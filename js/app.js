@@ -213,6 +213,11 @@ function initFormEventListeners() {
     }
   });
 
+  // บังคับให้ช่องบ้านเลขที่กรอกได้เฉพาะตัวเลขเท่านั้น
+  elements.houseNoInput.addEventListener('input', (e) => {
+    e.target.value = e.target.value.replace(/[^0-9]/g, '');
+  });
+
   // ปุ่มรีเฟรชพิกัดด้วยตนเอง
   elements.btnRefreshLocation.addEventListener('click', () => {
     fetchCurrentLocation(true);
