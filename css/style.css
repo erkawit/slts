@@ -17,24 +17,33 @@ body {
   animation: pulse-dot 2s infinite ease-in-out;
 }
 
-/* Camera Viewfinder Target Reticle */
+/* Camera Viewfinder Target Reticle (3:4 Portrait / 4:3 Landscape) */
 .camera-reticle {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 180px;
-  height: 180px;
+  width: min(76vw, 300px);
+  height: calc(min(76vw, 300px) * 4 / 3);
   pointer-events: none;
-  border: 2px dashed rgba(255, 255, 255, 0.6);
-  border-radius: 12px;
+  border: 2px dashed rgba(255, 255, 255, 0.7);
+  border-radius: 16px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+  transition: all 0.3s ease;
+}
+
+@media (orientation: landscape) {
+  .camera-reticle {
+    width: min(60vh * 4 / 3, 420px);
+    height: min(60vh, 315px);
+  }
 }
 
 .camera-reticle::before, .camera-reticle::after {
   content: '';
   position: absolute;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-color: #3b82f6;
   border-style: solid;
 }
@@ -42,15 +51,15 @@ body {
 .camera-reticle::before {
   top: -2px;
   left: -2px;
-  border-width: 3px 0 0 3px;
-  border-top-left-radius: 12px;
+  border-width: 4px 0 0 4px;
+  border-top-left-radius: 16px;
 }
 
 .camera-reticle::after {
   bottom: -2px;
   right: -2px;
-  border-width: 0 3px 3px 0;
-  border-bottom-right-radius: 12px;
+  border-width: 0 4px 4px 0;
+  border-bottom-right-radius: 16px;
 }
 
 /* Transparent SweetAlert Loading Customization */

@@ -1,11 +1,33 @@
 /**
  * watermark.js - ระบบสร้างภาพถ่ายและประทับลายน้ำ (Canvas Watermark Engine)
- * อ้างอิงตามรูปแบบตัวอย่าง ต2097-2569.jpg
+ * รองรับสัดส่วน 3:4 (แนวตั้ง) และ 4:3 (แนวนอน) ตามการหมุนกล้อง
+ * กล่องข้อความสีดำสนิท ตัวหนังสือและสัญลักษณ์สีขาวทั้งหมด ขยายขนาด 100%
  */
 
 class WatermarkEngine {
   /**
-   * แปลงวันที่ปัจจุบันเป็นรูปแบบภาษาไทย พ.ศ. เช่น "25 ส.ค. 2569 10:28:45"
+   * ตรวจสอบแนวการถ่ายภาพ (Portrait / Landscape)
+   */
+  static getOrientation(sourceImage) {
+    // ถ้าเป็นรูปภาพนิ่ง (File / Image Upload)
+    if (sourceImage instanceof HTMLImageElement || (sourceImage.naturalWidth && !sourceImage.videoWidth)) {
+      const w = sourceImage.naturalWidth || sourceImage.width;
+      const h = sourceImage.naturalHeight || sourceImage.height;
+      return h >= w ? 'portrait' : 'landscape';
+    }
+
+    // ถ้าถ่ายจากกล้องสด (Video) ตรวจสอบจาก Screen Orientation และ Window
+    if (screen.orientation && screen.orientation.type) {
+      return screen.orientation.type.includes('portrait') ? 'portrait' : 'landscape';
+    }
+    if (typeof window.orientation !== 'undefined') {
+      return (Math.abs(window.orientation) === 90 || Math.abs(window.orientation) === 270) ? 'landscape' : 'portrait';
+    }
+    return window.innerHeight >= window.innerWidth ? 'portrait' : 'landscape';
+  }
+
+  /**
+   * แปลงวันที่ปัจจุบันเป็นรูปแบบภาษาไทย พ.ศ. เช่น "25 ส.ค. 2569 11:01:09"
    */
   static formatThaiDateTime(date = new Date()) {
     const thaiMonths = [
@@ -15,7 +37,6 @@ class WatermarkEngine {
 
     const day = date.getDate();
     const month = thaiMonths[date.getMonth()];
-    // พ.ศ. (ปี ค.ศ. + 543)
     const year = date.getFullYear() + 543;
 
     const pad = (n) => String(n).padStart(2, '0');
@@ -27,7 +48,36 @@ class WatermarkEngine {
   }
 
   /**
-   * ฟังก์ชันประทับลายน้ำลงบน Canvas จากภาพถ่ายต้นฉบับ
+   * วาดภาพแบบ Object-fit: Cover ลงบน Canvas สัดส่วน 3:4 หรือ 4:3
+   */
+  static drawCoverImage(ctx, img, targetW, targetH) {
+    const srcW = img.videoWidth || img.naturalWidth || img.width;
+    const srcH = img.videoHeight || img.naturalHeight || img.height;
+
+    const srcRatio = srcW / srcH;
+    const targetRatio = targetW / targetH;
+
+    let renderW, renderH, offsetX, offsetY;
+
+    if (srcRatio > targetRatio) {
+      // ภาพต้นฉบับกว้างกว่าเป้าหมาย -> ครอปด้านข้าง
+      renderH = targetH;
+      renderW = targetH * srcRatio;
+      offsetX = (targetW - renderW) / 2;
+      offsetY = 0;
+    } else {
+      // ภาพต้นฉบับสูงกว่าเป้าหมาย -> ครอปบนล่าง
+      renderW = targetW;
+      renderH = targetW / srcRatio;
+      offsetX = 0;
+      offsetY = (targetH - renderH) / 2;
+    }
+
+    ctx.drawImage(img, offsetX, offsetY, renderW, renderH);
+  }
+
+  /**
+   * ฟังก์ชันประทับลายน้ำลงบน Canvas ตามการหมุนกล้อง
    * @param {HTMLImageElement|HTMLVideoElement|ImageBitmap} sourceImage ภาพหรือวิดีโอจากกล้อง
    * @param {Object} data ข้อมูลพิกัด เลขคดี ที่ตั้ง
    * @returns {Promise<{canvas: HTMLCanvasElement, dataUrl: string, blob: Blob}>}
@@ -36,73 +86,75 @@ class WatermarkEngine {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
-    // กำหนดขนาดตามภาพต้นฉบับ (รองรับความละเอียดสูง เช่น 1280x720 หรือ 1920x1080)
-    let width = sourceImage.videoWidth || sourceImage.naturalWidth || sourceImage.width || 1280;
-    let height = sourceImage.videoHeight || sourceImage.naturalHeight || sourceImage.height || 720;
+    // 1. ตรวจสอบแนวการถ่ายภาพ
+    const orientation = this.getOrientation(sourceImage);
+    const isPortrait = orientation === 'portrait';
 
-    // มาตรฐานความกว้างให้เหมาะสมกับ Mobile / Web (ความละเอียดคมชัด)
-    const maxDimension = 1920;
-    if (width > maxDimension || height > maxDimension) {
-      const ratio = Math.min(maxDimension / width, maxDimension / height);
-      width = Math.round(width * ratio);
-      height = Math.round(height * ratio);
+    // 2. กำหนดขนาด Canvas ตามสัดส่วนมาตรฐาน (แนวตั้ง 3:4 = 1080x1440, แนวนอน 4:3 = 1440x1080)
+    let width, height;
+    if (isPortrait) {
+      width = 1080;
+      height = 1440; // 3:4
+    } else {
+      width = 1440;
+      height = 1080; // 4:3
     }
 
     canvas.width = width;
     canvas.height = height;
 
-    // 1. วาดภาพถ่ายต้นฉบับเต็มผืนผ้าใบ
-    ctx.drawImage(sourceImage, 0, 0, width, height);
+    // 3. วาดภาพต้นฉบับเต็มผืนผ้าใบแบบ Cover
+    this.drawCoverImage(ctx, sourceImage, width, height);
 
-    // คำนวณ Scale Factor เพื่อให้ Element ต่างๆ ย่อขยายตามขนาดภาพ
-    const baseScale = Math.max(width, height) / 1000;
-    const scale = Math.max(0.7, Math.min(baseScale, 1.8));
+    // 4. คำนวณ Scale Factor เพื่อให้ Element ขยายสมส่วน
+    const scale = isPortrait ? (width / 1000) : (height / 1000);
 
-    // 2. [มุมซ้ายบน (Top-Left)]: เข็มทิศ (Compass Overlay)
-    const compassRadius = 45 * scale;
-    const compassX = 25 * scale + compassRadius;
-    const compassY = 25 * scale + compassRadius;
+    // 5. [มุมซ้ายบน (Top-Left)]: เข็มทิศ (Compass Overlay)
+    const compassRadius = 55 * scale;
+    const compassX = 30 * scale + compassRadius;
+    const compassY = 30 * scale + compassRadius;
     if (window.compassManager) {
       window.compassManager.drawCompass(ctx, compassX, compassY, compassRadius);
     }
 
-    // 3. [มุมซ้ายล่าง (Bottom-Left)]: แผนที่จำลอง Google Map / OSM
-    const mapWidth = 160 * scale;
-    const mapHeight = 120 * scale;
-    const mapX = 20 * scale;
-    const mapY = height - mapHeight - (20 * scale);
+    // 6. [มุมซ้ายล่าง (Bottom-Left)]: ภาพแผนที่พิกัดปัจจุบัน
+    const mapWidth = 220 * scale;
+    const mapHeight = 160 * scale;
+    const mapX = 28 * scale;
+    const mapY = height - mapHeight - (28 * scale);
     if (window.mapSnapshotManager && data.lat && data.lng) {
       await window.mapSnapshotManager.drawMapOverlay(ctx, mapX, mapY, mapWidth, mapHeight, data.lat, data.lng);
     }
 
-    // 4. [มุมขวาล่าง (Bottom-Right)]: กล่องข้อมูลสีดำโปร่งแสง
+    // 7. [มุมขวาล่าง (Bottom-Right)]: กล่องข้อมูลสีดำสนิท ตัวหนังสือและสัญลักษณ์สีขาวล้วน ขยายขนาด 100%
     await this.drawInfoBadge(ctx, width, height, scale, data);
 
     // แปลงผลลัพธ์เป็น Data URL และ Blob
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95));
 
-    return { canvas, dataUrl, blob };
+    return { canvas, dataUrl, blob, orientation };
   }
 
   /**
-   * วาดกล่องข้อความมุมขวาล่าง
+   * วาดกล่องข้อความมุมขวาล่าง (สีดำสนิท + ตัวหนังสือและสัญลักษณ์สีขาวทั้งหมด + ขยายขนาด 100%)
    */
   static async drawInfoBadge(ctx, canvasWidth, canvasHeight, scale, data) {
-    const padding = 14 * scale;
-    const fontSize = Math.max(12, Math.round(15 * scale));
-    const fontTitleSize = Math.max(13, Math.round(16 * scale));
-    const lineHeight = fontSize * 1.5;
+    // ปรับขนาดฟอนต์ให้ใหญ่ขึ้น 100% (จากเดิม 14-15px เป็น 28-30px)
+    const padding = 24 * scale;
+    const fontSize = Math.round(28 * scale);
+    const fontTitleSize = Math.round(30 * scale);
+    const lineHeight = fontSize * 1.55;
 
     ctx.save();
     ctx.font = `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`;
 
-    // เตรียมข้อความแต่ละบรรทัด
+    // วันที่และเวลาปัจจุบัน (พ.ศ.)
     const dateStr = data.dateTime || this.formatThaiDateTime(new Date());
-    
-    // พิกัด
-    const latFormatted = data.lat ? `${Math.abs(data.lat).toFixed(4)}°${data.lat >= 0 ? 'N' : 'S'}` : '17.4645°N';
-    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}°${data.lng >= 0 ? 'E' : 'W'}` : '102.7993°E';
+
+    // พิกัด Lat/Lng และทิศองศา
+    const latFormatted = data.lat ? `${Math.abs(data.lat).toFixed(4)}°${data.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
+    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}°${data.lng >= 0 ? 'E' : 'W'}` : '102.7881°E';
     const headingDeg = (data.heading !== undefined && data.heading !== null) ? data.heading : (window.compassManager ? window.compassManager.getHeading() : 0);
     const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
     const coordStr = `${latFormatted}  ${lngFormatted}   ${headingDeg}° ${dirText}`;
@@ -112,11 +164,12 @@ class WatermarkEngine {
     // เลขคดี
     const caseStr = `เลขคดี: ${data.caseNumber || '-'}`;
 
+    // กำหนดบรรทัดข้อมูล: ตัวหนังสือและสัญลักษณ์เป็นสีขาวล้วน (#ffffff) ทั้งหมดตามข้อกำหนด
     const lines = [
-      { text: `📅 ${dateStr}`, color: '#ffffff', font: `bold ${fontSize}px sans-serif` },
-      { text: `📍 ${coordStr}`, color: '#ffea79', font: `bold ${fontSize}px sans-serif` },
-      { text: `🏠 ${locationStr}`, color: '#ffffff', font: `500 ${fontSize}px sans-serif` },
-      { text: `⚖️ ${caseStr}`, color: '#68d391', font: `bold ${fontTitleSize}px sans-serif` }
+      { text: `📅  ${dateStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif` },
+      { text: `📍  ${coordStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif` },
+      { text: `🏠  ${locationStr}`, font: `600 ${fontSize}px 'Sarabun', 'Prompt', sans-serif` },
+      { text: `⚖️  ${caseStr}`, font: `bold ${fontTitleSize}px 'Sarabun', 'Prompt', sans-serif` }
     ];
 
     // คำนวณความกว้างที่ต้องการ
@@ -128,12 +181,12 @@ class WatermarkEngine {
     });
 
     const boxWidth = maxTextWidth + (padding * 2.2);
-    const boxHeight = (lines.length * lineHeight) + (padding * 1.6);
-    const boxX = canvasWidth - boxWidth - (20 * scale);
-    const boxY = canvasHeight - boxHeight - (20 * scale);
+    const boxHeight = (lines.length * lineHeight) + (padding * 1.5);
+    const boxX = canvasWidth - boxWidth - (28 * scale);
+    const boxY = canvasHeight - boxHeight - (28 * scale);
 
-    // วาดพื้นหลังกล่องดำมนโปร่งแสง
-    const radius = 10 * scale;
+    // วาดพื้นหลังกล่องดำสนิท 100% (Solid Black)
+    const radius = 14 * scale;
     ctx.beginPath();
     ctx.moveTo(boxX + radius, boxY);
     ctx.lineTo(boxX + boxWidth - radius, boxY);
@@ -146,17 +199,20 @@ class WatermarkEngine {
     ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
     ctx.closePath();
 
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.78)'; // Slate dark
+    // พื้นหลังสีดำสนิท (Solid Pitch Black)
+    ctx.fillStyle = '#000000';
     ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+
+    // กรอบขอบสีขาวบางๆ เพื่อความคมชัด
+    ctx.lineWidth = 2 * scale;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.stroke();
 
-    // วาดข้อความแต่ละบรรทัด
+    // วาดข้อความและสัญลักษณ์สีขาวทั้งหมด (#ffffff)
     let currentY = boxY + padding + (fontSize * 0.85);
     lines.forEach(line => {
       ctx.font = line.font;
-      ctx.fillStyle = line.color;
+      ctx.fillStyle = '#ffffff'; // สีขาวล้วน 100%
       ctx.textAlign = 'left';
       ctx.fillText(line.text, boxX + padding, currentY);
       currentY += lineHeight;
