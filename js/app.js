@@ -12,7 +12,7 @@ const state = {
   locationIntervalId: null,
   cameraStream: null,
   facingMode: 'environment', // 'environment' (กล้องหลัง) หรือ 'user' (กล้องหน้า)
-  appsScriptUrl: localStorage.getItem('slts_apps_script_url') || '',
+  appsScriptUrl: localStorage.getItem('slts_apps_script_url') || 'https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec',
   isUploading: false
 };
 
@@ -674,14 +674,26 @@ async function executeUpload() {
       body: JSON.stringify(payload)
     });
 
-    const resJson = await response.json();
+    const responseText = await response.text();
+    let resJson = null;
 
-    if (resJson.status === 'success') {
+    try {
+      resJson = JSON.parse(responseText);
+    } catch (parseErr) {
+      // กรณี Google ตอบกลับเป็น HTML (เช่น ติดหน้า Login หรือหน้าขอสิทธิ์)
+      if (responseText.includes('ต้องมีสิทธิ์เข้าถึง') || responseText.includes('accounts.google.com') || responseText.includes('<!DOCTYPE')) {
+        throw new Error('Google Apps Script ถูกตั้งค่าสิทธิ์เป็นส่วนตัว กรุณาตั้งค่า "Who has access" (ผู้มีสิทธิ์เข้าถึง) ในการ Deploy ให้เป็น "Anyone" (ทุกคน)');
+      } else {
+        throw new Error('การตอบกลับจาก Google Apps Script ไม่ถูกต้อง: ' + responseText.substring(0, 100));
+      }
+    }
+
+    if (resJson && resJson.status === 'success') {
       Swal.fire({
         icon: 'success',
         title: 'บันทึกสำเร็จ!',
         html: `<p class="text-gray-700">บันทึกรูปและข้อมูลเลขคดี <b>${currentPreviewData.caseNumber}</b> ลงใน Google Drive เรียบร้อยแล้ว</p>
-               ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded text-sm">ดูรูปใน Google Drive</a>` : ''}`,
+               ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
         confirmButtonColor: '#2563eb'
       }).then(() => {
         elements.previewModal.classList.add('hidden');
@@ -689,7 +701,7 @@ async function executeUpload() {
         resetFormForNextCase();
       });
     } else {
-      throw new Error(resJson.message || 'เกิดข้อผิดพลาดในการบันทึก');
+      throw new Error((resJson && resJson.message) || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     }
 
   } catch (error) {
@@ -697,7 +709,20 @@ async function executeUpload() {
     Swal.fire({
       icon: 'warning',
       title: 'บันทึกลง Google Drive ไม่สำเร็จ',
-      text: 'ภาพถูกดาวน์โหลดลงเครื่องคุณแล้ว แต่ไม่สามารถส่งไป Apps Script ได้: ' + error.message,
+      html: `
+        <div class="text-left text-sm text-gray-700 space-y-2">
+          <p class="font-semibold text-red-600">${error.message}</p>
+          <hr class="my-2">
+          <p><b>วิธีแก้ไข:</b></p>
+          <ol class="list-decimal pl-4 space-y-1 text-xs text-gray-600">
+            <li>เปิด Google Apps Script โครงการของคุณ</li>
+            <li>กด <b>Deploy</b> > <b>Manage deployments</b> (จัดการการทำให้ใช้งานได้)</li>
+            <li>กดไอคอน <b>✏️ (แก้ไข)</b> ที่เวอร์ชันล่าสุด</li>
+            <li>ตรง <b>Who has access (ผู้มีสิทธิ์เข้าถึง)</b> ให้เปลี่ยนเป็น <b>"Anyone" (ทุกคน)</b></li>
+            <li>กด <b>Deploy</b> และลองใหม่อีกครั้ง</li>
+          </ol>
+        </div>
+      `,
       confirmButtonText: 'ตกลง',
       confirmButtonColor: '#2563eb'
     });
