@@ -216,42 +216,75 @@
 
   </main>
 
-  <!-- Modal: กล้องถ่ายภาพสด (Camera Live Viewfinder Modal) -->
-  <div id="cameraModal" class="fixed inset-0 bg-black/95 z-50 hidden flex-col justify-between">
+  <!-- Modal: กล้องถ่ายภาพสด (Camera Live Viewfinder Modal พร้อม Live Watermark HUD) -->
+  <div id="cameraModal" class="fixed inset-0 bg-black/95 z-50 hidden flex-col justify-between select-none">
     <!-- Top Bar -->
-    <div class="p-4 flex items-center justify-between text-white bg-gradient-to-b from-black/80 to-transparent">
+    <div class="p-3 sm:p-4 flex items-center justify-between text-white bg-gradient-to-b from-black/90 to-transparent z-10">
       <div class="flex items-center space-x-2">
         <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
-        <span id="cameraStatus" class="text-sm font-medium">กำลังเปิดกล้อง...</span>
+        <span id="cameraStatus" class="text-xs sm:text-sm font-medium">กำลังเปิดกล้อง...</span>
       </div>
-      <button id="btnCloseCamera" type="button" class="p-2 text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition">
-        <i class="fa-solid fa-xmark text-lg"></i>
-      </button>
+      
+      <!-- Orientation Toggle & Close Button -->
+      <div class="flex items-center gap-2">
+        <button id="btnToggleOrientation" type="button" class="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 border border-white/20" title="สลับแนวตั้ง 3:4 / แนวนอน 4:3">
+          <i class="fa-solid fa-arrows-rotate text-blue-400"></i>
+          <span id="txtOrientationMode">แนวตั้ง 3:4</span>
+        </button>
+        <button id="btnCloseCamera" type="button" class="p-2 text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
     </div>
 
-    <!-- Video Viewport -->
-    <div class="relative flex-1 flex items-center justify-center overflow-hidden">
+    <!-- Video Viewport & Live Overlays (HUD) -->
+    <div id="cameraViewportContainer" class="relative flex-1 flex items-center justify-center overflow-hidden bg-black">
       <video id="videoPreview" autoplay playsinline muted class="w-full h-full object-cover"></video>
-      <!-- Viewfinder Target Reticle -->
-      <div class="camera-reticle"></div>
+
+      <!-- Live Overlays Reticle Frame (Dynamic 3:4 / 4:3 Frame) -->
+      <div id="liveOverlayFrame" class="camera-live-frame ratio-3-4 pointer-events-none">
+        
+        <!-- มุมซ้ายบน (Top-Left): เข็มทิศสด Live Compass -->
+        <div class="absolute top-2 left-2 sm:top-3 sm:left-3">
+          <canvas id="liveCompassCanvas" width="84" height="84" class="drop-shadow-lg"></canvas>
+        </div>
+
+        <!-- มุมซ้ายล่าง (Bottom-Left): แผนที่สด Live Map -->
+        <div class="absolute bottom-2 left-2 sm:bottom-3 sm:left-3">
+          <canvas id="liveMapCanvas" width="100" height="75" class="rounded-lg border-2 border-white/80 shadow-2xl"></canvas>
+        </div>
+
+        <!-- มุมขวาล่าง (Bottom-Right): กล่องข้อมูลสด Live Badge (สีดำสนิท + ตัวหนังสือขาว) -->
+        <div class="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 max-w-[62%] sm:max-w-[55%]">
+          <div class="bg-black border-2 border-white/70 rounded-xl p-2 sm:p-2.5 shadow-2xl text-white space-y-0.5 pointer-events-none">
+            <div id="liveBadgeDate" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📅 --</div>
+            <div id="liveBadgeCoords" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📍 --</div>
+            <div id="liveBadgeLocation" class="text-[9px] sm:text-[10px] font-semibold text-white leading-tight truncate">🏠 --</div>
+            <div id="liveBadgeCase" class="text-[9px] sm:text-[11px] font-bold text-white leading-tight truncate">⚖️ --</div>
+          </div>
+        </div>
+
+      </div>
     </div>
 
     <!-- Bottom Controls -->
-    <div class="p-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex items-center justify-around">
+    <div class="p-4 sm:p-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex items-center justify-around z-10">
       <!-- สลับกล้องหน้า/หลัง -->
       <button id="btnFlipCamera" type="button" class="p-3 text-white bg-white/20 hover:bg-white/30 rounded-full active:scale-95 transition" title="สลับกล้อง">
         <i class="fa-solid fa-camera-rotate text-xl"></i>
       </button>
 
       <!-- Shutter Capture Button -->
-      <button id="btnCapture" type="button" class="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center bg-blue-600 hover:bg-blue-500 active:scale-90 transition shadow-2xl shadow-blue-500/50">
-        <div class="w-14 h-14 rounded-full bg-white flex items-center justify-center text-blue-600">
+      <button id="btnCapture" type="button" class="w-18 h-18 sm:w-20 sm:h-20 rounded-full border-4 border-white flex items-center justify-center bg-blue-600 hover:bg-blue-500 active:scale-90 transition shadow-2xl shadow-blue-500/50">
+        <div class="w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-white flex items-center justify-center text-blue-600">
           <i class="fa-solid fa-camera text-2xl"></i>
         </div>
       </button>
 
-      <!-- Dummy spacer for alignment -->
-      <div class="w-12 h-12"></div>
+      <!-- Orientation Toggle Quick Button -->
+      <button id="btnFlipOrientationQuick" type="button" class="p-3 text-white bg-white/20 hover:bg-white/30 rounded-full active:scale-95 transition" title="หมุนแนวตั้ง 3:4 / แนวนอน 4:3">
+        <i class="fa-solid fa-mobile-screen-button text-xl"></i>
+      </button>
     </div>
   </div>
 

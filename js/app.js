@@ -12,6 +12,8 @@ const state = {
   locationIntervalId: null,
   cameraStream: null,
   facingMode: 'environment', // 'environment' (กล้องหลัง) หรือ 'user' (กล้องหน้า)
+  captureOrientation: 'portrait', // 'portrait' (3:4) หรือ 'landscape' (4:3)
+  hudIntervalId: null,
   appsScriptUrl: localStorage.getItem('slts_apps_script_url') || 'https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec',
   isUploading: false
 };
@@ -94,6 +96,18 @@ function initDOMElements() {
   elements.btnCloseCamera = document.getElementById('btnCloseCamera');
   elements.btnFlipCamera = document.getElementById('btnFlipCamera');
   elements.cameraStatus = document.getElementById('cameraStatus');
+  elements.btnToggleOrientation = document.getElementById('btnToggleOrientation');
+  elements.btnFlipOrientationQuick = document.getElementById('btnFlipOrientationQuick');
+  elements.txtOrientationMode = document.getElementById('txtOrientationMode');
+
+  // Live HUD Overlays
+  elements.liveOverlayFrame = document.getElementById('liveOverlayFrame');
+  elements.liveCompassCanvas = document.getElementById('liveCompassCanvas');
+  elements.liveMapCanvas = document.getElementById('liveMapCanvas');
+  elements.liveBadgeDate = document.getElementById('liveBadgeDate');
+  elements.liveBadgeCoords = document.getElementById('liveBadgeCoords');
+  elements.liveBadgeLocation = document.getElementById('liveBadgeLocation');
+  elements.liveBadgeCase = document.getElementById('liveBadgeCase');
 
   // Preview Modal Elements
   elements.previewModal = document.getElementById('previewModal');
@@ -146,7 +160,6 @@ function initOtherCaseYearDropdown() {
   const currentThaiYear = new Date().getFullYear() + 543;
   elements.otherCaseYearSelect.innerHTML = '';
 
-  // ปีปัจจุบัน ย้อนหลังไป 5 ปี (รวม 6 ปี เช่น 2569, 2568, 2567, 2566, 2565, 2564)
   for (let i = 0; i <= 5; i++) {
     const year = currentThaiYear - i;
     const opt = document.createElement('option');
@@ -250,7 +263,6 @@ function initLocationService() {
   const hasPermission = localStorage.getItem('slts_location_permission_granted') === 'true';
 
   if (hasPermission) {
-    // ถ้าเคยอนุญาตแล้ว ดึงพิกัดและเริ่มรอบรีเฟรชทันทีโดยไม่ต้องถามซ้ำ
     if (window.compassManager) {
       window.compassManager.requestPermission();
     }
@@ -259,7 +271,6 @@ function initLocationService() {
     return;
   }
 
-  // แจ้งเตือนขออนุญาต Location ผ่าน SweetAlert2 เฉพาะครั้งแรก
   Swal.fire({
     title: 'ขออนุญาตเข้าถึงตำแหน่ง (GPS)',
     text: 'ระบบจำเป็นต้องใช้พิกัดตำแหน่งปัจจุบันเพื่อระบุพิกัดส่งหมายและปักหมุดบนภาพถ่าย',
@@ -290,7 +301,6 @@ function startLocationInterval() {
   if (state.locationIntervalId) {
     clearInterval(state.locationIntervalId);
   }
-  // Auto-refresh ทุก 10 วินาที ตามข้อ 2.4
   state.locationIntervalId = setInterval(() => {
     fetchCurrentLocation(false);
   }, 10000);
@@ -357,11 +367,10 @@ function fetchCurrentLocation(isManual = false) {
 }
 
 /**
- * ระบบจัดการกล้อง WebRTC Camera API
+ * ระบบจัดการกล้อง WebRTC Camera API & Live HUD
  */
 function initCameraEvents() {
   elements.btnOpenCamera.addEventListener('click', () => {
-    // ตรวจสอบความถูกต้องของฟอร์มก่อนเปิดกล้อง
     if (!validateForm()) return;
     openCameraModal();
   });
@@ -373,10 +382,51 @@ function initCameraEvents() {
     startCameraStream();
   });
 
-  elements.btnCapture.addEventListener('click', captureAndProcessPhoto);
+  // ปุ่มสลับแนวตั้ง 3:4 / แนวนอน 4:3
+  if (elements.btnToggleOrientation) {
+    elements.btnToggleOrientation.addEventListener('click', toggleOrientation);
+  }
+  if (elements.btnFlipOrientationQuick) {
+    elements.btnFlipOrientationQuick.addEventListener('click', toggleOrientation);
+  }
 
-  // Fallback สำหรับกรณีกล้อง WebRTC ไม่ทำงาน
+  // ตรวจจับการหมุนของหน้าจอ/อุปกรณ์
+  window.addEventListener('resize', handleScreenOrientationChange);
+  window.addEventListener('orientationchange', handleScreenOrientationChange);
+
+  elements.btnCapture.addEventListener('click', captureAndProcessPhoto);
   elements.fileFallbackInput.addEventListener('change', handleFallbackFile);
+}
+
+function handleScreenOrientationChange() {
+  if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
+    const isPortrait = window.innerHeight >= window.innerWidth;
+    setCaptureOrientation(isPortrait ? 'portrait' : 'landscape');
+  }
+}
+
+function toggleOrientation() {
+  const nextMode = state.captureOrientation === 'portrait' ? 'landscape' : 'portrait';
+  setCaptureOrientation(nextMode);
+}
+
+function setCaptureOrientation(mode) {
+  state.captureOrientation = mode;
+  const isPortrait = mode === 'portrait';
+
+  if (elements.liveOverlayFrame) {
+    if (isPortrait) {
+      elements.liveOverlayFrame.classList.remove('ratio-4-3');
+      elements.liveOverlayFrame.classList.add('ratio-3-4');
+    } else {
+      elements.liveOverlayFrame.classList.remove('ratio-3-4');
+      elements.liveOverlayFrame.classList.add('ratio-4-3');
+    }
+  }
+
+  if (elements.txtOrientationMode) {
+    elements.txtOrientationMode.textContent = isPortrait ? 'แนวตั้ง 3:4' : 'แนวนอน 4:3';
+  }
 }
 
 function validateForm() {
@@ -410,7 +460,7 @@ function validateForm() {
       Swal.fire({
         icon: 'warning',
         title: 'กรุณากรอกบ้านเลขที่',
-        text: 'สำหรับหมายบ้าน บังคับต้องระบุบ้านเลขที่',
+        text: 'สำหรับหมายบ้าน บังคับต้องระบุบ้านเลขที่ (เฉพาะตัวเลข)',
         confirmButtonColor: '#2563eb'
       });
       elements.houseNoInput.focus();
@@ -445,18 +495,76 @@ function validateForm() {
 }
 
 async function openCameraModal() {
+  // ตรวจจับแนวการถ่ายภาพเริ่มต้น
+  const isPortrait = window.innerHeight >= window.innerWidth;
+  setCaptureOrientation(isPortrait ? 'portrait' : 'landscape');
+
   elements.cameraModal.classList.remove('hidden');
   elements.cameraModal.classList.add('flex');
   await startCameraStream();
+  startLiveCameraHUD();
 }
 
 function closeCameraModal() {
+  stopLiveCameraHUD();
   if (state.cameraStream) {
     state.cameraStream.getTracks().forEach(track => track.stop());
     state.cameraStream = null;
   }
   elements.cameraModal.classList.add('hidden');
   elements.cameraModal.classList.remove('flex');
+}
+
+/**
+ * อัปเดตข้อมูลลายน้ำบนหน้าจอถ่ายภาพสด (Live Camera HUD)
+ */
+function startLiveCameraHUD() {
+  stopLiveCameraHUD();
+
+  // ดึงภาพแผนที่สแนปช็อตมาวาดที่มุมซ้ายล่าง
+  updateLiveMapHUD();
+
+  // อัปเดตข้อมูลกล่องข้อความและเข็มทิศแบบ Real-time
+  const updateHUD = () => {
+    if (!elements.cameraModal || elements.cameraModal.classList.contains('hidden')) return;
+
+    // 1. วาดเข็มทิศสด
+    if (elements.liveCompassCanvas && window.compassManager) {
+      const ctx = elements.liveCompassCanvas.getContext('2d');
+      ctx.clearRect(0, 0, 84, 84);
+      window.compassManager.drawCompass(ctx, 42, 42, 34);
+    }
+
+    // 2. อัปเดตกล่องข้อมูลสด
+    const dateStr = WatermarkEngine.formatThaiDateTime(new Date());
+    const latFormatted = state.lat ? `${Math.abs(state.lat).toFixed(4)}°${state.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
+    const lngFormatted = state.lng ? `${Math.abs(state.lng).toFixed(4)}°${state.lng >= 0 ? 'E' : 'W'}` : '102.7882°E';
+    const headingDeg = window.compassManager ? window.compassManager.getHeading() : 0;
+    const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
+
+    if (elements.liveBadgeDate) elements.liveBadgeDate.textContent = `📅  ${dateStr}`;
+    if (elements.liveBadgeCoords) elements.liveBadgeCoords.textContent = `📍  ${latFormatted} ${lngFormatted} ${headingDeg}° ${dirText}`;
+    if (elements.liveBadgeLocation) elements.liveBadgeLocation.textContent = `🏠  ${getFullLocationText()}`;
+    if (elements.liveBadgeCase) elements.liveBadgeCase.textContent = `⚖️  เลขคดี: ${getFormattedCaseNumber()}`;
+  };
+
+  updateHUD();
+  state.hudIntervalId = setInterval(updateHUD, 200);
+}
+
+async function updateLiveMapHUD() {
+  if (elements.liveMapCanvas && window.mapSnapshotManager && state.lat && state.lng) {
+    const ctx = elements.liveMapCanvas.getContext('2d');
+    const mapImg = await window.mapSnapshotManager.getMapImage(state.lat, state.lng, 100, 75);
+    ctx.drawImage(mapImg, 0, 0, 100, 75);
+  }
+}
+
+function stopLiveCameraHUD() {
+  if (state.hudIntervalId) {
+    clearInterval(state.hudIntervalId);
+    state.hudIntervalId = null;
+  }
 }
 
 async function startCameraStream() {
@@ -485,7 +593,6 @@ async function startCameraStream() {
     console.error('Camera access error:', err);
     elements.cameraStatus.textContent = 'ไม่สามารถเปิดกล้องสดได้';
     
-    // แจ้งให้ใช้วิธีถ่ายรูปผ่าน Native File Picker
     Swal.fire({
       icon: 'info',
       title: 'ไม่สามารถเปิดกล้องสดได้โดยตรง',
@@ -528,18 +635,20 @@ async function captureAndProcessPhoto() {
       dateTime: WatermarkEngine.formatThaiDateTime(new Date())
     };
 
-    // 1. สร้างภาพ Watermark
-    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData);
+    // 1. สร้างภาพ Watermark ตาม Orientation ที่เลือก/ตรวจจับได้ (3:4 หรือ 4:3)
+    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation);
     
     // 2. ตั้งชื่อไฟล์ตามเลขคดี โดยแปลง / เป็น -
-    const safeFilename = caseNumber.replace(/\//g, '-') + '.jpg';
+    const baseFilename = caseNumber.replace(/\//g, '-');
+    const imageFilename = baseFilename + '.jpg';
+    const textFilename = baseFilename + '.txt';
     
     // ปิดกล้อง
     closeCameraModal();
     hideCustomLoading();
 
-    // 3. แสดง Modal Preview พร้อมดาวน์โหลดลงเครื่องทันที (ตามข้อ 3.3)
-    showPreviewAndProcess(result, safeFilename, payloadData);
+    // 3. แสดง Modal Preview พร้อมดาวน์โหลดทั้ง .jpg และ .txt ลงเครื่องทันที
+    showPreviewAndProcess(result, imageFilename, textFilename, payloadData);
 
   } catch (error) {
     console.error('Capture error:', error);
@@ -585,10 +694,12 @@ async function handleFallbackFile(e) {
     };
 
     const result = await WatermarkEngine.renderWatermark(img, payloadData);
-    const safeFilename = caseNumber.replace(/\//g, '-') + '.jpg';
+    const baseFilename = caseNumber.replace(/\//g, '-');
+    const imageFilename = baseFilename + '.jpg';
+    const textFilename = baseFilename + '.txt';
     
     hideCustomLoading();
-    showPreviewAndProcess(result, safeFilename, payloadData);
+    showPreviewAndProcess(result, imageFilename, textFilename, payloadData);
   } catch (err) {
     console.error(err);
     hideCustomLoading();
@@ -599,32 +710,37 @@ async function handleFallbackFile(e) {
 }
 
 /**
- * แสดงพรีวิว สั่งดาวน์โหลดอัตโนมัติ และซิงค์ขึ้น Google Drive
+ * แสดงพรีวิว สั่งดาวน์โหลดอัตโนมัติ (.jpg + .txt) และซิงค์ขึ้น Google Drive
  */
 let currentPreviewResult = null;
 let currentPreviewData = null;
-let currentPreviewFilename = '';
+let currentPreviewImageFilename = '';
+let currentPreviewTextFilename = '';
 
-function showPreviewAndProcess(result, filename, data) {
+function showPreviewAndProcess(result, imageFilename, textFilename, data) {
   currentPreviewResult = result;
-  currentPreviewFilename = filename;
+  currentPreviewImageFilename = imageFilename;
+  currentPreviewTextFilename = textFilename;
   currentPreviewData = data;
 
-  // 1. Trigger Download ลงมือถือ/คอมพิวเตอร์ทันที ตามข้อ 3.3
-  WatermarkEngine.triggerDownload(result.dataUrl, filename);
+  // 1. Trigger Download ทั้งรูปภาพ (.jpg) และ Text File (.txt) ลงมือถือ/คอมพิวเตอร์ทันที
+  WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
+  if (result.textContent) {
+    WatermarkEngine.triggerTextDownload(result.textContent, textFilename);
+  }
 
   // 2. แสดงใน Preview Modal
   elements.previewImage.src = result.dataUrl;
-  elements.previewFilename.textContent = filename;
+  elements.previewFilename.textContent = `${imageFilename} + ${textFilename}`;
   elements.previewModal.classList.remove('hidden');
   elements.previewModal.classList.add('flex');
 
   // แจ้งเตือน Toast เล็กๆ
   Swal.fire({
     icon: 'success',
-    title: 'บันทึกรูปลงเครื่องเรียบร้อย',
-    text: `บันทึกไฟล์ "${filename}" แล้ว`,
-    timer: 2000,
+    title: 'บันทึกรูปภาพและ Text File เรียบร้อย',
+    html: `บันทึกไฟล์ <b>"${imageFilename}"</b> และ <b>"${textFilename}"</b> แล้ว`,
+    timer: 2500,
     showConfirmButton: false,
     toast: true,
     position: 'top-end'
@@ -645,7 +761,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * ส่งข้อมูลและรูปภาพไปยัง Google Apps Script
+ * ส่งข้อมูล รูปภาพ และ Text File ไปยัง Google Apps Script
  */
 async function uploadToGoogleDrive() {
   if (!state.appsScriptUrl) {
@@ -682,8 +798,9 @@ async function executeUpload() {
   try {
     const payload = {
       ...currentPreviewData,
-      fileName: currentPreviewFilename,
-      imageBase64: currentPreviewResult.dataUrl
+      fileName: currentPreviewImageFilename,
+      imageBase64: currentPreviewResult.dataUrl,
+      textContent: currentPreviewResult.textContent || WatermarkEngine.generateTextFileContent(currentPreviewData)
     };
 
     // ส่ง POST ไปยัง Google Apps Script Web App
@@ -701,7 +818,6 @@ async function executeUpload() {
     try {
       resJson = JSON.parse(responseText);
     } catch (parseErr) {
-      // กรณี Google ตอบกลับเป็น HTML (เช่น ติดหน้า Login หรือหน้าขอสิทธิ์)
       if (responseText.includes('ต้องมีสิทธิ์เข้าถึง') || responseText.includes('accounts.google.com') || responseText.includes('<!DOCTYPE')) {
         throw new Error('Google Apps Script ถูกตั้งค่าสิทธิ์เป็นส่วนตัว กรุณาตั้งค่า "Who has access" (ผู้มีสิทธิ์เข้าถึง) ในการ Deploy ให้เป็น "Anyone" (ทุกคน)');
       } else {
@@ -713,7 +829,7 @@ async function executeUpload() {
       Swal.fire({
         icon: 'success',
         title: 'บันทึกสำเร็จ!',
-        html: `<p class="text-gray-700">บันทึกรูปและข้อมูลเลขคดี <b>${currentPreviewData.caseNumber}</b> ลงใน Google Drive เรียบร้อยแล้ว</p>
+        html: `<p class="text-gray-700">บันทึกรูปภาพและ Text File เลขคดี <b>${currentPreviewData.caseNumber}</b> ลงใน Google Drive เรียบร้อยแล้ว</p>
                ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
         confirmButtonColor: '#2563eb'
       }).then(() => {

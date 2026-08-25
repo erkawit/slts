@@ -17,49 +17,56 @@ body {
   animation: pulse-dot 2s infinite ease-in-out;
 }
 
-/* Camera Viewfinder Target Reticle (3:4 Portrait / 4:3 Landscape) */
-.camera-reticle {
+/* Camera Live Viewfinder & Watermark HUD Frame (3:4 Portrait / 4:3 Landscape) */
+.camera-live-frame {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: min(76vw, 300px);
-  height: calc(min(76vw, 300px) * 4 / 3);
-  pointer-events: none;
-  border: 2px dashed rgba(255, 255, 255, 0.7);
-  border-radius: 16px;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
-  transition: all 0.3s ease;
+  border: 2px dashed rgba(255, 255, 255, 0.85);
+  border-radius: 18px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@media (orientation: landscape) {
-  .camera-reticle {
-    width: min(60vh * 4 / 3, 420px);
-    height: min(60vh, 315px);
-  }
+/* 3:4 Ratio (แนวตั้ง) */
+.camera-live-frame.ratio-3-4 {
+  width: min(84vw, 340px);
+  height: calc(min(84vw, 340px) * 4 / 3);
+  max-height: calc(100vh - 170px);
+  max-width: calc((100vh - 170px) * 3 / 4);
 }
 
-.camera-reticle::before, .camera-reticle::after {
+/* 4:3 Ratio (แนวนอน) */
+.camera-live-frame.ratio-4-3 {
+  height: min(60vh, 320px);
+  width: calc(min(60vh, 320px) * 4 / 3);
+  max-width: calc(100vw - 32px);
+  max-height: calc((100vw - 32px) * 3 / 4);
+}
+
+.camera-live-frame::before, .camera-live-frame::after {
   content: '';
   position: absolute;
   width: 24px;
   height: 24px;
   border-color: #3b82f6;
   border-style: solid;
+  pointer-events: none;
 }
 
-.camera-reticle::before {
+.camera-live-frame::before {
   top: -2px;
   left: -2px;
   border-width: 4px 0 0 4px;
-  border-top-left-radius: 16px;
+  border-top-left-radius: 18px;
 }
 
-.camera-reticle::after {
+.camera-live-frame::after {
   bottom: -2px;
   right: -2px;
   border-width: 0 4px 4px 0;
-  border-bottom-right-radius: 16px;
+  border-bottom-right-radius: 18px;
 }
 
 /* Transparent SweetAlert Loading Customization */

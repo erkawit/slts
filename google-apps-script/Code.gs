@@ -29,6 +29,8 @@ function doPost(e) {
     const folder = DriveApp.getFolderById(FOLDER_ID);
     let fileUrl = "";
     let fileId = "";
+    let txtFileUrl = "";
+    let txtFileId = "";
 
     // 1. บันทึกรูปภาพ (Base64) ลงใน Google Drive Folder
     if (data.imageBase64 && data.fileName) {
@@ -48,7 +50,16 @@ function doPost(e) {
       fileId = createdFile.getId();
     }
 
-    // 2. บันทึกข้อมูลลง Google Sheets
+    // 2. บันทึก Text File (.txt) ข้อมูลลายน้ำลงใน Google Drive Folder
+    if (data.textContent && data.fileName) {
+      const txtFileName = data.fileName.replace(/\.jpg$/i, '.txt');
+      const createdTxtFile = folder.createFile(txtFileName, data.textContent, MimeType.PLAIN_TEXT);
+      createdTxtFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      txtFileUrl = createdTxtFile.getUrl();
+      txtFileId = createdTxtFile.getId();
+    }
+
+    // 3. บันทึกข้อมูลลง Google Sheets
     const sheet = getOrCreateSpreadsheet(folder);
     
     const timestamp = new Date();

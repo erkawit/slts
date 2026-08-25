@@ -1,7 +1,7 @@
 /**
  * watermark.js - ระบบสร้างภาพถ่ายและประทับลายน้ำ (Canvas Watermark Engine)
- * รองรับสัดส่วน 3:4 (แนวตั้ง) และ 4:3 (แนวนอน) ตามการหมุนกล้อง
- * กล่องข้อความสีดำสนิท ตัวหนังสือและสัญลักษณ์สีขาวทั้งหมด ขยายขนาด 100%
+ * รองรับสัดส่วน 3:4 (แนวตั้ง) และ 4:3 (แนวนอน) ตามการหมุนกล้องจริง
+ * สร้าง Text File (.txt) บันทึกข้อมูลลายน้ำ และประทับลายน้ำลงบนภาพ
  */
 
 class WatermarkEngine {
@@ -9,14 +9,12 @@ class WatermarkEngine {
    * ตรวจสอบแนวการถ่ายภาพ (Portrait / Landscape)
    */
   static getOrientation(sourceImage) {
-    // ถ้าเป็นรูปภาพนิ่ง (File / Image Upload)
     if (sourceImage instanceof HTMLImageElement || (sourceImage.naturalWidth && !sourceImage.videoWidth)) {
       const w = sourceImage.naturalWidth || sourceImage.width;
       const h = sourceImage.naturalHeight || sourceImage.height;
       return h >= w ? 'portrait' : 'landscape';
     }
 
-    // ถ้าถ่ายจากกล้องสด (Video) ตรวจสอบจาก Screen Orientation และ Window
     if (screen.orientation && screen.orientation.type) {
       return screen.orientation.type.includes('portrait') ? 'portrait' : 'landscape';
     }
@@ -27,7 +25,7 @@ class WatermarkEngine {
   }
 
   /**
-   * แปลงวันที่ปัจจุบันเป็นรูปแบบภาษาไทย พ.ศ. เช่น "25 ส.ค. 2569 11:01:09"
+   * แปลงวันที่ปัจจุบันเป็นรูปแบบภาษาไทย พ.ศ. เช่น "25 ส.ค. 2569 11:36:36"
    */
   static formatThaiDateTime(date = new Date()) {
     const thaiMonths = [
@@ -45,6 +43,24 @@ class WatermarkEngine {
     const seconds = pad(date.getSeconds());
 
     return `${day} ${month} ${year} ${hours}:${minutes}:${seconds}`;
+  }
+
+  /**
+   * สร้างเนื้อหา Text File (.txt) ตามที่แสดงผลในมุมขวาล่างของภาพ
+   */
+  static generateTextFileContent(data) {
+    const dateStr = data.dateTime || this.formatThaiDateTime(new Date());
+
+    const latFormatted = data.lat ? `${Math.abs(data.lat).toFixed(4)}°${data.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
+    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}°${data.lng >= 0 ? 'E' : 'W'}` : '102.7882°E';
+    const headingDeg = (data.heading !== undefined && data.heading !== null) ? data.heading : (window.compassManager ? window.compassManager.getHeading() : 0);
+    const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
+    const coordStr = `${latFormatted} ${lngFormatted} ${headingDeg}° ${dirText}`;
+
+    const locationStr = data.locationText || 'อำเภอเมืองอุดรธานี';
+    const caseStr = `เลขคดี: ${data.caseNumber || '-'}`;
+
+    return `${dateStr}\r\n${coordStr}\r\n${locationStr}\r\n${caseStr}`;
   }
 
   /**
@@ -80,24 +96,25 @@ class WatermarkEngine {
    * ฟังก์ชันประทับลายน้ำลงบน Canvas ตามการหมุนกล้อง
    * @param {HTMLImageElement|HTMLVideoElement|ImageBitmap} sourceImage ภาพหรือวิดีโอจากกล้อง
    * @param {Object} data ข้อมูลพิกัด เลขคดี ที่ตั้ง
-   * @returns {Promise<{canvas: HTMLCanvasElement, dataUrl: string, blob: Blob}>}
+   * @param {string} [forcedOrientation] กำหนด 'portrait' หรือ 'landscape' โดยตรง
+   * @returns {Promise<{canvas: HTMLCanvasElement, dataUrl: string, blob: Blob, textContent: string, orientation: string}>}
    */
-  static async renderWatermark(sourceImage, data) {
+  static async renderWatermark(sourceImage, data, forcedOrientation = null) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
-    // 1. ตรวจสอบแนวการถ่ายภาพ
-    const orientation = this.getOrientation(sourceImage);
+    // 1. ตรวจสอบแนวการถ่ายภาพ (Portrait / Landscape)
+    const orientation = forcedOrientation || this.getOrientation(sourceImage);
     const isPortrait = orientation === 'portrait';
 
-    // 2. กำหนดขนาด Canvas ตามสัดส่วนมาตรฐาน (แนวตั้ง 3:4 = 1080x1440, แนวนอน 4:3 = 1440x1080)
+    // 2. กำหนดขนาด Canvas ตามสัดส่วนมาตรฐาน
     let width, height;
     if (isPortrait) {
       width = 1080;
-      height = 1440; // 3:4
+      height = 1440; // 3:4 แนวตั้ง
     } else {
       width = 1440;
-      height = 1080; // 4:3
+      height = 1080; // 4:3 แนวนอน
     }
 
     canvas.width = width;
@@ -132,15 +149,15 @@ class WatermarkEngine {
     // แปลงผลลัพธ์เป็น Data URL และ Blob
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+    const textContent = this.generateTextFileContent(data);
 
-    return { canvas, dataUrl, blob, orientation };
+    return { canvas, dataUrl, blob, textContent, orientation };
   }
 
   /**
    * วาดกล่องข้อความมุมขวาล่าง (สีดำสนิท + ตัวหนังสือและสัญลักษณ์สีขาวทั้งหมด + ขยายขนาด 100%)
    */
   static async drawInfoBadge(ctx, canvasWidth, canvasHeight, scale, data) {
-    // ปรับขนาดฟอนต์ให้ใหญ่ขึ้น 100% (จากเดิม 14-15px เป็น 28-30px)
     const padding = 24 * scale;
     const fontSize = Math.round(28 * scale);
     const fontTitleSize = Math.round(30 * scale);
@@ -154,7 +171,7 @@ class WatermarkEngine {
 
     // พิกัด Lat/Lng และทิศองศา
     const latFormatted = data.lat ? `${Math.abs(data.lat).toFixed(4)}°${data.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
-    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}°${data.lng >= 0 ? 'E' : 'W'}` : '102.7881°E';
+    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}°${data.lng >= 0 ? 'E' : 'W'}` : '102.7882°E';
     const headingDeg = (data.heading !== undefined && data.heading !== null) ? data.heading : (window.compassManager ? window.compassManager.getHeading() : 0);
     const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
     const coordStr = `${latFormatted}  ${lngFormatted}   ${headingDeg}° ${dirText}`;
@@ -164,7 +181,6 @@ class WatermarkEngine {
     // เลขคดี
     const caseStr = `เลขคดี: ${data.caseNumber || '-'}`;
 
-    // กำหนดบรรทัดข้อมูล: ตัวหนังสือและสัญลักษณ์เป็นสีขาวล้วน (#ffffff) ทั้งหมดตามข้อกำหนด
     const lines = [
       { text: `📅  ${dateStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif` },
       { text: `📍  ${coordStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif` },
@@ -199,20 +215,19 @@ class WatermarkEngine {
     ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
     ctx.closePath();
 
-    // พื้นหลังสีดำสนิท (Solid Pitch Black)
     ctx.fillStyle = '#000000';
     ctx.fill();
 
-    // กรอบขอบสีขาวบางๆ เพื่อความคมชัด
+    // กรอบขอบสีขาวคมชัด
     ctx.lineWidth = 2 * scale;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
     ctx.stroke();
 
     // วาดข้อความและสัญลักษณ์สีขาวทั้งหมด (#ffffff)
     let currentY = boxY + padding + (fontSize * 0.85);
     lines.forEach(line => {
       ctx.font = line.font;
-      ctx.fillStyle = '#ffffff'; // สีขาวล้วน 100%
+      ctx.fillStyle = '#ffffff';
       ctx.textAlign = 'left';
       ctx.fillText(line.text, boxX + padding, currentY);
       currentY += lineHeight;
@@ -222,7 +237,7 @@ class WatermarkEngine {
   }
 
   /**
-   * สั่งดาวน์โหลดไฟล์ลงเครื่องอัตโนมัติ
+   * สั่งดาวน์โหลดไฟล์รูปภาพลงเครื่อง
    */
   static triggerDownload(dataUrl, filename) {
     const a = document.createElement('a');
@@ -231,6 +246,21 @@ class WatermarkEngine {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  }
+
+  /**
+   * สั่งดาวน์โหลด Text File (.txt) ลงเครื่อง
+   */
+  static triggerTextDownload(textContent, filename) {
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 }
 
