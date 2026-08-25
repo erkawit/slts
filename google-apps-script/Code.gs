@@ -31,16 +31,17 @@ function doPost(e) {
     const sheet = getTargetSpreadsheet(folder);
 
     // ==========================================
-    // ACTION 1: DELETE (เฉพาะสิทธิ์ Admin)
+    // ACTION 1: DELETE (ลบเฉพาะ 1 แถวเป้าหมายที่ระบุใน Google Sheet และลบไฟล์ใน Google Drive)
+    // ป้องกันการลบแถวทั้งหมด 100% โดยอ้างอิง Row Index และ Drive File ID ที่ยืนยันแล้วเท่านั้น
     // ==========================================
     if (data.action === "delete") {
       let deletedRows = 0;
       let deletedFiles = 0;
 
-      // ลบไฟล์ภาพใน Google Drive
-      if (data.fileId) {
+      // 1. ลบไฟล์ใน Google Drive โดยอ้างอิงจาก Drive File ID โดยตรง
+      if (data.fileId && typeof data.fileId === 'string' && data.fileId.trim() !== '') {
         try {
-          const file = DriveApp.getFileById(data.fileId);
+          const file = DriveApp.getFileById(data.fileId.trim());
           file.setTrashed(true);
           deletedFiles++;
         } catch (err) {
@@ -48,44 +49,75 @@ function doPost(e) {
         }
       }
 
-      if (data.fileName) {
-        try {
-          const imgFiles = folder.getFilesByName(data.fileName);
-          while (imgFiles.hasNext()) {
-            imgFiles.next().setTrashed(true);
-            deletedFiles++;
+      // 2. ตรวจสอบและค้นหาตำแหน่งแถวเป้าหมายใน Google Sheet (Exact Targeted Row)
+      const lastRow = sheet.getLastRow();
+      if (lastRow <= 1) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          message: "ไม่มีแถวข้อมูลใน Google Sheet ให้ลบ",
+          deletedRows: 0,
+          deletedFiles: deletedFiles
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      const sheetData = sheet.getDataRange().getValues();
+      let targetRowIndex = -1; // 1-indexed row number in Google Sheet (ห้ามเป็น row 1 ที่เป็นหัวตาราง)
+
+      // 2.1 ตรวจสอบความถูกต้องของ rowIndex ที่ส่งมาจาก Client ก่อน (ถ้ามี)
+      if (data.rowIndex && Number(data.rowIndex) > 1 && Number(data.rowIndex) <= lastRow) {
+        const checkIdx = Number(data.rowIndex) - 1;
+        const row = sheetData[checkIdx];
+        if (row) {
+          const rowTimestamp = String(row[0] || '').trim();
+          const rowCaseNumber = String(row[1] || '').trim();
+          const rowFileId = String(row[13] || '').trim();
+
+          // ยืนยันว่าแถวที่ระบุตรงกับข้อมูลที่ต้องการลบจริง (อย่างน้อย 1 เงื่อนไขเพื่อความปลอดภัย)
+          if ((data.fileId && data.fileId.trim() !== '' && rowFileId === data.fileId.trim()) ||
+              (data.caseNumber && data.caseNumber.trim() !== '' && rowCaseNumber === data.caseNumber.trim()) ||
+              (data.timestamp && data.timestamp.trim() !== '' && rowTimestamp === data.timestamp.trim())) {
+            targetRowIndex = Number(data.rowIndex);
           }
-        } catch (err) {
-          console.warn("Delete files by name error:", err);
         }
       }
 
-      // ลบแถวใน Google Sheet
-      const sheetData = sheet.getDataRange().getValues();
-      for (let i = sheetData.length - 1; i >= 1; i--) {
-        const row = sheetData[i];
-        const rowTimestamp = String(row[0] || '').trim();
-        const rowCaseNumber = String(row[1] || '').trim();
-        const rowFileName = String(row[10] || '').trim();
-        const rowFileId = String(row[13] || '').trim();
+      // 2.2 หาก rowIndex ไม่ตรง หรือไม่ได้ส่งมา ให้ค้นหาเฉพาะ 1 แถวที่ตรงกับ Drive File ID หรือ (Timestamp + เลขคดี)
+      if (targetRowIndex === -1) {
+        for (let i = 1; i < sheetData.length; i++) {
+          const row = sheetData[i];
+          const rowTimestamp = String(row[0] || '').trim();
+          const rowCaseNumber = String(row[1] || '').trim();
+          const rowFileId = String(row[13] || '').trim();
 
-        let isMatch = false;
-        if (data.fileId && rowFileId === data.fileId) isMatch = true;
-        else if (data.fileName && rowFileName === data.fileName) isMatch = true;
-        else if (data.timestamp && data.caseNumber && rowTimestamp === data.timestamp && rowCaseNumber === data.caseNumber) isMatch = true;
-        else if (data.rowIndex && Number(data.rowIndex) === (i + 1)) isMatch = true;
+          let match = false;
+          if (data.fileId && data.fileId.trim() !== '' && rowFileId === data.fileId.trim()) {
+            match = true;
+          } else if (data.caseNumber && data.caseNumber.trim() !== '' && data.timestamp && data.timestamp.trim() !== '' &&
+                     rowCaseNumber === data.caseNumber.trim() && rowTimestamp === data.timestamp.trim()) {
+            match = true;
+          }
 
-        if (isMatch) {
-          sheet.deleteRow(i + 1);
-          deletedRows++;
+          if (match) {
+            targetRowIndex = i + 1;
+            break; // ลบเฉพาะ 1 แถวที่พบเท่านั้น! ไม่วนลบต่อ
+          }
         }
+      }
+
+      // 2.3 ดำเนินการลบเฉพาะ 1 แถวเป้าหมายเท่านั้น (และต้องไม่ใช่หัวตาราง Row 1)
+      if (targetRowIndex > 1 && targetRowIndex <= lastRow) {
+        sheet.deleteRow(targetRowIndex);
+        deletedRows = 1;
       }
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
-        message: `ลบรายการใน Google Sheet (${deletedRows} แถว) และไฟล์ใน Drive (${deletedFiles} ไฟล์) เรียบร้อยแล้ว`,
+        message: deletedRows > 0 
+          ? `ลบรายการแถวที่ ${targetRowIndex} ใน Google Sheet และลบไฟล์ใน Google Drive เรียบร้อยแล้ว` 
+          : `ไม่พบแถวที่ตรงกับเงื่อนไขใน Google Sheet (ลบไฟล์ใน Drive: ${deletedFiles} ไฟล์)`,
         deletedRows: deletedRows,
-        deletedFiles: deletedFiles
+        deletedFiles: deletedFiles,
+        targetRowIndex: targetRowIndex
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
