@@ -70,7 +70,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initDOMElements();
   initAuthSystem();
   initDistrictsDropdown();
-  initOtherCaseYearDropdown();
+  initCasePrefixes();
+  initCaseYearDropdowns();
   initFormEventListeners();
   initLocationService();
   initCameraEvents();
@@ -86,7 +87,10 @@ function initDOMElements() {
   
   // เลขคดี
   elements.udonCaseField = document.getElementById('udonCaseField');
-  elements.caseNumberInput = document.getElementById('caseNumber');
+  elements.udonPrefixInput = document.getElementById('udonPrefix');
+  elements.udonPrefixList = document.getElementById('udonPrefixList');
+  elements.udonCaseNoInput = document.getElementById('udonCaseNo');
+  elements.udonCaseYearSelect = document.getElementById('udonCaseYear');
   elements.otherCourtCaseField = document.getElementById('otherCourtCaseField');
   elements.otherCaseNoInput = document.getElementById('otherCaseNo');
   elements.otherCaseYearSelect = document.getElementById('otherCaseYear');
@@ -866,6 +870,9 @@ function updateCacheBadgeUI(isFromCache, timeStr) {
 function renderDataTable(rows) {
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
 
+  // ดึงประวัติอักษรนำหน้าเลขคดีจากชีตมาอัปเดต autocomplete
+  extractPrefixesFromRows(rows);
+
   // 1. ทำลายและล้าง DataTable เดิมอย่างหมดจดเพื่อป้องกันรายการซ้ำ
   if ($.fn.DataTable.isDataTable('#summonsDataTable')) {
     $('#summonsDataTable').DataTable().clear().destroy();
@@ -1084,6 +1091,60 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
 // 5. ฟอร์มและระบบบันทึกส่งหมาย (Summons Form & Camera)
 // =========================================================================
 
+// ค่าตั้งต้นอักษรนำหน้าเลขคดี ศาลจังหวัดอุดรธานี
+const DEFAULT_CASE_PREFIXES = ['อ', 'ย', 'พ', 'ผบ', 'พE', 'ผบE', 'ร', 'รส', 'ม', 'มE', 'มย', 'มยE'];
+
+function initCasePrefixes() {
+  const stored = JSON.parse(localStorage.getItem('slts_case_prefixes') || '[]');
+  const combined = Array.from(new Set([...DEFAULT_CASE_PREFIXES, ...stored]));
+  renderPrefixDatalist(combined);
+}
+
+function renderPrefixDatalist(prefixes) {
+  if (!elements.udonPrefixList) return;
+  elements.udonPrefixList.innerHTML = '';
+  prefixes.forEach(p => {
+    if (p && p.trim()) {
+      const opt = document.createElement('option');
+      opt.value = p.trim();
+      elements.udonPrefixList.appendChild(opt);
+    }
+  });
+}
+
+function saveCasePrefix(prefix) {
+  if (!prefix || !prefix.trim()) return;
+  const clean = prefix.trim();
+  let stored = JSON.parse(localStorage.getItem('slts_case_prefixes') || '[]');
+  if (!stored.includes(clean)) {
+    stored.push(clean);
+    localStorage.setItem('slts_case_prefixes', JSON.stringify(stored));
+    initCasePrefixes();
+  }
+}
+
+function extractPrefixesFromRows(rows) {
+  if (!rows || !rows.length) return;
+  let stored = JSON.parse(localStorage.getItem('slts_case_prefixes') || '[]');
+  let hasNew = false;
+
+  rows.forEach(r => {
+    const caseStr = r['เลขคดี'] || '';
+    const m = caseStr.match(/^([a-zA-Zก-๙]+)\d+\/\d+/);
+    if (m && m[1] && m[1] !== 'ต') {
+      if (!DEFAULT_CASE_PREFIXES.includes(m[1]) && !stored.includes(m[1])) {
+        stored.push(m[1]);
+        hasNew = true;
+      }
+    }
+  });
+
+  if (hasNew) {
+    localStorage.setItem('slts_case_prefixes', JSON.stringify(stored));
+    initCasePrefixes();
+  }
+}
+
 function initDistrictsDropdown() {
   elements.districtSelect.innerHTML = '';
   DISTRICT_ORDER.forEach(district => {
@@ -1111,50 +1172,80 @@ function updateSubdistricts(districtName) {
   });
 }
 
-function initOtherCaseYearDropdown() {
-  if (!elements.otherCaseYearSelect) return;
-
+/**
+ * สร้างตัวเลือก ปี พ.ศ. ปัจจุบัน และถอยหลังไปอีก 20 ปี (รวม 21 ปี)
+ */
+function initCaseYearDropdowns() {
   const currentThaiYear = new Date().getFullYear() + 543;
-  elements.otherCaseYearSelect.innerHTML = '';
+  const yearSelects = [elements.udonCaseYearSelect, elements.otherCaseYearSelect];
 
-  for (let i = 0; i <= 5; i++) {
-    const year = currentThaiYear - i;
-    const opt = document.createElement('option');
-    opt.value = year;
-    opt.textContent = year;
-    if (i === 0) {
-      opt.selected = true;
+  yearSelects.forEach(sel => {
+    if (!sel) return;
+    sel.innerHTML = '';
+    for (let i = 0; i <= 20; i++) {
+      const year = currentThaiYear - i;
+      const opt = document.createElement('option');
+      opt.value = year;
+      opt.textContent = year;
+      if (i === 0) {
+        opt.selected = true; // ปีปัจจุบันเป็นค่าเริ่มต้น
+      }
+      sel.appendChild(opt);
     }
-    elements.otherCaseYearSelect.appendChild(opt);
-  }
+  });
 }
 
 function getFormattedCaseNumber() {
   const courtType = elements.courtTypeSelect.value;
   if (courtType === 'ศาลอื่น') {
-    const caseNo = (elements.otherCaseNoInput.value || '').trim();
-    const year = elements.otherCaseYearSelect.value;
+    const caseNo = (elements.otherCaseNoInput ? elements.otherCaseNoInput.value : '').trim();
+    const year = elements.otherCaseYearSelect ? elements.otherCaseYearSelect.value : '';
     return caseNo ? `ต${caseNo}/${year}` : '';
   } else {
-    return (elements.caseNumberInput.value || '').trim();
+    const prefix = (elements.udonPrefixInput ? elements.udonPrefixInput.value : '').trim();
+    const caseNo = (elements.udonCaseNoInput ? elements.udonCaseNoInput.value : '').trim();
+    const year = elements.udonCaseYearSelect ? elements.udonCaseYearSelect.value : '';
+    return (prefix && caseNo) ? `${prefix}${caseNo}/${year}` : '';
   }
 }
 
 function initFormEventListeners() {
+  // สลับประเภทศาล
   elements.courtTypeSelect.addEventListener('change', (e) => {
     const val = e.target.value;
     if (val === 'ศาลอื่น') {
       elements.udonCaseField.classList.add('hidden');
       elements.otherCourtCaseField.classList.remove('hidden');
       elements.otherCourtCaseField.classList.add('flex');
-      elements.otherCaseNoInput.focus();
+      if (elements.otherCaseNoInput) elements.otherCaseNoInput.focus();
     } else {
       elements.otherCourtCaseField.classList.add('hidden');
       elements.otherCourtCaseField.classList.remove('flex');
       elements.udonCaseField.classList.remove('hidden');
-      elements.caseNumberInput.focus();
+      if (elements.udonCaseNoInput) elements.udonCaseNoInput.focus();
     }
   });
+
+  // อักษรนำหน้า: ให้กรอกได้เฉพาะตัวอักษร (ไทย / อังกฤษ)
+  if (elements.udonPrefixInput) {
+    elements.udonPrefixInput.addEventListener('input', (e) => {
+      e.target.value = e.target.value.replace(/[^a-zA-Zก-๙]/g, '');
+    });
+  }
+
+  // เลขคดี ศาลจังหวัดอุดรธานี: กรอกได้เฉพาะตัวเลขเท่านั้น
+  if (elements.udonCaseNoInput) {
+    elements.udonCaseNoInput.addEventListener('input', (e) => {
+      e.target.value = e.target.value.replace(/\D/g, '');
+    });
+  }
+
+  // เลขคดี หมายศาลอื่น: กรอกได้เฉพาะตัวเลขเท่านั้น
+  if (elements.otherCaseNoInput) {
+    elements.otherCaseNoInput.addEventListener('input', (e) => {
+      e.target.value = e.target.value.replace(/\D/g, '');
+    });
+  }
 
   elements.locationTypeSelect.addEventListener('change', (e) => {
     const isHouse = e.target.value === 'หมายบ้าน';
@@ -1365,25 +1456,47 @@ function validateForm() {
   const courtType = elements.courtTypeSelect.value;
   const caseNumber = getFormattedCaseNumber();
 
-  if (!caseNumber) {
-    if (courtType === 'ศาลอื่น') {
+  if (courtType === 'ศาลจังหวัดอุดรธานี') {
+    const prefix = (elements.udonPrefixInput ? elements.udonPrefixInput.value : '').trim();
+    const caseNo = (elements.udonCaseNoInput ? elements.udonCaseNoInput.value : '').trim();
+
+    if (!prefix) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'กรุณาระบุอักษรนำหน้าเลขคดี',
+        text: 'โปรดเลือกหรือพิมพ์อักษรนำหน้า เช่น ผบE, อ, ย, พ',
+        confirmButtonColor: '#2563eb'
+      });
+      if (elements.udonPrefixInput) elements.udonPrefixInput.focus();
+      return false;
+    }
+
+    if (!caseNo) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'กรุณากรอกเลขคดี',
+        text: 'โปรดระบุหมายเลขคดี (ตัวเลขเท่านั้น) เช่น 1245',
+        confirmButtonColor: '#2563eb'
+      });
+      if (elements.udonCaseNoInput) elements.udonCaseNoInput.focus();
+      return false;
+    }
+
+    // บันทึกอักษรนำหน้าใหม่ลงในฐานข้อมูลประวัติ
+    saveCasePrefix(prefix);
+
+  } else {
+    const otherNo = (elements.otherCaseNoInput ? elements.otherCaseNoInput.value : '').trim();
+    if (!otherNo) {
       Swal.fire({
         icon: 'warning',
         title: 'กรุณากรอกเลขคดี',
         text: 'โปรดระบุหมายเลขคดี เช่น 2097',
         confirmButtonColor: '#2563eb'
       });
-      elements.otherCaseNoInput.focus();
-    } else {
-      Swal.fire({
-        icon: 'warning',
-        title: 'กรุณากรอกเลขคดี',
-        text: 'โปรดระบุเลขคดี เช่น ผบE1245/2569',
-        confirmButtonColor: '#2563eb'
-      });
-      elements.caseNumberInput.focus();
+      if (elements.otherCaseNoInput) elements.otherCaseNoInput.focus();
+      return false;
     }
-    return false;
   }
 
   if (elements.locationTypeSelect.value === 'หมายบ้าน') {
@@ -1774,14 +1887,18 @@ async function executeUpload() {
 function resetFormForNextCase() {
   const courtType = elements.courtTypeSelect.value;
   if (courtType === 'ศาลอื่น') {
-    elements.otherCaseNoInput.value = '';
-    elements.otherCaseNoInput.focus();
+    if (elements.otherCaseNoInput) {
+      elements.otherCaseNoInput.value = '';
+      elements.otherCaseNoInput.focus();
+    }
   } else {
-    elements.caseNumberInput.value = '';
-    elements.caseNumberInput.focus();
+    if (elements.udonCaseNoInput) {
+      elements.udonCaseNoInput.value = '';
+      elements.udonCaseNoInput.focus();
+    }
   }
-  elements.houseNoInput.value = '';
-  elements.mooInput.value = '';
+  if (elements.houseNoInput) elements.houseNoInput.value = '';
+  if (elements.mooInput) elements.mooInput.value = '';
 }
 
 function initSettings() {

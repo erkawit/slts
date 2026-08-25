@@ -207,9 +207,48 @@
                     </div>
                   </div>
                   
-                  <!-- กรณีเลือก: ศาลจังหวัดอุดรธานี -->
-                  <div id="udonCaseField" class="relative">
-                    <input type="text" id="caseNumber" placeholder="เลขคดี เช่น ผบE1245/2569" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 font-semibold placeholder-gray-400 transition">
+                  <!-- กรณีเลือก: ศาลจังหวัดอุดรธานี (อักษรนำหน้า + เลขคดี + / + ปี พ.ศ.) -->
+                  <div id="udonCaseField" class="flex items-stretch">
+                    <!-- 1. อักษรนำหน้า (เฉพาะตัวอักษร + ค้นหา/เลือกประวัติ) -->
+                    <div class="relative w-28 sm:w-36 flex-shrink-0">
+                      <input 
+                        type="text" 
+                        id="udonPrefix" 
+                        list="udonPrefixList" 
+                        placeholder="อักษร เช่น ผบE" 
+                        class="w-full h-full bg-white border border-r-0 border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-l-xl px-3 py-2.5 text-sm font-bold text-gray-800 placeholder-gray-400 transition"
+                        autocomplete="off"
+                      >
+                      <datalist id="udonPrefixList">
+                        <!-- Injected by JavaScript (ค่าตั้งต้น: อ, ย, พ, ผบ, พE, ผบE, ร, รส, ม, มE, มย, มยE + ประวัติ) -->
+                      </datalist>
+                    </div>
+
+                    <!-- 2. เลขคดี (เฉพาะตัวเลข) -->
+                    <input 
+                      type="text" 
+                      id="udonCaseNo" 
+                      placeholder="เลขคดี เช่น 1245" 
+                      inputmode="numeric" 
+                      class="flex-1 min-w-0 bg-white border-y border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 px-3.5 py-2.5 text-sm font-bold text-gray-800 placeholder-gray-400 transition"
+                    />
+
+                    <span class="inline-flex items-center px-2.5 sm:px-3 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold select-none">
+                      /
+                    </span>
+
+                    <!-- 3. ปี พ.ศ. (ย้อนหลัง 20 ปี, ค่าเริ่มต้นเป็นปีปัจจุบัน) -->
+                    <div class="relative w-24 sm:w-28 flex-shrink-0">
+                      <select 
+                        id="udonCaseYear" 
+                        class="w-full h-full bg-white border border-l-0 border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-r-xl pl-2.5 pr-6 py-2.5 text-sm font-semibold text-gray-800 transition appearance-none cursor-pointer"
+                      >
+                        <!-- Injected by JavaScript -->
+                      </select>
+                      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-gray-500">
+                        <i class="fa-solid fa-chevron-down text-xs"></i>
+                      </div>
+                    </div>
                   </div>
 
                   <!-- กรณีเลือก: หมายศาลอื่น (ต + ตัวเลข + / + ปี พ.ศ.) -->
@@ -217,14 +256,14 @@
                     <span class="inline-flex items-center px-4 bg-blue-50 border border-r-0 border-gray-300 rounded-l-xl text-blue-700 font-bold text-base select-none">
                       ต
                     </span>
-                    <input type="number" id="otherCaseNo" placeholder="เลขคดี เช่น 2097" inputmode="numeric" class="flex-1 min-w-0 bg-white border-y border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 px-3.5 py-2.5 text-sm text-gray-800 font-semibold placeholder-gray-400 transition" />
-                    <span class="inline-flex items-center px-3 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold select-none">
+                    <input type="text" id="otherCaseNo" placeholder="เลขคดี เช่น 2097" inputmode="numeric" class="flex-1 min-w-0 bg-white border-y border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 px-3.5 py-2.5 text-sm font-bold text-gray-800 placeholder-gray-400 transition" />
+                    <span class="inline-flex items-center px-2.5 sm:px-3 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold select-none">
                       /
                     </span>
-                    <div class="relative w-32">
-                      <select id="otherCaseYear" class="w-full h-full bg-white border border-l-0 border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-r-xl pl-3 pr-7 py-2.5 text-sm font-semibold text-gray-800 transition appearance-none cursor-pointer">
+                    <div class="relative w-24 sm:w-28 flex-shrink-0">
+                      <select id="otherCaseYear" class="w-full h-full bg-white border border-l-0 border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-r-xl pl-2.5 pr-6 py-2.5 text-sm font-semibold text-gray-800 transition appearance-none cursor-pointer">
                       </select>
-                      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-gray-500">
                         <i class="fa-solid fa-chevron-down text-xs"></i>
                       </div>
                     </div>
