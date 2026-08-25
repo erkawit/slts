@@ -1315,13 +1315,8 @@ function initCameraEvents() {
     startCameraStream();
   });
 
-  if (elements.btnToggleOrientation) {
-    elements.btnToggleOrientation.addEventListener('click', toggleOrientation);
-  }
-  if (elements.btnFlipOrientationQuick) {
-    elements.btnFlipOrientationQuick.addEventListener('click', toggleOrientation);
-  }
-
+  // ตรวจจับการหมุนเครื่องอัตโนมัติผ่าน Gyroscope (DeviceOrientation)
+  window.addEventListener('deviceorientation', handleGyroscopeOrientation);
   window.addEventListener('resize', handleScreenOrientationChange);
   window.addEventListener('orientationchange', handleScreenOrientationChange);
 
@@ -1329,16 +1324,39 @@ function initCameraEvents() {
   elements.fileFallbackInput.addEventListener('change', handleFallbackFile);
 }
 
-function handleScreenOrientationChange() {
-  if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
-    const isPortrait = window.innerHeight >= window.innerWidth;
-    setCaptureOrientation(isPortrait ? 'portrait' : 'landscape');
+/**
+ * ตรวจจับการหมุนกล้องอัตโนมัติจากเซนเซอร์ Gyroscope / DeviceOrientation
+ */
+function handleGyroscopeOrientation(event) {
+  if (!event || elements.cameraModal.classList.contains('hidden')) return;
+
+  const beta = Math.abs(event.beta || 0);   // แกนตั้ง (หน้า-หลัง)
+  const gamma = Math.abs(event.gamma || 0); // แกนนอน (ซ้าย-ขวา)
+
+  // ถ้าถือเครื่องในแนวนอน (แกนนอนเอียงชัดเจน)
+  if (gamma > 40 && gamma > beta) {
+    if (state.captureOrientation !== 'landscape') {
+      setCaptureOrientation('landscape');
+    }
+  } 
+  // ถ้าถือเครื่องในแนวตั้ง (แกนตั้งตั้งตรง)
+  else if (beta > 35 && beta >= gamma) {
+    if (state.captureOrientation !== 'portrait') {
+      setCaptureOrientation('portrait');
+    }
   }
 }
 
-function toggleOrientation() {
-  const nextMode = state.captureOrientation === 'portrait' ? 'landscape' : 'portrait';
-  setCaptureOrientation(nextMode);
+function handleScreenOrientationChange() {
+  if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
+    if (screen.orientation && screen.orientation.type) {
+      const isPortrait = screen.orientation.type.includes('portrait');
+      setCaptureOrientation(isPortrait ? 'portrait' : 'landscape');
+    } else {
+      const isPortrait = window.innerHeight >= window.innerWidth;
+      setCaptureOrientation(isPortrait ? 'portrait' : 'landscape');
+    }
+  }
 }
 
 function setCaptureOrientation(mode) {
@@ -1356,7 +1374,7 @@ function setCaptureOrientation(mode) {
   }
 
   if (elements.txtOrientationMode) {
-    elements.txtOrientationMode.textContent = isPortrait ? 'แนวตั้ง 3:4' : 'แนวนอน 4:3';
+    elements.txtOrientationMode.textContent = isPortrait ? 'แนวตั้ง 3:4 (อัตโนมัติ)' : 'แนวนอน 4:3 (อัตโนมัติ)';
   }
 }
 
