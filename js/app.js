@@ -1297,17 +1297,21 @@ function renderDataTable(rows) {
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-blue-50/40 transition';
 
-    // คอลัมน์พิกัดพร้อมปุ่มคัดลอก
+    // คอลัมน์พิกัดพร้อมปุ่มคัดลอก และปุ่มเปิดใน Google Maps
     let coordDisplay = '-';
     if (lat && lng) {
       const latFixed = Number(lat).toFixed(4);
       const lngFixed = Number(lng).toFixed(4);
+      const googleMapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
       coordDisplay = `
         <div class="flex items-center gap-1.5 whitespace-nowrap">
           <span class="font-mono text-xs text-blue-700 font-semibold">${latFixed}, ${lngFixed}</span>
           <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition" title="คัดลอกพิกัด Latitude, Longitude">
             <i class="fa-regular fa-copy text-xs"></i>
           </button>
+          <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded transition inline-flex items-center" title="เปิดดูตำแหน่งใน Google Maps">
+            <i class="fa-solid fa-map-location-dot text-xs"></i>
+          </a>
         </div>
       `;
     }
@@ -1391,12 +1395,16 @@ window.openCaseHistoryModal = function(caseNumber) {
     if (lat && lng) {
       const latFixed = Number(lat).toFixed(4);
       const lngFixed = Number(lng).toFixed(4);
+      const googleMapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
       coordDisplay = `
         <div class="flex items-center gap-1.5 whitespace-nowrap">
           <span class="font-mono text-xs text-blue-700 font-semibold">${latFixed}, ${lngFixed}</span>
           <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="คัดลอกพิกัด">
             <i class="fa-regular fa-copy text-xs"></i>
           </button>
+          <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded inline-flex items-center" title="เปิดดูตำแหน่งใน Google Maps">
+            <i class="fa-solid fa-map-location-dot text-xs"></i>
+          </a>
         </div>
       `;
     }
@@ -1911,7 +1919,7 @@ window.openMobileCaseSearchModal = async function() {
               <i class="fa-solid fa-location-dot text-red-500 mr-1"></i>${loc}
             </p>
 
-            <!-- Action Buttons: 3.1 เลขคดี, 3.2 พิกัด, 3.3 ดูภาพ (ถ้ามี) -->
+            <!-- Action Buttons: 3.1 เลขคดี, 3.2 พิกัด, Google Maps, 3.3 ดูภาพ (ถ้ามี) -->
             <div class="flex items-center gap-1.5 flex-wrap pt-1">
               <!-- 3.1 ปุ่มเลขคดี -->
               <button type="button" class="px-2.5 py-1.5 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
@@ -1925,6 +1933,12 @@ window.openMobileCaseSearchModal = async function() {
                   <i class="fa-solid fa-location-crosshairs text-emerald-600"></i>
                   <span>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</span>
                 </button>
+
+                <!-- ปุ่มเปิดใน Google Maps -->
+                <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-sm inline-flex items-center gap-1 active:scale-95 transition" title="เปิดดูตำแหน่งใน Google Maps">
+                  <i class="fa-solid fa-map-location-dot text-rose-600"></i>
+                  <span>Google Maps</span>
+                </a>
               ` : ''}
 
               <!-- 3.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะเมื่อมีภาพในระบบ) -->
