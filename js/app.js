@@ -430,7 +430,9 @@ function initResponsiveUI() {
 window.loadGoogleSheetData = function() {
   showCustomLoading('กำลังดึงข้อมูลประวัติการส่งหมาย...', 'กำลังเชื่อมต่อ Google Sheet');
 
-  Papa.parse(state.googleSheetCsvUrl, {
+  const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${Date.now()}`;
+
+  Papa.parse(csvFetchUrl, {
     download: true,
     header: true,
     skipEmptyLines: true,
@@ -456,13 +458,14 @@ window.loadGoogleSheetData = function() {
 
 function renderDataTable(rows) {
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+
+  // 1. ทำลายและล้าง DataTable เดิมอย่างหมดจดเพื่อป้องกันรายการซ้ำ
+  if ($.fn.DataTable.isDataTable('#summonsDataTable')) {
+    $('#summonsDataTable').DataTable().clear().destroy();
+  }
+
   const tableBody = document.getElementById('dataTableBody');
   tableBody.innerHTML = '';
-
-  // ทำลาย DataTable เก่าก่อนสร้างใหม่
-  if ($.fn.DataTable.isDataTable('#summonsDataTable')) {
-    $('#summonsDataTable').DataTable().destroy();
-  }
 
   rows.forEach((row, index) => {
     const timestamp = row['วัน-เวลาบันทึก'] || row['Timestamp'] || '';
