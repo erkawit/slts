@@ -1,0 +1,29 @@
+{
+  "name": "slts",
+  "version": "1.0.0",
+  "description": "**สำหรับเจ้าพนักงานศาลจังหวัดอุดรธานี**",
+  "main": "index.js",
+  "scripts": {
+    "sync-public": "node build-public.js",
+    "cap:sync": "node build-public.js && npx cap sync",
+    "cap:open": "node build-public.js && npx cap sync && npx cap open android",
+    "build:apk": "node build-public.js && npx cap sync && cd android && gradlew.bat assembleDebug"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erkawit/slts.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/erkawit/slts/issues"
+  },
+  "homepage": "https://github.com/erkawit/slts#readme",
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0"
+  }
+}
