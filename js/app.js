@@ -1306,7 +1306,7 @@ function renderDataTable(rows) {
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-blue-50/40 transition';
 
-    // คอลัมน์พิกัดพร้อมปุ่มคัดลอก และปุ่มเปิดใน Google Maps
+    // คอลัมน์พิกัดพร้อมปุ่มคัดลอก และปุ่มเปิดใน Google Maps ชัดเจนสวยงาม
     let coordDisplay = '-';
     if (lat && lng) {
       const latFixed = Number(lat).toFixed(4);
@@ -1314,12 +1314,13 @@ function renderDataTable(rows) {
       const googleMapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
       coordDisplay = `
         <div class="flex items-center gap-1.5 whitespace-nowrap">
-          <span class="font-mono text-xs text-blue-700 font-semibold">${latFixed}, ${lngFixed}</span>
-          <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition" title="คัดลอกพิกัด Latitude, Longitude">
-            <i class="fa-regular fa-copy text-xs"></i>
+          <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-mono text-xs font-semibold rounded-lg border border-blue-200 transition inline-flex items-center gap-1 shadow-sm" title="คลิกเพื่อคัดลอกพิกัด">
+            <i class="fa-regular fa-copy text-[11px] text-blue-500"></i>
+            <span>${latFixed}, ${lngFixed}</span>
           </button>
-          <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded transition inline-flex items-center" title="เปิดดูตำแหน่งใน Google Maps">
-            <i class="fa-solid fa-map-location-dot text-xs"></i>
+          <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 font-bold text-xs rounded-lg border border-rose-200 shadow-sm transition inline-flex items-center gap-1.5" title="เปิดดูตำแหน่งบน Google Maps">
+            <i class="fa-solid fa-map-location-dot text-rose-600 text-xs"></i>
+            <span>Google Maps</span>
           </a>
         </div>
       `;
@@ -1407,12 +1408,13 @@ window.openCaseHistoryModal = function(caseNumber) {
       const googleMapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
       coordDisplay = `
         <div class="flex items-center gap-1.5 whitespace-nowrap">
-          <span class="font-mono text-xs text-blue-700 font-semibold">${latFixed}, ${lngFixed}</span>
-          <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="คัดลอกพิกัด">
-            <i class="fa-regular fa-copy text-xs"></i>
+          <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-mono text-xs font-semibold rounded-lg border border-blue-200 transition inline-flex items-center gap-1 shadow-sm" title="คลิกเพื่อคัดลอกพิกัด">
+            <i class="fa-regular fa-copy text-[11px] text-blue-500"></i>
+            <span>${latFixed}, ${lngFixed}</span>
           </button>
-          <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded inline-flex items-center" title="เปิดดูตำแหน่งใน Google Maps">
-            <i class="fa-solid fa-map-location-dot text-xs"></i>
+          <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 font-bold text-xs rounded-lg border border-rose-200 shadow-sm transition inline-flex items-center gap-1.5" title="เปิดดูตำแหน่งบน Google Maps">
+            <i class="fa-solid fa-map-location-dot text-rose-600 text-xs"></i>
+            <span>Google Maps</span>
           </a>
         </div>
       `;
@@ -1971,8 +1973,12 @@ window.openManualUploadModal = function() {
 
 /**
  * Modal ค้นหาข้อมูลหมายบนหน้าจอมือถือ (< 768px)
- * แสดงรายการในรูปแบบ ListView สำหรับหน้าจอมือถือ
- * แต่ละรายการมี: 3.1 ปุ่มเลขคดี, 3.2 ปุ่มพิกัด, 3.3 ปุ่มดูภาพที่อัปโหลด (ถ้ามี)
+ * แสดงรายการเลขคดีที่ไม่ซ้ำ (Grouped by Case Number)
+ * หากมีหลายรายการ จะมีปุ่มให้กดดูรายการย่อย
+ * แต่ละรายการย่อยมี:
+ * 2.1 ปุ่มเลขคดี
+ * 2.2 ปุ่มพิกัด (คัดลอกพิกัด + Google Maps)
+ * 2.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะรายการที่มีรูปภาพในระบบ และสามารถคลิกภาพเพื่อเปิดดูเต็มจอได้)
  */
 window.openMobileCaseSearchModal = async function() {
   // ตรวจสอบและดึงข้อมูลสดจาก Google Sheet หากยังไม่มีข้อมูล
@@ -2000,12 +2006,12 @@ window.openMobileCaseSearchModal = async function() {
   }
 
   Swal.fire({
-    title: 'ค้นหาข้อมูลหมาย',
+    title: '<div class="flex items-center justify-center gap-2 text-gray-900 font-bold text-base"><i class="fa-solid fa-magnifying-glass text-blue-600"></i><span>ค้นหาข้อมูลหมาย</span></div>',
     html: `
       <div class="text-left space-y-3 pt-1">
         <!-- ช่องค้นหาเลขคดี + ปุ่มค้นหา -->
         <div class="flex gap-2">
-          <input type="text" id="mobileSearchInput" placeholder="พิมพ์เลขคดี เช่น ผบE2100/2569..." class="flex-1 bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition">
+          <input type="text" id="mobileSearchInput" placeholder="พิมพ์เลขคดี หรือ ที่ตั้งส่งหมาย..." class="flex-1 bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition">
           <button type="button" id="btnTriggerMobileSearch" class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow flex items-center gap-1.5 transition">
             <i class="fa-solid fa-magnifying-glass"></i>
             <span>ค้นหา</span>
@@ -2017,7 +2023,7 @@ window.openMobileCaseSearchModal = async function() {
         </div>
 
         <!-- รายการคดีแบบ ListView สำหรับจอมือถือ -->
-        <div id="mobileSearchResultsContainer" class="max-h-[58vh] overflow-y-auto space-y-2.5 pr-0.5">
+        <div id="mobileSearchResultsContainer" class="max-h-[60vh] overflow-y-auto space-y-3 pr-0.5">
           <!-- Injected by JS -->
         </div>
       </div>
@@ -2041,10 +2047,21 @@ window.openMobileCaseSearchModal = async function() {
           return !q || c.includes(q) || d.includes(q);
         });
 
-        countTxt.textContent = q ? `พบทั้งหมด ${filtered.length} รายการ` : `แสดง ${Math.min(filtered.length, 20)} รายการล่าสุด`;
+        // จัดกลุ่มตามเลขคดี (Group by Case Number) เพื่อแสดงรายการที่ไม่ซ้ำ
+        const groupMap = new Map();
+        filtered.forEach(r => {
+          const caseNo = (r['เลขคดี'] || '-').trim();
+          if (!groupMap.has(caseNo)) {
+            groupMap.set(caseNo, []);
+          }
+          groupMap.get(caseNo).push(r);
+        });
+
+        const uniqueCases = Array.from(groupMap.keys());
+        countTxt.textContent = q ? `พบเลขคดีทั้งหมด ${uniqueCases.length} คดี (${filtered.length} รายการส่งหมาย)` : `แสดง ${Math.min(uniqueCases.length, 20)} เลขคดีล่าสุด`;
         container.innerHTML = '';
 
-        if (filtered.length === 0) {
+        if (uniqueCases.length === 0) {
           container.innerHTML = `
             <div class="p-6 text-center text-gray-400 bg-gray-50 rounded-2xl border border-gray-200">
               <i class="fa-solid fa-folder-open text-3xl mb-2 text-gray-300"></i>
@@ -2054,66 +2071,87 @@ window.openMobileCaseSearchModal = async function() {
           return;
         }
 
-        const displayRows = q ? filtered : filtered.slice(0, 20);
+        const displayKeys = q ? uniqueCases : uniqueCases.slice(0, 20);
 
-        displayRows.forEach(row => {
-          const caseNo = row['เลขคดี'] || '-';
-          const rawTime = row['วัน-เวลาบันทึก'] || row['Timestamp'] || '';
+        displayKeys.forEach(caseNo => {
+          const records = groupMap.get(caseNo);
+          const latest = records[0];
+          const rawTime = latest['วัน-เวลาบันทึก'] || latest['Timestamp'] || '';
           const formattedDate = formatThaiDateDisplay(rawTime);
-          const loc = row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '-';
-          const lat = row['ละติจูด (Lat)'] || row['ละติจูด'] || '';
-          const lng = row['ลองจิจูด (Lng)'] || row['ลองจิจูด'] || '';
-          const imgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
+          const loc = latest['ที่ตั้งส่งหมาย (เต็ม)'] || latest['ที่ตั้งส่งหมาย'] || '-';
+          const lat = latest['ละติจูด (Lat)'] || latest['ละติจูด'] || '';
+          const lng = latest['ลองจิจูด (Lng)'] || latest['ลองจิจูด'] || '';
+          const imgUrl = latest['ลิงก์รูปภาพใน Google Drive'] || latest['ลิงก์รูปภาพ'] || '';
           const hasImage = imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http');
+          const hasMultiple = records.length > 1;
 
           const card = document.createElement('div');
-          card.className = 'bg-white rounded-xl border border-gray-200 p-3.5 shadow-sm space-y-2.5 text-left transition hover:border-blue-300';
+          card.className = 'bg-white rounded-2xl border border-gray-200 p-4 shadow-sm space-y-2.5 text-left transition hover:border-blue-300';
           
           card.innerHTML = `
             <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2">
               <div>
                 <span class="font-bold text-gray-900 text-sm text-blue-700">${caseNo}</span>
-                <p class="text-[11px] text-gray-500 font-mono mt-0.5"><i class="fa-regular fa-calendar-check mr-1"></i>${formattedDate}</p>
+                <p class="text-[11px] text-gray-500 font-mono mt-0.5"><i class="fa-regular fa-calendar-check mr-1 text-blue-500"></i>${formattedDate}</p>
               </div>
-              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${hasImage ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}">
-                ${hasImage ? 'มีภาพถ่าย' : 'ไม่มีภาพ'}
-              </span>
+              <div class="flex items-center gap-1">
+                ${hasMultiple ? `
+                  <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                    <i class="fa-solid fa-layer-group mr-0.5"></i> ${records.length} รายการ
+                  </span>
+                ` : `
+                  <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold ${hasImage ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}">
+                    ${hasImage ? 'มีภาพถ่าย' : 'ไม่มีภาพ'}
+                  </span>
+                `}
+              </div>
             </div>
 
             <p class="text-xs text-gray-700 leading-relaxed">
               <i class="fa-solid fa-location-dot text-red-500 mr-1"></i>${loc}
             </p>
 
-            <!-- Action Buttons: 3.1 เลขคดี, 3.2 พิกัด, Google Maps, 3.3 ดูภาพ (ถ้ามี) -->
-            <div class="flex items-center gap-1.5 flex-wrap pt-1">
-              <!-- 3.1 ปุ่มเลขคดี -->
-              <button type="button" class="px-2.5 py-1.5 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
-                <i class="fa-solid fa-scale-balanced text-blue-600"></i>
-                <span>${caseNo}</span>
-              </button>
-
-              <!-- 3.2 ปุ่มพิกัด -->
-              ${lat && lng ? `
-                <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-sm inline-flex items-center gap-1 hover:bg-emerald-100 transition" title="คัดลอกพิกัด">
-                  <i class="fa-solid fa-location-crosshairs text-emerald-600"></i>
-                  <span>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</span>
+            ${hasMultiple ? `
+              <!-- ปุ่มดูรายการย่อยทั้งหมดสำหรับคดีที่มีประวัติมากกว่า 1 รายการ -->
+              <div class="pt-1">
+                <button type="button" onclick="openMobileSubRecordsModal('${caseNo.replace(/'/g, "\\'")}')" class="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-98 text-white font-bold rounded-xl text-xs shadow-sm flex items-center justify-center gap-2 transition">
+                  <i class="fa-solid fa-layer-group"></i>
+                  <span>ดูรายการย่อย (${records.length} รายการ)</span>
+                  <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                </button>
+              </div>
+            ` : `
+              <!-- สำหรับคดีที่มี 1 รายการ แสดงปุ่ม: 2.1 เลขคดี, 2.2 พิกัด, 2.3 ดูภาพ (ถ้ามี) -->
+              <div class="flex items-center gap-1.5 flex-wrap pt-1">
+                <!-- 2.1 ปุ่มเลขคดี -->
+                <button type="button" class="px-2.5 py-1.5 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
+                  <i class="fa-solid fa-scale-balanced text-blue-600"></i>
+                  <span>${caseNo}</span>
                 </button>
 
-                <!-- ปุ่มเปิดใน Google Maps -->
-                <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-sm inline-flex items-center gap-1 active:scale-95 transition" title="เปิดดูตำแหน่งใน Google Maps">
-                  <i class="fa-solid fa-map-location-dot text-rose-600"></i>
-                  <span>Google Maps</span>
-                </a>
-              ` : ''}
+                <!-- 2.2 ปุ่มพิกัด -->
+                ${lat && lng ? `
+                  <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-sm inline-flex items-center gap-1 transition" title="คัดลอกพิกัด">
+                    <i class="fa-solid fa-location-crosshairs text-emerald-600"></i>
+                    <span>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</span>
+                  </button>
 
-              <!-- 3.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะเมื่อมีภาพในระบบ) -->
-              ${hasImage ? `
-                <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNo}', '${loc.replace(/'/g, "\\'")}', '${formattedDate}', '${lat}', '${lng}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm inline-flex items-center gap-1 active:scale-95 transition">
-                  <i class="fa-solid fa-image"></i>
-                  <span>ดูภาพ</span>
-                </button>
-              ` : ''}
-            </div>
+                  <!-- ปุ่มเปิดใน Google Maps -->
+                  <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-sm inline-flex items-center gap-1 active:scale-95 transition" title="เปิดดูตำแหน่งใน Google Maps">
+                    <i class="fa-solid fa-map-location-dot text-rose-600"></i>
+                    <span>Google Maps</span>
+                  </a>
+                ` : ''}
+
+                <!-- 2.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะเมื่อมีภาพในระบบ) -->
+                ${hasImage ? `
+                  <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNo}', '${loc.replace(/'/g, "\\'")}', '${formattedDate}', '${lat}', '${lng}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm inline-flex items-center gap-1 active:scale-95 transition">
+                    <i class="fa-solid fa-image"></i>
+                    <span>ดูภาพ</span>
+                  </button>
+                ` : ''}
+              </div>
+            `}
           `;
 
           container.appendChild(card);
@@ -2127,6 +2165,91 @@ window.openMobileCaseSearchModal = async function() {
         if (e.key === 'Enter') renderList(searchInput.value);
       });
     }
+  });
+};
+
+/**
+ * Modal แสดงรายการย่อยทั้งหมดของเลขคดีนั้นๆ บนหน้าจอมือถือ (< 768px)
+ * แต่ละรายการแสดง:
+ * 2.1 ปุ่มเลขคดี
+ * 2.2 ปุ่มพิกัด (คัดลอกพิกัด + Google Maps)
+ * 2.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะรายการที่มีภาพในระบบ)
+ */
+window.openMobileSubRecordsModal = function(caseNumber) {
+  const records = (state.allSheetRows || []).filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim());
+
+  let cardsHtml = '';
+  records.forEach((rec, idx) => {
+    const rawTime = rec['วัน-เวลาบันทึก'] || rec['Timestamp'] || '';
+    const formattedDate = formatThaiDateDisplay(rawTime);
+    const loc = rec['ที่ตั้งส่งหมาย (เต็ม)'] || rec['ที่ตั้งส่งหมาย'] || '-';
+    const lat = rec['ละติจูด (Lat)'] || rec['ละติจูด'] || '';
+    const lng = rec['ลองจิจูด (Lng)'] || rec['ลองจิจูด'] || '';
+    const imgUrl = rec['ลิงก์รูปภาพใน Google Drive'] || rec['ลิงก์รูปภาพ'] || '';
+    const hasImage = imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http');
+
+    cardsHtml += `
+      <div class="bg-gray-50/90 rounded-2xl border border-gray-200 p-3.5 space-y-2.5 text-left shadow-sm">
+        <div class="flex items-center justify-between border-b border-gray-200 pb-1.5">
+          <span class="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+            <span class="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">${records.length - idx}</span>
+            <span>รายการส่งหมายครั้งที่ ${records.length - idx}</span>
+          </span>
+          <span class="text-[11px] text-gray-500 font-mono">${formattedDate}</span>
+        </div>
+
+        <p class="text-xs text-gray-700 leading-relaxed">
+          <i class="fa-solid fa-location-dot text-red-500 mr-1"></i>${loc}
+        </p>
+
+        <!-- Action Buttons: 2.1 เลขคดี, 2.2 พิกัด, 2.3 ดูภาพ (ถ้ามี) -->
+        <div class="flex items-center gap-1.5 flex-wrap pt-1">
+          <!-- 2.1 ปุ่มเลขคดี -->
+          <button type="button" class="px-2.5 py-1.5 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
+            <i class="fa-solid fa-scale-balanced text-blue-600"></i>
+            <span>${caseNumber}</span>
+          </button>
+
+          <!-- 2.2 ปุ่มพิกัด -->
+          ${lat && lng ? `
+            <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-sm inline-flex items-center gap-1 transition" title="คัดลอกพิกัด">
+              <i class="fa-solid fa-location-crosshairs text-emerald-600"></i>
+              <span>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</span>
+            </button>
+
+            <!-- ปุ่มเปิดใน Google Maps -->
+            <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-sm inline-flex items-center gap-1 active:scale-95 transition" title="เปิดดูตำแหน่งใน Google Maps">
+              <i class="fa-solid fa-map-location-dot text-rose-600"></i>
+              <span>Google Maps</span>
+            </a>
+          ` : ''}
+
+          <!-- 2.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะเมื่อมีภาพในระบบ) -->
+          ${hasImage ? `
+            <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${loc.replace(/'/g, "\\'")}', '${formattedDate}', '${lat}', '${lng}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm inline-flex items-center gap-1 active:scale-95 transition">
+              <i class="fa-solid fa-image"></i>
+              <span>ดูภาพ</span>
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  });
+
+  Swal.fire({
+    title: `<div class="flex items-center justify-center gap-2 text-gray-900 font-bold text-base"><i class="fa-solid fa-layer-group text-blue-600"></i><span>รายการย่อย: ${caseNumber}</span></div>`,
+    html: `
+      <div class="text-left text-xs text-gray-500 mb-2.5">
+        <span>พบรายการประวัติทั้งหมด <b>${records.length}</b> ครั้ง</span>
+      </div>
+      <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-0.5">
+        ${cardsHtml}
+      </div>
+    `,
+    width: '95%',
+    showCloseButton: true,
+    showConfirmButton: false,
+    allowOutsideClick: false
   });
 };
 
@@ -2201,7 +2324,7 @@ async function saveInitialRecordToSheet(data, fileName) {
 }
 
 /**
- * แสดงภาพถ่ายเต็มด้วย SweetAlert พร้อมปุ่มดาวน์โหลด
+ * แสดงภาพถ่ายเต็มด้วย SweetAlert พร้อมปุ่มดาวน์โหลด และคลิกดูเต็มหน้าจอได้
  */
 window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, lat, lng) {
   let directImgUrl = imgUrl;
@@ -2218,21 +2341,40 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
         <p><b>🏠 ที่ตั้งส่งหมาย:</b> ${locationFull}</p>
         <p><b>📍 พิกัด GPS:</b> ${lat}, ${lng}</p>
       </div>
-      <div class="relative bg-gray-900 rounded-xl overflow-hidden shadow-inner flex items-center justify-center min-h-[250px] max-h-[60vh]">
-        <img src="${directImgUrl}" alt="${caseNumber}" class="max-w-full max-h-[58vh] object-contain rounded-lg shadow-md" onerror="this.onerror=null; this.src='${imgUrl}';">
+      <div class="relative bg-gray-900 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center min-h-[250px] max-h-[60vh] cursor-pointer group" onclick="openFullScreenImage('${directImgUrl}')" title="คลิกที่ภาพเพื่อเปิดดูแบบเต็มหน้าจอ">
+        <img src="${directImgUrl}" alt="${caseNumber}" class="max-w-full max-h-[58vh] object-contain rounded-lg shadow-md transition group-hover:scale-[1.01]" onerror="this.onerror=null; this.src='${imgUrl}';">
+        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5">
+          <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+          <span>คลิกที่ภาพเพื่อเปิดดูแบบเต็มหน้าจอ</span>
+        </div>
       </div>
     `,
     width: '650px',
     showCloseButton: true,
     showCancelButton: true,
     allowOutsideClick: false,
-    confirmButtonText: '<i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> เปิดภาพขนาดเต็ม (Google Drive)',
+    confirmButtonText: '<i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> เปิดภาพใน Google Drive',
     cancelButtonText: 'ปิด',
     confirmButtonColor: '#2563eb',
     cancelButtonColor: '#6b7280'
   }).then((res) => {
     if (res.isConfirmed) {
       window.open(imgUrl, '_blank');
+    }
+  });
+};
+
+window.openFullScreenImage = function(imgSrc) {
+  Swal.fire({
+    imageUrl: imgSrc,
+    imageAlt: 'ภาพขนาดเต็ม',
+    showCloseButton: true,
+    showConfirmButton: false,
+    width: '95vw',
+    padding: '0.5rem',
+    background: 'rgba(0, 0, 0, 0.95)',
+    customClass: {
+      popup: 'border-0 rounded-2xl'
     }
   });
 };
