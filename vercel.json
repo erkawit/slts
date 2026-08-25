@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "name": "slts-court-udonthani",
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Permissions-Policy", "value": "camera=*, geolocation=*, accelerometer=*, gyroscope=*" }
+      ]
+    }
+  ]
+}
