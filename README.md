@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # slts
 =======
 # ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System - SLTS)
