@@ -47,8 +47,8 @@
    - **ดาวน์โหลดลงเครื่องทันที:** บันทึกรูปลงเครื่องโทรศัพท์ทันทีที่ประทับลายน้ำเสร็จ
 
 7. **การจัดเก็บข้อมูลบน Google Drive & Google Sheets:**
-   - อัปโหลดไฟล์ภาพไปยัง Google Drive โฟลเดอร์ที่กำหนด
-   - บันทึกประวัติข้อมูลลงใน Google Sheets ให้อัตโนมัติ
+   - อัปโหลดไฟล์ภาพ (`.jpg`) และไฟล์ข้อความ (`.txt`) ไปยัง Google Drive โฟลเดอร์ที่กำหนด (`1whnbwZjGSevdo-KG8RVz9oFge8V-U5wp`)
+   - บันทึกประวัติข้อมูลลงใน Google Sheet: [https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo](https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/edit?usp=sharing) ให้อัตโนมัติ
 
 ---
 

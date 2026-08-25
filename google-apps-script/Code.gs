@@ -2,10 +2,12 @@
  * Google Apps Script สำหรับระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System)
  * ศาลจังหวัดอุดรธานี
  * 
- * Folder ID: 1whnbwZjGSevdo-KG8RVz9oFge8V-U5wp
+ * Google Drive Folder ID: 1whnbwZjGSevdo-KG8RVz9oFge8V-U5wp
+ * Google Sheet ID: 1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo
  */
 
 const FOLDER_ID = "1whnbwZjGSevdo-KG8RVz9oFge8V-U5wp";
+const SPREADSHEET_ID = "1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo";
 const SHEET_NAME = "บันทึกการส่งหมาย";
 
 /**
@@ -59,8 +61,8 @@ function doPost(e) {
       txtFileId = createdTxtFile.getId();
     }
 
-    // 3. บันทึกข้อมูลลง Google Sheets
-    const sheet = getOrCreateSpreadsheet(folder);
+    // 3. บันทึกข้อมูลลง Google Sheets ที่ระบุ
+    const sheet = getTargetSpreadsheet(folder);
     
     const timestamp = new Date();
     const thaiDateStr = Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
@@ -78,14 +80,16 @@ function doPost(e) {
       data.lng ? Number(data.lng) : "",          // 9. ลองจิจูด (Longitude)
       data.heading !== undefined ? data.heading : "", // 10. ทิศองศา
       data.fileName || "",                       // 11. ชื่อไฟล์ภาพ
-      fileUrl || "",                             // 12. ลิงก์ดูภาพใน Google Drive
-      fileId || ""                               // 13. File ID
+      fileUrl || "",                             // 12. ลิงก์รูปภาพใน Google Drive
+      txtFileUrl || "",                          // 13. ลิงก์ Text File ใน Google Drive
+      fileId || ""                               // 14. File ID
     ]);
 
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
-      message: "บันทึกข้อมูลและรูปภาพลง Google Drive สำเร็จ",
+      message: "บันทึกข้อมูล รูปภาพ และ Text File ลง Google Drive & Sheet สำเร็จ",
       fileUrl: fileUrl,
+      txtFileUrl: txtFileUrl,
       fileId: fileId,
       caseNumber: data.caseNumber
     })).setMimeType(ContentService.MimeType.JSON);
@@ -102,27 +106,34 @@ function doPost(e) {
 }
 
 /**
- * ตรวจสอบหรือสร้าง Google Sheets ภายใน Folder
+ * ดึง Google Sheet ตาม Spreadsheet ID ที่กำหนด
  */
-function getOrCreateSpreadsheet(folder) {
-  const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+function getTargetSpreadsheet(folder) {
   let spreadsheet;
-  
-  if (files.hasNext()) {
-    spreadsheet = SpreadsheetApp.open(files.next());
-  } else {
-    spreadsheet = SpreadsheetApp.create("ข้อมูลการส่งหมาย_ศาลจังหวัดอุดรธานี");
-    const ssFile = DriveApp.getFileById(spreadsheet.getId());
-    folder.addFile(ssFile);
-    DriveApp.getRootFolder().removeFile(ssFile);
+
+  try {
+    spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  } catch (err) {
+    // กรณีไม่มีสิทธิ์หรือหา ID ไม่เจอ ให้สร้าง/ค้นหาในโฟลเดอร์เป็น Fallback
+    const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+    if (files.hasNext()) {
+      spreadsheet = SpreadsheetApp.open(files.next());
+    } else {
+      spreadsheet = SpreadsheetApp.create("ข้อมูลการส่งหมาย_ศาลจังหวัดอุดรธานี");
+      const ssFile = DriveApp.getFileById(spreadsheet.getId());
+      folder.addFile(ssFile);
+      DriveApp.getRootFolder().removeFile(ssFile);
+    }
   }
 
   let sheet = spreadsheet.getSheetByName(SHEET_NAME);
   if (!sheet) {
     sheet = spreadsheet.getActiveSheet();
     sheet.setName(SHEET_NAME);
-    
-    // สร้างหัวตาราง (Header)
+  }
+
+  // ตรวจสอบว่ามีหัวตาราง (Header) แล้วหรือยัง
+  if (sheet.getLastRow() === 0) {
     const headers = [
       "วัน-เวลาบันทึก",
       "เลขคดี",
@@ -136,6 +147,7 @@ function getOrCreateSpreadsheet(folder) {
       "ทิศองศา",
       "ชื่อไฟล์รูปภาพ",
       "ลิงก์รูปภาพใน Google Drive",
+      "ลิงก์ Text File ใน Google Drive",
       "Drive File ID"
     ];
 
@@ -159,7 +171,8 @@ function getOrCreateSpreadsheet(folder) {
 function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify({
     status: "online",
-    message: "Summons Location Tracking API (Google Apps Script) is running.",
-    folderId: FOLDER_ID
+    message: "Summons Location Tracking API is running.",
+    folderId: FOLDER_ID,
+    spreadsheetId: SPREADSHEET_ID
   })).setMimeType(ContentService.MimeType.JSON);
 }
