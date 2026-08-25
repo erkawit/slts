@@ -102,6 +102,8 @@ function initDOMElements() {
   elements.mooInput = document.getElementById('moo');
   elements.localAdminAddressFields = document.getElementById('localAdminAddressFields');
   elements.localAdminNameInput = document.getElementById('localAdminName');
+  elements.customOtherAddressFields = document.getElementById('customOtherAddressFields');
+  elements.customOtherLocationName = document.getElementById('customOtherLocationName');
 
   // พิกัด
   elements.coordinatesInput = document.getElementById('coordinates');
@@ -892,7 +894,6 @@ function renderDataTable(rows) {
     const lng = row['ลองจิจูด (Lng)'] || row['ลองจิจูด'] || '';
     const fileName = row['ชื่อไฟล์รูปภาพ'] || '';
     const imgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
-    const txtUrl = row['ลิงก์ Text File ใน Google Drive'] || '';
     const fileId = row['Drive File ID'] || '';
 
     if (!caseNumber && !timestamp) return;
@@ -900,25 +901,34 @@ function renderDataTable(rows) {
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-blue-50/40 transition';
 
-    // คอลัมน์ดูภาพ
-    let imgBtn = '-';
-    if (imgUrl) {
+    // คอลัมน์พิกัดพร้อมปุ่มคัดลอก
+    let coordDisplay = '-';
+    if (lat && lng) {
+      const latFixed = Number(lat).toFixed(4);
+      const lngFixed = Number(lng).toFixed(4);
+      coordDisplay = `
+        <div class="flex items-center gap-1.5 whitespace-nowrap">
+          <span class="font-mono text-xs text-blue-700 font-semibold">${latFixed}, ${lngFixed}</span>
+          <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition" title="คัดลอกพิกัด Latitude, Longitude">
+            <i class="fa-regular fa-copy text-xs"></i>
+          </button>
+        </div>
+      `;
+    }
+
+    // คอลัมน์ดูภาพ: ถ้ายังไม่มีการกดส่งภาพไป Drive ให้ขึ้นปุ่ม disabled "ไม่มีข้อมูลภาพในระบบ"
+    let imgBtn = `
+      <button type="button" disabled class="px-2.5 py-1 bg-gray-100 text-gray-400 rounded-lg text-xs font-medium border border-gray-200 cursor-not-allowed inline-flex items-center gap-1.5" title="ยังไม่มีการอัปโหลดไฟล์รูปภาพลง Google Drive">
+        <i class="fa-solid fa-image-slash text-gray-400 text-xs"></i>
+        <span>ไม่มีข้อมูลภาพในระบบ</span>
+      </button>
+    `;
+    if (imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http')) {
       imgBtn = `
         <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${timestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1">
           <i class="fa-solid fa-image"></i>
           <span>ดูภาพ</span>
         </button>
-      `;
-    }
-
-    // คอลัมน์ Text File
-    let txtBtn = '-';
-    if (txtUrl) {
-      txtBtn = `
-        <a href="${txtUrl}" target="_blank" class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold border border-gray-300 transition inline-flex items-center gap-1">
-          <i class="fa-solid fa-file-lines text-blue-600"></i>
-          <span>.TXT</span>
-        </a>
       `;
     }
 
@@ -940,9 +950,8 @@ function renderDataTable(rows) {
       <td class="text-xs text-gray-700">${district}</td>
       <td class="text-xs text-gray-700">${subdistrict}</td>
       <td class="text-xs text-gray-700 max-w-[200px] truncate" title="${locationFull}">${locationFull}</td>
-      <td class="font-mono text-xs text-blue-700 whitespace-nowrap">${lat && lng ? `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}` : '-'}</td>
+      <td>${coordDisplay}</td>
       <td class="whitespace-nowrap">${imgBtn}</td>
-      <td class="whitespace-nowrap">${txtBtn}</td>
       <td class="whitespace-nowrap">${actionBtn}</td>
     `;
     tableBody.appendChild(tr);
@@ -968,6 +977,61 @@ function renderDataTable(rows) {
       zeroRecords: "ไม่พบข้อมูลที่ตรงกับการค้นหา"
     }
   });
+}
+
+/**
+ * คัดลอกพิกัด Latitude, Longitude ไปยัง Clipboard พร้อมแสดงข้อความแจ้งเตือน
+ */
+window.copyCoordinates = function(lat, lng) {
+  if (!lat || !lng) return;
+  const coordText = `${lat}, ${lng}`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(coordText).then(() => {
+      Swal.fire({
+        icon: 'success',
+        title: 'คัดลอกพิกัดแล้ว',
+        html: `<span class="font-mono text-sm font-bold text-blue-600">${coordText}</span>`,
+        timer: 1500,
+        showConfirmButton: false,
+        toast: true,
+        position: 'top-end'
+      });
+    }).catch(() => {
+      prompt('คัดลอกพิกัด:', coordText);
+    });
+  } else {
+    prompt('คัดลอกพิกัด:', coordText);
+  }
+};
+
+/**
+ * บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันทีเมื่อกดถ่ายภาพ (แม้ยังไม่กดส่ง Drive)
+ */
+async function saveInitialRecordToSheet(data, fileName) {
+  if (!state.appsScriptUrl) return;
+  try {
+    const payload = {
+      action: 'record_initial',
+      ...data,
+      fileName: fileName
+    };
+    fetch(state.appsScriptUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify(payload)
+    }).then(res => res.json()).then(resJson => {
+      if (resJson && resJson.status === 'success') {
+        localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+        localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+      }
+    }).catch(err => {
+      console.warn('Initial sheet background save notice:', err);
+    });
+  } catch (err) {
+    console.warn('Initial sheet save error:', err);
+  }
 }
 
 /**
@@ -1247,21 +1311,38 @@ function initFormEventListeners() {
     });
   }
 
+  // หมู่: กรอกได้เฉพาะตัวเลขเท่านั้น (ไม่บังคับกรอก)
+  if (elements.mooInput) {
+    elements.mooInput.addEventListener('input', (e) => {
+      e.target.value = e.target.value.replace(/\D/g, '');
+    });
+  }
+
+  // สลับประเภทสถานที่ (หมายบ้าน / ที่ทำการปกครองส่วนท้องถิ่น / อื่นๆ)
   elements.locationTypeSelect.addEventListener('change', (e) => {
-    const isHouse = e.target.value === 'หมายบ้าน';
-    if (isHouse) {
+    const val = e.target.value;
+    if (val === 'หมายบ้าน') {
       elements.houseAddressFields.classList.remove('hidden');
       elements.localAdminAddressFields.classList.add('hidden');
+      elements.customOtherAddressFields.classList.add('hidden');
       elements.houseNoInput.setAttribute('required', 'required');
-    } else {
+      elements.houseNoInput.focus();
+    } else if (val === 'ที่ทำการปกครองส่วนท้องถิ่น') {
       elements.houseAddressFields.classList.add('hidden');
       elements.localAdminAddressFields.classList.remove('hidden');
+      elements.customOtherAddressFields.classList.add('hidden');
       elements.houseNoInput.removeAttribute('required');
       
       if (!elements.localAdminNameInput.value.trim()) {
         elements.localAdminNameInput.value = 'ที่ทำการปกครองส่วนท้องถิ่น';
       }
       elements.localAdminNameInput.focus();
+    } else if (val === 'อื่นๆ') {
+      elements.houseAddressFields.classList.add('hidden');
+      elements.localAdminAddressFields.classList.add('hidden');
+      elements.customOtherAddressFields.classList.remove('hidden');
+      elements.houseNoInput.removeAttribute('required');
+      elements.customOtherLocationName.focus();
     }
   });
 
@@ -1278,6 +1359,9 @@ function getFullLocationText() {
   if (locationType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
     const adminText = (elements.localAdminNameInput.value || 'ที่ทำการปกครองส่วนท้องถิ่น').trim();
     return `${adminText} ต.${subdistrict} อ.${district}`;
+  } else if (locationType === 'อื่นๆ') {
+    const otherText = (elements.customOtherLocationName.value || 'อื่นๆ').trim();
+    return `${otherText} ต.${subdistrict} อ.${district}`;
   } else {
     const houseNo = elements.houseNoInput.value.trim();
     const moo = elements.mooInput.value.trim();
@@ -1523,6 +1607,18 @@ function validateForm() {
       elements.localAdminNameInput.focus();
       return false;
     }
+  } else if (elements.locationTypeSelect.value === 'อื่นๆ') {
+    const otherText = elements.customOtherLocationName ? elements.customOtherLocationName.value.trim() : '';
+    if (!otherText) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'กรุณาระบุชื่อสถานที่อื่นๆ',
+        text: 'โปรดระบุชื่อสถานที่ส่งหมาย เช่น โรงเรียน, วัด, โรงพยาบาล...',
+        confirmButtonColor: '#2563eb'
+      });
+      if (elements.customOtherLocationName) elements.customOtherLocationName.focus();
+      return false;
+    }
   }
 
   if (!state.lat || !state.lng) {
@@ -1672,12 +1768,14 @@ async function captureAndProcessPhoto() {
     
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
-    const textFilename = baseFilename + '.txt';
     
     closeCameraModal();
     hideCustomLoading();
 
-    showPreviewAndProcess(result, imageFilename, textFilename, payloadData);
+    // ⚡ บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที แม้ยังไม่กดส่ง Drive
+    saveInitialRecordToSheet(payloadData, imageFilename);
+
+    showPreviewAndProcess(result, imageFilename, payloadData);
 
   } catch (error) {
     console.error('Capture error:', error);
@@ -1722,10 +1820,13 @@ async function handleFallbackFile(e) {
     const result = await WatermarkEngine.renderWatermark(img, payloadData);
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
-    const textFilename = baseFilename + '.txt';
     
     hideCustomLoading();
-    showPreviewAndProcess(result, imageFilename, textFilename, payloadData);
+
+    // ⚡ บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที
+    saveInitialRecordToSheet(payloadData, imageFilename);
+
+    showPreviewAndProcess(result, imageFilename, payloadData);
   } catch (err) {
     console.error(err);
     hideCustomLoading();
@@ -1738,28 +1839,23 @@ async function handleFallbackFile(e) {
 let currentPreviewResult = null;
 let currentPreviewData = null;
 let currentPreviewImageFilename = '';
-let currentPreviewTextFilename = '';
 
-function showPreviewAndProcess(result, imageFilename, textFilename, data) {
+function showPreviewAndProcess(result, imageFilename, data) {
   currentPreviewResult = result;
   currentPreviewImageFilename = imageFilename;
-  currentPreviewTextFilename = textFilename;
   currentPreviewData = data;
 
   WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
-  if (result.textContent) {
-    WatermarkEngine.triggerTextDownload(result.textContent, textFilename);
-  }
 
   elements.previewImage.src = result.dataUrl;
-  elements.previewFilename.textContent = `${imageFilename} + ${textFilename}`;
+  elements.previewFilename.textContent = imageFilename;
   elements.previewModal.classList.remove('hidden');
   elements.previewModal.classList.add('flex');
 
   Swal.fire({
     icon: 'success',
-    title: 'บันทึกรูปภาพและ Text File เรียบร้อย',
-    html: `บันทึกไฟล์ <b>"${imageFilename}"</b> และ <b>"${textFilename}"</b> แล้ว`,
+    title: 'บันทึกรูปภาพเรียบร้อย',
+    html: `บันทึกไฟล์ภาพ <b>"${imageFilename}"</b> ลงเครื่อง และบันทึกข้อมูลลง Google Sheet แล้ว`,
     timer: 2500,
     showConfirmButton: false,
     toast: true,
@@ -1808,14 +1904,13 @@ async function uploadToGoogleDrive() {
 async function executeUpload() {
   if (!currentPreviewResult || !currentPreviewData) return;
 
-  showCustomLoading('กำลังบันทึกข้อมูล...', 'กำลังอัปโหลดรูปภาพและบันทึกลง Google Drive & Sheet');
+  showCustomLoading('กำลังบันทึกข้อมูล...', 'กำลังอัปโหลดรูปภาพลง Google Drive & Sheet');
 
   try {
     const payload = {
       ...currentPreviewData,
       fileName: currentPreviewImageFilename,
-      imageBase64: currentPreviewResult.dataUrl,
-      textContent: currentPreviewResult.textContent || WatermarkEngine.generateTextFileContent(currentPreviewData)
+      imageBase64: currentPreviewResult.dataUrl
     };
 
     const response = await fetch(state.appsScriptUrl, {
@@ -1847,7 +1942,7 @@ async function executeUpload() {
       Swal.fire({
         icon: 'success',
         title: 'บันทึกสำเร็จ!',
-        html: `<p class="text-gray-700">บันทึกรูปภาพและ Text File เลขคดี <b>${currentPreviewData.caseNumber}</b> ลงใน Google Drive & Sheet เรียบร้อยแล้ว</p>
+        html: `<p class="text-gray-700">อัปโหลดรูปภาพเลขคดี <b>${currentPreviewData.caseNumber}</b> ลงใน Google Drive เรียบร้อยแล้ว</p>
                ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
         confirmButtonColor: '#2563eb'
       }).then(() => {
@@ -1899,6 +1994,7 @@ function resetFormForNextCase() {
   }
   if (elements.houseNoInput) elements.houseNoInput.value = '';
   if (elements.mooInput) elements.mooInput.value = '';
+  if (elements.customOtherLocationName) elements.customOtherLocationName.value = '';
 }
 
 function initSettings() {

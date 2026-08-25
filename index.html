@@ -282,25 +282,31 @@
                     <select id="locationType" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
                       <option value="หมายบ้าน">หมายบ้าน</option>
                       <option value="ที่ทำการปกครองส่วนท้องถิ่น">ที่ทำการปกครองส่วนท้องถิ่น</option>
+                      <option value="อื่นๆ">อื่นๆ</option>
                     </select>
                     <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-500">
                       <i class="fa-solid fa-chevron-down text-xs"></i>
                     </div>
                   </div>
 
-                  <!-- ช่องกรอกบ้านเลขที่ และ หมู่ (กรอกข้อความ เช่น 154/2 ได้) -->
+                  <!-- ช่องกรอกบ้านเลขที่ และ หมู่ (หมู่กรอกเฉพาะตัวเลข) -->
                   <div id="houseAddressFields" class="grid grid-cols-2 gap-3">
                     <div>
                       <input type="text" id="houseNo" placeholder="บ้านเลขที่ เช่น 154/2 *" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition" required>
                     </div>
                     <div>
-                      <input type="text" id="moo" placeholder="หมู่ (ถ้ามี)" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition">
+                      <input type="text" id="moo" placeholder="หมู่ (ตัวเลขเท่านั้น)" inputmode="numeric" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition">
                     </div>
                   </div>
 
                   <!-- ช่องกรอกข้อความที่ทำการปกครองส่วนท้องถิ่น -->
                   <div id="localAdminAddressFields" class="hidden">
                     <input type="text" id="localAdminName" value="ที่ทำการปกครองส่วนท้องถิ่น" placeholder="ที่ทำการปกครองส่วนท้องถิ่น เช่น อบต.โนนสูง" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition">
+                  </div>
+
+                  <!-- ช่องกรอกข้อความสถานที่อื่นๆ -->
+                  <div id="customOtherAddressFields" class="hidden">
+                    <input type="text" id="customOtherLocationName" placeholder="ระบุสถานที่อื่นๆ เช่น โรงเรียน, วัด, โรงพยาบาล..." class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition">
                   </div>
                 </div>
               </div>
@@ -445,8 +451,7 @@
                 <th>ตำบล</th>
                 <th>ที่ตั้งส่งหมาย</th>
                 <th>พิกัด (Lat, Lng)</th>
-                <th>ภาพถ่าย</th>
-                <th>Text File</th>
+                <th>ภาพถ่ายใน Drive</th>
                 <th class="admin-only-col">จัดการ</th>
               </tr>
             </thead>

@@ -11,7 +11,7 @@ const SPREADSHEET_ID = "1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo";
 const SHEET_NAME = "บันทึกการส่งหมาย";
 
 /**
- * ฟังก์ชันสำหรับรับคำขอแบบ POST จากเว็บแอป (บันทึกข้อมูล หรือ ลบข้อมูล)
+ * ฟังก์ชันสำหรับรับคำขอแบบ POST จากเว็บแอป
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
@@ -31,13 +31,13 @@ function doPost(e) {
     const sheet = getTargetSpreadsheet(folder);
 
     // ==========================================
-    // ACTION: DELETE (เฉพาะสิทธิ์ Admin)
+    // ACTION 1: DELETE (เฉพาะสิทธิ์ Admin)
     // ==========================================
     if (data.action === "delete") {
       let deletedRows = 0;
       let deletedFiles = 0;
 
-      // 1. ลบไฟล์ใน Google Drive (ภาพถ่าย และ Text File)
+      // ลบไฟล์ภาพใน Google Drive
       if (data.fileId) {
         try {
           const file = DriveApp.getFileById(data.fileId);
@@ -50,17 +50,9 @@ function doPost(e) {
 
       if (data.fileName) {
         try {
-          // ลบไฟล์ภาพ
           const imgFiles = folder.getFilesByName(data.fileName);
           while (imgFiles.hasNext()) {
             imgFiles.next().setTrashed(true);
-            deletedFiles++;
-          }
-          // ลบ Text File
-          const txtFileName = data.fileName.replace(/\.jpg$/i, '.txt');
-          const txtFiles = folder.getFilesByName(txtFileName);
-          while (txtFiles.hasNext()) {
-            txtFiles.next().setTrashed(true);
             deletedFiles++;
           }
         } catch (err) {
@@ -68,10 +60,9 @@ function doPost(e) {
         }
       }
 
-      // 2. ลบแถวใน Google Sheet
+      // ลบแถวใน Google Sheet
       const sheetData = sheet.getDataRange().getValues();
-      // ค้นหาแถวที่ตรงกับ fileId หรือ (timestamp และ caseNumber)
-      for (let i = sheetData.length - 1; i >= 1; i--) { // วนจากล่างขึ้นบน
+      for (let i = sheetData.length - 1; i >= 1; i--) {
         const row = sheetData[i];
         const rowTimestamp = String(row[0] || '').trim();
         const rowCaseNumber = String(row[1] || '').trim();
@@ -99,14 +90,47 @@ function doPost(e) {
     }
 
     // ==========================================
-    // ACTION: SAVE / CREATE NEW RECORD
+    // ACTION 2: RECORD_INITIAL (บันทึกลงชีตทันทีหลังกดถ่ายภาพ แม้ยังไม่กดส่ง Drive)
+    // ==========================================
+    if (data.action === "record_initial") {
+      const timestamp = new Date();
+      const thaiDateStr = data.dateTime || Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
+
+      sheet.appendRow([
+        thaiDateStr,                               // 1. วันที่เวลาบันทึก
+        data.caseNumber || "",                     // 2. เลขคดี
+        data.courtType || "",                      // 3. ประเภทศาล
+        data.district || "",                       // 4. อำเภอ
+        data.subdistrict || "",                    // 5. ตำบล
+        data.locationType || "",                   // 6. ประเภทสถานที่
+        data.locationText || "",                   // 7. ที่ตั้งสถานที่ส่งหมาย (แบบเต็ม)
+        data.lat ? Number(data.lat) : "",          // 8. ละติจูด (Latitude)
+        data.lng ? Number(data.lng) : "",          // 9. ลองจิจูด (Longitude)
+        data.heading !== undefined ? data.heading : "", // 10. ทิศองศา
+        data.fileName || "",                       // 11. ชื่อไฟล์ภาพ
+        "",                                        // 12. ลิงก์รูปภาพใน Google Drive (ยังไม่มี)
+        "",                                        // 13. ลิงก์ Text File (ยกเลิกการใช้)
+        ""                                         // 14. Drive File ID
+      ]);
+
+      const lastRow = sheet.getLastRow();
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "บันทึกข้อมูลรายละเอียดลงใน Google Sheet เรียบร้อยแล้ว",
+        rowIndex: lastRow,
+        timestamp: thaiDateStr,
+        caseNumber: data.caseNumber
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ==========================================
+    // ACTION 3: UPLOAD_IMAGE (อัปโหลดรูปภาพลง Google Drive และอัปเดตแถวในชีต)
     // ==========================================
     let fileUrl = "";
     let fileId = "";
-    let txtFileUrl = "";
-    let txtFileId = "";
 
-    // 1. บันทึกรูปภาพ (Base64) ลงใน Google Drive Folder
+    // บันทึกรูปภาพ (Base64) ลงใน Google Drive Folder (ไม่สร้างไฟล์ .txt)
     if (data.imageBase64 && data.fileName) {
       let base64String = data.imageBase64;
       if (base64String.indexOf("base64,") !== -1) {
@@ -122,41 +146,53 @@ function doPost(e) {
       fileId = createdFile.getId();
     }
 
-    // 2. บันทึก Text File (.txt) ข้อมูลลายน้ำลงใน Google Drive Folder
-    if (data.textContent && data.fileName) {
-      const txtFileName = data.fileName.replace(/\.jpg$/i, '.txt');
-      const createdTxtFile = folder.createFile(txtFileName, data.textContent, MimeType.PLAIN_TEXT);
-      createdTxtFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      txtFileUrl = createdTxtFile.getUrl();
-      txtFileId = createdTxtFile.getId();
+    // ตรวจสอบว่ามีแถวเดิมที่บันทึกไว้ใน record_initial หรือไม่
+    const sheetData = sheet.getDataRange().getValues();
+    let targetRowIndex = -1;
+
+    for (let i = sheetData.length - 1; i >= 1; i--) {
+      const row = sheetData[i];
+      const rowCaseNumber = String(row[1] || '').trim();
+      const rowFileName = String(row[10] || '').trim();
+      const rowImgUrl = String(row[11] || '').trim();
+
+      if (rowCaseNumber === data.caseNumber && (!rowImgUrl || rowImgUrl === "") && (!data.fileName || rowFileName === data.fileName)) {
+        targetRowIndex = i + 1;
+        break;
+      }
     }
 
-    // 3. บันทึกข้อมูลลง Google Sheets
-    const timestamp = new Date();
-    const thaiDateStr = Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
+    if (targetRowIndex !== -1) {
+      // อัปเดตช่องลิงก์รูปภาพ (Column 12) และ File ID (Column 14)
+      sheet.getRange(targetRowIndex, 12).setValue(fileUrl);
+      sheet.getRange(targetRowIndex, 14).setValue(fileId);
+    } else {
+      // ถ้าไม่พบแถวเดิม ให้สร้างแถวใหม่สมบูรณ์
+      const timestamp = new Date();
+      const thaiDateStr = data.dateTime || Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
 
-    sheet.appendRow([
-      thaiDateStr,                               // 1. วันที่เวลาบันทึก
-      data.caseNumber || "",                     // 2. เลขคดี
-      data.courtType || "",                      // 3. ประเภทศาล
-      data.district || "",                       // 4. อำเภอ
-      data.subdistrict || "",                    // 5. ตำบล
-      data.locationType || "",                   // 6. ประเภทสถานที่
-      data.locationText || "",                   // 7. ที่ตั้งสถานที่ส่งหมาย (แบบเต็ม)
-      data.lat ? Number(data.lat) : "",          // 8. ละติจูด (Latitude)
-      data.lng ? Number(data.lng) : "",          // 9. ลองจิจูด (Longitude)
-      data.heading !== undefined ? data.heading : "", // 10. ทิศองศา
-      data.fileName || "",                       // 11. ชื่อไฟล์ภาพ
-      fileUrl || "",                             // 12. ลิงก์รูปภาพใน Google Drive
-      txtFileUrl || "",                          // 13. ลิงก์ Text File ใน Google Drive
-      fileId || ""                               // 14. Drive File ID
-    ]);
+      sheet.appendRow([
+        thaiDateStr,
+        data.caseNumber || "",
+        data.courtType || "",
+        data.district || "",
+        data.subdistrict || "",
+        data.locationType || "",
+        data.locationText || "",
+        data.lat ? Number(data.lat) : "",
+        data.lng ? Number(data.lng) : "",
+        data.heading !== undefined ? data.heading : "",
+        data.fileName || "",
+        fileUrl || "",
+        "",
+        fileId || ""
+      ]);
+    }
 
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
-      message: "บันทึกข้อมูล รูปภาพ และ Text File ลง Google Drive & Sheet สำเร็จ",
+      message: "บันทึกรูปภาพลง Google Drive & Sheet สำเร็จ",
       fileUrl: fileUrl,
-      txtFileUrl: txtFileUrl,
       fileId: fileId,
       caseNumber: data.caseNumber
     })).setMimeType(ContentService.MimeType.JSON);
