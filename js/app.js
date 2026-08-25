@@ -16,6 +16,36 @@ const state = {
   isUploading: false
 };
 
+/**
+ * แสดงหน้าต่างโหลดข้อมูลแบบ SweetAlert2 โปร่งใส 100% แสดงเฉพาะโลโก้และสัญลักษณ์โหลดข้อมูล
+ */
+function showCustomLoading(title = 'กำลังโหลดข้อมูล', subtitle = '') {
+  Swal.fire({
+    html: `
+      <div class="logo-loading-box">
+        <div class="logo-loading-wrapper">
+          <img src="img/logo.png" alt="ตราศาลจังหวัดอุดรธานี" class="logo-loading-img">
+          <div class="logo-spinner-ring"></div>
+        </div>
+        <div class="logo-loading-text">
+          <span>${title}</span>
+        </div>
+        ${subtitle ? `<div class="logo-loading-subtext">${subtitle}</div>` : ''}
+      </div>
+    `,
+    showConfirmButton: false,
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    customClass: {
+      popup: 'transparent-swal-popup'
+    }
+  });
+}
+
+function hideCustomLoading() {
+  Swal.close();
+}
+
 // DOM Elements
 const elements = {};
 
@@ -473,14 +503,7 @@ async function captureAndProcessPhoto() {
     return;
   }
 
-  Swal.fire({
-    title: 'กำลังประมวลผลลายน้ำ...',
-    html: 'กำลังรวมแผนที่ เข็มทิศ และข้อมูลส่งหมาย',
-    allowOutsideClick: false,
-    didOpen: () => {
-      Swal.showLoading();
-    }
-  });
+  showCustomLoading('กำลังสร้างภาพถ่ายพร้อมลายน้ำ...', 'กำลังประมวลผลแผนที่ เข็มทิศ และข้อมูลส่งหมาย');
 
   try {
     const caseNumber = getFormattedCaseNumber();
@@ -508,13 +531,14 @@ async function captureAndProcessPhoto() {
     
     // ปิดกล้อง
     closeCameraModal();
-    Swal.close();
+    hideCustomLoading();
 
     // 3. แสดง Modal Preview พร้อมดาวน์โหลดลงเครื่องทันที (ตามข้อ 3.3)
     showPreviewAndProcess(result, safeFilename, payloadData);
 
   } catch (error) {
     console.error('Capture error:', error);
+    hideCustomLoading();
     Swal.fire('ข้อผิดพลาด', 'ไม่สามารถสร้างภาพถ่ายลายน้ำได้: ' + error.message, 'error');
   }
 }
@@ -531,11 +555,7 @@ async function handleFallbackFile(e) {
     return;
   }
 
-  Swal.fire({
-    title: 'กำลังประมวลผลลายน้ำ...',
-    allowOutsideClick: false,
-    didOpen: () => Swal.showLoading()
-  });
+  showCustomLoading('กำลังประมวลผลภาพถ่าย...', 'กำลังสร้างภาพถ่ายพร้อมข้อมูลส่งหมาย');
 
   try {
     const img = new Image();
@@ -562,10 +582,11 @@ async function handleFallbackFile(e) {
     const result = await WatermarkEngine.renderWatermark(img, payloadData);
     const safeFilename = caseNumber.replace(/\//g, '-') + '.jpg';
     
-    Swal.close();
+    hideCustomLoading();
     showPreviewAndProcess(result, safeFilename, payloadData);
   } catch (err) {
     console.error(err);
+    hideCustomLoading();
     Swal.fire('ข้อผิดพลาด', 'ไม่สามารถประมวลผลภาพได้', 'error');
   } finally {
     e.target.value = '';
@@ -651,12 +672,7 @@ async function uploadToGoogleDrive() {
 async function executeUpload() {
   if (!currentPreviewResult || !currentPreviewData) return;
 
-  Swal.fire({
-    title: 'กำลังส่งข้อมูลไปยัง Google Drive...',
-    html: 'กำลังอัปโหลดไฟล์ภาพและบันทึกข้อมูลลง Google Sheet',
-    allowOutsideClick: false,
-    didOpen: () => Swal.showLoading()
-  });
+  showCustomLoading('กำลังบันทึกข้อมูล...', 'กำลังอัปโหลดรูปภาพและบันทึกลง Google Drive');
 
   try {
     const payload = {
