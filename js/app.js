@@ -187,9 +187,9 @@ function initAuthSystem() {
     localStorage.setItem('slts_users', JSON.stringify(users));
   }
 
-  // รหัสผ่านตั้งต้นสำหรับการรีเซ็ต (Default Reset Password)
-  if (!localStorage.getItem('slts_default_reset_pass')) {
-    localStorage.setItem('slts_default_reset_pass', 'caogikojt02');
+  // รหัสผ่านตั้งต้นสำหรับการรีเซ็ต (Default Reset Password: 123456)
+  if (!localStorage.getItem('slts_default_reset_pass') || localStorage.getItem('slts_default_reset_pass') === 'caogikojt02') {
+    localStorage.setItem('slts_default_reset_pass', '123456');
   }
 
   // ดึงเซสชันผู้ใช้ปัจจุบัน
@@ -236,6 +236,18 @@ function updateAuthUI() {
     if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
   }
 
+  // ปุ่มอัปโหลดภาพหมายย้อนหลัง (แสดงเมื่อล็อกอิน และอยู่บนหน้าจอกว้าง > 768px)
+  const btnManualUpload = document.getElementById('btnManualUploadPhoto');
+  if (btnManualUpload) {
+    if (isLoggedIn && isDesktop) {
+      btnManualUpload.classList.remove('hidden');
+      btnManualUpload.classList.add('inline-flex');
+    } else {
+      btnManualUpload.classList.add('hidden');
+      btnManualUpload.classList.remove('inline-flex');
+    }
+  }
+
   // Tab 3: จัดการผู้ใช้งาน (แสดงเฉพาะ Admin บน Desktop)
   if (isAdmin && isDesktop) {
     elements.tabBtnUsers.classList.remove('hidden');
@@ -251,7 +263,7 @@ function updateAuthUI() {
   }
 
   if (elements.currentDefaultResetPassText) {
-    elements.currentDefaultResetPassText.textContent = localStorage.getItem('slts_default_reset_pass') || 'caogikojt02';
+    elements.currentDefaultResetPassText.textContent = localStorage.getItem('slts_default_reset_pass') || '123456';
   }
 
   renderUserList();
@@ -623,10 +635,12 @@ window.resetUserPasswordModal = function(username) {
   const user = users.find(u => u.username === username);
   if (!user) return;
 
-  const defaultPass = localStorage.getItem('slts_default_reset_pass') || 'caogikojt02';
+  const defaultPass = localStorage.getItem('slts_default_reset_pass') || '123456';
 
   Swal.fire({
     title: `รีเซ็ตรหัสผ่าน (@${username})`,
+    showCloseButton: true,
+    allowOutsideClick: false,
     html: `
       <div class="text-left space-y-3.5 pt-2">
         <p class="text-xs text-gray-600">เลือกรีเซ็ตรหัสผ่านเป็นค่าตั้งต้น หรือกำหนดรหัสผ่านใหม่เอง:</p>
@@ -675,6 +689,8 @@ window.resetUserPasswordModal = function(username) {
       Swal.fire({
         icon: 'success',
         title: 'รีเซ็ตรหัสผ่านสำเร็จ',
+        showCloseButton: true,
+        allowOutsideClick: false,
         html: `รีเซ็ตรหัสผ่านของ <b>@${username}</b> เป็น: <br><span class="font-mono text-base font-bold text-blue-600 mt-1 inline-block bg-blue-50 px-3 py-1 rounded-lg border border-blue-200">${res.value}</span>`,
         confirmButtonColor: '#2563eb'
       });
@@ -684,14 +700,16 @@ window.resetUserPasswordModal = function(username) {
 
 // Set Default Reset Password Config Modal (Admin)
 window.openDefaultPasswordConfigModal = function() {
-  const currentDefault = localStorage.getItem('slts_default_reset_pass') || 'caogikojt02';
+  const currentDefault = localStorage.getItem('slts_default_reset_pass') || '123456';
 
   Swal.fire({
     title: 'ตั้งค่ารหัสผ่านตั้งต้นของระบบ',
     text: 'รหัสผ่านนี้จะถูกใช้เป็นค่าเริ่มต้นเมื่อ Admin กดยืนยันรีเซ็ตรหัสผ่านให้แก่ผู้ใช้งาน',
     input: 'text',
     inputValue: currentDefault,
-    inputPlaceholder: 'เช่น caogikojt02 หรือ 123456',
+    inputPlaceholder: 'เช่น 123456',
+    showCloseButton: true,
+    allowOutsideClick: false,
     showCancelButton: true,
     confirmButtonText: 'บันทึกค่า',
     cancelButtonText: 'ยกเลิก',
@@ -869,8 +887,125 @@ function updateCacheBadgeUI(isFromCache, timeStr) {
   }
 }
 
+/**
+ * บีบอัดไฟล์ภาพให้มีขนาดไม่เกิน 1MB (<= 1,048,576 bytes)
+ */
+async function compressImageToMax1MB(dataUrl) {
+  const approxBytes = Math.round((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75);
+  if (approxBytes <= 1024 * 1024) {
+    return dataUrl;
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      let quality = 0.85;
+
+      // ปรับลดความกว้าง/ความสูงถ้าใหญ่เกินไป
+      if (width > 1600 || height > 1600) {
+        const scale = Math.min(1600 / width, 1600 / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      let resultDataUrl = canvas.toDataURL('image/jpeg', quality);
+      let currentBytes = Math.round((resultDataUrl.length - resultDataUrl.indexOf(',') - 1) * 0.75);
+
+      while (currentBytes > 1024 * 1024 && quality > 0.25) {
+        quality -= 0.12;
+        if (quality < 0.6) {
+          width = Math.round(width * 0.85);
+          height = Math.round(height * 0.85);
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, 0, 0, width, height);
+        }
+        resultDataUrl = canvas.toDataURL('image/jpeg', quality);
+        currentBytes = Math.round((resultDataUrl.length - resultDataUrl.indexOf(',') - 1) * 0.75);
+      }
+
+      resolve(resultDataUrl);
+    };
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * อัปโหลดข้อมูลพร้อมแสดง Progress Bar และตัวเลข % ความคืบหน้า (ปิดไม่ได้จนกว่าจะเสร็จสิ้น)
+ */
+function uploadWithProgressBar(payload, title = 'กำลังอัปโหลดรูปภาพขึ้น Google Drive...') {
+  return new Promise((resolve, reject) => {
+    Swal.fire({
+      title: title,
+      html: `
+        <div class="space-y-3.5 my-3 text-left">
+          <div class="flex justify-between items-center text-xs font-bold text-gray-700">
+            <span>ความคืบหน้าการนำเข้าข้อมูล</span>
+            <span id="uploadPercentTxt" class="font-mono text-sm font-extrabold text-blue-600">0%</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-4 overflow-hidden shadow-inner p-0.5 border border-gray-300">
+            <div id="uploadProgressBar" class="bg-gradient-to-r from-blue-500 via-indigo-600 to-blue-700 h-full rounded-full transition-all duration-200 ease-out" style="width: 0%"></div>
+          </div>
+          <p class="text-[11px] text-gray-500 text-center"><i class="fa-solid fa-lock mr-1"></i>กำลังประมวลผล กรุณารอสักครู่ (หน้าต่างนี้จะปิดไม่ได้จนกว่าจะเสร็จสิ้น)</p>
+        </div>
+      `,
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      showConfirmButton: false,
+      showCancelButton: false,
+      showCloseButton: false
+    });
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', state.appsScriptUrl, true);
+    xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const percent = Math.min(95, Math.round((e.loaded / e.total) * 100));
+        const bar = document.getElementById('uploadProgressBar');
+        const txt = document.getElementById('uploadPercentTxt');
+        if (bar) bar.style.width = percent + '%';
+        if (txt) txt.textContent = percent + '%';
+      }
+    };
+
+    xhr.onload = () => {
+      const bar = document.getElementById('uploadProgressBar');
+      const txt = document.getElementById('uploadPercentTxt');
+      if (bar) bar.style.width = '100%';
+      if (txt) txt.textContent = '100%';
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        let resJson = null;
+        try {
+          resJson = JSON.parse(xhr.responseText);
+        } catch (e) {
+          resJson = { status: 'success', message: xhr.responseText };
+        }
+        resolve(resJson);
+      } else {
+        reject(new Error('การอัปโหลดล้มเหลว รหัสข้อผิดพลาด: ' + xhr.status));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่าย'));
+    xhr.send(JSON.stringify(payload));
+  });
+}
+
 function renderDataTable(rows) {
+  state.allSheetRows = rows;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isDesktop = window.innerWidth > 768;
 
   // ดึงประวัติอักษรนำหน้าเลขคดีจากชีตมาอัปเดต autocomplete
   extractPrefixesFromRows(rows);
@@ -883,20 +1018,29 @@ function renderDataTable(rows) {
   const tableBody = document.getElementById('dataTableBody');
   tableBody.innerHTML = '';
 
+  // 2. จัดกลุ่มข้อมูลเลขคดีที่ซ้ำกัน และแสดงเฉพาะรายการล่าสุดในตารางหลัก
+  const caseGroups = new Map();
   rows.forEach((row, index) => {
-    const timestamp = row['วัน-เวลาบันทึก'] || row['Timestamp'] || '';
-    const caseNumber = row['เลขคดี'] || '';
-    const courtType = row['ประเภทศาล'] || 'ศาลจังหวัดอุดรธานี';
-    const district = row['อำเภอ'] || '';
-    const subdistrict = row['ตำบล'] || '';
-    const locationFull = row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '';
-    const lat = row['ละติจูด (Lat)'] || row['ละติจูด'] || '';
-    const lng = row['ลองจิจูด (Lng)'] || row['ลองจิจูด'] || '';
-    const fileName = row['ชื่อไฟล์รูปภาพ'] || '';
-    const imgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
-    const fileId = row['Drive File ID'] || '';
+    const caseNumber = (row['เลขคดี'] || '').trim();
+    if (!caseNumber) return;
+    if (!caseGroups.has(caseNumber)) {
+      caseGroups.set(caseNumber, []);
+    }
+    caseGroups.get(caseNumber).push({ ...row, originalIndex: index });
+  });
 
-    if (!caseNumber && !timestamp) return;
+  caseGroups.forEach((recordList, caseNumber) => {
+    // รายการล่าสุด (รายการแรกสุดในกลุ่ม)
+    const latest = recordList[0];
+    const timestamp = latest['วัน-เวลาบันทึก'] || latest['Timestamp'] || '';
+    const courtType = latest['ประเภทศาล'] || 'ศาลจังหวัดอุดรธานี';
+    const district = latest['อำเภอ'] || '';
+    const subdistrict = latest['ตำบล'] || '';
+    const locationFull = latest['ที่ตั้งส่งหมาย (เต็ม)'] || latest['ที่ตั้งส่งหมาย'] || '';
+    const lat = latest['ละติจูด (Lat)'] || latest['ละติจูด'] || '';
+    const lng = latest['ลองจิจูด (Lng)'] || latest['ลองจิจูด'] || '';
+    const fileName = latest['ชื่อไฟล์รูปภาพ'] || '';
+    const fileId = latest['Drive File ID'] || '';
 
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-blue-50/40 transition';
@@ -916,27 +1060,19 @@ function renderDataTable(rows) {
       `;
     }
 
-    // คอลัมน์ดูภาพ: ถ้ายังไม่มีการกดส่งภาพไป Drive ให้ขึ้นปุ่ม disabled "ไม่มีข้อมูลภาพในระบบ"
-    let imgBtn = `
-      <button type="button" disabled class="px-2.5 py-1 bg-gray-100 text-gray-400 rounded-lg text-xs font-medium border border-gray-200 cursor-not-allowed inline-flex items-center gap-1.5" title="ยังไม่มีการอัปโหลดไฟล์รูปภาพลง Google Drive">
-        <i class="fa-solid fa-image-slash text-gray-400 text-xs"></i>
-        <span>ไม่มีข้อมูลภาพในระบบ</span>
+    // ปุ่ม "ประวัติส่งหมาย" (แสดงจำนวนรายการถ้ามีมากกว่า 1)
+    const historyBtn = `
+      <button type="button" onclick="openCaseHistoryModal('${caseNumber.replace(/'/g, "\\'")}')" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition inline-flex items-center gap-1.5">
+        <i class="fa-solid fa-clock-rotate-left"></i>
+        <span>ประวัติส่งหมาย ${recordList.length > 1 ? `<span class="bg-blue-900 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">${recordList.length}</span>` : ''}</span>
       </button>
     `;
-    if (imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http')) {
-      imgBtn = `
-        <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${timestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1">
-          <i class="fa-solid fa-image"></i>
-          <span>ดูภาพ</span>
-        </button>
-      `;
-    }
 
-    // คอลัมน์จัดการ (Admin เท่านั้น)
+    // คอลัมน์จัดการ (Admin และหน้าจอ > 768px เท่านั้น)
     let actionBtn = `<span class="text-xs text-gray-400 italic">User Only</span>`;
-    if (isAdmin) {
+    if (isAdmin && isDesktop) {
       actionBtn = `
-        <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${timestamp}', '${caseNumber}', ${index + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบข้อมูลในชีตและไฟล์ใน Drive">
+        <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${timestamp}', '${caseNumber}', ${latest.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบข้อมูลในชีตและไฟล์ใน Drive">
           <i class="fa-solid fa-trash-can"></i>
           <span>ลบ</span>
         </button>
@@ -951,7 +1087,7 @@ function renderDataTable(rows) {
       <td class="text-xs text-gray-700">${subdistrict}</td>
       <td class="text-xs text-gray-700 max-w-[200px] truncate" title="${locationFull}">${locationFull}</td>
       <td>${coordDisplay}</td>
-      <td class="whitespace-nowrap">${imgBtn}</td>
+      <td class="whitespace-nowrap">${historyBtn}</td>
       <td class="whitespace-nowrap">${actionBtn}</td>
     `;
     tableBody.appendChild(tr);
@@ -980,6 +1116,358 @@ function renderDataTable(rows) {
 }
 
 /**
+ * แสดง Popup รายการประวัติการส่งหมายทั้งหมดของเลขคดีนั้นๆ
+ */
+window.openCaseHistoryModal = function(caseNumber) {
+  const records = (state.allSheetRows || []).filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim());
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isDesktop = window.innerWidth > 768;
+  const showDeleteCol = isAdmin && isDesktop;
+
+  let rowsHtml = '';
+  records.forEach((rec) => {
+    const timestamp = rec['วัน-เวลาบันทึก'] || rec['Timestamp'] || '';
+    const lat = rec['ละติจูด (Lat)'] || rec['ละติจูด'] || '';
+    const lng = rec['ลองจิจูด (Lng)'] || rec['ลองจิจูด'] || '';
+    const imgUrl = rec['ลิงก์รูปภาพใน Google Drive'] || rec['ลิงก์รูปภาพ'] || '';
+    const fileId = rec['Drive File ID'] || '';
+    const fileName = rec['ชื่อไฟล์รูปภาพ'] || '';
+    const locationFull = rec['ที่ตั้งส่งหมาย (เต็ม)'] || rec['ที่ตั้งส่งหมาย'] || '';
+
+    let coordDisplay = '-';
+    if (lat && lng) {
+      const latFixed = Number(lat).toFixed(4);
+      const lngFixed = Number(lng).toFixed(4);
+      coordDisplay = `
+        <div class="flex items-center gap-1.5 whitespace-nowrap">
+          <span class="font-mono text-xs text-blue-700 font-semibold">${latFixed}, ${lngFixed}</span>
+          <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="คัดลอกพิกัด">
+            <i class="fa-regular fa-copy text-xs"></i>
+          </button>
+        </div>
+      `;
+    }
+
+    let imgBtn = `
+      <button type="button" disabled class="px-2.5 py-1 bg-gray-100 text-gray-400 rounded-lg text-xs font-medium border border-gray-200 cursor-not-allowed inline-flex items-center gap-1.5">
+        <i class="fa-solid fa-image-slash text-gray-400 text-xs"></i>
+        <span>ไม่มีข้อมูลภาพในระบบ</span>
+      </button>
+    `;
+    if (imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http')) {
+      imgBtn = `
+        <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${timestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1">
+          <i class="fa-solid fa-image"></i>
+          <span>ดูภาพ</span>
+        </button>
+      `;
+    }
+
+    let deleteBtn = '';
+    if (showDeleteCol) {
+      deleteBtn = `
+        <td>
+          <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${timestamp}', '${caseNumber}', ${rec.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบรายการนี้">
+            <i class="fa-solid fa-trash-can"></i>
+            <span>ลบ</span>
+          </button>
+        </td>
+      `;
+    }
+
+    rowsHtml += `
+      <tr>
+        <td class="font-mono text-xs text-gray-700 whitespace-nowrap">${timestamp}</td>
+        <td>${coordDisplay}</td>
+        <td class="whitespace-nowrap">${imgBtn}</td>
+        ${showDeleteCol ? deleteBtn : ''}
+      </tr>
+    `;
+  });
+
+  Swal.fire({
+    title: `ประวัติการส่งหมาย: ${caseNumber}`,
+    html: `
+      <div class="text-left text-xs text-gray-600 mb-3">
+        <span>พบประวัติทั้งหมด <b>${records.length}</b> รายการ</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table id="caseSubDataTable" class="w-full text-left text-xs stripe hover" style="width:100%">
+          <thead>
+            <tr class="bg-gray-100 text-gray-700 font-bold">
+              <th>วันเดือนปีและเวลา</th>
+              <th>พิกัด</th>
+              <th>รูปภาพ</th>
+              ${showDeleteCol ? '<th class="admin-only-col">ลบ</th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+    `,
+    width: showDeleteCol ? '750px' : '650px',
+    showCloseButton: true,
+    showConfirmButton: false,
+    allowOutsideClick: false,
+    didOpen: () => {
+      $('#caseSubDataTable').DataTable({
+        pageLength: 5,
+        order: [[0, 'desc']],
+        responsive: true,
+        language: {
+          search: "ค้นหาในประวัติ:",
+          lengthMenu: "แสดง _MENU_ แถว",
+          info: "แสดง _START_ ถึง _END_ จาก _TOTAL_ รายการ",
+          paginate: { next: "ถัดไป", previous: "ก่อนหน้า" },
+          zeroRecords: "ไม่พบข้อมูล"
+        }
+      });
+    }
+  });
+};
+
+/**
+ * Modal อัปโหลดภาพหมายย้อนหลัง (สำหรับกรณีไม่ได้อัปโหลดขณะถ่าย หรืออัปโหลดล้มเหลว)
+ */
+window.openManualUploadModal = function() {
+  if (!state.allSheetRows || state.allSheetRows.length === 0) {
+    Swal.fire({
+      icon: 'info',
+      title: 'ยังไม่มีข้อมูลในระบบ',
+      text: 'ไม่พบรายการส่งหมายใน Google Sheet',
+      showCloseButton: true,
+      allowOutsideClick: false
+    });
+    return;
+  }
+
+  let selectedRowData = null;
+  let selectedImageDataUrl = null;
+
+  Swal.fire({
+    title: 'อัปโหลดภาพหมายย้อนหลัง',
+    html: `
+      <div class="text-left space-y-4 pt-1">
+        <!-- 1. ค้นหาเลขคดี Realtime -->
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">
+            <i class="fa-solid fa-magnifying-glass text-blue-600 mr-1"></i> 1. ค้นหาเลขคดี (พิมพ์ค้นหาแบบ Real-time):
+          </label>
+          <input type="text" id="manualSearchCaseInput" placeholder="พิมพ์เลขคดี เช่น ผบE1245/2569 หรือ 2097..." class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition">
+        </div>
+
+        <!-- ผลลัพธ์การค้นหา -->
+        <div class="max-h-48 overflow-y-auto border border-gray-200 rounded-xl bg-gray-50/50">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-gray-100 text-gray-700 font-bold sticky top-0">
+              <tr>
+                <th class="p-2">เลขคดี</th>
+                <th class="p-2">วัน-เวลา</th>
+                <th class="p-2">ที่ตั้ง</th>
+                <th class="p-2 text-center">เลือก</th>
+              </tr>
+            </thead>
+            <tbody id="manualSearchResultsBody">
+              <!-- Injected by realtime search -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- กล่องแสดงรายการที่เลือก -->
+        <div id="manualSelectedCaseBox" class="hidden p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs space-y-1">
+          <p class="font-bold text-blue-900 flex items-center justify-between">
+            <span><i class="fa-solid fa-check-circle text-emerald-600 mr-1"></i> รายการที่เลือก: <span id="manualSelectedCaseText" class="font-mono text-sm text-blue-700"></span></span>
+            <span id="manualSelectedTimestampText" class="text-gray-500 font-normal"></span>
+          </p>
+        </div>
+
+        <!-- 2. กล่องอัปโหลดไฟล์รูปภาพ -->
+        <div id="manualUploadSection" class="hidden space-y-3 pt-2 border-t border-gray-200">
+          <label class="block text-xs font-bold text-gray-700">
+            <i class="fa-solid fa-image text-blue-600 mr-1"></i> 2. เลือกไฟล์รูปภาพ (เฉพาะไฟล์รูปภาพ):
+          </label>
+          <input type="file" id="manualImageFileInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+
+          <!-- ตัวอย่างรูปภาพ (Thumbnail Preview) -->
+          <div id="manualImagePreviewContainer" class="hidden space-y-2">
+            <div class="relative bg-gray-900 rounded-xl p-2 flex items-center justify-center max-h-48 overflow-hidden cursor-pointer group" onclick="viewManualFullPreview()" title="คลิกเพื่อดูภาพขนาดเต็ม">
+              <img id="manualPreviewImg" src="" class="max-h-44 object-contain rounded-lg shadow">
+              <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5">
+                <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                <span>คลิกเพื่อดูภาพเต็ม</span>
+              </div>
+            </div>
+            <p id="manualImageInfoText" class="text-[11px] text-gray-500 text-center font-mono"></p>
+          </div>
+        </div>
+      </div>
+    `,
+    width: '700px',
+    showCloseButton: true,
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-cloud-arrow-up mr-1.5"></i> ยืนยันอัปโหลดภาพขึ้น Google Drive',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#2563eb',
+    cancelButtonColor: '#6b7280',
+    didOpen: () => {
+      const searchInput = document.getElementById('manualSearchCaseInput');
+      const resultsBody = document.getElementById('manualSearchResultsBody');
+      const fileInput = document.getElementById('manualImageFileInput');
+      const confirmBtn = Swal.getConfirmButton();
+      confirmBtn.disabled = true;
+
+      // ฟังก์ชัน Render ผลการค้นหา
+      const renderSearch = (query = '') => {
+        const q = query.trim().toLowerCase();
+        const filtered = state.allSheetRows.filter(r => {
+          const c = (r['เลขคดี'] || '').toLowerCase();
+          const d = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').toLowerCase();
+          return !q || c.includes(q) || d.includes(q);
+        }).slice(0, 15);
+
+        resultsBody.innerHTML = '';
+        if (filtered.length === 0) {
+          resultsBody.innerHTML = `<tr><td colspan="4" class="p-3 text-center text-gray-400 text-xs">ไม่พบเลขคดีที่ตรงกัน</td></tr>`;
+          return;
+        }
+
+        filtered.forEach(row => {
+          const caseNo = row['เลขคดี'] || '-';
+          const time = row['วัน-เวลาบันทึก'] || row['Timestamp'] || '-';
+          const loc = row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '-';
+          const imgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
+
+          const tr = document.createElement('tr');
+          tr.className = 'border-b border-gray-100 hover:bg-blue-50/50 transition';
+          tr.innerHTML = `
+            <td class="p-2 font-bold text-gray-900">${caseNo}</td>
+            <td class="p-2 font-mono text-gray-600 whitespace-nowrap">${time}</td>
+            <td class="p-2 text-gray-600 max-w-[150px] truncate" title="${loc}">${loc}</td>
+            <td class="p-2 text-center">
+              <button type="button" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition">
+                เลือก
+              </button>
+            </td>
+          `;
+          tr.querySelector('button').addEventListener('click', () => {
+            selectedRowData = row;
+            document.getElementById('manualSelectedCaseBox').classList.remove('hidden');
+            document.getElementById('manualSelectedCaseText').textContent = caseNo;
+            document.getElementById('manualSelectedTimestampText').textContent = time;
+            document.getElementById('manualUploadSection').classList.remove('hidden');
+            if (selectedImageDataUrl) confirmBtn.disabled = false;
+          });
+          resultsBody.appendChild(tr);
+        });
+      };
+
+      renderSearch('');
+      searchInput.addEventListener('input', (e) => renderSearch(e.target.value));
+
+      // เมื่อเลือกไฟล์รูปภาพ
+      fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          selectedImageDataUrl = ev.target.result;
+          window._manualTempDataUrl = selectedImageDataUrl;
+          const previewImg = document.getElementById('manualPreviewImg');
+          previewImg.src = selectedImageDataUrl;
+          document.getElementById('manualImagePreviewContainer').classList.remove('hidden');
+          const sizeKb = Math.round(file.size / 1024);
+          document.getElementById('manualImageInfoText').textContent = `ไฟล์: ${file.name} (${sizeKb} KB)`;
+
+          if (selectedRowData) confirmBtn.disabled = false;
+        };
+        reader.readAsDataURL(file);
+      });
+    },
+    preConfirm: () => {
+      if (!selectedRowData || !selectedImageDataUrl) {
+        Swal.showValidationMessage('กรุณาเลือกรายการเลขคดีและเลือกไฟล์รูปภาพ');
+        return false;
+      }
+      return { row: selectedRowData, dataUrl: selectedImageDataUrl };
+    }
+  }).then(async (result) => {
+    if (result.isConfirmed && result.value) {
+      const { row, dataUrl } = result.value;
+      const caseNumber = row['เลขคดี'] || '';
+      const baseFilename = caseNumber.replace(/\//g, '-');
+      const imageFilename = baseFilename + '.jpg';
+
+      try {
+        // บีบอัดรูปภาพให้ <= 1MB
+        const compressedDataUrl = await compressImageToMax1MB(dataUrl);
+
+        const uploadPayload = {
+          action: 'upload_image',
+          caseNumber: caseNumber,
+          courtType: row['ประเภทศาล'] || 'ศาลจังหวัดอุดรธานี',
+          district: row['อำเภอ'] || '',
+          subdistrict: row['ตำบล'] || '',
+          locationType: row['ประเภทสถานที่'] || 'หมายบ้าน',
+          locationText: row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '',
+          lat: row['ละติจูด (Lat)'] || row['ละติจูด'] || '',
+          lng: row['ลองจิจูด (Lng)'] || row['ลองจิจูด'] || '',
+          fileName: imageFilename,
+          imageBase64: compressedDataUrl
+        };
+
+        const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
+
+        // เคลียร์แคชและโหลดข้อมูลใหม่
+        localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+        localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
+        Swal.fire({
+          icon: 'success',
+          title: 'อัปโหลดภาพสำเร็จ!',
+          showCloseButton: true,
+          allowOutsideClick: false,
+          html: `<p class="text-gray-700">อัปโหลดภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงใน Google Drive & Sheet เรียบร้อยแล้ว</p>
+                 ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
+          confirmButtonColor: '#2563eb'
+        }).then(() => {
+          loadGoogleSheetData(true);
+        });
+
+      } catch (err) {
+        console.error('Manual upload error:', err);
+        Swal.fire({
+          icon: 'error',
+          title: 'การอัปโหลดไม่สำเร็จ',
+          text: err.message,
+          showCloseButton: true,
+          allowOutsideClick: false,
+          confirmButtonColor: '#2563eb'
+        });
+      }
+    }
+  });
+};
+
+/**
+ * ดูภาพตัวอย่างขนาดเต็มจาก Manual Upload
+ */
+window.viewManualFullPreview = function() {
+  if (!window._manualTempDataUrl) return;
+  Swal.fire({
+    title: 'ตัวอย่างภาพขนาดเต็ม',
+    imageUrl: window._manualTempDataUrl,
+    imageAlt: 'ตัวอย่างภาพ',
+    showCloseButton: true,
+    allowOutsideClick: false,
+    confirmButtonText: 'ปิด',
+    confirmButtonColor: '#2563eb'
+  });
+};
+
+/**
  * คัดลอกพิกัด Latitude, Longitude ไปยัง Clipboard พร้อมแสดงข้อความแจ้งเตือน
  */
 window.copyCoordinates = function(lat, lng) {
@@ -991,10 +1479,9 @@ window.copyCoordinates = function(lat, lng) {
         icon: 'success',
         title: 'คัดลอกพิกัดแล้ว',
         html: `<span class="font-mono text-sm font-bold text-blue-600">${coordText}</span>`,
-        timer: 1500,
-        showConfirmButton: false,
-        toast: true,
-        position: 'top-end'
+        showCloseButton: true,
+        allowOutsideClick: false,
+        confirmButtonColor: '#2563eb'
       });
     }).catch(() => {
       prompt('คัดลอกพิกัด:', coordText);
@@ -1059,6 +1546,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     width: '650px',
     showCloseButton: true,
     showCancelButton: true,
+    allowOutsideClick: false,
     confirmButtonText: '<i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> เปิดภาพขนาดเต็ม (Google Drive)',
     cancelButtonText: 'ปิด',
     confirmButtonColor: '#2563eb',
@@ -1075,7 +1563,13 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
  */
 window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex) {
   if (!state.currentUser || state.currentUser.role !== 'admin') {
-    Swal.fire('ไม่มีสิทธิ์', 'เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถลบข้อมูลได้', 'error');
+    Swal.fire({
+      icon: 'error',
+      title: 'ไม่มีสิทธิ์',
+      text: 'เฉพาะผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถลบข้อมูลได้',
+      showCloseButton: true,
+      allowOutsideClick: false
+    });
     return;
   }
 
@@ -1085,10 +1579,12 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
       <div class="text-left text-sm text-gray-700 bg-red-50 border border-red-200 p-3 rounded-xl space-y-1">
         <p class="font-bold text-red-700"><i class="fa-solid fa-triangle-exclamation mr-1"></i> การดำเนินการนี้จะทำการ:</p>
         <p>1. ลบแถวข้อมูลใน Google Sheet ถาวร</p>
-        <p>2. ย้ายไฟล์ภาพและ Text File ใน Google Drive ไปยังถังขยะ</p>
+        <p>2. ย้ายไฟล์ภาพใน Google Drive ไปยังถังขยะ</p>
       </div>
     `,
     icon: 'warning',
+    showCloseButton: true,
+    allowOutsideClick: false,
     showCancelButton: true,
     confirmButtonText: 'ยืนยันการลบข้อมูล',
     cancelButtonText: 'ยกเลิก',
@@ -1128,8 +1624,9 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
             icon: 'success',
             title: 'ลบข้อมูลสำเร็จ',
             text: resJson.message,
-            timer: 2000,
-            showConfirmButton: false
+            showCloseButton: true,
+            allowOutsideClick: false,
+            confirmButtonColor: '#2563eb'
           });
           // โหลดตารางสดใหม่ทันที
           loadGoogleSheetData(true);
@@ -1144,6 +1641,8 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
           icon: 'error',
           title: 'เกิดข้อผิดพลาดในการลบ',
           text: err.message,
+          showCloseButton: true,
+          allowOutsideClick: false,
           confirmButtonColor: '#2563eb'
         });
       }
@@ -1740,7 +2239,13 @@ async function startCameraStream() {
 
 async function captureAndProcessPhoto() {
   if (!elements.videoPreview.videoWidth) {
-    Swal.fire('ข้อผิดพลาด', 'กล้องยังไม่พร้อมใช้งาน', 'error');
+    Swal.fire({
+      icon: 'error',
+      title: 'ข้อผิดพลาด',
+      text: 'กล้องยังไม่พร้อมใช้งาน',
+      showCloseButton: true,
+      allowOutsideClick: false
+    });
     return;
   }
 
@@ -1765,22 +2270,63 @@ async function captureAndProcessPhoto() {
     };
 
     const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation);
-    
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
     
     closeCameraModal();
     hideCustomLoading();
 
-    // ⚡ บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที แม้ยังไม่กดส่ง Drive
+    // 1. บันทึกลงอุปกรณ์ทันที (เงียบๆ ไม่เด้งถามเปิดไฟล์)
+    WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
+
+    // 2. บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที (Background)
     saveInitialRecordToSheet(payloadData, imageFilename);
 
-    showPreviewAndProcess(result, imageFilename, payloadData);
+    // 3. ปรับลดขนาดรูปภาพให้ <= 1MB
+    const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
+
+    // 4. อัปโหลดขึ้น Google Drive ทันทีพร้อม Progress Bar (ปิดไม่ได้จนกว่าจะเสร็จ)
+    const uploadPayload = {
+      ...payloadData,
+      fileName: imageFilename,
+      imageBase64: compressedImageBase64
+    };
+
+    const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
+
+    // เคลียร์แคช
+    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
+    Swal.fire({
+      icon: 'success',
+      title: 'บันทึกสำเร็จ!',
+      html: `<p class="text-gray-700">บันทึกภาพถ่ายและอัปโหลดขึ้น Google Drive เลขคดี <b>${caseNumber}</b> เรียบร้อยแล้ว</p>
+             ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
+      confirmButtonText: 'ตกลง',
+      confirmButtonColor: '#2563eb',
+      showCloseButton: true,
+      allowOutsideClick: false
+    }).then(() => {
+      resetFormForNextCase();
+    });
 
   } catch (error) {
-    console.error('Capture error:', error);
+    console.error('Capture/Upload error:', error);
     hideCustomLoading();
-    Swal.fire('ข้อผิดพลาด', 'ไม่สามารถสร้างภาพถ่ายลายน้ำได้: ' + error.message, 'error');
+    Swal.fire({
+      icon: 'warning',
+      title: 'การอัปโหลดขัดข้อง',
+      html: `<p class="text-sm text-gray-700 mb-2">บันทึกรูปภาพลงอุปกรณ์และบันทึกข้อมูลเบื้องต้นลง Google Sheet แล้ว แต่การอัปโหลดไฟล์ภาพขึ้น Google Drive ไม่สำเร็จ</p>
+             <p class="text-xs text-red-600 font-semibold mb-3">${error.message}</p>
+             <p class="text-xs text-gray-500">ท่านสามารถล็อกอินบนหน้าจอคอมพิวเตอร์ (>768px) แล้วกดปุ่ม <b>"อัปโหลดภาพหมาย"</b> เพื่ออัปโหลดภาพย้อนหลังได้ในภายหลัง</p>`,
+      confirmButtonText: 'ตกลง',
+      confirmButtonColor: '#2563eb',
+      showCloseButton: true,
+      allowOutsideClick: false
+    }).then(() => {
+      resetFormForNextCase();
+    });
   }
 }
 
@@ -1823,44 +2369,53 @@ async function handleFallbackFile(e) {
     
     hideCustomLoading();
 
-    // ⚡ บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที
+    // 1. บันทึกลงอุปกรณ์ทันที
+    WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
+
+    // 2. บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที
     saveInitialRecordToSheet(payloadData, imageFilename);
 
-    showPreviewAndProcess(result, imageFilename, payloadData);
+    // 3. ปรับลดขนาดรูปภาพให้ <= 1MB
+    const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
+
+    // 4. อัปโหลดขึ้น Google Drive ทันทีพร้อม Progress Bar
+    const uploadPayload = {
+      ...payloadData,
+      fileName: imageFilename,
+      imageBase64: compressedImageBase64
+    };
+
+    const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
+
+    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
+    Swal.fire({
+      icon: 'success',
+      title: 'บันทึกสำเร็จ!',
+      html: `<p class="text-gray-700">บันทึกภาพถ่ายและอัปโหลดขึ้น Google Drive เลขคดี <b>${caseNumber}</b> เรียบร้อยแล้ว</p>
+             ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
+      confirmButtonText: 'ตกลง',
+      confirmButtonColor: '#2563eb',
+      showCloseButton: true,
+      allowOutsideClick: false
+    }).then(() => {
+      resetFormForNextCase();
+    });
+
   } catch (err) {
     console.error(err);
     hideCustomLoading();
-    Swal.fire('ข้อผิดพลาด', 'ไม่สามารถประมวลผลภาพได้', 'error');
+    Swal.fire({
+      icon: 'error',
+      title: 'ไม่สามารถประมวลผลภาพได้',
+      text: err.message,
+      showCloseButton: true,
+      allowOutsideClick: false
+    });
   } finally {
     e.target.value = '';
   }
-}
-
-let currentPreviewResult = null;
-let currentPreviewData = null;
-let currentPreviewImageFilename = '';
-
-function showPreviewAndProcess(result, imageFilename, data) {
-  currentPreviewResult = result;
-  currentPreviewImageFilename = imageFilename;
-  currentPreviewData = data;
-
-  WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
-
-  elements.previewImage.src = result.dataUrl;
-  elements.previewFilename.textContent = imageFilename;
-  elements.previewModal.classList.remove('hidden');
-  elements.previewModal.classList.add('flex');
-
-  Swal.fire({
-    icon: 'success',
-    title: 'บันทึกรูปภาพเรียบร้อย',
-    html: `บันทึกไฟล์ภาพ <b>"${imageFilename}"</b> ลงเครื่อง และบันทึกข้อมูลลง Google Sheet แล้ว`,
-    timer: 2500,
-    showConfirmButton: false,
-    toast: true,
-    position: 'top-end'
-  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
