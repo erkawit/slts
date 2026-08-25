@@ -1230,8 +1230,57 @@ window.openCaseHistoryModal = function(caseNumber) {
 
 /**
  * Modal อัปโหลดภาพหมายย้อนหลัง (สำหรับกรณีไม่ได้อัปโหลดขณะถ่าย หรืออัปโหลดล้มเหลว)
+ * โดยจะทำการตรวจสอบและดึงข้อมูลสดล่าสุดจาก Google Sheet ก่อนแสดงรายการเสมอ
  */
-window.openManualUploadModal = function() {
+window.openManualUploadModal = async function() {
+  // 1. แสดง Loading และดึงข้อมูลสดล่าสุดจาก Google Sheet เพื่อตรวจสอบข้อมูล
+  showCustomLoading('กำลังตรวจสอบข้อมูลใน Google Sheet...', 'กำลังดึงรายการเลขคดีล่าสุดจาก Google Sheet เพื่อตรวจสอบ');
+
+  try {
+    const now = Date.now();
+    const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${now}`;
+
+    const freshRows = await new Promise((resolve, reject) => {
+      Papa.parse(csvFetchUrl, {
+        download: true,
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => resolve(results.data || []),
+        error: (err) => reject(err)
+      });
+    });
+
+    hideCustomLoading();
+
+    // บันทึกลง cache และอัปเดต state
+    state.allSheetRows = freshRows;
+    try {
+      localStorage.setItem(CACHE_KEY_SHEET_DATA, JSON.stringify(freshRows));
+      localStorage.setItem(CACHE_KEY_SHEET_TIME, String(Date.now()));
+    } catch (saveErr) {
+      console.warn('Could not save to localStorage:', saveErr);
+    }
+    const timeStr = new Date().toLocaleTimeString('th-TH');
+    updateCacheBadgeUI(false, timeStr);
+    renderDataTable(freshRows);
+
+  } catch (err) {
+    console.error('Check Google Sheet error:', err);
+    hideCustomLoading();
+    // หากดึงสดไม่สำเร็จ แต่มีแคชเดิม ให้ใช้ข้อมูลที่มีอยู่ต่อได้
+    if (!state.allSheetRows || state.allSheetRows.length === 0) {
+      Swal.fire({
+        icon: 'error',
+        title: 'ไม่สามารถเชื่อมต่อ Google Sheet ได้',
+        text: 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ตของท่าน: ' + err.message,
+        showCloseButton: true,
+        allowOutsideClick: false,
+        confirmButtonColor: '#2563eb'
+      });
+      return;
+    }
+  }
+
   if (!state.allSheetRows || state.allSheetRows.length === 0) {
     Swal.fire({
       icon: 'info',
