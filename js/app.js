@@ -269,6 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initFormEventListeners();
   initLocationService();
   initCameraEvents();
+  initDesktopUploadEvents();
   initSettings();
   initResponsiveUI();
 });
@@ -305,6 +306,13 @@ function initDOMElements() {
   elements.btnRefreshLocation = document.getElementById('btnRefreshLocation');
   elements.btnOpenCamera = document.getElementById('btnOpenCamera');
   elements.fileFallbackInput = document.getElementById('fileFallbackInput');
+
+  // Desktop File Upload Elements
+  elements.desktopImageFileInput = document.getElementById('desktopImageFileInput');
+  elements.desktopImagePreviewContainer = document.getElementById('desktopImagePreviewContainer');
+  elements.desktopPreviewImg = document.getElementById('desktopPreviewImg');
+  elements.desktopImageSizeBadge = document.getElementById('desktopImageSizeBadge');
+  elements.btnConfirmDesktopUpload = document.getElementById('btnConfirmDesktopUpload');
   
   // Camera Modal Elements
   elements.cameraModal = document.getElementById('cameraModal');
@@ -2518,9 +2526,29 @@ function initFormEventListeners() {
     }
   });
 
-  elements.btnRefreshLocation.addEventListener('click', () => {
-    fetchCurrentLocation(true);
-  });
+  // เมื่อผู้ใช้พิมพ์หรือแก้ไขพิกัดในช่อง coordinates ด้วยตนเอง
+  if (elements.coordinatesInput) {
+    elements.coordinatesInput.addEventListener('input', () => {
+      state.isManuallyEditedCoords = true;
+      const val = elements.coordinatesInput.value.trim();
+      const parts = val.split(/[,;\s]+/).map(p => parseFloat(p)).filter(p => !isNaN(p));
+      if (parts.length >= 2) {
+        state.lat = parts[0];
+        state.lng = parts[1];
+        if (elements.locationStatus) {
+          elements.locationStatus.textContent = '● ระบุพิกัดด้วยตนเอง (Manual Coordinates)';
+          elements.locationStatus.className = 'text-xs text-blue-600 font-semibold';
+        }
+      }
+    });
+  }
+
+  if (elements.btnRefreshLocation) {
+    elements.btnRefreshLocation.addEventListener('click', () => {
+      state.isManuallyEditedCoords = false;
+      fetchCurrentLocation(true);
+    });
+  }
 }
 
 function getFullLocationText() {
@@ -2613,7 +2641,10 @@ function fetchCurrentLocation(isManual = false) {
         }
       }
 
-      elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+      if (!state.isManuallyEditedCoords || isManual) {
+        elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+        state.isManuallyEditedCoords = false;
+      }
       
       const timeStr = state.lastLocationTime.toLocaleTimeString('th-TH');
       elements.locationStatus.textContent = `● อัปเดตล่าสุด ${timeStr} (ความแม่นยำ ±${state.accuracy}ม.)`;
@@ -2664,12 +2695,16 @@ function initCameraEvents() {
     btnMobile.addEventListener('click', handleOpenCam);
   }
 
-  elements.btnCloseCamera.addEventListener('click', closeCameraModal);
+  if (elements.btnCloseCamera) {
+    elements.btnCloseCamera.addEventListener('click', closeCameraModal);
+  }
 
-  elements.btnFlipCamera.addEventListener('click', () => {
-    state.facingMode = state.facingMode === 'environment' ? 'user' : 'environment';
-    startCameraStream();
-  });
+  if (elements.btnFlipCamera) {
+    elements.btnFlipCamera.addEventListener('click', () => {
+      state.facingMode = state.facingMode === 'environment' ? 'user' : 'environment';
+      startCameraStream();
+    });
+  }
 
   // ปุ่มสลับมุมมองกล้อง (แนวนอน 4:3 / แนวตั้ง 3:4) แบบกดเองตามต้องการ
   if (elements.btnToggleOrientation) {
@@ -2679,8 +2714,204 @@ function initCameraEvents() {
     elements.btnFlipOrientationQuick.addEventListener('click', toggleOrientation);
   }
 
-  elements.btnCapture.addEventListener('click', captureAndProcessPhoto);
-  elements.fileFallbackInput.addEventListener('change', handleFallbackFile);
+  if (elements.btnCapture) {
+    elements.btnCapture.addEventListener('click', captureAndProcessPhoto);
+  }
+  if (elements.fileFallbackInput) {
+    elements.fileFallbackInput.addEventListener('change', handleFallbackFile);
+  }
+}
+
+/**
+ * จัดการระบบอัปโหลดไฟล์รูปภาพบนหน้าจอคอมพิวเตอร์ (> 768px)
+ */
+function initDesktopUploadEvents() {
+  if (elements.desktopImageFileInput) {
+    elements.desktopImageFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (!file.type.startsWith('image/')) {
+        Swal.fire('ข้อผิดพลาด', 'กรุณาเลือกเฉพาะไฟล์รูปภาพ (JPG, PNG, WEBP, HEIC ฯลฯ)', 'warning');
+        elements.desktopImageFileInput.value = '';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        state.selectedDesktopImageDataUrl = ev.target.result;
+        if (elements.desktopPreviewImg) {
+          elements.desktopPreviewImg.src = state.selectedDesktopImageDataUrl;
+        }
+        if (elements.desktopImagePreviewContainer) {
+          elements.desktopImagePreviewContainer.classList.remove('hidden');
+        }
+        if (elements.desktopImageSizeBadge) {
+          const sizeKb = Math.round(file.size / 1024);
+          elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB)`;
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (elements.btnConfirmDesktopUpload) {
+    elements.btnConfirmDesktopUpload.addEventListener('click', handleDesktopUpload);
+  }
+}
+
+window.viewDesktopFullPreview = function() {
+  if (!state.selectedDesktopImageDataUrl) return;
+  Swal.fire({
+    title: 'ตัวอย่างรูปภาพขนาดเต็ม',
+    imageUrl: state.selectedDesktopImageDataUrl,
+    imageAlt: 'ตัวอย่างรูปภาพ',
+    showCloseButton: true,
+    showConfirmButton: false,
+    width: '80%',
+    customClass: {
+      popup: 'p-4 rounded-2xl'
+    }
+  });
+};
+
+async function handleDesktopUpload() {
+  if (!validateForm()) return;
+
+  if (!state.selectedDesktopImageDataUrl) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'กรุณาเลือกไฟล์รูปภาพ',
+      text: 'โปรดเลือกไฟล์รูปภาพจากเครื่องคอมพิวเตอร์ก่อนกดอัปโหลด',
+      confirmButtonColor: '#2563eb'
+    });
+    if (elements.desktopImageFileInput) elements.desktopImageFileInput.focus();
+    return;
+  }
+
+  showCustomLoading('กำลังประมวลผลลายน้ำและรูปภาพ...', 'กำลังสร้างภาพถ่ายพร้อมข้อมูลส่งหมาย');
+
+  try {
+    const img = new Image();
+    img.src = state.selectedDesktopImageDataUrl;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+
+    const caseNumber = getFormattedCaseNumber();
+    const courtType = elements.courtTypeSelect.value;
+    const district = elements.districtSelect.value;
+    const subdistrict = elements.subdistrictSelect.value;
+    const locationType = elements.locationTypeSelect.value;
+    const locationText = getFullLocationText();
+    const heading = window.compassManager ? window.compassManager.getHeading() : 0;
+
+    const payloadData = {
+      caseNumber: caseNumber,
+      courtType: courtType,
+      district: district,
+      subdistrict: subdistrict,
+      locationType: locationType,
+      locationText: locationText,
+      lat: state.lat,
+      lng: state.lng,
+      heading: heading,
+      dateTime: WatermarkEngine.formatThaiDateTime(new Date())
+    };
+
+    // วาดลายน้ำลงบนรูปภาพ
+    const watermarkedResult = await WatermarkEngine.renderWatermark(img, payloadData);
+    const baseFilename = caseNumber.replace(/\//g, '-');
+    const imageFilename = baseFilename + '.jpg';
+
+    hideCustomLoading();
+
+    // 1. บันทึกลงเครื่องผู้ใช้
+    WatermarkEngine.triggerDownload(watermarkedResult.dataUrl, imageFilename);
+
+    // 2. บีบอัดรูปภาพให้ไม่เกิน 1MB
+    const compressedImageBase64 = await compressImageToMax1MB(watermarkedResult.dataUrl);
+
+    const uploadPayload = {
+      action: 'upload_image',
+      ...payloadData,
+      fileName: imageFilename,
+      imageBase64: compressedImageBase64
+    };
+
+    // 3. ตรวจสอบสถานะการเชื่อมต่ออินเทอร์เน็ต
+    if (!navigator.onLine) {
+      addToOfflineQueue({
+        payload: uploadPayload,
+        fileName: imageFilename,
+        caseNumber: caseNumber
+      });
+
+      Swal.fire({
+        icon: 'info',
+        title: 'บันทึกสำเร็จ (โหมดออฟไลน์)',
+        html: `
+          <div class="text-left text-xs space-y-2 text-gray-700">
+            <p>บันทึกภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงในเครื่องเรียบร้อยแล้ว</p>
+            <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800">
+              <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-600"></i>
+              <b>แจ้งเตือน:</b> เนื่องจากขณะนี้ไม่มีสัญญาณอินเทอร์เน็ต ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์</b> ในเครื่องไว้แล้ว และจะทำการอัปโหลดขึ้น Google Drive & Sheet ให้โดยอัตโนมัติเมื่อท่านเชื่อมต่ออินเทอร์เน็ต
+            </div>
+          </div>
+        `,
+        confirmButtonText: 'ตกลง',
+        confirmButtonColor: '#2563eb',
+        showCloseButton: true,
+        allowOutsideClick: false
+      });
+      resetDesktopForm();
+      return;
+    }
+
+    // 4. บันทึกข้อมูลเบื้องต้นลงใน Google Sheet
+    saveInitialRecordToSheet(payloadData, imageFilename);
+
+    // 5. อัปโหลดขึ้น Google Drive พร้อม Progress Bar
+    const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
+
+    // เคลียร์แคชและโหลดข้อมูลใหม่
+    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
+    Swal.fire({
+      icon: 'success',
+      title: 'อัปโหลดภาพสำเร็จ!',
+      showCloseButton: true,
+      allowOutsideClick: false,
+      html: `<p class="text-gray-700">อัปโหลดภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงใน Google Drive & Sheet เรียบร้อยแล้ว</p>
+             ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
+      confirmButtonColor: '#2563eb'
+    }).then(() => {
+      resetDesktopForm();
+      loadGoogleSheetData(true);
+    });
+
+  } catch (err) {
+    console.error('Desktop upload error:', err);
+    hideCustomLoading();
+    Swal.fire({
+      icon: 'error',
+      title: 'การอัปโหลดไม่สำเร็จ',
+      text: err.message,
+      showCloseButton: true,
+      allowOutsideClick: false,
+      confirmButtonColor: '#2563eb'
+    });
+  }
+}
+
+function resetDesktopForm() {
+  resetFormForNextCase();
+  state.selectedDesktopImageDataUrl = null;
+  if (elements.desktopImageFileInput) elements.desktopImageFileInput.value = '';
+  if (elements.desktopImagePreviewContainer) elements.desktopImagePreviewContainer.classList.add('hidden');
+  if (elements.desktopPreviewImg) elements.desktopPreviewImg.src = '';
 }
 
 /**
@@ -2793,14 +3024,24 @@ function validateForm() {
     }
   }
 
+  // ตรวจสอบและดึงพิกัดจากช่องกรอกพิกัด (หากผู้ใช้พิมพ์หรือแก้ไขเอง)
+  const coordsRaw = (elements.coordinatesInput ? elements.coordinatesInput.value : '').trim();
+  if (coordsRaw) {
+    const parts = coordsRaw.split(/[,;\s]+/).map(p => parseFloat(p.trim())).filter(p => !isNaN(p));
+    if (parts.length >= 2) {
+      state.lat = parts[0];
+      state.lng = parts[1];
+    }
+  }
+
   if (!state.lat || !state.lng) {
     Swal.fire({
       icon: 'warning',
       title: 'ยังไม่ได้รับพิกัด GPS',
-      text: 'ระบบกำลังค้นหาพิกัด กรุณารอสักครู่หรือกด "เช็คพิกัดใหม่"',
+      text: 'ระบบกำลังค้นหาพิกัด กรุณารอสักครู่ พิมพ์ระบุพิกัด หรือกด "เช็คพิกัดใหม่"',
       confirmButtonColor: '#2563eb'
     });
-    fetchCurrentLocation(true);
+    if (elements.coordinatesInput) elements.coordinatesInput.focus();
     return false;
   }
 

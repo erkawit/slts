@@ -332,11 +332,11 @@
                 </div>
               </div>
 
-              <!-- 2.4 ระบบพิกัดทางภูมิศาสตร์ -->
+              <!-- 2.4 ระบบพิกัดทางภูมิศาสตร์ (อนุญาตให้พิมพ์แก้ไขพิกัดได้) -->
               <div class="pt-1">
                 <div class="flex items-center justify-between mb-1.5">
                   <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    <i class="fa-solid fa-crosshairs text-blue-600 mr-1"></i> พิกัด GPS ปัจจุบัน (ดึงอัตโนมัติทุก 10 วินาที)
+                    <i class="fa-solid fa-crosshairs text-blue-600 mr-1"></i> พิกัด GPS (สามารถพิมพ์แก้ไขพิกัดได้)
                   </label>
                   <span class="flex items-center text-[11px] text-gray-500">
                     <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-dot mr-1.5"></span> พิกัดสด
@@ -345,9 +345,9 @@
 
                 <div class="flex gap-2">
                   <div class="relative flex-1">
-                    <input type="text" id="coordinates" readonly placeholder="กำลังค้นหาพิกัด..." class="w-full bg-gray-100 border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm font-mono text-gray-700 cursor-not-allowed select-all">
+                    <input type="text" id="coordinates" placeholder="เช่น 17.4144, 102.7882" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-mono font-semibold text-gray-800 transition">
                   </div>
-                  <button type="button" id="btnRefreshLocation" class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium text-sm px-4 py-2.5 rounded-xl whitespace-nowrap shadow-sm shadow-blue-200 transition flex items-center gap-1.5">
+                  <button type="button" id="btnRefreshLocation" class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium text-sm px-4 py-2.5 rounded-xl whitespace-nowrap shadow-sm shadow-blue-200 transition flex items-center gap-1.5" title="ดึงพิกัดปัจจุบัน">
                     <i class="fa-solid fa-arrows-rotate"></i>
                     <span>เช็คพิกัดใหม่</span>
                   </button>
@@ -374,34 +374,51 @@
             </form>
           </div>
 
-          <!-- RIGHT PANEL: เมนูถ่ายภาพและศูนย์ควบคุม (แสดงเฉพาะจอคอมพิวเตอร์ > 768px) -->
+          <!-- RIGHT PANEL: เมนูอัปโหลดไฟล์ภาพและศูนย์ควบคุม (แสดงเฉพาะจอคอมพิวเตอร์ > 768px) -->
           <div class="hidden lg:block lg:col-span-5 space-y-5">
             
-            <!-- Camera & Dispatch Action Card -->
+            <!-- Upload & Dispatch Action Card -->
             <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
-              <div>
-                <div class="flex items-center justify-between pb-4 mb-4 border-b border-gray-100">
+              <div class="space-y-4">
+                <div class="flex items-center justify-between pb-3 border-b border-gray-100">
                   <h3 class="font-bold text-gray-900 text-sm sm:text-base flex items-center gap-2">
-                    <i class="fa-solid fa-camera text-blue-600"></i>
-                    <span>ถ่ายภาพและประทับลายน้ำ</span>
+                    <i class="fa-solid fa-cloud-arrow-up text-blue-600"></i>
+                    <span>เลือกไฟล์ภาพและอัปโหลดส่งหมาย</span>
                   </h3>
                   <span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
-                    3:4 / 4:3 อัตโนมัติ
+                    ประทับลายน้ำอัตโนมัติ
                   </span>
                 </div>
 
-                <!-- Action Buttons for Desktop -->
+                <!-- File Picker Area for Desktop -->
                 <div class="space-y-3">
-                  <button type="button" id="btnOpenCamera" class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold py-4 px-4 rounded-xl shadow-lg shadow-blue-500/25 transition duration-200 flex items-center justify-center gap-2.5 text-base">
-                    <i class="fa-solid fa-camera text-xl"></i>
-                    <span>เปิดกล้อง / ถ่ายภาพส่งหมาย</span>
-                  </button>
+                  <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1.5">
+                      <i class="fa-solid fa-image text-blue-600 mr-1"></i> เลือกไฟล์รูปภาพจากเครื่อง (เฉพาะไฟล์รูปภาพ) <span class="text-red-500">*</span>
+                    </label>
+                    <input type="file" id="desktopImageFileInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border border-gray-300 rounded-xl p-1 bg-white">
+                  </div>
 
-                  <button type="button" onclick="document.getElementById('fileFallbackInput').click()" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-gray-200">
-                    <i class="fa-solid fa-folder-open text-gray-500"></i>
-                    <span>เลือกรูปภาพจากเครื่องคอมพิวเตอร์</span>
+                  <!-- Thumbnail Preview Container -->
+                  <div id="desktopImagePreviewContainer" class="hidden space-y-2 mt-2">
+                    <p class="text-xs font-bold text-gray-700 flex items-center justify-between">
+                      <span>ตัวอย่างภาพที่เลือก (คลิกที่ภาพเพื่อดูขนาดเต็ม):</span>
+                      <span id="desktopImageSizeBadge" class="text-[11px] font-mono text-gray-500"></span>
+                    </p>
+                    <div class="relative bg-gray-900 rounded-xl p-2 flex items-center justify-center max-h-56 overflow-hidden cursor-pointer group" onclick="viewDesktopFullPreview()" title="คลิกเพื่อดูภาพขนาดเต็ม">
+                      <img id="desktopPreviewImg" src="" class="max-h-52 object-contain rounded-lg shadow">
+                      <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5">
+                        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                        <span>คลิกเพื่อดูภาพเต็ม</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Confirm Upload Button for Desktop -->
+                  <button type="button" id="btnConfirmDesktopUpload" class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-blue-500/25 transition duration-200 flex items-center justify-center gap-2 text-base mt-3">
+                    <i class="fa-solid fa-cloud-arrow-up text-lg"></i>
+                    <span>ยืนยันอัปโหลดภาพส่งหมาย</span>
                   </button>
-                  <input type="file" id="fileFallbackInput" accept="image/*" capture="environment" class="hidden">
                 </div>
               </div>
 

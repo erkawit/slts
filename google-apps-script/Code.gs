@@ -2,11 +2,11 @@
  * Google Apps Script สำหรับระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System)
  * ศาลจังหวัดอุดรธานี
  * 
- * Google Drive Folder ID: 1whnbwZjGSevdo-KG8RVz9oFge8V-U5wp
+ * Google Drive Folder ID: 1ArsWIsoIIYeQY3o_dPrsTpBXy4pEXQuQ
  * Google Sheet ID: 1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo
  */
 
-const FOLDER_ID = "1whnbwZjGSevdo-KG8RVz9oFge8V-U5wp";
+const FOLDER_ID = "1ArsWIsoIIYeQY3o_dPrsTpBXy4pEXQuQ";
 const SPREADSHEET_ID = "1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo";
 const SHEET_NAME = "บันทึกการส่งหมาย";
 
