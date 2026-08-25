@@ -11,11 +11,10 @@ const SPREADSHEET_ID = "1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo";
 const SHEET_NAME = "บันทึกการส่งหมาย";
 
 /**
- * ฟังก์ชันสำหรับรับคำขอแบบ POST จากเว็บแอป
+ * ฟังก์ชันสำหรับรับคำขอแบบ POST จากเว็บแอป (บันทึกข้อมูล หรือ ลบข้อมูล)
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  // รอคิวไม่เกิน 30 วินาทีเพื่อป้องกัน race condition ในการเขียนชีต
   lock.tryLock(30000);
 
   try {
@@ -29,6 +28,79 @@ function doPost(e) {
     }
 
     const folder = DriveApp.getFolderById(FOLDER_ID);
+    const sheet = getTargetSpreadsheet(folder);
+
+    // ==========================================
+    // ACTION: DELETE (เฉพาะสิทธิ์ Admin)
+    // ==========================================
+    if (data.action === "delete") {
+      let deletedRows = 0;
+      let deletedFiles = 0;
+
+      // 1. ลบไฟล์ใน Google Drive (ภาพถ่าย และ Text File)
+      if (data.fileId) {
+        try {
+          const file = DriveApp.getFileById(data.fileId);
+          file.setTrashed(true);
+          deletedFiles++;
+        } catch (err) {
+          console.warn("Delete file by ID error:", err);
+        }
+      }
+
+      if (data.fileName) {
+        try {
+          // ลบไฟล์ภาพ
+          const imgFiles = folder.getFilesByName(data.fileName);
+          while (imgFiles.hasNext()) {
+            imgFiles.next().setTrashed(true);
+            deletedFiles++;
+          }
+          // ลบ Text File
+          const txtFileName = data.fileName.replace(/\.jpg$/i, '.txt');
+          const txtFiles = folder.getFilesByName(txtFileName);
+          while (txtFiles.hasNext()) {
+            txtFiles.next().setTrashed(true);
+            deletedFiles++;
+          }
+        } catch (err) {
+          console.warn("Delete files by name error:", err);
+        }
+      }
+
+      // 2. ลบแถวใน Google Sheet
+      const sheetData = sheet.getDataRange().getValues();
+      // ค้นหาแถวที่ตรงกับ fileId หรือ (timestamp และ caseNumber)
+      for (let i = sheetData.length - 1; i >= 1; i--) { // วนจากล่างขึ้นบน
+        const row = sheetData[i];
+        const rowTimestamp = String(row[0] || '').trim();
+        const rowCaseNumber = String(row[1] || '').trim();
+        const rowFileName = String(row[10] || '').trim();
+        const rowFileId = String(row[13] || '').trim();
+
+        let isMatch = false;
+        if (data.fileId && rowFileId === data.fileId) isMatch = true;
+        else if (data.fileName && rowFileName === data.fileName) isMatch = true;
+        else if (data.timestamp && data.caseNumber && rowTimestamp === data.timestamp && rowCaseNumber === data.caseNumber) isMatch = true;
+        else if (data.rowIndex && Number(data.rowIndex) === (i + 1)) isMatch = true;
+
+        if (isMatch) {
+          sheet.deleteRow(i + 1);
+          deletedRows++;
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: `ลบรายการใน Google Sheet (${deletedRows} แถว) และไฟล์ใน Drive (${deletedFiles} ไฟล์) เรียบร้อยแล้ว`,
+        deletedRows: deletedRows,
+        deletedFiles: deletedFiles
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ==========================================
+    // ACTION: SAVE / CREATE NEW RECORD
+    // ==========================================
     let fileUrl = "";
     let fileId = "";
     let txtFileUrl = "";
@@ -36,7 +108,6 @@ function doPost(e) {
 
     // 1. บันทึกรูปภาพ (Base64) ลงใน Google Drive Folder
     if (data.imageBase64 && data.fileName) {
-      // ตัด prefix เช่น "data:image/jpeg;base64," ออกหากมี
       let base64String = data.imageBase64;
       if (base64String.indexOf("base64,") !== -1) {
         base64String = base64String.split("base64,")[1];
@@ -46,7 +117,6 @@ function doPost(e) {
       const blob = Utilities.newBlob(decodedBytes, "image/jpeg", data.fileName);
       const createdFile = folder.createFile(blob);
       
-      // ตั้งสิทธิ์ให้อ่านได้ผ่านลิงก์
       createdFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       fileUrl = createdFile.getUrl();
       fileId = createdFile.getId();
@@ -61,13 +131,10 @@ function doPost(e) {
       txtFileId = createdTxtFile.getId();
     }
 
-    // 3. บันทึกข้อมูลลง Google Sheets ที่ระบุ
-    const sheet = getTargetSpreadsheet(folder);
-    
+    // 3. บันทึกข้อมูลลง Google Sheets
     const timestamp = new Date();
     const thaiDateStr = Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
 
-    // เพิ่มแถวข้อมูลใหม่
     sheet.appendRow([
       thaiDateStr,                               // 1. วันที่เวลาบันทึก
       data.caseNumber || "",                     // 2. เลขคดี
@@ -82,7 +149,7 @@ function doPost(e) {
       data.fileName || "",                       // 11. ชื่อไฟล์ภาพ
       fileUrl || "",                             // 12. ลิงก์รูปภาพใน Google Drive
       txtFileUrl || "",                          // 13. ลิงก์ Text File ใน Google Drive
-      fileId || ""                               // 14. File ID
+      fileId || ""                               // 14. Drive File ID
     ]);
 
     return ContentService.createTextOutput(JSON.stringify({
@@ -114,7 +181,6 @@ function getTargetSpreadsheet(folder) {
   try {
     spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   } catch (err) {
-    // กรณีไม่มีสิทธิ์หรือหา ID ไม่เจอ ให้สร้าง/ค้นหาในโฟลเดอร์เป็น Fallback
     const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
     if (files.hasNext()) {
       spreadsheet = SpreadsheetApp.open(files.next());
@@ -132,7 +198,6 @@ function getTargetSpreadsheet(folder) {
     sheet.setName(SHEET_NAME);
   }
 
-  // ตรวจสอบว่ามีหัวตาราง (Header) แล้วหรือยัง
   if (sheet.getLastRow() === 0) {
     const headers = [
       "วัน-เวลาบันทึก",
@@ -153,7 +218,6 @@ function getTargetSpreadsheet(folder) {
 
     sheet.appendRow(headers);
     
-    // จัดสไตล์หัวตาราง
     const headerRange = sheet.getRange(1, 1, 1, headers.length);
     headerRange.setBackground("#2563eb");
     headerRange.setFontColor("#ffffff");
