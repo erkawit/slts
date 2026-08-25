@@ -1142,66 +1142,67 @@ async function compressImageToMax1MB(dataUrl) {
 
 /**
  * อัปโหลดข้อมูลพร้อมแสดง Progress Bar และตัวเลข % ความคืบหน้า (ปิดไม่ได้จนกว่าจะเสร็จสิ้น)
+ * ใช้ fetch กับ text/plain เพื่อป้องกันปัญหา CORS Preflight กับ Google Apps Script
  */
-function uploadWithProgressBar(payload, title = 'กำลังอัปโหลดรูปภาพขึ้น Google Drive...') {
-  return new Promise((resolve, reject) => {
-    Swal.fire({
-      title: title,
-      html: `
-        <div class="space-y-3.5 my-3 text-left">
-          <div class="flex justify-between items-center text-xs font-bold text-gray-700">
-            <span>ความคืบหน้าการนำเข้าข้อมูล</span>
-            <span id="uploadPercentTxt" class="font-mono text-sm font-extrabold text-blue-600">0%</span>
-          </div>
-          <div class="w-full bg-gray-200 rounded-full h-4 overflow-hidden shadow-inner p-0.5 border border-gray-300">
-            <div id="uploadProgressBar" class="bg-gradient-to-r from-blue-500 via-indigo-600 to-blue-700 h-full rounded-full transition-all duration-200 ease-out" style="width: 0%"></div>
-          </div>
-          <p class="text-[11px] text-gray-500 text-center"><i class="fa-solid fa-lock mr-1"></i>กำลังประมวลผล กรุณารอสักครู่ (หน้าต่างนี้จะปิดไม่ได้จนกว่าจะเสร็จสิ้น)</p>
+async function uploadWithProgressBar(payload, title = 'กำลังอัปโหลดรูปภาพขึ้น Google Drive...') {
+  Swal.fire({
+    title: title,
+    html: `
+      <div class="space-y-3.5 my-3 text-left">
+        <div class="flex justify-between items-center text-xs font-bold text-gray-700">
+          <span>ความคืบหน้าการนำเข้าข้อมูล</span>
+          <span id="uploadPercentTxt" class="font-mono text-sm font-extrabold text-blue-600">15%</span>
         </div>
-      `,
-      allowOutsideClick: false,
-      allowEscapeKey: false,
-      showConfirmButton: false,
-      showCancelButton: false,
-      showCloseButton: false
-    });
+        <div class="w-full bg-gray-200 rounded-full h-4 overflow-hidden shadow-inner p-0.5 border border-gray-300">
+          <div id="uploadProgressBar" class="bg-gradient-to-r from-blue-500 via-indigo-600 to-blue-700 h-full rounded-full transition-all duration-300 ease-out" style="width: 15%"></div>
+        </div>
+        <p class="text-[11px] text-gray-500 text-center"><i class="fa-solid fa-lock mr-1"></i>กำลังประมวลผลและนำส่งข้อมูล กรุณารอสักครู่ (หน้าต่างนี้จะปิดไม่ได้จนกว่าจะเสร็จสิ้น)</p>
+      </div>
+    `,
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    showConfirmButton: false,
+    showCancelButton: false,
+    showCloseButton: false
+  });
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', state.appsScriptUrl, true);
-    xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const percent = Math.min(95, Math.round((e.loaded / e.total) * 100));
-        const bar = document.getElementById('uploadProgressBar');
-        const txt = document.getElementById('uploadPercentTxt');
-        if (bar) bar.style.width = percent + '%';
-        if (txt) txt.textContent = percent + '%';
-      }
-    };
-
-    xhr.onload = () => {
+  // อัปเดต Progress Bar อย่างต่อเนื่องขณะรอการตอบกลับ
+  let currentPercent = 15;
+  const progressInterval = setInterval(() => {
+    if (currentPercent < 90) {
+      currentPercent += Math.floor(Math.random() * 8) + 4;
+      if (currentPercent > 90) currentPercent = 90;
       const bar = document.getElementById('uploadProgressBar');
       const txt = document.getElementById('uploadPercentTxt');
-      if (bar) bar.style.width = '100%';
-      if (txt) txt.textContent = '100%';
+      if (bar) bar.style.width = currentPercent + '%';
+      if (txt) txt.textContent = currentPercent + '%';
+    }
+  }, 250);
 
-      if (xhr.status >= 200 && xhr.status < 300) {
-        let resJson = null;
-        try {
-          resJson = JSON.parse(xhr.responseText);
-        } catch (e) {
-          resJson = { status: 'success', message: xhr.responseText };
-        }
-        resolve(resJson);
-      } else {
-        reject(new Error('การอัปโหลดล้มเหลว รหัสข้อผิดพลาด: ' + xhr.status));
-      }
-    };
+  try {
+    const response = await fetch(state.appsScriptUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify(payload)
+    });
 
-    xhr.onerror = () => reject(new Error('เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่าย'));
-    xhr.send(JSON.stringify(payload));
-  });
+    clearInterval(progressInterval);
+
+    const bar = document.getElementById('uploadProgressBar');
+    const txt = document.getElementById('uploadPercentTxt');
+    if (bar) bar.style.width = '100%';
+    if (txt) txt.textContent = '100%';
+
+    const resJson = await response.json();
+    return resJson;
+
+  } catch (err) {
+    clearInterval(progressInterval);
+    console.error('uploadWithProgressBar fetch error:', err);
+    throw new Error('เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่าย หรือไม่สามารถติดต่อ Google Apps Script ได้: ' + err.message);
+  }
 }
 
 /**
@@ -1892,10 +1893,7 @@ window.openManualUploadModal = function() {
 
         hideCustomLoading();
 
-        // 1. บันทึกลงอุปกรณ์เงียบๆ
-        WatermarkEngine.triggerDownload(watermarkedResult.dataUrl, imageFilename);
-
-        // 2. บีบอัดรูปภาพให้ขนาด <= 1MB
+        // บีบอัดรูปภาพให้ขนาด <= 1MB (ไม่ต้องดาวน์โหลดลงเครื่องเพราะเป็นการอัปโหลดไฟล์ที่มีอยู่แล้ว)
         const compressedImageBase64 = await compressImageToMax1MB(watermarkedResult.dataUrl);
 
         const uploadPayload = {
@@ -2827,10 +2825,7 @@ async function handleDesktopUpload() {
 
     hideCustomLoading();
 
-    // 1. บันทึกลงเครื่องผู้ใช้
-    WatermarkEngine.triggerDownload(watermarkedResult.dataUrl, imageFilename);
-
-    // 2. บีบอัดรูปภาพให้ไม่เกิน 1MB
+    // บีบอัดรูปภาพให้ไม่เกิน 1MB (ไม่ต้องดาวน์โหลดไฟล์ลงเครื่องเพราะเป็นการอัปโหลดไฟล์จากเครื่อง)
     const compressedImageBase64 = await compressImageToMax1MB(watermarkedResult.dataUrl);
 
     const uploadPayload = {
