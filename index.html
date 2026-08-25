@@ -31,7 +31,7 @@
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between">
+<body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
   <!-- Main Header & Desktop Navigation Bar (Full Width on Desktop) -->
   <header class="bg-white border-b border-gray-200/90 sticky top-0 z-30 shadow-sm backdrop-blur-md bg-white/95">
@@ -75,23 +75,53 @@
           <i class="fa-solid fa-gear text-lg"></i>
         </button>
 
-        <!-- User Authentication Widget -->
-        <div id="authWidget" class="flex items-center">
+        <!-- User Authentication Widget & Dropdown Menu -->
+        <div id="authWidget" class="relative">
           <!-- Guest / Not Logged In -->
           <button id="btnLoginModal" type="button" onclick="openLoginModal()" class="text-xs sm:text-sm font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm">
             <i class="fa-solid fa-right-to-bracket"></i>
             <span>เข้าสู่ระบบ</span>
           </button>
 
-          <!-- Logged In User Profile -->
-          <div id="userProfileBadge" class="hidden items-center gap-2.5 bg-gray-100/90 border border-gray-200 pl-3.5 pr-2 py-1.5 rounded-xl shadow-sm">
-            <div class="text-left">
-              <p id="authUserName" class="text-xs font-bold text-gray-800 leading-tight">Admin</p>
-              <p id="authUserRole" class="text-[10px] text-blue-600 font-bold leading-tight uppercase tracking-wider">ADMIN</p>
-            </div>
-            <button type="button" onclick="handleLogout()" title="ออกจากระบบ" class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition">
-              <i class="fa-solid fa-right-from-bracket text-xs"></i>
+          <!-- Logged In User Profile Badge & Dropdown Trigger -->
+          <div id="userProfileContainer" class="hidden relative">
+            <button id="userProfileBtn" type="button" onclick="toggleUserDropdown(event)" class="flex items-center gap-2.5 bg-gray-100/90 hover:bg-gray-200/90 border border-gray-200 pl-3 pr-2 py-1.5 rounded-xl shadow-sm transition cursor-pointer select-none">
+              <div class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                <i class="fa-solid fa-user"></i>
+              </div>
+              <div class="text-left hidden sm:block">
+                <p id="authUserName" class="text-xs font-bold text-gray-800 leading-tight">Admin</p>
+                <p id="authUserRole" class="text-[10px] text-blue-600 font-bold leading-tight uppercase tracking-wider">ADMIN</p>
+              </div>
+              <i class="fa-solid fa-chevron-down text-[10px] text-gray-500 ml-0.5"></i>
             </button>
+
+            <!-- User Dropdown Menu -->
+            <div id="userDropdownMenu" class="hidden absolute right-0 mt-2 w-60 bg-white rounded-2xl shadow-2xl border border-gray-200/90 py-2 z-50 animate-fade-in divide-y divide-gray-100">
+              <div class="px-4 py-2.5">
+                <p id="dropdownUserFullName" class="text-sm font-bold text-gray-900 truncate">ผู้ดูแลระบบ</p>
+                <p id="dropdownUsername" class="text-xs text-gray-500">@admin</p>
+                <span id="dropdownRoleBadge" class="inline-block mt-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">Admin</span>
+              </div>
+              
+              <div class="py-1">
+                <button type="button" onclick="openEditProfileModal()" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
+                  <i class="fa-solid fa-user-pen text-blue-600 w-4 text-center"></i>
+                  <span>แก้ไขข้อมูลส่วนตัว</span>
+                </button>
+                <button type="button" onclick="openChangePasswordModal()" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
+                  <i class="fa-solid fa-key text-amber-600 w-4 text-center"></i>
+                  <span>เปลี่ยนรหัสผ่าน</span>
+                </button>
+              </div>
+
+              <div class="py-1">
+                <button type="button" onclick="handleLogout()" class="w-full text-left px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition">
+                  <i class="fa-solid fa-right-from-bracket text-red-600 w-4 text-center"></i>
+                  <span>ออกจากระบบ</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -369,11 +399,15 @@
               <i class="fa-solid fa-table-list text-blue-600"></i>
               <span>ประวัติการจัดเก็บข้อมูลส่งหมาย</span>
             </h2>
-            <p class="text-xs text-gray-500 mt-1">ดึงข้อมูลและรูปภาพสดจาก Google Sheet ศาลจังหวัดอุดรธานี</p>
+            <div class="flex items-center gap-2 mt-1 text-xs text-gray-500">
+              <span>ดึงข้อมูลสดจาก Google Sheet</span>
+              <span>•</span>
+              <span id="cacheStatusBadge" class="text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">แคชอัตโนมัติ 1 นาที</span>
+            </div>
           </div>
 
           <div class="flex items-center gap-2.5 w-full sm:w-auto">
-            <button type="button" onclick="loadGoogleSheetData()" class="px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-xl text-xs sm:text-sm transition flex items-center gap-2 border border-blue-200 shadow-sm">
+            <button type="button" onclick="loadGoogleSheetData(true)" class="px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-xl text-xs sm:text-sm transition flex items-center gap-2 border border-blue-200 shadow-sm" title="บังคับโหลดข้อมูลสดจาก Google Sheet ทันที">
               <i class="fa-solid fa-rotate"></i>
               <span>รีเฟรชข้อมูล</span>
             </button>
@@ -417,16 +451,23 @@
       <div class="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
         <!-- Add User Card (lg:col-span-4) -->
-        <div class="lg:col-span-4 bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-          <h3 class="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <i class="fa-solid fa-user-plus text-blue-600"></i>
-            <span>เพิ่มผู้ใช้งานใหม่</span>
-          </h3>
+        <div class="lg:col-span-4 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-5">
+          <div>
+            <h3 class="text-base font-bold text-gray-900 mb-1 flex items-center gap-2">
+              <i class="fa-solid fa-user-plus text-blue-600"></i>
+              <span>เพิ่มผู้ใช้งานใหม่</span>
+            </h3>
+            <p class="text-xs text-gray-500">สร้างบัญชีสำหรับเจ้าพนักงานหรือผู้ดูแลระบบ</p>
+          </div>
 
           <form id="addUserForm" onsubmit="handleCreateUser(event)" class="space-y-3.5">
             <div>
               <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อผู้ใช้ (Username) *</label>
               <input type="text" id="newUsername" required placeholder="เช่น officer1" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อ-นามสกุล / ชื่อแสดง *</label>
+              <input type="text" id="newFullName" required placeholder="เช่น นายสมชาย ส่งหมาย" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
             </div>
             <div>
               <label class="block text-xs font-bold text-gray-700 mb-1">รหัสผ่าน (Password) *</label>
@@ -445,20 +486,39 @@
               </button>
             </div>
           </form>
+
+          <!-- Default Reset Password Configuration Card -->
+          <div class="pt-4 border-t border-gray-100">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-xs font-bold text-gray-800">รหัสผ่านตั้งต้นเมื่อรีเซ็ต</p>
+                <p class="text-[11px] text-gray-500">ค่าปัจจุบัน: <span id="currentDefaultResetPassText" class="font-mono font-bold text-blue-600">caogikojt02</span></p>
+              </div>
+              <button type="button" onclick="openDefaultPasswordConfigModal()" class="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg border border-gray-300 transition flex items-center gap-1">
+                <i class="fa-solid fa-pen-to-square text-xs"></i>
+                <span>เปลี่ยน</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Users List Card (lg:col-span-8) -->
         <div class="lg:col-span-8 bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-          <h3 class="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <i class="fa-solid fa-users text-blue-600"></i>
-            <span>รายชื่อผู้ใช้งานทั้งหมด</span>
-          </h3>
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
+                <i class="fa-solid fa-users text-blue-600"></i>
+                <span>รายชื่อผู้ใช้งานทั้งหมด</span>
+              </h3>
+              <p class="text-xs text-gray-500 mt-0.5">จัดการสิทธิ์ แก้ไขข้อมูล และรีเซ็ตรหัสผ่าน</p>
+            </div>
+          </div>
 
           <div class="overflow-x-auto w-full">
             <table class="w-full text-left text-sm">
               <thead>
                 <tr class="bg-gray-50 border-b border-gray-200 text-gray-600 font-bold text-xs uppercase">
-                  <th class="py-3 px-4">ชื่อผู้ใช้ (Username)</th>
+                  <th class="py-3 px-4">ชื่อผู้ใช้ / ชื่อแสดง</th>
                   <th class="py-3 px-4">สิทธิ์ (Role)</th>
                   <th class="py-3 px-4">วันที่สร้าง</th>
                   <th class="py-3 px-4 text-right">การจัดการ</th>
@@ -512,6 +572,66 @@
         </button>
 
         <p class="text-[11px] text-gray-400 text-center pt-2">ค่าเริ่มต้น: user: <b>admin</b> / pass: <b>caogikojt02</b></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: แก้ไขข้อมูลส่วนตัว (Edit Profile Modal) -->
+  <div id="editProfileModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in relative">
+      <button type="button" onclick="closeEditProfileModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-1">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+      <h3 class="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
+        <i class="fa-solid fa-user-pen text-blue-600"></i>
+        <span>แก้ไขข้อมูลส่วนตัว</span>
+      </h3>
+      <form id="editProfileForm" onsubmit="handleSaveProfile(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อผู้ใช้ (Username)</label>
+          <input type="text" id="profileUsername" disabled class="w-full bg-gray-100 border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm font-mono text-gray-500 cursor-not-allowed">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อแสดง / ชื่อ-นามสกุล *</label>
+          <input type="text" id="profileDisplayName" required class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+        </div>
+        <div class="pt-2">
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl transition shadow-sm text-sm">
+            บันทึกข้อมูล
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: เปลี่ยนรหัสผ่าน (Change Password Modal) -->
+  <div id="changePasswordModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in relative">
+      <button type="button" onclick="closeChangePasswordModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-1">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+      <h3 class="text-base font-bold text-gray-900 mb-3 flex items-center gap-2">
+        <i class="fa-solid fa-key text-amber-600"></i>
+        <span>เปลี่ยนรหัสผ่าน</span>
+      </h3>
+      <form id="changePasswordForm" onsubmit="handleSaveNewPassword(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">รหัสผ่านปัจจุบัน *</label>
+          <input type="password" id="currentPass" required placeholder="••••••••" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">รหัสผ่านใหม่ *</label>
+          <input type="password" id="newPass" required placeholder="••••••••" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">ยืนยันรหัสผ่านใหม่ *</label>
+          <input type="password" id="confirmNewPass" required placeholder="••••••••" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+        </div>
+        <div class="pt-2">
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl transition shadow-sm text-sm">
+            บันทึกรหัสผ่านใหม่
+          </button>
+        </div>
       </form>
     </div>
   </div>

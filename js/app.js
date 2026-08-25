@@ -4,9 +4,10 @@
  * 
  * รองรับ:
  * 1. บันทึกข้อมูลพิกัดและถ่ายภาพส่งหมาย (Mobile & Desktop)
- * 2. ล็อกอิน / สิทธิ์ผู้ใช้งาน (Admin / User)
- * 3. ตารางประวัติ DataTables (Google Sheet CSV)
- * 4. ลบข้อมูลใน Google Sheet และ Google Drive (Admin เท่านั้น)
+ * 2. ล็อกอิน / สิทธิ์ผู้ใช้งาน (Admin / User) + แก้ไขโปรไฟล์ & เปลี่ยนรหัสผ่าน
+ * 3. จัดการผู้ใช้ (Admin): แก้ไขข้อมูล, รีเซ็ตรหัสผ่าน, ตั้งค่ารหัสผ่านตั้งต้น
+ * 4. แคชตารางข้อมูล Google Sheet ลง localStorage พร้อมเงื่อนไข 1 นาที (1-Min Smart Cache)
+ * 5. ลบข้อมูลใน Google Sheet และ Google Drive (Admin เท่านั้น)
  */
 
 // Global Application State
@@ -26,6 +27,11 @@ const state = {
   currentUser: null,
   dataTableInstance: null
 };
+
+// Cache Constants
+const CACHE_KEY_SHEET_DATA = 'slts_sheet_data_cache';
+const CACHE_KEY_SHEET_TIME = 'slts_sheet_data_last_fetch';
+const CACHE_TTL_MS = 60 * 1000; // 1 นาที (60,000 มิลลิวินาที)
 
 /**
  * แสดงหน้าต่างโหลดข้อมูลแบบ SweetAlert2 โปร่งใส 100%
@@ -135,18 +141,28 @@ function initDOMElements() {
   elements.tabContentForm = document.getElementById('tabContentForm');
   elements.tabContentTable = document.getElementById('tabContentTable');
   elements.tabContentUsers = document.getElementById('tabContentUsers');
+  elements.cacheStatusBadge = document.getElementById('cacheStatusBadge');
 
-  // Auth Elements
+  // Auth & Dropdown Elements
   elements.loginModal = document.getElementById('loginModal');
   elements.btnLoginModal = document.getElementById('btnLoginModal');
-  elements.userProfileBadge = document.getElementById('userProfileBadge');
+  elements.userProfileContainer = document.getElementById('userProfileContainer');
+  elements.userDropdownMenu = document.getElementById('userDropdownMenu');
   elements.authUserName = document.getElementById('authUserName');
   elements.authUserRole = document.getElementById('authUserRole');
+  elements.dropdownUserFullName = document.getElementById('dropdownUserFullName');
+  elements.dropdownUsername = document.getElementById('dropdownUsername');
+  elements.dropdownRoleBadge = document.getElementById('dropdownRoleBadge');
   elements.userListBody = document.getElementById('userListBody');
+  elements.currentDefaultResetPassText = document.getElementById('currentDefaultResetPassText');
+
+  // Modals
+  elements.editProfileModal = document.getElementById('editProfileModal');
+  elements.changePasswordModal = document.getElementById('changePasswordModal');
 }
 
 // =========================================================================
-// 1. ระบบยืนยันตัวตนและการจัดการสิทธิ์ผู้ใช้งาน (Authentication & User Management)
+// 1. ระบบยืนยันตัวตนและการจัดการสิทธิ์ผู้ใช้งาน (Authentication & Profile)
 // =========================================================================
 
 function initAuthSystem() {
@@ -163,6 +179,11 @@ function initAuthSystem() {
       }
     ];
     localStorage.setItem('slts_users', JSON.stringify(users));
+  }
+
+  // รหัสผ่านตั้งต้นสำหรับการรีเซ็ต (Default Reset Password)
+  if (!localStorage.getItem('slts_default_reset_pass')) {
+    localStorage.setItem('slts_default_reset_pass', 'caogikojt02');
   }
 
   // ดึงเซสชันผู้ใช้ปัจจุบัน
@@ -186,14 +207,27 @@ function updateAuthUI() {
   // ปรับการแสดงผลโปรไฟล์และปุ่มล็อกอิน
   if (isLoggedIn) {
     elements.btnLoginModal.classList.add('hidden');
-    elements.userProfileBadge.classList.remove('hidden');
-    elements.userProfileBadge.classList.add('flex');
-    elements.authUserName.textContent = state.currentUser.name || state.currentUser.username;
+    elements.userProfileContainer.classList.remove('hidden');
+    elements.userProfileContainer.classList.add('flex');
+    
+    const displayName = state.currentUser.name || state.currentUser.username;
+    elements.authUserName.textContent = displayName;
     elements.authUserRole.textContent = state.currentUser.role.toUpperCase();
+    elements.dropdownUserFullName.textContent = displayName;
+    elements.dropdownUsername.textContent = `@${state.currentUser.username}`;
+    
+    if (isAdmin) {
+      elements.dropdownRoleBadge.className = 'inline-block mt-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200';
+      elements.dropdownRoleBadge.textContent = 'Admin (ผู้ดูแลระบบ)';
+    } else {
+      elements.dropdownRoleBadge.className = 'inline-block mt-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200';
+      elements.dropdownRoleBadge.textContent = 'User (เจ้าหน้าที่)';
+    }
   } else {
     elements.btnLoginModal.classList.remove('hidden');
-    elements.userProfileBadge.classList.add('hidden');
-    elements.userProfileBadge.classList.remove('flex');
+    elements.userProfileContainer.classList.add('hidden');
+    elements.userProfileContainer.classList.remove('flex');
+    if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
   }
 
   // Tab 3: จัดการผู้ใช้งาน (แสดงเฉพาะ Admin บน Desktop)
@@ -210,8 +244,28 @@ function updateAuthUI() {
     elements.btnSettings.classList.add('hidden');
   }
 
+  if (elements.currentDefaultResetPassText) {
+    elements.currentDefaultResetPassText.textContent = localStorage.getItem('slts_default_reset_pass') || 'caogikojt02';
+  }
+
   renderUserList();
 }
+
+// User Profile Dropdown Toggle
+window.toggleUserDropdown = function(e) {
+  if (e) e.stopPropagation();
+  if (elements.userDropdownMenu) {
+    elements.userDropdownMenu.classList.toggle('hidden');
+  }
+};
+
+window.handleGlobalClick = function(e) {
+  if (elements.userDropdownMenu && !elements.userDropdownMenu.classList.contains('hidden')) {
+    if (!elements.userProfileContainer.contains(e.target)) {
+      elements.userDropdownMenu.classList.add('hidden');
+    }
+  }
+};
 
 function openLoginModal() {
   elements.loginModal.classList.remove('hidden');
@@ -252,19 +306,21 @@ function handleLogin(e) {
     });
 
     if (state.dataTableInstance) {
-      loadGoogleSheetData();
+      loadGoogleSheetData(false);
     }
   } else {
     Swal.fire({
       icon: 'error',
       title: 'เข้าสู่ระบบไม่สำเร็จ',
-      text: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (ค่าเริ่มต้น admin / caogikojt02)',
+      text: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
       confirmButtonColor: '#2563eb'
     });
   }
 }
 
 function handleLogout() {
+  if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
+  
   Swal.fire({
     title: 'ต้องการออกจากระบบ?',
     text: 'คุณจะกลับสู่โหมดผู้ใช้งานทั่วไป',
@@ -290,6 +346,115 @@ function handleLogout() {
   });
 }
 
+// Edit Profile Modal
+window.openEditProfileModal = function() {
+  if (!state.currentUser) return;
+  if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
+  
+  document.getElementById('profileUsername').value = state.currentUser.username;
+  document.getElementById('profileDisplayName').value = state.currentUser.name || '';
+  
+  elements.editProfileModal.classList.remove('hidden');
+  elements.editProfileModal.classList.add('flex');
+  document.getElementById('profileDisplayName').focus();
+};
+
+window.closeEditProfileModal = function() {
+  elements.editProfileModal.classList.add('hidden');
+  elements.editProfileModal.classList.remove('flex');
+};
+
+window.handleSaveProfile = function(e) {
+  e.preventDefault();
+  if (!state.currentUser) return;
+
+  const newName = document.getElementById('profileDisplayName').value.trim();
+  if (!newName) return;
+
+  // อัปเดตใน users list
+  let users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  const idx = users.findIndex(u => u.username === state.currentUser.username);
+  if (idx !== -1) {
+    users[idx].name = newName;
+    localStorage.setItem('slts_users', JSON.stringify(users));
+  }
+
+  // อัปเดต current session
+  state.currentUser.name = newName;
+  localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+
+  closeEditProfileModal();
+  updateAuthUI();
+
+  Swal.fire({
+    icon: 'success',
+    title: 'บันทึกข้อมูลสำเร็จ',
+    text: `อัปเดตชื่อแสดงผลเป็น "${newName}" เรียบร้อยแล้ว`,
+    timer: 1500,
+    showConfirmButton: false
+  });
+};
+
+// Change Password Modal
+window.openChangePasswordModal = function() {
+  if (!state.currentUser) return;
+  if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
+  
+  document.getElementById('changePasswordForm').reset();
+  elements.changePasswordModal.classList.remove('hidden');
+  elements.changePasswordModal.classList.add('flex');
+  document.getElementById('currentPass').focus();
+};
+
+window.closeChangePasswordModal = function() {
+  elements.changePasswordModal.classList.add('hidden');
+  elements.changePasswordModal.classList.remove('flex');
+};
+
+window.handleSaveNewPassword = function(e) {
+  e.preventDefault();
+  if (!state.currentUser) return;
+
+  const curPass = document.getElementById('currentPass').value.trim();
+  const newPass = document.getElementById('newPass').value.trim();
+  const confirmPass = document.getElementById('confirmNewPass').value.trim();
+
+  let users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  const user = users.find(u => u.username === state.currentUser.username);
+
+  if (!user || user.password !== curPass) {
+    Swal.fire('รหัสผ่านเดิมไม่ถูกต้อง', 'กรุณาตรวจสอบรหัสผ่านปัจจุบันของคุณอีกครั้ง', 'error');
+    return;
+  }
+
+  if (newPass.length < 4) {
+    Swal.fire('รหัสผ่านสั้นเกินไป', 'โปรดกำหนดรหัสผ่านใหม่อย่างน้อย 4 ตัวอักษร', 'warning');
+    return;
+  }
+
+  if (newPass !== confirmPass) {
+    Swal.fire('รหัสผ่านไม่ตรงกัน', 'รหัสผ่านใหม่และยืนยันรหัสผ่านใหม่ไม่ตรงกัน', 'warning');
+    return;
+  }
+
+  user.password = newPass;
+  localStorage.setItem('slts_users', JSON.stringify(users));
+
+  closeChangePasswordModal();
+
+  Swal.fire({
+    icon: 'success',
+    title: 'เปลี่ยนรหัสผ่านสำเร็จ',
+    text: 'รหัสผ่านของคุณได้รับการเปลี่ยนเรียบร้อยแล้ว',
+    timer: 1800,
+    showConfirmButton: false
+  });
+};
+
+// =========================================================================
+// 2. จัดการผู้ใช้งาน (User Management - Admin Only)
+// =========================================================================
+
 function handleCreateUser(e) {
   e.preventDefault();
   if (!state.currentUser || state.currentUser.role !== 'admin') {
@@ -298,6 +463,7 @@ function handleCreateUser(e) {
   }
 
   const username = document.getElementById('newUsername').value.trim();
+  const fullName = document.getElementById('newFullName').value.trim();
   const password = document.getElementById('newPassword').value.trim();
   const role = document.getElementById('newRole').value;
 
@@ -315,7 +481,7 @@ function handleCreateUser(e) {
     username: username,
     password: password,
     role: role,
-    name: role === 'admin' ? `Admin (${username})` : `เจ้าหน้าที่ (${username})`,
+    name: fullName || (role === 'admin' ? `Admin (${username})` : `เจ้าหน้าที่ (${username})`),
     createdAt: dateNow
   });
 
@@ -343,26 +509,203 @@ function renderUserList() {
 
     const isAdmin = u.role === 'admin';
     const roleBadge = isAdmin
-      ? `<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">Admin</span>`
-      : `<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">User</span>`;
+      ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">Admin</span>`
+      : `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">User</span>`;
 
-    const canDelete = u.username !== 'admin' && (state.currentUser && state.currentUser.role === 'admin');
-    const deleteBtn = canDelete
-      ? `<button type="button" onclick="deleteUser('${u.username}')" class="text-xs text-red-600 hover:text-red-800 font-semibold px-2.5 py-1 rounded-lg hover:bg-red-50 transition"><i class="fa-solid fa-trash mr-1"></i>ลบ</button>`
-      : `<span class="text-xs text-gray-400 italic">ผู้ดูแลระบบหลัก</span>`;
+    const isPrimaryAdmin = u.username === 'admin';
+    
+    let actionButtons = '';
+    if (state.currentUser && state.currentUser.role === 'admin') {
+      actionButtons = `
+        <div class="flex items-center justify-end gap-1.5">
+          <button type="button" onclick="editUserModal('${u.username}')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold border border-blue-200 transition" title="แก้ไขข้อมูลผู้ใช้">
+            <i class="fa-solid fa-pen-to-square mr-1"></i>แก้ไข
+          </button>
+          <button type="button" onclick="resetUserPasswordModal('${u.username}')" class="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-semibold border border-amber-200 transition" title="รีเซ็ตรหัสผ่าน">
+            <i class="fa-solid fa-key mr-1"></i>รีเซ็ตรหัส
+          </button>
+          ${!isPrimaryAdmin ? `
+            <button type="button" onclick="deleteUser('${u.username}')" class="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg text-xs font-semibold border border-red-200 transition" title="ลบผู้ใช้">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          ` : '<span class="text-[11px] text-gray-400 italic ml-1">หลัก</span>'}
+        </div>
+      `;
+    }
 
     tr.innerHTML = `
-      <td class="py-3 px-3 font-semibold text-gray-800 flex items-center gap-2">
-        <i class="fa-solid ${isAdmin ? 'fa-shield-halved text-purple-600' : 'fa-user text-blue-600'}"></i>
-        <span>${u.username}</span>
+      <td class="py-3 px-4">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-full ${isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'} flex items-center justify-center font-bold text-xs">
+            <i class="fa-solid ${isAdmin ? 'fa-shield-halved' : 'fa-user'}"></i>
+          </div>
+          <div>
+            <p class="font-bold text-gray-900 leading-tight">${u.name || u.username}</p>
+            <p class="text-xs text-gray-500 font-mono">@${u.username}</p>
+          </div>
+        </div>
       </td>
-      <td class="py-3 px-3">${roleBadge}</td>
-      <td class="py-3 px-3 text-xs text-gray-500 font-mono">${u.createdAt || '-'}</td>
-      <td class="py-3 px-3 text-right">${deleteBtn}</td>
+      <td class="py-3 px-4">${roleBadge}</td>
+      <td class="py-3 px-4 text-xs text-gray-500 font-mono">${u.createdAt || '-'}</td>
+      <td class="py-3 px-4 text-right">${actionButtons}</td>
     `;
     elements.userListBody.appendChild(tr);
   });
 }
+
+// Edit User Modal (Admin)
+window.editUserModal = function(username) {
+  const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  const user = users.find(u => u.username === username);
+  if (!user) return;
+
+  const isPrimary = username === 'admin';
+
+  Swal.fire({
+    title: `แก้ไขข้อมูลผู้ใช้ (@${username})`,
+    html: `
+      <div class="text-left space-y-3 pt-2">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อ-นามสกุล / ชื่อแสดง *</label>
+          <input type="text" id="swalEditName" value="${user.name || user.username}" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) *</label>
+          <select id="swalEditRole" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm" ${isPrimary ? 'disabled' : ''}>
+            <option value="user" ${user.role === 'user' ? 'selected' : ''}>User (เจ้าหน้าที่ทั่วไป)</option>
+            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin (ผู้ดูแลระบบ)</option>
+          </select>
+          ${isPrimary ? '<p class="text-[11px] text-gray-400 mt-1">ผู้ดูแลระบบหลักไม่สามารถเปลี่ยน Role ได้</p>' : ''}
+        </div>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'บันทึกการแก้ไข',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#2563eb',
+    preConfirm: () => {
+      const name = document.getElementById('swalEditName').value.trim();
+      const role = document.getElementById('swalEditRole').value;
+      if (!name) {
+        Swal.showValidationMessage('กรุณาระบุชื่อ-นามสกุล');
+        return false;
+      }
+      return { name, role };
+    }
+  }).then((res) => {
+    if (res.isConfirmed && res.value) {
+      user.name = res.value.name;
+      if (!isPrimary) user.role = res.value.role;
+      localStorage.setItem('slts_users', JSON.stringify(users));
+
+      // ถ้าแก้ไขบัญชีที่ล็อกอินอยู่ ให้ sync session ด้วย
+      if (state.currentUser && state.currentUser.username === username) {
+        state.currentUser.name = user.name;
+        state.currentUser.role = user.role;
+        localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+      }
+
+      updateAuthUI();
+      Swal.fire('สำเร็จ', `อัปเดตข้อมูลผู้ใช้ @${username} เรียบร้อยแล้ว`, 'success');
+    }
+  });
+};
+
+// Reset User Password Modal (Admin)
+window.resetUserPasswordModal = function(username) {
+  const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  const user = users.find(u => u.username === username);
+  if (!user) return;
+
+  const defaultPass = localStorage.getItem('slts_default_reset_pass') || 'caogikojt02';
+
+  Swal.fire({
+    title: `รีเซ็ตรหัสผ่าน (@${username})`,
+    html: `
+      <div class="text-left space-y-3.5 pt-2">
+        <p class="text-xs text-gray-600">เลือกรีเซ็ตรหัสผ่านเป็นค่าตั้งต้น หรือกำหนดรหัสผ่านใหม่เอง:</p>
+        
+        <div class="p-3 bg-blue-50/80 border border-blue-200 rounded-xl">
+          <p class="text-xs font-bold text-blue-900 mb-1">รหัสผ่านตั้งต้นของระบบ:</p>
+          <div class="flex items-center justify-between">
+            <span class="font-mono text-sm font-bold text-blue-700">${defaultPass}</span>
+            <button type="button" id="btnApplyDefaultPass" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition shadow-sm">
+              ใช้รหัสตั้งต้นนี้
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">หรือ กำหนดรหัสผ่านใหม่เอง:</label>
+          <input type="text" id="swalCustomPass" placeholder="พิมพ์รหัสผ่านใหม่" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm font-mono">
+        </div>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'บันทึกรหัสผ่านใหม่',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#2563eb',
+    didOpen: () => {
+      const applyBtn = document.getElementById('btnApplyDefaultPass');
+      if (applyBtn) {
+        applyBtn.addEventListener('click', () => {
+          document.getElementById('swalCustomPass').value = defaultPass;
+        });
+      }
+    },
+    preConfirm: () => {
+      const pass = document.getElementById('swalCustomPass').value.trim();
+      if (!pass) {
+        Swal.showValidationMessage('กรุณาระบุรหัสผ่าน หรือกดปุ่ม "ใช้รหัสตั้งต้นนี้"');
+        return false;
+      }
+      return pass;
+    }
+  }).then((res) => {
+    if (res.isConfirmed && res.value) {
+      user.password = res.value;
+      localStorage.setItem('slts_users', JSON.stringify(users));
+
+      Swal.fire({
+        icon: 'success',
+        title: 'รีเซ็ตรหัสผ่านสำเร็จ',
+        html: `รีเซ็ตรหัสผ่านของ <b>@${username}</b> เป็น: <br><span class="font-mono text-base font-bold text-blue-600 mt-1 inline-block bg-blue-50 px-3 py-1 rounded-lg border border-blue-200">${res.value}</span>`,
+        confirmButtonColor: '#2563eb'
+      });
+    }
+  });
+};
+
+// Set Default Reset Password Config Modal (Admin)
+window.openDefaultPasswordConfigModal = function() {
+  const currentDefault = localStorage.getItem('slts_default_reset_pass') || 'caogikojt02';
+
+  Swal.fire({
+    title: 'ตั้งค่ารหัสผ่านตั้งต้นของระบบ',
+    text: 'รหัสผ่านนี้จะถูกใช้เป็นค่าเริ่มต้นเมื่อ Admin กดยืนยันรีเซ็ตรหัสผ่านให้แก่ผู้ใช้งาน',
+    input: 'text',
+    inputValue: currentDefault,
+    inputPlaceholder: 'เช่น caogikojt02 หรือ 123456',
+    showCancelButton: true,
+    confirmButtonText: 'บันทึกค่า',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#2563eb',
+    inputValidator: (val) => {
+      if (!val || !val.trim()) {
+        return 'กรุณาระบุรหัสผ่านตั้งต้น';
+      }
+    }
+  }).then((res) => {
+    if (res.isConfirmed && res.value) {
+      const newVal = res.value.trim();
+      localStorage.setItem('slts_default_reset_pass', newVal);
+      if (elements.currentDefaultResetPassText) {
+        elements.currentDefaultResetPassText.textContent = newVal;
+      }
+      Swal.fire('บันทึกสำเร็จ', `รหัสผ่านตั้งต้นถูกเปลี่ยนเป็น "${newVal}" เรียบร้อยแล้ว`, 'success');
+    }
+  });
+};
 
 window.deleteUser = function(username) {
   if (!state.currentUser || state.currentUser.role !== 'admin') return;
@@ -387,11 +730,10 @@ window.deleteUser = function(username) {
 };
 
 // =========================================================================
-// 2. การสลับหน้า Tab (Navigation System)
+// 3. การสลับหน้า Tab (Navigation System)
 // =========================================================================
 
 window.switchTab = function(tabName) {
-  // รีเซ็ตคลาสปุ่มแท็บ
   document.querySelectorAll('.tab-nav-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(pane => {
     pane.classList.add('hidden');
@@ -406,7 +748,8 @@ window.switchTab = function(tabName) {
     elements.tabBtnTable.classList.add('active');
     elements.tabContentTable.classList.remove('hidden');
     elements.tabContentTable.classList.add('active');
-    loadGoogleSheetData();
+    // โหลดข้อมูลแบบ Smart Cache 1 นาที
+    loadGoogleSheetData(false);
   } else if (tabName === 'users') {
     elements.tabBtnUsers.classList.add('active');
     elements.tabContentUsers.classList.remove('hidden');
@@ -424,13 +767,37 @@ function initResponsiveUI() {
 }
 
 // =========================================================================
-// 3. ตารางประวัติการส่งหมาย DataTables (ดึง CSV จาก Google Sheet)
+// 4. ตารางประวัติการส่งหมาย DataTables (Smart Cache 1 นาที ใน LocalStorage)
 // =========================================================================
 
-window.loadGoogleSheetData = function() {
+/**
+ * ดึงข้อมูล Google Sheet ด้วยระบบ Smart Cache 1 นาที
+ * @param {boolean} forceRefresh - บังคับดึงข้อมูลสดจาก Google Sheet หรือไม่
+ */
+window.loadGoogleSheetData = function(forceRefresh = false) {
+  const cachedDataStr = localStorage.getItem(CACHE_KEY_SHEET_DATA);
+  const lastFetchTime = Number(localStorage.getItem(CACHE_KEY_SHEET_TIME) || 0);
+  const now = Date.now();
+  const timeElapsed = now - lastFetchTime;
+  const isCacheValid = cachedDataStr && timeElapsed < CACHE_TTL_MS;
+
+  // 1. ถ้ามี Cache และยังไม่หมดอายุ (ยังไม่ถึง 1 นาที) และไม่ได้กดบังคับรีเฟรช -> โหลดจาก localStorage ทันที!
+  if (!forceRefresh && isCacheValid) {
+    try {
+      const cachedRows = JSON.parse(cachedDataStr);
+      const timeStr = new Date(lastFetchTime).toLocaleTimeString('th-TH');
+      updateCacheBadgeUI(true, timeStr);
+      renderDataTable(cachedRows);
+      return;
+    } catch (e) {
+      console.warn('Cache parse error, falling back to network fetch:', e);
+    }
+  }
+
+  // 2. ถ้าไม่มี Cache, Cache หมดอายุ (เกิน 1 นาที), หรือผู้ใช้กดปุ่มรีเฟรช -> โหลดสดจาก Google Sheet
   showCustomLoading('กำลังดึงข้อมูลประวัติการส่งหมาย...', 'กำลังเชื่อมต่อ Google Sheet');
 
-  const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${Date.now()}`;
+  const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${now}`;
 
   Papa.parse(csvFetchUrl, {
     download: true,
@@ -438,11 +805,40 @@ window.loadGoogleSheetData = function() {
     skipEmptyLines: true,
     complete: function(results) {
       hideCustomLoading();
-      renderDataTable(results.data || []);
+      const rows = results.data || [];
+      
+      // บันทึกลง localStorage
+      try {
+        localStorage.setItem(CACHE_KEY_SHEET_DATA, JSON.stringify(rows));
+        localStorage.setItem(CACHE_KEY_SHEET_TIME, String(Date.now()));
+      } catch (saveErr) {
+        console.warn('Could not save to localStorage:', saveErr);
+      }
+
+      const timeStr = new Date().toLocaleTimeString('th-TH');
+      updateCacheBadgeUI(false, timeStr);
+      renderDataTable(rows);
     },
     error: function(err) {
       console.error('CSV fetch error:', err);
       hideCustomLoading();
+
+      // หากดึงสดล้มเหลว แต่มีแคชเดิม ให้ใช้แคชเดิมแทน
+      if (cachedDataStr) {
+        try {
+          const cachedRows = JSON.parse(cachedDataStr);
+          renderDataTable(cachedRows);
+          Swal.fire({
+            icon: 'info',
+            title: 'แสดงข้อมูลจากแคชในเครื่อง',
+            text: 'ไม่สามารถเชื่อมต่ออินเทอร์เน็ตได้ ระบบจึงแสดงข้อมูลล่าสุดที่บันทึกไว้',
+            timer: 2000,
+            showConfirmButton: false
+          });
+          return;
+        } catch (e) {}
+      }
+
       Swal.fire({
         icon: 'warning',
         title: 'ไม่สามารถดึงข้อมูลจาก Google Sheet ได้โดยตรง',
@@ -455,6 +851,17 @@ window.loadGoogleSheetData = function() {
     }
   });
 };
+
+function updateCacheBadgeUI(isFromCache, timeStr) {
+  if (!elements.cacheStatusBadge) return;
+  if (isFromCache) {
+    elements.cacheStatusBadge.className = 'text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200';
+    elements.cacheStatusBadge.innerHTML = `<i class="fa-solid fa-clock-rotate-left mr-1"></i>แคช (${timeStr})`;
+  } else {
+    elements.cacheStatusBadge.className = 'text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200';
+    elements.cacheStatusBadge.innerHTML = `<i class="fa-solid fa-bolt mr-1"></i>ข้อมูลสด (${timeStr})`;
+  }
+}
 
 function renderDataTable(rows) {
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
@@ -538,7 +945,7 @@ function renderDataTable(rows) {
   state.dataTableInstance = $('#summonsDataTable').DataTable({
     pageLength: 10,
     responsive: true,
-    order: [[0, 'desc']], // เรียงตามวันเวลาล่าสุด
+    order: [[0, 'desc']],
     language: {
       search: "ค้นหาข้อมูล:",
       lengthMenu: "แสดง _MENU_ แถวต่อหน้า",
@@ -560,7 +967,6 @@ function renderDataTable(rows) {
  * แสดงภาพถ่ายเต็มด้วย SweetAlert พร้อมปุ่มดาวน์โหลด
  */
 window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, lat, lng) {
-  // แปลง URL รูปภาพใน Drive ให้อยู่ในโหมด Direct View
   let directImgUrl = imgUrl;
   const match = imgUrl.match(/id=([a-zA-Z0-9_-]+)/) || imgUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
   if (match && match[1]) {
@@ -643,6 +1049,10 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
         hideCustomLoading();
 
         if (resJson.status === 'success') {
+          // ลบแคชในเครื่องด้วย
+          localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+          localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
           Swal.fire({
             icon: 'success',
             title: 'ลบข้อมูลสำเร็จ',
@@ -650,8 +1060,8 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
             timer: 2000,
             showConfirmButton: false
           });
-          // โหลดตารางใหม่
-          loadGoogleSheetData();
+          // โหลดตารางสดใหม่ทันที
+          loadGoogleSheetData(true);
         } else {
           throw new Error(resJson.message || 'ไม่สามารถลบข้อมูลได้');
         }
@@ -671,7 +1081,7 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
 };
 
 // =========================================================================
-// 4. ฟอร์มและระบบบันทึกส่งหมาย (Summons Form & Camera)
+// 5. ฟอร์มและระบบบันทึกส่งหมาย (Summons Form & Camera)
 // =========================================================================
 
 function initDistrictsDropdown() {
@@ -731,7 +1141,6 @@ function getFormattedCaseNumber() {
 }
 
 function initFormEventListeners() {
-  // สลับประเภทศาล
   elements.courtTypeSelect.addEventListener('change', (e) => {
     const val = e.target.value;
     if (val === 'ศาลอื่น') {
@@ -747,7 +1156,6 @@ function initFormEventListeners() {
     }
   });
 
-  // สลับประเภทสถานที่
   elements.locationTypeSelect.addEventListener('change', (e) => {
     const isHouse = e.target.value === 'หมายบ้าน';
     if (isHouse) {
@@ -1318,6 +1726,10 @@ async function executeUpload() {
     }
 
     if (resJson && resJson.status === 'success') {
+      // เคลียร์แคชเพื่อบังคับให้ดึงข้อมูลใหม่
+      localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+      localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
       Swal.fire({
         icon: 'success',
         title: 'บันทึกสำเร็จ!',
