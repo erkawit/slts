@@ -24,8 +24,13 @@ if (!fs.existsSync(publicDir)) {
   fs.mkdirSync(publicDir, { recursive: true });
 }
 
-// Copy index.html
-fs.copyFileSync(path.join(__dirname, 'index.html'), path.join(publicDir, 'index.html'));
+// Copy files
+['index.html', 'manifest.json', 'sw.js'].forEach(file => {
+  const src = path.join(__dirname, file);
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, path.join(publicDir, file));
+  }
+});
 
 // Copy folders
 ['css', 'js', 'img'].forEach(folder => {

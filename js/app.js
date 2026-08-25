@@ -33,6 +33,199 @@ const CACHE_KEY_SHEET_DATA = 'slts_sheet_data_cache';
 const CACHE_KEY_SHEET_TIME = 'slts_sheet_data_last_fetch';
 const CACHE_TTL_MS = 60 * 1000; // 1 นาที (60,000 มิลลิวินาที)
 
+// Offline Queue Storage Key
+const OFFLINE_QUEUE_KEY = 'slts_offline_queue';
+
+function getOfflineQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function addToOfflineQueue(item) {
+  const queue = getOfflineQueue();
+  const queueItem = {
+    id: 'off_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    createdAt: new Date().toISOString(),
+    ...item
+  };
+  queue.push(queueItem);
+  try {
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+  } catch (e) {
+    console.error('Save offline queue error:', e);
+  }
+  updateOfflineBadgeUI();
+  return queueItem;
+}
+
+function removeFromOfflineQueue(id) {
+  let queue = getOfflineQueue();
+  queue = queue.filter(q => q.id !== id);
+  try {
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+  } catch (e) {
+    console.error('Remove offline queue error:', e);
+  }
+  updateOfflineBadgeUI();
+}
+
+function updateOfflineBadgeUI() {
+  const queue = getOfflineQueue();
+  const badgeBtn = document.getElementById('btnSyncOfflineQueue');
+  const countBadge = document.getElementById('offlineQueueCountBadge');
+  const netBadge = document.getElementById('networkStatusBadge');
+  const netDot = document.getElementById('networkStatusDot');
+  const netText = document.getElementById('networkStatusText');
+
+  const isOnline = navigator.onLine;
+
+  if (netBadge && netDot && netText) {
+    if (isOnline) {
+      netBadge.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm select-none';
+      netDot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
+      netText.textContent = 'ออนไลน์';
+    } else {
+      netBadge.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 shadow-sm select-none';
+      netDot.className = 'w-2 h-2 rounded-full bg-rose-500';
+      netText.textContent = 'ออฟไลน์';
+    }
+  }
+
+  if (badgeBtn && countBadge) {
+    if (queue.length > 0) {
+      badgeBtn.classList.remove('hidden');
+      badgeBtn.classList.add('inline-flex');
+      countBadge.textContent = `รอซิงค์ (${queue.length})`;
+    } else {
+      badgeBtn.classList.add('hidden');
+      badgeBtn.classList.remove('inline-flex');
+    }
+  }
+}
+
+function initOfflineSyncSystem() {
+  window.addEventListener('online', () => {
+    updateOfflineBadgeUI();
+    const queue = getOfflineQueue();
+    if (queue.length > 0) {
+      Swal.fire({
+        icon: 'info',
+        title: 'เชื่อมต่ออินเทอร์เน็ตแล้ว',
+        html: `ตรวจพบข้อมูลที่บันทึกไว้ในโหมดออฟไลน์จำนวน <b>${queue.length}</b> รายการ<br>ระบบจะเริ่มทำการซิงค์ขึ้น Google Drive & Sheet ทันที`,
+        timer: 3000,
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false
+      });
+      syncOfflineQueue(false);
+    }
+  });
+
+  window.addEventListener('offline', () => {
+    updateOfflineBadgeUI();
+    Swal.fire({
+      icon: 'warning',
+      title: 'เข้าสู่โหมดออฟไลน์',
+      text: 'ระบบจะจัดเก็บภาพถ่ายและข้อมูลลงในเครื่องให้อัตโนมัติ',
+      timer: 3000,
+      toast: true,
+      position: 'top-end',
+      showConfirmButton: false
+    });
+  });
+
+  updateOfflineBadgeUI();
+}
+
+async function syncOfflineQueue(isManual = false) {
+  const queue = getOfflineQueue();
+
+  if (!navigator.onLine) {
+    if (isManual) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'ไม่มีการเชื่อมต่ออินเทอร์เน็ต',
+        text: 'กรุณาเชื่อมต่อ Wi-Fi หรือ Cellular ก่อนทำการซิงค์ข้อมูล',
+        showCloseButton: true,
+        allowOutsideClick: false,
+        confirmButtonColor: '#2563eb'
+      });
+    }
+    return;
+  }
+
+  if (queue.length === 0) {
+    if (isManual) {
+      Swal.fire({
+        icon: 'success',
+        title: 'ไม่มีข้อมูลค้างในคิว',
+        text: 'ข้อมูลทั้งหมดได้รับการซิงค์ขึ้น Google Drive & Sheet เรียบร้อยแล้ว',
+        showCloseButton: true,
+        allowOutsideClick: false,
+        confirmButtonColor: '#2563eb'
+      });
+    }
+    return;
+  }
+
+  // ซิงค์ข้อมูลทีละรายการ
+  let successCount = 0;
+  let failCount = 0;
+
+  showCustomLoading(`กำลังซิงค์ข้อมูล (${queue.length} รายการ)...`, 'กำลังนำส่งข้อมูลขึ้น Google Drive & Sheet');
+
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    try {
+      const response = await fetch(state.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(item.payload)
+      });
+      const resJson = await response.json();
+      if (resJson && resJson.status === 'success') {
+        removeFromOfflineQueue(item.id);
+        successCount++;
+      } else {
+        failCount++;
+      }
+    } catch (err) {
+      console.error('Sync item error:', err);
+      failCount++;
+    }
+  }
+
+  hideCustomLoading();
+  updateOfflineBadgeUI();
+  localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+  localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
+  if (successCount > 0) {
+    Swal.fire({
+      icon: 'success',
+      title: 'ซิงค์ข้อมูลสำเร็จ!',
+      html: `นำส่งข้อมูลจากโหมดออฟไลน์ขึ้น Google Drive & Sheet สำเร็จ <b>${successCount}</b> รายการ${failCount > 0 ? `<br><span class="text-xs text-red-500">คงเหลือไม่สำเร็จ ${failCount} รายการ</span>` : ''}`,
+      showCloseButton: true,
+      allowOutsideClick: false,
+      confirmButtonColor: '#2563eb'
+    }).then(() => {
+      loadGoogleSheetData(true);
+    });
+  } else if (failCount > 0) {
+    Swal.fire({
+      icon: 'error',
+      title: 'การซิงค์ล้มเหลว',
+      text: 'ไม่สามารถส่งข้อมูลได้ กรุณาลองใหม่อีกครั้งเมื่อมีสัญญาณอินเทอร์เน็ตที่เสถียร',
+      showCloseButton: true,
+      allowOutsideClick: false,
+      confirmButtonColor: '#2563eb'
+    });
+  }
+}
+
 /**
  * แสดงหน้าต่างโหลดข้อมูลแบบ SweetAlert2 โปร่งใส 100%
  */
@@ -69,6 +262,7 @@ const elements = {};
 document.addEventListener('DOMContentLoaded', () => {
   initDOMElements();
   initAuthSystem();
+  initOfflineSyncSystem();
   initDistrictsDropdown();
   initCasePrefixes();
   initCaseYearDropdowns();
@@ -2585,19 +2779,50 @@ async function captureAndProcessPhoto() {
     // 1. บันทึกลงอุปกรณ์ทันที (เงียบๆ ไม่เด้งถามเปิดไฟล์)
     WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
 
-    // 2. บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที (Background)
-    saveInitialRecordToSheet(payloadData, imageFilename);
-
-    // 3. ปรับลดขนาดรูปภาพให้ <= 1MB
+    // 2. ปรับลดขนาดรูปภาพให้ <= 1MB
     const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
 
-    // 4. อัปโหลดขึ้น Google Drive ทันทีพร้อม Progress Bar (ปิดไม่ได้จนกว่าจะเสร็จ)
     const uploadPayload = {
       ...payloadData,
       fileName: imageFilename,
       imageBase64: compressedImageBase64
     };
 
+    // 3. ตรวจสอบสถานะการเชื่อมต่ออินเทอร์เน็ต
+    if (!navigator.onLine) {
+      // โหมดออฟไลน์: จัดเก็บเข้า Offline Queue
+      addToOfflineQueue({
+        payload: uploadPayload,
+        fileName: imageFilename,
+        caseNumber: caseNumber
+      });
+
+      Swal.fire({
+        icon: 'info',
+        title: 'บันทึกสำเร็จ (โหมดออฟไลน์)',
+        html: `
+          <div class="text-left text-xs space-y-2 text-gray-700">
+            <p>บันทึกภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงในเครื่องเรียบร้อยแล้ว 📷</p>
+            <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800">
+              <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-600"></i>
+              <b>แจ้งเตือน:</b> เนื่องจากขณะนี้ไม่มีสัญญาณอินเทอร์เน็ต ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์</b> ในเครื่องไว้แล้ว และจะทำการอัปโหลดขึ้น Google Drive & Sheet ให้โดยอัตโนมัติเมื่อท่านเชื่อมต่ออินเทอร์เน็ต
+            </div>
+          </div>
+        `,
+        confirmButtonText: 'ตกลง',
+        confirmButtonColor: '#2563eb',
+        showCloseButton: true,
+        allowOutsideClick: false
+      }).then(() => {
+        resetFormForNextCase();
+      });
+      return;
+    }
+
+    // 4. บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที (Background)
+    saveInitialRecordToSheet(payloadData, imageFilename);
+
+    // 5. อัปโหลดขึ้น Google Drive ทันทีพร้อม Progress Bar (ปิดไม่ได้จนกว่าจะเสร็จ)
     const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
 
     // เคลียร์แคช
@@ -2620,12 +2845,38 @@ async function captureAndProcessPhoto() {
   } catch (error) {
     console.error('Capture/Upload error:', error);
     hideCustomLoading();
+
+    // บันทึกเข้า Offline Queue เผื่ออัปโหลดใหม่
+    try {
+      const caseNumber = getFormattedCaseNumber();
+      const baseFilename = caseNumber.replace(/\//g, '-');
+      const imageFilename = baseFilename + '.jpg';
+      addToOfflineQueue({
+        payload: {
+          caseNumber: caseNumber,
+          courtType: elements.courtTypeSelect.value,
+          district: elements.districtSelect.value,
+          subdistrict: elements.subdistrictSelect.value,
+          locationType: elements.locationTypeSelect.value,
+          locationText: getFullLocationText(),
+          lat: state.lat,
+          lng: state.lng,
+          heading: window.compassManager ? window.compassManager.getHeading() : 0,
+          dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+          fileName: imageFilename
+        },
+        fileName: imageFilename,
+        caseNumber: caseNumber
+      });
+    } catch (e) {
+      console.warn('Queue fallback notice:', e);
+    }
+
     Swal.fire({
       icon: 'warning',
-      title: 'การอัปโหลดขัดข้อง',
-      html: `<p class="text-sm text-gray-700 mb-2">บันทึกรูปภาพลงอุปกรณ์และบันทึกข้อมูลเบื้องต้นลง Google Sheet แล้ว แต่การอัปโหลดไฟล์ภาพขึ้น Google Drive ไม่สำเร็จ</p>
-             <p class="text-xs text-red-600 font-semibold mb-3">${error.message}</p>
-             <p class="text-xs text-gray-500">ท่านสามารถล็อกอินบนหน้าจอคอมพิวเตอร์ (>768px) แล้วกดปุ่ม <b>"อัปโหลดภาพหมาย"</b> เพื่ออัปโหลดภาพย้อนหลังได้ในภายหลัง</p>`,
+      title: 'การอัปโหลดออนไลน์ขัดข้อง',
+      html: `<p class="text-sm text-gray-700 mb-2">บันทึกรูปภาพลงอุปกรณ์เรียบร้อยแล้ว แต่การอัปโหลดขึ้น Google Drive ขัดข้อง</p>
+             <p class="text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 mb-3"><i class="fa-solid fa-cloud-arrow-up mr-1"></i>ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์</b> ให้แล้ว โดยจะทำการซิงค์ให้อัตโนมัติเมื่อเชื่อมต่ออินเทอร์เน็ต</p>`,
       confirmButtonText: 'ตกลง',
       confirmButtonColor: '#2563eb',
       showCloseButton: true,
@@ -2678,19 +2929,41 @@ async function handleFallbackFile(e) {
     // 1. บันทึกลงอุปกรณ์ทันที
     WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
 
-    // 2. บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที
-    saveInitialRecordToSheet(payloadData, imageFilename);
-
-    // 3. ปรับลดขนาดรูปภาพให้ <= 1MB
+    // 2. ปรับลดขนาดรูปภาพให้ <= 1MB
     const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
 
-    // 4. อัปโหลดขึ้น Google Drive ทันทีพร้อม Progress Bar
     const uploadPayload = {
       ...payloadData,
       fileName: imageFilename,
       imageBase64: compressedImageBase64
     };
 
+    if (!navigator.onLine) {
+      addToOfflineQueue({
+        payload: uploadPayload,
+        fileName: imageFilename,
+        caseNumber: caseNumber
+      });
+
+      Swal.fire({
+        icon: 'info',
+        title: 'บันทึกสำเร็จ (โหมดออฟไลน์)',
+        html: `<p class="text-gray-700">บันทึกภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงในเครื่องเรียบร้อยแล้ว</p>
+               <p class="text-xs text-amber-600 font-semibold mt-2"><i class="fa-solid fa-cloud-arrow-up mr-1"></i>ระบบได้เก็บเข้าคิวออฟไลน์ไว้แล้ว และจะทำการอัปโหลดขึ้น Google Drive & Sheet ให้อัตโนมัติเมื่อเชื่อมต่ออินเทอร์เน็ต</p>`,
+        confirmButtonText: 'ตกลง',
+        confirmButtonColor: '#2563eb',
+        showCloseButton: true,
+        allowOutsideClick: false
+      }).then(() => {
+        resetFormForNextCase();
+      });
+      return;
+    }
+
+    // 3. บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที
+    saveInitialRecordToSheet(payloadData, imageFilename);
+
+    // 4. อัปโหลดขึ้น Google Drive ทันทีพร้อม Progress Bar
     const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
 
     localStorage.removeItem(CACHE_KEY_SHEET_DATA);

@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย - ศาลจังหวัดอุดรธานี</title>
   
+  <!-- PWA & Mobile Web App Meta -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1d4ed8">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ส่งหมาย อุดร">
+  
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="img/logo.png">
   <link rel="apple-touch-icon" href="img/logo.png">
@@ -69,7 +77,20 @@
       </nav>
 
       <!-- Right Header Controls -->
-      <div class="flex items-center space-x-2.5">
+      <div class="flex items-center space-x-2">
+        
+        <!-- Network & Offline Queue Status Badge -->
+        <div id="networkStatusBadge" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm select-none" title="สถานะการเชื่อมต่อเครือข่าย">
+          <span id="networkStatusDot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span id="networkStatusText" class="hidden xs:inline">ออนไลน์</span>
+        </div>
+
+        <!-- Sync Offline Queue Button (แสดงเมื่อมีข้อมูลค้างรอซิงค์) -->
+        <button id="btnSyncOfflineQueue" type="button" onclick="syncOfflineQueue(true)" class="hidden items-center gap-1.5 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-full text-[11px] sm:text-xs font-bold shadow transition animate-bounce select-none" title="มีข้อมูลบันทึกในโหมดออฟไลน์ กดเพื่อซิงค์ขึ้น Google Drive ทันที">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+          <span id="offlineQueueCountBadge">ซิงค์ (0)</span>
+        </button>
+
         <!-- Settings Button (แสดงเฉพาะจอ > 768px และเป็น Admin เท่านั้น) -->
         <button id="btnSettings" type="button" title="ตั้งค่าเชื่อมต่อ Google Drive (เฉพาะ Admin)" class="hidden p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition border border-transparent hover:border-blue-200">
           <i class="fa-solid fa-gear text-lg"></i>
@@ -774,5 +795,16 @@
   <script src="js/map.js"></script>
   <script src="js/watermark.js"></script>
   <script src="js/app.js"></script>
+
+  <!-- PWA Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then((reg) => console.log('[PWA] Service Worker registered successfully:', reg.scope))
+          .catch((err) => console.warn('[PWA] Service Worker registration failed:', err));
+      });
+    }
+  </script>
 </body>
 </html>
