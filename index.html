@@ -612,7 +612,7 @@
     </div>
   </div>
 
-  <!-- Modal: กล้องถ่ายภาพสด (Camera Live Viewfinder Modal พร้อม Live Watermark HUD & Auto Gyroscope Orientation) -->
+  <!-- Modal: กล้องถ่ายภาพสด (Camera Live Viewfinder Modal พร้อม Live Watermark HUD & Manual Orientation Switcher) -->
   <div id="cameraModal" class="fixed inset-0 bg-black/95 z-50 hidden flex-col justify-between select-none">
     <!-- Top Bar -->
     <div class="p-3 sm:p-4 flex items-center justify-between text-white bg-gradient-to-b from-black/90 to-transparent z-10">
@@ -622,19 +622,23 @@
       </div>
       
       <div class="flex items-center gap-2">
-        <span id="txtOrientationMode" class="text-[11px] font-semibold text-gray-300 bg-white/10 px-2.5 py-1 rounded-lg">แนวตั้ง 3:4 (อัตโนมัติ)</span>
+        <!-- ปุ่มสลับมุมมอง แนวนอน 4:3 (ค่าเริ่มต้น) / แนวตั้ง 3:4 -->
+        <button id="btnToggleOrientation" type="button" class="px-3 py-1.5 bg-blue-600/90 hover:bg-blue-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 border border-blue-400/50 shadow-sm" title="คลิกเพื่อสลับ แนวนอน 4:3 / แนวตั้ง 3:4">
+          <i class="fa-solid fa-arrows-rotate text-white text-xs"></i>
+          <span id="txtOrientationMode">แนวนอน 4:3</span>
+        </button>
         <button id="btnCloseCamera" type="button" class="p-2 text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition">
           <i class="fa-solid fa-xmark text-lg"></i>
         </button>
       </div>
     </div>
 
-    <!-- Video Viewport & Live Overlays (HUD) -->
+    <!-- Video Viewport & Live Overlays (HUD) - Default Landscape 4:3 -->
     <div id="cameraViewportContainer" class="relative flex-1 flex items-center justify-center overflow-hidden bg-black">
       <video id="videoPreview" autoplay playsinline muted class="w-full h-full object-cover"></video>
 
-      <!-- Live Overlays Reticle Frame (Dynamic 3:4 / 4:3 Frame Auto Switched via Gyroscope) -->
-      <div id="liveOverlayFrame" class="camera-live-frame ratio-3-4 pointer-events-none">
+      <!-- Live Overlays Reticle Frame (สลับ 4:3 / 3:4 ตามปุ่มกด) -->
+      <div id="liveOverlayFrame" class="camera-live-frame ratio-4-3 pointer-events-none">
         
         <!-- มุมซ้ายบน: เข็มทิศสด Live Compass -->
         <div class="absolute top-2 left-2 sm:top-3 sm:left-3">
@@ -672,8 +676,10 @@
         </div>
       </button>
 
-      <!-- Balanced spacer for symmetry -->
-      <div class="w-12 h-12"></div>
+      <!-- ปุ่มสลับแนวกล้องด่วนที่มุมขวาล่าง -->
+      <button id="btnFlipOrientationQuick" type="button" class="p-3.5 text-white bg-white/20 hover:bg-white/30 rounded-full active:scale-95 transition" title="สลับแนวนอน 4:3 / แนวตั้ง 3:4">
+        <i class="fa-solid fa-arrows-rotate text-xl"></i>
+      </button>
     </div>
   </div>
 

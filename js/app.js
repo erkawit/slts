@@ -19,7 +19,7 @@ const state = {
   locationIntervalId: null,
   cameraStream: null,
   facingMode: 'environment',
-  captureOrientation: 'portrait', // 'portrait' (3:4) หรือ 'landscape' (4:3)
+  captureOrientation: 'landscape', // แนวนอน (4:3) เป็นโหมดพื้นฐาน
   hudIntervalId: null,
   appsScriptUrl: localStorage.getItem('slts_apps_script_url') || 'https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec',
   googleSheetCsvUrl: 'https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/gviz/tq?tqx=out:csv',
@@ -1324,79 +1324,40 @@ function initCameraEvents() {
     startCameraStream();
   });
 
-  // ตรวจจับการหมุนเครื่องอัตโนมัติผ่าน Gyroscope (DeviceOrientation)
-  window.addEventListener('deviceorientation', handleGyroscopeOrientation);
-  window.addEventListener('resize', handleScreenOrientationChange);
-  window.addEventListener('orientationchange', handleScreenOrientationChange);
+  // ปุ่มสลับมุมมองกล้อง (แนวนอน 4:3 / แนวตั้ง 3:4) แบบกดเองตามต้องการ
+  if (elements.btnToggleOrientation) {
+    elements.btnToggleOrientation.addEventListener('click', toggleOrientation);
+  }
+  if (elements.btnFlipOrientationQuick) {
+    elements.btnFlipOrientationQuick.addEventListener('click', toggleOrientation);
+  }
 
   elements.btnCapture.addEventListener('click', captureAndProcessPhoto);
   elements.fileFallbackInput.addEventListener('change', handleFallbackFile);
 }
 
 /**
- * ตรวจจับการหมุนกล้องอัตโนมัติจากเซนเซอร์ Gyroscope / DeviceOrientation
- * หมุนหน้าต่างและจัดวางองค์ประกอบตามทิศทางโทรศัพท์จริง
+ * สลับมุมมองกล้องระหว่าง แนวนอน (4:3) และ แนวตั้ง (3:4)
  */
-function handleGyroscopeOrientation(event) {
-  if (!event || !elements.cameraModal || elements.cameraModal.classList.contains('hidden')) return;
-
-  const beta = event.beta || 0;   // แกนตั้ง (หน้า-หลัง)
-  const gamma = event.gamma || 0; // แกนนอน (ซ้าย-ขวา)
-
-  let nextOrientation = 'portrait';
-  let nextRotation = 0;
-
-  // เอียงไปทางขวา (Landscape 4:3 Right)
-  if (gamma > 35) {
-    nextOrientation = 'landscape';
-    nextRotation = 90;
-  }
-  // เอียงไปทางซ้าย (Landscape 4:3 Left)
-  else if (gamma < -35) {
-    nextOrientation = 'landscape';
-    nextRotation = -90;
-  }
-  // ถือแนวตั้งปกติ (Portrait 3:4 Upright)
-  else if (beta > 30 && Math.abs(gamma) <= 30) {
-    nextOrientation = 'portrait';
-    nextRotation = 0;
-  }
-
-  if (state.captureOrientation !== nextOrientation || state.rotationDeg !== nextRotation) {
-    state.rotationDeg = nextRotation;
-    setCaptureOrientation(nextOrientation, nextRotation);
-  }
+function toggleOrientation() {
+  const nextMode = state.captureOrientation === 'landscape' ? 'portrait' : 'landscape';
+  setCaptureOrientation(nextMode);
 }
 
-function handleScreenOrientationChange() {
-  if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
-    if (screen.orientation && screen.orientation.type) {
-      const isPortrait = screen.orientation.type.includes('portrait');
-      setCaptureOrientation(isPortrait ? 'portrait' : 'landscape', isPortrait ? 0 : 90);
-    } else {
-      const isPortrait = window.innerHeight >= window.innerWidth;
-      setCaptureOrientation(isPortrait ? 'portrait' : 'landscape', isPortrait ? 0 : 90);
-    }
-  }
-}
-
-function setCaptureOrientation(mode, rotationDeg = 0) {
+function setCaptureOrientation(mode) {
   state.captureOrientation = mode;
-  state.rotationDeg = rotationDeg;
-  const isPortrait = mode === 'portrait';
+  const isLandscape = mode === 'landscape';
 
   if (elements.liveOverlayFrame) {
-    if (isPortrait) {
-      elements.liveOverlayFrame.className = 'camera-live-frame ratio-3-4 gyro-rotate pointer-events-none';
-      elements.liveOverlayFrame.style.transform = 'translate(-50%, -50%) rotate(0deg)';
+    if (isLandscape) {
+      elements.liveOverlayFrame.className = 'camera-live-frame ratio-4-3 pointer-events-none';
     } else {
-      elements.liveOverlayFrame.className = 'camera-live-frame ratio-4-3 gyro-rotate pointer-events-none';
-      elements.liveOverlayFrame.style.transform = 'translate(-50%, -50%)';
+      elements.liveOverlayFrame.className = 'camera-live-frame ratio-3-4 pointer-events-none';
     }
   }
 
   if (elements.txtOrientationMode) {
-    elements.txtOrientationMode.textContent = isPortrait ? 'แนวตั้ง 3:4 (อัตโนมัติ)' : 'แนวนอน 4:3 (อัตโนมัติ)';
+    elements.txtOrientationMode.textContent = isLandscape ? 'แนวนอน 4:3' : 'แนวตั้ง 3:4';
   }
 }
 
@@ -1466,8 +1427,8 @@ function validateForm() {
 }
 
 async function openCameraModal() {
-  const isPortrait = window.innerHeight >= window.innerWidth;
-  setCaptureOrientation(isPortrait ? 'portrait' : 'landscape');
+  // เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
+  setCaptureOrientation('landscape');
 
   elements.cameraModal.classList.remove('hidden');
   elements.cameraModal.classList.add('flex');
@@ -1594,11 +1555,7 @@ async function captureAndProcessPhoto() {
       dateTime: WatermarkEngine.formatThaiDateTime(new Date())
     };
 
-    const rotationAngle = (state.captureOrientation === 'landscape' && elements.videoPreview.videoWidth < elements.videoPreview.videoHeight)
-      ? (state.rotationDeg || 90)
-      : 0;
-
-    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation, rotationAngle);
+    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation);
     
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
