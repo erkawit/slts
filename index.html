@@ -31,59 +31,63 @@
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body class="bg-gray-50 text-gray-800 antialiased min-h-screen flex flex-col justify-between">
+<body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between">
 
-  <!-- Main Header & Desktop Navigation -->
-  <header class="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+  <!-- Main Header & Desktop Navigation Bar (Full Width on Desktop) -->
+  <header class="bg-white border-b border-gray-200/90 sticky top-0 z-30 shadow-sm backdrop-blur-md bg-white/95">
+    <div class="w-full max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
       
-      <!-- Brand Logo -->
-      <div class="flex items-center space-x-3 cursor-pointer" onclick="switchTab('form')">
-        <div class="w-11 h-11 flex items-center justify-center">
-          <img src="img/logo.png" alt="ตราศาลจังหวัดอุดรธานี" class="w-full h-full object-contain drop-shadow-sm">
+      <!-- Brand Logo & Court Name -->
+      <div class="flex items-center space-x-3.5 cursor-pointer select-none" onclick="switchTab('form')">
+        <div class="w-11 h-11 sm:w-12 sm:h-12 flex items-center justify-center flex-shrink-0">
+          <img src="img/logo.png" alt="ตราศาลจังหวัดอุดรธานี" class="w-full h-full object-contain drop-shadow-sm transition-transform hover:scale-105">
         </div>
         <div>
-          <h1 class="text-base font-bold text-gray-900 leading-tight">ระบบบันทึกพิกัดส่งหมาย</h1>
-          <p class="text-xs text-gray-500 font-medium">ศาลจังหวัดอุดรธานี</p>
+          <h1 class="text-base sm:text-lg font-bold text-gray-900 leading-tight">ระบบจัดเก็บข้อมูลพิกัดส่งหมาย</h1>
+          <p class="text-xs text-blue-700 font-semibold tracking-wide flex items-center gap-1.5">
+            <span>ศาลจังหวัดอุดรธานี</span>
+            <span class="text-gray-300 hidden sm:inline">•</span>
+            <span class="text-gray-500 font-normal text-[11px] hidden sm:inline">Summons Location Tracking System (SLTS)</span>
+          </p>
         </div>
       </div>
 
       <!-- Desktop Nav Tabs (แสดงเมื่อจอ > 768px) -->
-      <nav class="hidden md:flex items-center space-x-1 bg-gray-100/80 p-1.5 rounded-xl border border-gray-200 text-sm font-medium">
-        <button type="button" id="tabBtnForm" onclick="switchTab('form')" class="tab-nav-btn active px-4 py-2 rounded-lg transition-all flex items-center gap-2">
-          <i class="fa-solid fa-pen-to-square"></i>
+      <nav class="hidden md:flex items-center space-x-1.5 bg-gray-100/90 p-1.5 rounded-2xl border border-gray-200/80 text-sm font-medium shadow-inner">
+        <button type="button" id="tabBtnForm" onclick="switchTab('form')" class="tab-nav-btn active px-4 py-2 rounded-xl transition-all flex items-center gap-2">
+          <i class="fa-solid fa-pen-to-square text-blue-600"></i>
           <span>บันทึกส่งหมาย</span>
         </button>
-        <button type="button" id="tabBtnTable" onclick="switchTab('table')" class="tab-nav-btn px-4 py-2 rounded-lg transition-all flex items-center gap-2">
-          <i class="fa-solid fa-table-list"></i>
+        <button type="button" id="tabBtnTable" onclick="switchTab('table')" class="tab-nav-btn px-4 py-2 rounded-xl transition-all flex items-center gap-2">
+          <i class="fa-solid fa-table-list text-emerald-600"></i>
           <span>ตารางประวัติส่งหมาย</span>
         </button>
-        <button type="button" id="tabBtnUsers" onclick="switchTab('users')" class="tab-nav-btn hidden px-4 py-2 rounded-lg transition-all flex items-center gap-2">
-          <i class="fa-solid fa-users-gear"></i>
+        <button type="button" id="tabBtnUsers" onclick="switchTab('users')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2">
+          <i class="fa-solid fa-users-gear text-purple-600"></i>
           <span>จัดการผู้ใช้งาน</span>
         </button>
       </nav>
 
       <!-- Right Header Controls -->
-      <div class="flex items-center space-x-2">
+      <div class="flex items-center space-x-2.5">
         <!-- Settings Button (แสดงเฉพาะจอ > 768px และเป็น Admin เท่านั้น) -->
-        <button id="btnSettings" type="button" title="ตั้งค่าเชื่อมต่อ Google Drive (เฉพาะ Admin)" class="hidden p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors border border-transparent hover:border-blue-200">
+        <button id="btnSettings" type="button" title="ตั้งค่าเชื่อมต่อ Google Drive (เฉพาะ Admin)" class="hidden p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition border border-transparent hover:border-blue-200">
           <i class="fa-solid fa-gear text-lg"></i>
         </button>
 
         <!-- User Authentication Widget -->
         <div id="authWidget" class="flex items-center">
           <!-- Guest / Not Logged In -->
-          <button id="btnLoginModal" type="button" onclick="openLoginModal()" class="text-xs sm:text-sm font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5">
+          <button id="btnLoginModal" type="button" onclick="openLoginModal()" class="text-xs sm:text-sm font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm">
             <i class="fa-solid fa-right-to-bracket"></i>
             <span>เข้าสู่ระบบ</span>
           </button>
 
           <!-- Logged In User Profile -->
-          <div id="userProfileBadge" class="hidden items-center gap-2 bg-gray-100 border border-gray-200 pl-3 pr-1.5 py-1 rounded-xl">
+          <div id="userProfileBadge" class="hidden items-center gap-2.5 bg-gray-100/90 border border-gray-200 pl-3.5 pr-2 py-1.5 rounded-xl shadow-sm">
             <div class="text-left">
               <p id="authUserName" class="text-xs font-bold text-gray-800 leading-tight">Admin</p>
-              <p id="authUserRole" class="text-[10px] text-blue-600 font-semibold leading-tight uppercase">ADMIN</p>
+              <p id="authUserRole" class="text-[10px] text-blue-600 font-bold leading-tight uppercase tracking-wider">ADMIN</p>
             </div>
             <button type="button" onclick="handleLogout()" title="ออกจากระบบ" class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition">
               <i class="fa-solid fa-right-from-bracket text-xs"></i>
@@ -95,226 +99,285 @@
     </div>
   </header>
 
-  <!-- Main Container -->
-  <main class="max-w-7xl w-full mx-auto p-3 sm:p-5 flex-1">
+  <!-- Main Container (Full Width & Spacious Grid on Desktop) -->
+  <main class="w-full max-w-[1700px] mx-auto p-3 sm:p-5 lg:px-10 lg:py-6 flex-1">
     
     <!-- ========================================================= -->
-    <!-- TAB 1: หน้าแบบฟอร์มบันทึกส่งหมาย (Form View) -->
+    <!-- TAB 1: หน้าแบบฟอร์มบันทึกส่งหมาย (Desktop 2-Column Command Center) -->
     <!-- ========================================================= -->
     <div id="tabContentForm" class="tab-pane active">
       
-      <div class="max-w-xl md:max-w-5xl mx-auto">
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+      <div class="w-full">
+        
+        <!-- Desktop Dual-Column Layout (Left Form + Right Preview/Camera) -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
-          <!-- Banner Header -->
-          <div class="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border-b border-gray-100 px-5 py-4 flex items-center justify-between">
-            <div class="flex items-center space-x-2">
-              <span class="inline-flex items-center text-xs font-bold text-blue-700 bg-blue-100/90 px-3 py-1 rounded-full shadow-sm">
-                <i class="fa-solid fa-map-pin mr-1.5 text-[11px]"></i> พิกัดส่งหมาย (SLTS)
-              </span>
-              <span class="text-xs text-gray-500 hidden sm:inline">ศาลจังหวัดอุดรธานี</span>
-            </div>
-            <div class="text-xs font-medium text-gray-500 flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-dot"></span>
-              <span>ระบบพร้อมบันทึก</span>
-            </div>
-          </div>
-
-          <form id="summonsForm" class="p-5 sm:p-6" onsubmit="return false;">
+          <!-- LEFT PANEL: แบบฟอร์มกรอกข้อมูลส่งหมาย (lg:col-span-7) -->
+          <div class="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <!-- Panel Header -->
+            <div class="bg-gradient-to-r from-blue-50/90 via-indigo-50/80 to-blue-50/90 border-b border-gray-100 px-6 py-4 flex items-center justify-between">
+              <div class="flex items-center space-x-2.5">
+                <span class="inline-flex items-center text-xs font-bold text-blue-700 bg-blue-100 px-3 py-1 rounded-full shadow-sm">
+                  <i class="fa-solid fa-file-pen mr-1.5 text-[11px]"></i> ฟอร์มบันทึกข้อมูลส่งหมาย
+                </span>
+                <span class="text-xs font-semibold text-gray-500 hidden sm:inline">ศาลจังหวัดอุดรธานี</span>
+              </div>
+              <div class="text-xs font-medium text-gray-500 flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse-dot"></span>
+                <span class="font-semibold text-emerald-700">GPS ออนไลน์</span>
+              </div>
+            </div>
+
+            <!-- Form Content -->
+            <form id="summonsForm" class="p-6 space-y-5" onsubmit="return false;">
               
-              <!-- Left Column: ข้อมูลคดีและที่ตั้ง -->
-              <div class="space-y-4">
-                
-                <!-- 2.1 อำเภอและตำบล -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label for="district" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                      <i class="fa-solid fa-landmark text-blue-600 mr-1"></i> อำเภอ (อุดรธานี) <span class="text-red-500">*</span>
-                    </label>
-                    <div class="relative">
-                      <select id="district" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
-                      </select>
-                      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500">
-                        <i class="fa-solid fa-chevron-down text-xs"></i>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label for="subdistrict" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                      <i class="fa-solid fa-location-dot text-blue-600 mr-1"></i> ตำบล <span class="text-red-500">*</span>
-                    </label>
-                    <div class="relative">
-                      <select id="subdistrict" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
-                      </select>
-                      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500">
-                        <i class="fa-solid fa-chevron-down text-xs"></i>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 2.2 ข้อมูลเลขคดี -->
+              <!-- 2.1 อำเภอและตำบล (อุดรธานี 20 อำเภอ) -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                    <i class="fa-solid fa-gavel text-blue-600 mr-1"></i> ข้อมูลเลขคดี <span class="text-red-500">*</span>
+                  <label for="district" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                    <i class="fa-solid fa-landmark text-blue-600 mr-1"></i> อำเภอ (อุดรธานี) <span class="text-red-500">*</span>
                   </label>
-                  <div class="space-y-2">
-                    <div class="relative">
-                      <select id="courtType" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
-                        <option value="ศาลจังหวัดอุดรธานี">ศาลจังหวัดอุดรธานี</option>
-                        <option value="ศาลอื่น">หมายศาลอื่น</option>
-                      </select>
-                      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500">
-                        <i class="fa-solid fa-chevron-down text-xs"></i>
-                      </div>
-                    </div>
-                    
-                    <!-- กรณีเลือก: ศาลจังหวัดอุดรธานี -->
-                    <div id="udonCaseField" class="relative">
-                      <input type="text" id="caseNumber" placeholder="เลขคดี เช่น ผบE1245/2569" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 font-semibold placeholder-gray-400 transition">
-                    </div>
-
-                    <!-- กรณีเลือก: หมายศาลอื่น (ต + ตัวเลข + / + ปี พ.ศ.) -->
-                    <div id="otherCourtCaseField" class="hidden flex items-stretch">
-                      <span class="inline-flex items-center px-3.5 bg-blue-50 border border-r-0 border-gray-300 rounded-l-xl text-blue-700 font-bold text-base select-none">
-                        ต
-                      </span>
-                      <input type="number" id="otherCaseNo" placeholder="เลขคดี เช่น 2097" inputmode="numeric" class="flex-1 min-w-0 bg-white border-y border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 px-3 py-2.5 text-sm text-gray-800 font-semibold placeholder-gray-400 transition" />
-                      <span class="inline-flex items-center px-2.5 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold select-none">
-                        /
-                      </span>
-                      <div class="relative w-28">
-                        <select id="otherCaseYear" class="w-full h-full bg-white border border-l-0 border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-r-xl pl-2 pr-7 py-2.5 text-sm font-semibold text-gray-800 transition appearance-none cursor-pointer">
-                        </select>
-                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
-                          <i class="fa-solid fa-chevron-down text-xs"></i>
-                        </div>
-                      </div>
+                  <div class="relative">
+                    <select id="district" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-500">
+                      <i class="fa-solid fa-chevron-down text-xs"></i>
                     </div>
                   </div>
                 </div>
 
-                <!-- 2.3 ข้อมูลที่ตั้งสถานที่ส่งหมาย -->
                 <div>
-                  <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                    <i class="fa-solid fa-house-user text-blue-600 mr-1"></i> ประเภทสถานที่ <span class="text-red-500">*</span>
+                  <label for="subdistrict" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                    <i class="fa-solid fa-location-dot text-blue-600 mr-1"></i> ตำบล <span class="text-red-500">*</span>
                   </label>
-                  
-                  <div class="space-y-2">
-                    <div class="relative">
-                      <select id="locationType" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
-                        <option value="หมายบ้าน">หมายบ้าน</option>
-                        <option value="ที่ทำการปกครองส่วนท้องถิ่น">ที่ทำการปกครองส่วนท้องถิ่น</option>
-                      </select>
-                      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500">
-                        <i class="fa-solid fa-chevron-down text-xs"></i>
-                      </div>
-                    </div>
-
-                    <!-- ช่องกรอกบ้านเลขที่ และ หมู่ (แสดงเมื่อเลือกหมายบ้าน) -->
-                    <div id="houseAddressFields" class="grid grid-cols-2 gap-2">
-                      <div>
-                        <input type="text" id="houseNo" placeholder="บ้านเลขที่ เช่น 154/2 *" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition" required>
-                      </div>
-                      <div>
-                        <input type="text" id="moo" placeholder="หมู่ (ถ้ามี)" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition">
-                      </div>
-                    </div>
-
-                    <!-- ช่องกรอกข้อความที่ทำการปกครองส่วนท้องถิ่น -->
-                    <div id="localAdminAddressFields" class="hidden">
-                      <input type="text" id="localAdminName" value="ที่ทำการปกครองส่วนท้องถิ่น" placeholder="ที่ทำการปกครองส่วนท้องถิ่น เช่น อบต.โนนสูง" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition">
+                  <div class="relative">
+                    <select id="subdistrict" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-500">
+                      <i class="fa-solid fa-chevron-down text-xs"></i>
                     </div>
                   </div>
                 </div>
-
               </div>
 
-              <!-- Right Column: พิกัด GPS และปุ่มกล้องถ่ายภาพ -->
-              <div class="space-y-4 flex flex-col justify-between">
-                
-                <!-- 2.4 ระบบพิกัดทางภูมิศาสตร์ -->
-                <div>
-                  <div class="flex items-center justify-between mb-1.5">
-                    <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider">
-                      <i class="fa-solid fa-crosshairs text-blue-600 mr-1"></i> พิกัด GPS ปัจจุบัน (รีเฟรชทุก 10 วิ)
-                    </label>
-                    <span class="flex items-center text-[11px] text-gray-500">
-                      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-dot mr-1.5"></span> สด
-                    </span>
-                  </div>
-
-                  <div class="flex gap-2">
-                    <div class="relative flex-1">
-                      <input type="text" id="coordinates" readonly placeholder="กำลังค้นหาพิกัด..." class="w-full bg-gray-100 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-mono text-gray-700 cursor-not-allowed select-all">
+              <!-- 2.2 ข้อมูลเลขคดี -->
+              <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                  <i class="fa-solid fa-gavel text-blue-600 mr-1"></i> ข้อมูลเลขคดี <span class="text-red-500">*</span>
+                </label>
+                <div class="space-y-2">
+                  <div class="relative">
+                    <select id="courtType" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
+                      <option value="ศาลจังหวัดอุดรธานี">ศาลจังหวัดอุดรธานี</option>
+                      <option value="ศาลอื่น">หมายศาลอื่น</option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-500">
+                      <i class="fa-solid fa-chevron-down text-xs"></i>
                     </div>
-                    <button type="button" id="btnRefreshLocation" class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium text-sm px-3.5 py-2.5 rounded-xl whitespace-nowrap shadow-sm shadow-blue-200 transition flex items-center gap-1.5">
-                      <i class="fa-solid fa-arrows-rotate"></i>
-                      <span>เช็คพิกัดใหม่</span>
-                    </button>
                   </div>
                   
-                  <div class="mt-1 flex items-center justify-between">
-                    <span id="locationStatus" class="text-xs text-gray-500">กำลังเชื่อมต่อสัญญาณ GPS...</span>
+                  <!-- กรณีเลือก: ศาลจังหวัดอุดรธานี -->
+                  <div id="udonCaseField" class="relative">
+                    <input type="text" id="caseNumber" placeholder="เลขคดี เช่น ผบE1245/2569" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 font-semibold placeholder-gray-400 transition">
+                  </div>
+
+                  <!-- กรณีเลือก: หมายศาลอื่น (ต + ตัวเลข + / + ปี พ.ศ.) -->
+                  <div id="otherCourtCaseField" class="hidden flex items-stretch">
+                    <span class="inline-flex items-center px-4 bg-blue-50 border border-r-0 border-gray-300 rounded-l-xl text-blue-700 font-bold text-base select-none">
+                      ต
+                    </span>
+                    <input type="number" id="otherCaseNo" placeholder="เลขคดี เช่น 2097" inputmode="numeric" class="flex-1 min-w-0 bg-white border-y border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 px-3.5 py-2.5 text-sm text-gray-800 font-semibold placeholder-gray-400 transition" />
+                    <span class="inline-flex items-center px-3 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold select-none">
+                      /
+                    </span>
+                    <div class="relative w-32">
+                      <select id="otherCaseYear" class="w-full h-full bg-white border border-l-0 border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-r-xl pl-3 pr-7 py-2.5 text-sm font-semibold text-gray-800 transition appearance-none cursor-pointer">
+                      </select>
+                      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                        <i class="fa-solid fa-chevron-down text-xs"></i>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2.3 ข้อมูลที่ตั้งสถานที่ส่งหมาย -->
+              <div>
+                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                  <i class="fa-solid fa-house-user text-blue-600 mr-1"></i> ประเภทสถานที่ <span class="text-red-500">*</span>
+                </label>
+                
+                <div class="space-y-2">
+                  <div class="relative">
+                    <select id="locationType" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
+                      <option value="หมายบ้าน">หมายบ้าน</option>
+                      <option value="ที่ทำการปกครองส่วนท้องถิ่น">ที่ทำการปกครองส่วนท้องถิ่น</option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-500">
+                      <i class="fa-solid fa-chevron-down text-xs"></i>
+                    </div>
+                  </div>
+
+                  <!-- ช่องกรอกบ้านเลขที่ และ หมู่ (กรอกข้อความ เช่น 154/2 ได้) -->
+                  <div id="houseAddressFields" class="grid grid-cols-2 gap-3">
+                    <div>
+                      <input type="text" id="houseNo" placeholder="บ้านเลขที่ เช่น 154/2 *" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition" required>
+                    </div>
+                    <div>
+                      <input type="text" id="moo" placeholder="หมู่ (ถ้ามี)" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition">
+                    </div>
+                  </div>
+
+                  <!-- ช่องกรอกข้อความที่ทำการปกครองส่วนท้องถิ่น -->
+                  <div id="localAdminAddressFields" class="hidden">
+                    <input type="text" id="localAdminName" value="ที่ทำการปกครองส่วนท้องถิ่น" placeholder="ที่ทำการปกครองส่วนท้องถิ่น เช่น อบต.โนนสูง" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition">
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2.4 ระบบพิกัดทางภูมิศาสตร์ -->
+              <div class="pt-1">
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                    <i class="fa-solid fa-crosshairs text-blue-600 mr-1"></i> พิกัด GPS ปัจจุบัน (ดึงอัตโนมัติทุก 10 วินาที)
+                  </label>
+                  <span class="flex items-center text-[11px] text-gray-500">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-dot mr-1.5"></span> พิกัดสด
+                  </span>
+                </div>
+
+                <div class="flex gap-2">
+                  <div class="relative flex-1">
+                    <input type="text" id="coordinates" readonly placeholder="กำลังค้นหาพิกัด..." class="w-full bg-gray-100 border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm font-mono text-gray-700 cursor-not-allowed select-all">
+                  </div>
+                  <button type="button" id="btnRefreshLocation" class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium text-sm px-4 py-2.5 rounded-xl whitespace-nowrap shadow-sm shadow-blue-200 transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                    <span>เช็คพิกัดใหม่</span>
+                  </button>
+                </div>
+                
+                <div class="mt-1.5 flex items-center justify-between">
+                  <span id="locationStatus" class="text-xs text-gray-500">กำลังเชื่อมต่อสัญญาณ GPS...</span>
+                </div>
+              </div>
+
+            </form>
+          </div>
+
+          <!-- RIGHT PANEL: เมนูถ่ายภาพและศูนย์ควบคุม (lg:col-span-5) -->
+          <div class="lg:col-span-5 space-y-5">
+            
+            <!-- Camera & Dispatch Action Card -->
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between pb-4 mb-4 border-b border-gray-100">
+                  <h3 class="font-bold text-gray-900 text-sm sm:text-base flex items-center gap-2">
+                    <i class="fa-solid fa-camera text-blue-600"></i>
+                    <span>ถ่ายภาพและประทับลายน้ำ</span>
+                  </h3>
+                  <span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
+                    3:4 / 4:3 สลับได้
+                  </span>
+                </div>
+
+                <!-- Feature Badges -->
+                <div class="grid grid-cols-2 gap-2.5 mb-5 text-xs text-gray-600">
+                  <div class="p-2.5 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-2">
+                    <i class="fa-solid fa-compass text-blue-600 text-base"></i>
+                    <div>
+                      <p class="font-bold text-gray-800">เข็มทิศทิศทาง</p>
+                      <p class="text-[10px] text-gray-400">ประทับมุมซ้ายบน</p>
+                    </div>
+                  </div>
+                  <div class="p-2.5 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-2">
+                    <i class="fa-solid fa-map-location-dot text-emerald-600 text-base"></i>
+                    <div>
+                      <p class="font-bold text-gray-800">แผนที่หมุดแดง</p>
+                      <p class="text-[10px] text-gray-400">ประทับมุมซ้ายล่าง</p>
+                    </div>
+                  </div>
+                  <div class="p-2.5 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-2">
+                    <i class="fa-solid fa-id-card text-purple-600 text-base"></i>
+                    <div>
+                      <p class="font-bold text-gray-800">กล่องข้อมูลดำสนิท</p>
+                      <p class="text-[10px] text-gray-400">ตัวหนังสือขาว 2 เท่า</p>
+                    </div>
+                  </div>
+                  <div class="p-2.5 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-2">
+                    <i class="fa-solid fa-file-arrow-down text-amber-600 text-base"></i>
+                    <div>
+                      <p class="font-bold text-gray-800">Text File (.txt)</p>
+                      <p class="text-[10px] text-gray-400">บันทึกคู่ภาพทันที</p>
+                    </div>
                   </div>
                 </div>
 
-                <!-- 3.1 ปุ่มเปิดกล้อง / ถ่ายภาพ -->
-                <div class="pt-2">
-                  <div class="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 text-center mb-3 hidden md:block">
-                    <i class="fa-solid fa-camera-retro text-3xl text-blue-600 mb-2"></i>
-                    <h4 class="font-bold text-sm text-gray-800">ถ่ายภาพพร้อมประทับลายน้ำ</h4>
-                    <p class="text-xs text-gray-500 mt-1">ระบบจะดึงพิกัด แผนที่ และเข็มทิศ ประทับลงบนภาพอัตโนมัติ</p>
-                  </div>
-
-                  <button type="button" id="btnOpenCamera" class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-blue-500/25 transition duration-200 flex items-center justify-center gap-2 text-base">
-                    <i class="fa-solid fa-camera text-lg"></i>
+                <!-- Action Buttons -->
+                <div class="space-y-3">
+                  <button type="button" id="btnOpenCamera" class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold py-4 px-4 rounded-xl shadow-lg shadow-blue-500/25 transition duration-200 flex items-center justify-center gap-2.5 text-base">
+                    <i class="fa-solid fa-camera text-xl"></i>
                     <span>เปิดกล้อง / ถ่ายภาพส่งหมาย</span>
                   </button>
 
+                  <button type="button" onclick="document.getElementById('fileFallbackInput').click()" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-4 rounded-xl transition flex items-center justify-center gap-2 text-sm border border-gray-200">
+                    <i class="fa-solid fa-folder-open text-gray-500"></i>
+                    <span>เลือกรูปภาพจากเครื่องคอมพิวเตอร์</span>
+                  </button>
                   <input type="file" id="fileFallbackInput" accept="image/*" capture="environment" class="hidden">
                 </div>
+              </div>
 
+              <!-- Storage Connection Info -->
+              <div class="mt-5 pt-4 border-t border-gray-100 text-xs text-gray-400 space-y-1">
+                <div class="flex items-center justify-between text-gray-500">
+                  <span>Google Drive โฟลเดอร์:</span>
+                  <a href="https://drive.google.com/drive/folders/1whnbwZjGSevdo-KG8RVz9oFge8V-U5wp?usp=sharing" target="_blank" class="text-blue-600 font-medium hover:underline flex items-center gap-1">
+                    <span>เปิด Drive</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                  </a>
+                </div>
+                <div class="flex items-center justify-between text-gray-500">
+                  <span>Google Sheet บันทึกผล:</span>
+                  <a href="https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/edit?usp=sharing" target="_blank" class="text-emerald-600 font-medium hover:underline flex items-center gap-1">
+                    <span>เปิด Sheet</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                  </a>
+                </div>
               </div>
 
             </div>
 
-          </form>
+          </div>
+
         </div>
 
-        <div class="mt-4 text-center text-xs text-gray-400 space-y-1">
-          <p>ระบบสร้างภาพถ่ายพร้อมลายน้ำ (เข็มทิศ + แผนที่ + ข้อมูลส่งหมาย) และบันทึก Text File (.txt)</p>
-          <p>ส่งข้อมูลและรูปภาพไปยัง Google Drive & Sheet ศาลจังหวัดอุดรธานี</p>
-        </div>
       </div>
 
     </div>
 
     <!-- ========================================================= -->
-    <!-- TAB 2: ตารางประวัติข้อมูลส่งหมาย (DataTables History View) -->
+    <!-- TAB 2: ตารางประวัติข้อมูลส่งหมาย (DataTables History View - Full Width) -->
     <!-- ========================================================= -->
     <div id="tabContentTable" class="tab-pane hidden">
-      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-6 overflow-hidden">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-7 overflow-hidden">
         
         <!-- Table Header & Actions -->
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-gray-200">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-5 mb-5 border-b border-gray-200">
           <div>
-            <h2 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <h2 class="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2.5">
               <i class="fa-solid fa-table-list text-blue-600"></i>
               <span>ประวัติการจัดเก็บข้อมูลส่งหมาย</span>
             </h2>
-            <p class="text-xs text-gray-500 mt-0.5">ดึงข้อมูลสดจาก Google Sheet ศาลจังหวัดอุดรธานี</p>
+            <p class="text-xs text-gray-500 mt-1">ดึงข้อมูลและรูปภาพสดจาก Google Sheet ศาลจังหวัดอุดรธานี</p>
           </div>
 
-          <div class="flex items-center gap-2 w-full sm:w-auto">
-            <button type="button" onclick="loadGoogleSheetData()" class="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-xl text-xs sm:text-sm transition flex items-center gap-1.5 border border-blue-200">
+          <div class="flex items-center gap-2.5 w-full sm:w-auto">
+            <button type="button" onclick="loadGoogleSheetData()" class="px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-xl text-xs sm:text-sm transition flex items-center gap-2 border border-blue-200 shadow-sm">
               <i class="fa-solid fa-rotate"></i>
               <span>รีเฟรชข้อมูล</span>
             </button>
-            <a href="https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/edit?usp=sharing" target="_blank" class="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-xl text-xs sm:text-sm transition flex items-center gap-1.5 border border-emerald-200">
+            <a href="https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/edit?usp=sharing" target="_blank" class="px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-xl text-xs sm:text-sm transition flex items-center gap-2 border border-emerald-200 shadow-sm">
               <i class="fa-solid fa-file-excel"></i>
               <span>เปิด Google Sheet</span>
             </a>
@@ -322,10 +385,10 @@
         </div>
 
         <!-- DataTable Container -->
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto w-full">
           <table id="summonsDataTable" class="w-full text-left text-xs sm:text-sm stripe hover" style="width:100%">
             <thead>
-              <tr class="bg-gray-100 text-gray-700 font-bold">
+              <tr class="bg-gray-100/80 text-gray-700 font-bold">
                 <th>วัน-เวลา</th>
                 <th>เลขคดี</th>
                 <th>ประเภทศาล</th>
@@ -339,7 +402,7 @@
               </tr>
             </thead>
             <tbody id="dataTableBody">
-              <!-- Data rows injected by JavaScript -->
+              <!-- Injected by JavaScript -->
             </tbody>
           </table>
         </div>
@@ -348,57 +411,57 @@
     </div>
 
     <!-- ========================================================= -->
-    <!-- TAB 3: จัดการผู้ใช้งาน (User Management View - Admin Only) -->
+    <!-- TAB 3: จัดการผู้ใช้งาน (User Management View - Full Width Desktop) -->
     <!-- ========================================================= -->
     <div id="tabContentUsers" class="tab-pane hidden">
-      <div class="max-w-4xl mx-auto space-y-6">
+      <div class="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
-        <!-- Add User Card -->
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-6">
+        <!-- Add User Card (lg:col-span-4) -->
+        <div class="lg:col-span-4 bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
           <h3 class="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
             <i class="fa-solid fa-user-plus text-blue-600"></i>
             <span>เพิ่มผู้ใช้งานใหม่</span>
           </h3>
 
-          <form id="addUserForm" onsubmit="handleCreateUser(event)" class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <form id="addUserForm" onsubmit="handleCreateUser(event)" class="space-y-3.5">
             <div>
               <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อผู้ใช้ (Username) *</label>
-              <input type="text" id="newUsername" required placeholder="เช่น officer1" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+              <input type="text" id="newUsername" required placeholder="เช่น officer1" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
             </div>
             <div>
               <label class="block text-xs font-bold text-gray-700 mb-1">รหัสผ่าน (Password) *</label>
-              <input type="password" id="newPassword" required placeholder="กำหนดรหัสผ่าน" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+              <input type="password" id="newPassword" required placeholder="กำหนดรหัสผ่าน" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
             </div>
             <div>
               <label class="block text-xs font-bold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) *</label>
-              <select id="newRole" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+              <select id="newRole" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                 <option value="user">User (เจ้าหน้าที่ทั่วไป)</option>
                 <option value="admin">Admin (ผู้ดูแลระบบ)</option>
               </select>
             </div>
-            <div class="flex items-end">
-              <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl transition shadow-sm text-sm">
-                <i class="fa-solid fa-plus mr-1"></i> เพิ่มผู้ใช้
+            <div class="pt-2">
+              <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl transition shadow-md shadow-blue-200 text-sm">
+                <i class="fa-solid fa-plus mr-1"></i> เพิ่มผู้ใช้งาน
               </button>
             </div>
           </form>
         </div>
 
-        <!-- Users List Card -->
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-6">
+        <!-- Users List Card (lg:col-span-8) -->
+        <div class="lg:col-span-8 bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
           <h3 class="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
             <i class="fa-solid fa-users text-blue-600"></i>
             <span>รายชื่อผู้ใช้งานทั้งหมด</span>
           </h3>
 
-          <div class="overflow-x-auto">
+          <div class="overflow-x-auto w-full">
             <table class="w-full text-left text-sm">
               <thead>
                 <tr class="bg-gray-50 border-b border-gray-200 text-gray-600 font-bold text-xs uppercase">
-                  <th class="py-2.5 px-3">ชื่อผู้ใช้ (Username)</th>
-                  <th class="py-2.5 px-3">สิทธิ์ (Role)</th>
-                  <th class="py-2.5 px-3">วันที่สร้าง</th>
-                  <th class="py-2.5 px-3 text-right">การจัดการ</th>
+                  <th class="py-3 px-4">ชื่อผู้ใช้ (Username)</th>
+                  <th class="py-3 px-4">สิทธิ์ (Role)</th>
+                  <th class="py-3 px-4">วันที่สร้าง</th>
+                  <th class="py-3 px-4 text-right">การจัดการ</th>
                 </tr>
               </thead>
               <tbody id="userListBody" class="divide-y divide-gray-100">
@@ -413,16 +476,19 @@
 
   </main>
 
+  <!-- Main Footer -->
+  <footer class="bg-white border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400">
+    <p>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System) © ศาลจังหวัดอุดรธานี</p>
+  </footer>
+
   <!-- Modal: ล็อกอินเข้าสู่ระบบ (Login Modal) -->
   <div id="loginModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4">
     <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in relative">
       
-      <!-- Close Button -->
       <button type="button" onclick="closeLoginModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-1">
         <i class="fa-solid fa-xmark text-lg"></i>
       </button>
 
-      <!-- Modal Header -->
       <div class="text-center mb-5">
         <div class="w-14 h-14 mx-auto mb-2 flex items-center justify-center">
           <img src="img/logo.png" alt="ตราศาล" class="w-full h-full object-contain">
@@ -434,11 +500,11 @@
       <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-3.5">
         <div>
           <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อผู้ใช้ (Username)</label>
-          <input type="text" id="loginUsername" required placeholder="admin" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+          <input type="text" id="loginUsername" required placeholder="admin" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
         </div>
         <div>
           <label class="block text-xs font-bold text-gray-700 mb-1">รหัสผ่าน (Password)</label>
-          <input type="password" id="loginPassword" required placeholder="••••••••" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+          <input type="password" id="loginPassword" required placeholder="••••••••" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
         </div>
 
         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl transition shadow-md shadow-blue-200 text-sm mt-2">
@@ -459,7 +525,6 @@
         <span id="cameraStatus" class="text-xs sm:text-sm font-medium">กำลังเปิดกล้อง...</span>
       </div>
       
-      <!-- Orientation Toggle & Close Button -->
       <div class="flex items-center gap-2">
         <button id="btnToggleOrientation" type="button" class="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 border border-white/20" title="สลับแนวตั้ง 3:4 / แนวนอน 4:3">
           <i class="fa-solid fa-arrows-rotate text-blue-400"></i>
@@ -478,17 +543,17 @@
       <!-- Live Overlays Reticle Frame (Dynamic 3:4 / 4:3 Frame) -->
       <div id="liveOverlayFrame" class="camera-live-frame ratio-3-4 pointer-events-none">
         
-        <!-- มุมซ้ายบน (Top-Left): เข็มทิศสด Live Compass -->
+        <!-- มุมซ้ายบน: เข็มทิศสด Live Compass -->
         <div class="absolute top-2 left-2 sm:top-3 sm:left-3">
           <canvas id="liveCompassCanvas" width="84" height="84" class="drop-shadow-lg"></canvas>
         </div>
 
-        <!-- มุมซ้ายล่าง (Bottom-Left): แผนที่สด Live Map -->
+        <!-- มุมซ้ายล่าง: แผนที่สด Live Map -->
         <div class="absolute bottom-2 left-2 sm:bottom-3 sm:left-3">
           <canvas id="liveMapCanvas" width="100" height="75" class="rounded-lg border-2 border-white/80 shadow-2xl"></canvas>
         </div>
 
-        <!-- มุมขวาล่าง (Bottom-Right): กล่องข้อมูลสด Live Badge (สีดำสนิท + ตัวหนังสือขาว) -->
+        <!-- มุมขวาล่าง: กล่องข้อมูลสด Live Badge -->
         <div class="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 max-w-[62%] sm:max-w-[55%]">
           <div class="bg-black border-2 border-white/70 rounded-xl p-2 sm:p-2.5 shadow-2xl text-white space-y-0.5 pointer-events-none">
             <div id="liveBadgeDate" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📅 --</div>
@@ -523,7 +588,6 @@
   <div id="previewModal" class="fixed inset-0 bg-black/80 z-50 hidden items-center justify-center p-4">
     <div class="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl animate-fade-in">
       
-      <!-- Modal Header -->
       <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
         <div>
           <h3 class="font-bold text-gray-800 text-sm">ภาพถ่ายประทับลายน้ำสำเร็จ</h3>
@@ -534,12 +598,10 @@
         </span>
       </div>
 
-      <!-- Preview Image Canvas Result -->
       <div class="p-3 bg-gray-900 flex-1 overflow-auto flex items-center justify-center min-h-[300px]">
         <img id="previewImage" alt="Watermarked Summons Preview" class="max-w-full max-h-[60vh] object-contain rounded-lg shadow-md">
       </div>
 
-      <!-- Action Buttons -->
       <div class="p-4 bg-white border-t border-gray-200 grid grid-cols-2 gap-3">
         <button id="btnRetake" type="button" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl transition flex items-center justify-center gap-1.5 text-sm">
           <i class="fa-solid fa-arrow-rotate-left"></i>
