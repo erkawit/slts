@@ -1303,10 +1303,19 @@ function fetchCurrentLocation(isManual = false) {
 }
 
 function initCameraEvents() {
-  elements.btnOpenCamera.addEventListener('click', () => {
+  const handleOpenCam = () => {
     if (!validateForm()) return;
     openCameraModal();
-  });
+  };
+
+  if (elements.btnOpenCamera) {
+    elements.btnOpenCamera.addEventListener('click', handleOpenCam);
+  }
+
+  const btnMobile = document.getElementById('btnOpenCameraMobile');
+  if (btnMobile) {
+    btnMobile.addEventListener('click', handleOpenCam);
+  }
 
   elements.btnCloseCamera.addEventListener('click', closeCameraModal);
 
@@ -1326,24 +1335,36 @@ function initCameraEvents() {
 
 /**
  * ตรวจจับการหมุนกล้องอัตโนมัติจากเซนเซอร์ Gyroscope / DeviceOrientation
+ * หมุนหน้าต่างและจัดวางองค์ประกอบตามทิศทางโทรศัพท์จริง
  */
 function handleGyroscopeOrientation(event) {
-  if (!event || elements.cameraModal.classList.contains('hidden')) return;
+  if (!event || !elements.cameraModal || elements.cameraModal.classList.contains('hidden')) return;
 
-  const beta = Math.abs(event.beta || 0);   // แกนตั้ง (หน้า-หลัง)
-  const gamma = Math.abs(event.gamma || 0); // แกนนอน (ซ้าย-ขวา)
+  const beta = event.beta || 0;   // แกนตั้ง (หน้า-หลัง)
+  const gamma = event.gamma || 0; // แกนนอน (ซ้าย-ขวา)
 
-  // ถ้าถือเครื่องในแนวนอน (แกนนอนเอียงชัดเจน)
-  if (gamma > 40 && gamma > beta) {
-    if (state.captureOrientation !== 'landscape') {
-      setCaptureOrientation('landscape');
-    }
-  } 
-  // ถ้าถือเครื่องในแนวตั้ง (แกนตั้งตั้งตรง)
-  else if (beta > 35 && beta >= gamma) {
-    if (state.captureOrientation !== 'portrait') {
-      setCaptureOrientation('portrait');
-    }
+  let nextOrientation = 'portrait';
+  let nextRotation = 0;
+
+  // เอียงไปทางขวา (Landscape 4:3 Right)
+  if (gamma > 35) {
+    nextOrientation = 'landscape';
+    nextRotation = 90;
+  }
+  // เอียงไปทางซ้าย (Landscape 4:3 Left)
+  else if (gamma < -35) {
+    nextOrientation = 'landscape';
+    nextRotation = -90;
+  }
+  // ถือแนวตั้งปกติ (Portrait 3:4 Upright)
+  else if (beta > 30 && Math.abs(gamma) <= 30) {
+    nextOrientation = 'portrait';
+    nextRotation = 0;
+  }
+
+  if (state.captureOrientation !== nextOrientation || state.rotationDeg !== nextRotation) {
+    state.rotationDeg = nextRotation;
+    setCaptureOrientation(nextOrientation, nextRotation);
   }
 }
 
@@ -1351,25 +1372,26 @@ function handleScreenOrientationChange() {
   if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
     if (screen.orientation && screen.orientation.type) {
       const isPortrait = screen.orientation.type.includes('portrait');
-      setCaptureOrientation(isPortrait ? 'portrait' : 'landscape');
+      setCaptureOrientation(isPortrait ? 'portrait' : 'landscape', isPortrait ? 0 : 90);
     } else {
       const isPortrait = window.innerHeight >= window.innerWidth;
-      setCaptureOrientation(isPortrait ? 'portrait' : 'landscape');
+      setCaptureOrientation(isPortrait ? 'portrait' : 'landscape', isPortrait ? 0 : 90);
     }
   }
 }
 
-function setCaptureOrientation(mode) {
+function setCaptureOrientation(mode, rotationDeg = 0) {
   state.captureOrientation = mode;
+  state.rotationDeg = rotationDeg;
   const isPortrait = mode === 'portrait';
 
   if (elements.liveOverlayFrame) {
     if (isPortrait) {
-      elements.liveOverlayFrame.classList.remove('ratio-4-3');
-      elements.liveOverlayFrame.classList.add('ratio-3-4');
+      elements.liveOverlayFrame.className = 'camera-live-frame ratio-3-4 gyro-rotate pointer-events-none';
+      elements.liveOverlayFrame.style.transform = 'translate(-50%, -50%) rotate(0deg)';
     } else {
-      elements.liveOverlayFrame.classList.remove('ratio-3-4');
-      elements.liveOverlayFrame.classList.add('ratio-4-3');
+      elements.liveOverlayFrame.className = 'camera-live-frame ratio-4-3 gyro-rotate pointer-events-none';
+      elements.liveOverlayFrame.style.transform = 'translate(-50%, -50%)';
     }
   }
 
@@ -1572,7 +1594,11 @@ async function captureAndProcessPhoto() {
       dateTime: WatermarkEngine.formatThaiDateTime(new Date())
     };
 
-    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation);
+    const rotationAngle = (state.captureOrientation === 'landscape' && elements.videoPreview.videoWidth < elements.videoPreview.videoHeight)
+      ? (state.rotationDeg || 90)
+      : 0;
+
+    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation, rotationAngle);
     
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';

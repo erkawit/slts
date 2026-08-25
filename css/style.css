@@ -53,7 +53,7 @@ body {
   border: 2px dashed rgba(255, 255, 255, 0.85);
   border-radius: 18px;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), width 0.35s ease, height 0.35s ease;
 }
 
 /* 3:4 Ratio (แนวตั้ง) */
@@ -70,6 +70,63 @@ body {
   width: calc(min(60vh, 320px) * 4 / 3);
   max-width: calc(100vw - 32px);
   max-height: calc((100vw - 32px) * 3 / 4);
+}
+
+/* Large Ergonomic Shutter Button (เด่นชัด กดง่ายด้วยนิ้วมือ) */
+.shutter-btn {
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  border: 4.5px solid #ffffff;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 28px rgba(59, 130, 246, 0.7), 0 6px 20px rgba(0, 0, 0, 0.5);
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s ease;
+  touch-action: manipulation;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (min-width: 640px) {
+  .shutter-btn {
+    width: 96px;
+    height: 96px;
+  }
+}
+
+.shutter-btn:active {
+  transform: scale(0.88);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.9), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.shutter-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.shutter-btn:active .shutter-inner {
+  background: #2563eb;
+}
+
+.shutter-btn:active .shutter-inner i {
+  color: #ffffff !important;
+  transform: scale(1.15);
+}
+
+/* Gyroscope rotation for HUD elements */
+.gyro-rotate {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .camera-live-frame::before, .camera-live-frame::after {

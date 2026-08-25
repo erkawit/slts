@@ -64,42 +64,64 @@ class WatermarkEngine {
   }
 
   /**
-   * วาดภาพแบบ Object-fit: Cover ลงบน Canvas สัดส่วน 3:4 หรือ 4:3
+   * วาดภาพแบบ Object-fit: Cover ลงบน Canvas สัดส่วน 3:4 หรือ 4:3 พร้อมรองรับการหมุนตามองศาจริง
    */
-  static drawCoverImage(ctx, img, targetW, targetH) {
-    const srcW = img.videoWidth || img.naturalWidth || img.width;
-    const srcH = img.videoHeight || img.naturalHeight || img.height;
+  static drawCoverImage(ctx, img, targetW, targetH, rotationDeg = 0) {
+    ctx.save();
+    if (rotationDeg !== 0) {
+      ctx.translate(targetW / 2, targetH / 2);
+      ctx.rotate((rotationDeg * Math.PI) / 180);
 
-    const srcRatio = srcW / srcH;
-    const targetRatio = targetW / targetH;
+      const isRotated90 = Math.abs(rotationDeg) === 90 || Math.abs(rotationDeg) === 270;
+      const effectiveTargetW = isRotated90 ? targetH : targetW;
+      const effectiveTargetH = isRotated90 ? targetW : targetH;
 
-    let renderW, renderH, offsetX, offsetY;
+      const srcW = img.videoWidth || img.naturalWidth || img.width;
+      const srcH = img.videoHeight || img.naturalHeight || img.height;
+      const srcRatio = srcW / srcH;
+      const targetRatio = effectiveTargetW / effectiveTargetH;
 
-    if (srcRatio > targetRatio) {
-      // ภาพต้นฉบับกว้างกว่าเป้าหมาย -> ครอปด้านข้าง
-      renderH = targetH;
-      renderW = targetH * srcRatio;
-      offsetX = (targetW - renderW) / 2;
-      offsetY = 0;
+      let renderW, renderH;
+      if (srcRatio > targetRatio) {
+        renderH = effectiveTargetH;
+        renderW = effectiveTargetH * srcRatio;
+      } else {
+        renderW = effectiveTargetW;
+        renderH = effectiveTargetW / srcRatio;
+      }
+      ctx.drawImage(img, -renderW / 2, -renderH / 2, renderW, renderH);
     } else {
-      // ภาพต้นฉบับสูงกว่าเป้าหมาย -> ครอปบนล่าง
-      renderW = targetW;
-      renderH = targetW / srcRatio;
-      offsetX = 0;
-      offsetY = (targetH - renderH) / 2;
-    }
+      const srcW = img.videoWidth || img.naturalWidth || img.width;
+      const srcH = img.videoHeight || img.naturalHeight || img.height;
+      const srcRatio = srcW / srcH;
+      const targetRatio = targetW / targetH;
 
-    ctx.drawImage(img, offsetX, offsetY, renderW, renderH);
+      let renderW, renderH, offsetX, offsetY;
+      if (srcRatio > targetRatio) {
+        renderH = targetH;
+        renderW = targetH * srcRatio;
+        offsetX = (targetW - renderW) / 2;
+        offsetY = 0;
+      } else {
+        renderW = targetW;
+        renderH = targetW / srcRatio;
+        offsetX = 0;
+        offsetY = (targetH - renderH) / 2;
+      }
+      ctx.drawImage(img, offsetX, offsetY, renderW, renderH);
+    }
+    ctx.restore();
   }
 
   /**
-   * ฟังก์ชันประทับลายน้ำลงบน Canvas ตามการหมุนกล้อง
+   * ฟังก์ชันประทับลายน้ำลงบน Canvas ตามการหมุนกล้องจริง
    * @param {HTMLImageElement|HTMLVideoElement|ImageBitmap} sourceImage ภาพหรือวิดีโอจากกล้อง
    * @param {Object} data ข้อมูลพิกัด เลขคดี ที่ตั้ง
    * @param {string} [forcedOrientation] กำหนด 'portrait' หรือ 'landscape' โดยตรง
+   * @param {number} [rotationDeg] องศาการหมุนภาพ (0, 90, -90)
    * @returns {Promise<{canvas: HTMLCanvasElement, dataUrl: string, blob: Blob, textContent: string, orientation: string}>}
    */
-  static async renderWatermark(sourceImage, data, forcedOrientation = null) {
+  static async renderWatermark(sourceImage, data, forcedOrientation = null, rotationDeg = 0) {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
@@ -121,7 +143,7 @@ class WatermarkEngine {
     canvas.height = height;
 
     // 3. วาดภาพต้นฉบับเต็มผืนผ้าใบแบบ Cover
-    this.drawCoverImage(ctx, sourceImage, width, height);
+    this.drawCoverImage(ctx, sourceImage, width, height, rotationDeg);
 
     // 4. คำนวณ Scale Factor เพื่อให้ Element ขยายสมส่วน
     const scale = isPortrait ? (width / 1000) : (height / 1000);
