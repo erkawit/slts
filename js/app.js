@@ -226,11 +226,6 @@ function initFormEventListeners() {
     }
   });
 
-  // บังคับให้ช่องบ้านเลขที่กรอกได้เฉพาะตัวเลขเท่านั้น
-  elements.houseNoInput.addEventListener('input', (e) => {
-    e.target.value = e.target.value.replace(/[^0-9]/g, '');
-  });
-
   // ปุ่มรีเฟรชพิกัดด้วยตนเอง
   elements.btnRefreshLocation.addEventListener('click', () => {
     fetchCurrentLocation(true);
@@ -460,7 +455,7 @@ function validateForm() {
       Swal.fire({
         icon: 'warning',
         title: 'กรุณากรอกบ้านเลขที่',
-        text: 'สำหรับหมายบ้าน บังคับต้องระบุบ้านเลขที่ (เฉพาะตัวเลข)',
+        text: 'สำหรับหมายบ้าน บังคับต้องระบุบ้านเลขที่ เช่น 154/2',
         confirmButtonColor: '#2563eb'
       });
       elements.houseNoInput.focus();
