@@ -125,10 +125,20 @@ function doPost(e) {
     }
 
     // ==========================================
-    // ACTION 3: UPLOAD_IMAGE (อัปโหลดรูปภาพลง Google Drive และอัปเดตแถวในชีต)
+    // ACTION 3: UPLOAD_IMAGE (อัปโหลดรูปภาพลง Google Drive และอัปเดต/เพิ่มแถวในชีต)
     // ==========================================
     let fileUrl = "";
     let fileId = "";
+
+    // หากเป็นการแทนที่ไฟล์เดิม (Overwrite) และมี oldFileId ให้ย้ายไฟล์เดิมใน Drive ไปยังถังขยะ
+    if (data.overwrite && data.oldFileId) {
+      try {
+        const oldFile = DriveApp.getFileById(data.oldFileId);
+        oldFile.setTrashed(true);
+      } catch (err) {
+        console.warn("Trash old file error:", err);
+      }
+    }
 
     // บันทึกรูปภาพ (Base64) ลงใน Google Drive Folder (ไม่สร้างไฟล์ .txt)
     if (data.imageBase64 && data.fileName) {
@@ -146,28 +156,37 @@ function doPost(e) {
       fileId = createdFile.getId();
     }
 
-    // ตรวจสอบว่ามีแถวเดิมที่บันทึกไว้ใน record_initial หรือไม่
     const sheetData = sheet.getDataRange().getValues();
     let targetRowIndex = -1;
 
-    for (let i = sheetData.length - 1; i >= 1; i--) {
-      const row = sheetData[i];
-      const rowCaseNumber = String(row[1] || '').trim();
-      const rowFileName = String(row[10] || '').trim();
-      const rowImgUrl = String(row[11] || '').trim();
+    // 1. ถ้าเป็นการระบุ rowIndex โดยตรง
+    if (data.rowIndex && Number(data.rowIndex) > 1 && Number(data.rowIndex) <= sheetData.length) {
+      targetRowIndex = Number(data.rowIndex);
+    } else {
+      // 2. ค้นหาแถวที่ตรงกัน
+      for (let i = sheetData.length - 1; i >= 1; i--) {
+        const row = sheetData[i];
+        const rowTimestamp = String(row[0] || '').trim();
+        const rowCaseNumber = String(row[1] || '').trim();
+        const rowImgUrl = String(row[11] || '').trim();
 
-      if (rowCaseNumber === data.caseNumber && (!rowImgUrl || rowImgUrl === "") && (!data.fileName || rowFileName === data.fileName)) {
-        targetRowIndex = i + 1;
-        break;
+        if (data.timestamp && rowTimestamp === data.timestamp && rowCaseNumber === data.caseNumber) {
+          targetRowIndex = i + 1;
+          break;
+        } else if (!data.isNewRecord && rowCaseNumber === data.caseNumber && (!rowImgUrl || rowImgUrl === "")) {
+          targetRowIndex = i + 1;
+          break;
+        }
       }
     }
 
-    if (targetRowIndex !== -1) {
-      // อัปเดตช่องลิงก์รูปภาพ (Column 12) และ File ID (Column 14)
+    if (targetRowIndex !== -1 && !data.isNewRecord) {
+      // อัปเดตแถวเดิมใน Google Sheet (แทนที่รูปภาพ หรือใส่ภาพในแถวที่ว่าง)
+      sheet.getRange(targetRowIndex, 11).setValue(data.fileName || "");
       sheet.getRange(targetRowIndex, 12).setValue(fileUrl);
       sheet.getRange(targetRowIndex, 14).setValue(fileId);
     } else {
-      // ถ้าไม่พบแถวเดิม ให้สร้างแถวใหม่สมบูรณ์
+      // เพิ่มข้อมูลใหม่ (Append New Row)
       const timestamp = new Date();
       const thaiDateStr = data.dateTime || Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
 
@@ -191,10 +210,11 @@ function doPost(e) {
 
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
-      message: "บันทึกรูปภาพลง Google Drive & Sheet สำเร็จ",
+      message: data.overwrite ? "แทนที่รูปภาพเดิมใน Google Drive & Sheet เรียบร้อยแล้ว" : "บันทึกรูปภาพลง Google Drive & Sheet สำเร็จ",
       fileUrl: fileUrl,
       fileId: fileId,
-      caseNumber: data.caseNumber
+      caseNumber: data.caseNumber,
+      isOverwrite: !!data.overwrite
     })).setMimeType(ContentService.MimeType.JSON);
 
   } catch (error) {

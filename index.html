@@ -337,11 +337,16 @@
                 </div>
               </div>
 
-              <!-- Mobile Only: ปุ่มเปิดกล้องถ่ายภาพ (แสดงเฉพาะจอมือถือ) -->
-              <div class="pt-2 block lg:hidden">
+              <!-- Mobile Only: ปุ่มเปิดกล้องถ่ายภาพ และ ปุ่มค้นหาข้อมูลหมาย (แสดงเฉพาะจอมือถือ < 768px) -->
+              <div class="pt-2 block lg:hidden space-y-2.5">
                 <button type="button" id="btnOpenCameraMobile" class="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-blue-500/25 transition duration-200 flex items-center justify-center gap-2 text-base">
                   <i class="fa-solid fa-camera text-lg"></i>
                   <span>เปิดกล้อง / ถ่ายภาพส่งหมาย</span>
+                </button>
+
+                <button type="button" onclick="openMobileCaseSearchModal()" class="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-[0.99] text-white font-bold py-3 px-4 rounded-xl shadow-md shadow-emerald-500/20 transition duration-200 flex items-center justify-center gap-2 text-sm">
+                  <i class="fa-solid fa-magnifying-glass"></i>
+                  <span>ค้นหาข้อมูลหมาย</span>
                 </button>
               </div>
 

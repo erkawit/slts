@@ -564,7 +564,7 @@ function renderUserList() {
         </div>
       </td>
       <td class="py-3 px-4">${roleBadge}</td>
-      <td class="py-3 px-4 text-xs text-gray-500 font-mono">${u.createdAt || '-'}</td>
+      <td class="py-3 px-4 text-xs text-gray-500 font-mono">${formatThaiDateDisplay(u.createdAt) || '-'}</td>
       <td class="py-3 px-4 text-right">${actionButtons}</td>
     `;
     elements.userListBody.appendChild(tr);
@@ -1002,6 +1002,63 @@ function uploadWithProgressBar(payload, title = 'กำลังอัปโห�
   });
 }
 
+/**
+ * แปลงรูปแบบวันเดือนปีให้อยู่ในรูปแบบไทยเสมอ เช่น "25 ส.ค. 2569 13:52:23" หรือ "25 ส.ค. 2569"
+ * วัน เดือน(ตัวอักษรย่อของไทย) ปี(พ.ศ.)
+ */
+function formatThaiDateDisplay(dateInput) {
+  if (!dateInput) return '-';
+  const thaiMonths = [
+    'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+  ];
+
+  const str = String(dateInput).trim();
+  // หากมีตัวย่อเดือนไทยอยู่แล้ว
+  if (thaiMonths.some(m => str.includes(m))) {
+    return str;
+  }
+
+  // รูปแบบ DD/MM/YYYY หรือ DD/MM/YYYY HH:mm:ss
+  const slashMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}:\d{1,2}(?::\d{1,2})?))?/);
+  if (slashMatch) {
+    const day = parseInt(slashMatch[1], 10);
+    const monthIdx = parseInt(slashMatch[2], 10) - 1;
+    let year = parseInt(slashMatch[3], 10);
+    if (year < 2400) year += 543;
+    const timePart = slashMatch[4] ? ' ' + slashMatch[4] : '';
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${day} ${thaiMonths[monthIdx]} ${year}${timePart}`;
+    }
+  }
+
+  // รูปแบบ YYYY-MM-DD หรือ YYYY-MM-DD HH:mm:ss
+  const dashMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}:\d{1,2}(?::\d{1,2})?))?/);
+  if (dashMatch) {
+    let year = parseInt(dashMatch[1], 10);
+    if (year < 2400) year += 543;
+    const monthIdx = parseInt(dashMatch[2], 10) - 1;
+    const day = parseInt(dashMatch[3], 10);
+    const timePart = dashMatch[4] ? ' ' + dashMatch[4] : '';
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${day} ${thaiMonths[monthIdx]} ${year}${timePart}`;
+    }
+  }
+
+  // แปลงจาก Date Object
+  const d = new Date(dateInput);
+  if (!isNaN(d.getTime())) {
+    const day = d.getDate();
+    const month = thaiMonths[d.getMonth()];
+    const year = d.getFullYear() + (d.getFullYear() < 2400 ? 543 : 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return `${day} ${month} ${year} ${time}`;
+  }
+
+  return str;
+}
+
 function renderDataTable(rows) {
   state.allSheetRows = rows;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
@@ -1032,7 +1089,8 @@ function renderDataTable(rows) {
   caseGroups.forEach((recordList, caseNumber) => {
     // รายการล่าสุด (รายการแรกสุดในกลุ่ม)
     const latest = recordList[0];
-    const timestamp = latest['วัน-เวลาบันทึก'] || latest['Timestamp'] || '';
+    const rawTimestamp = latest['วัน-เวลาบันทึก'] || latest['Timestamp'] || '';
+    const formattedTimestamp = formatThaiDateDisplay(rawTimestamp);
     const courtType = latest['ประเภทศาล'] || 'ศาลจังหวัดอุดรธานี';
     const district = latest['อำเภอ'] || '';
     const subdistrict = latest['ตำบล'] || '';
@@ -1072,7 +1130,7 @@ function renderDataTable(rows) {
     let actionBtn = `<span class="text-xs text-gray-400 italic">User Only</span>`;
     if (isAdmin && isDesktop) {
       actionBtn = `
-        <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${timestamp}', '${caseNumber}', ${latest.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบข้อมูลในชีตและไฟล์ใน Drive">
+        <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${rawTimestamp}', '${caseNumber}', ${latest.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบข้อมูลในชีตและไฟล์ใน Drive">
           <i class="fa-solid fa-trash-can"></i>
           <span>ลบ</span>
         </button>
@@ -1080,7 +1138,7 @@ function renderDataTable(rows) {
     }
 
     tr.innerHTML = `
-      <td class="font-mono text-xs text-gray-600 whitespace-nowrap">${timestamp}</td>
+      <td class="font-mono text-xs text-gray-600 whitespace-nowrap">${formattedTimestamp}</td>
       <td class="font-bold text-gray-900 whitespace-nowrap">${caseNumber}</td>
       <td class="text-xs text-gray-700">${courtType}</td>
       <td class="text-xs text-gray-700">${district}</td>
@@ -1126,7 +1184,8 @@ window.openCaseHistoryModal = function(caseNumber) {
 
   let rowsHtml = '';
   records.forEach((rec) => {
-    const timestamp = rec['วัน-เวลาบันทึก'] || rec['Timestamp'] || '';
+    const rawTimestamp = rec['วัน-เวลาบันทึก'] || rec['Timestamp'] || '';
+    const formattedTimestamp = formatThaiDateDisplay(rawTimestamp);
     const lat = rec['ละติจูด (Lat)'] || rec['ละติจูด'] || '';
     const lng = rec['ลองจิจูด (Lng)'] || rec['ลองจิจูด'] || '';
     const imgUrl = rec['ลิงก์รูปภาพใน Google Drive'] || rec['ลิงก์รูปภาพ'] || '';
@@ -1156,7 +1215,7 @@ window.openCaseHistoryModal = function(caseNumber) {
     `;
     if (imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http')) {
       imgBtn = `
-        <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${timestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1">
+        <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${formattedTimestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1">
           <i class="fa-solid fa-image"></i>
           <span>ดูภาพ</span>
         </button>
@@ -1167,7 +1226,7 @@ window.openCaseHistoryModal = function(caseNumber) {
     if (showDeleteCol) {
       deleteBtn = `
         <td>
-          <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${timestamp}', '${caseNumber}', ${rec.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบรายการนี้">
+          <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${rawTimestamp}', '${caseNumber}', ${rec.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบรายการนี้">
             <i class="fa-solid fa-trash-can"></i>
             <span>ลบ</span>
           </button>
@@ -1177,7 +1236,7 @@ window.openCaseHistoryModal = function(caseNumber) {
 
     rowsHtml += `
       <tr>
-        <td class="font-mono text-xs text-gray-700 whitespace-nowrap">${timestamp}</td>
+        <td class="font-mono text-xs text-gray-700 whitespace-nowrap">${formattedTimestamp}</td>
         <td>${coordDisplay}</td>
         <td class="whitespace-nowrap">${imgBtn}</td>
         ${showDeleteCol ? deleteBtn : ''}
@@ -1230,7 +1289,8 @@ window.openCaseHistoryModal = function(caseNumber) {
 
 /**
  * Modal อัปโหลดภาพหมายย้อนหลัง (สำหรับกรณีไม่ได้อัปโหลดขณะถ่าย หรืออัปโหลดล้มเหลว)
- * โดยจะทำการตรวจสอบและดึงข้อมูลสดล่าสุดจาก Google Sheet ก่อนแสดงรายการเสมอ
+ * ตรวจสอบและดึงข้อมูลสดล่าสุดจาก Google Sheet ก่อนแสดงรายการเสมอ
+ * หากรายการที่เลือกมีรูปภาพอยู่แล้ว จะแจ้งเตือนและสอบถามการแทนที่ไฟล์เดิม
  */
 window.openManualUploadModal = async function() {
   // 1. แสดง Loading และดึงข้อมูลสดล่าสุดจาก Google Sheet เพื่อตรวจสอบข้อมูล
@@ -1267,7 +1327,6 @@ window.openManualUploadModal = async function() {
   } catch (err) {
     console.error('Check Google Sheet error:', err);
     hideCustomLoading();
-    // หากดึงสดไม่สำเร็จ แต่มีแคชเดิม ให้ใช้ข้อมูลที่มีอยู่ต่อได้
     if (!state.allSheetRows || state.allSheetRows.length === 0) {
       Swal.fire({
         icon: 'error',
@@ -1325,11 +1384,18 @@ window.openManualUploadModal = async function() {
         </div>
 
         <!-- กล่องแสดงรายการที่เลือก -->
-        <div id="manualSelectedCaseBox" class="hidden p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs space-y-1">
-          <p class="font-bold text-blue-900 flex items-center justify-between">
-            <span><i class="fa-solid fa-check-circle text-emerald-600 mr-1"></i> รายการที่เลือก: <span id="manualSelectedCaseText" class="font-mono text-sm text-blue-700"></span></span>
-            <span id="manualSelectedTimestampText" class="text-gray-500 font-normal"></span>
-          </p>
+        <div id="manualSelectedCaseBox" class="hidden p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs space-y-1.5">
+          <div class="flex items-center justify-between">
+            <p class="font-bold text-blue-900">
+              <i class="fa-solid fa-check-circle text-emerald-600 mr-1"></i> รายการที่เลือก: <span id="manualSelectedCaseText" class="font-mono text-sm text-blue-700"></span>
+            </p>
+            <span id="manualSelectedTimestampText" class="text-gray-500 font-mono text-[11px]"></span>
+          </div>
+          <!-- Alert ถ้ามีไฟล์ภาพอยู่แล้ว -->
+          <div id="manualExistingImageWarning" class="hidden p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-1.5">
+            <i class="fa-solid fa-triangle-exclamation text-amber-600"></i>
+            <span><b>แจ้งเตือน:</b> รายการนี้มีภาพถ่ายในระบบแล้ว การอัปโหลดจะเป็นการ<b>แทนที่ไฟล์เดิม</b></span>
+          </div>
         </div>
 
         <!-- 2. กล่องอัปโหลดไฟล์รูปภาพ -->
@@ -1384,15 +1450,17 @@ window.openManualUploadModal = async function() {
 
         filtered.forEach(row => {
           const caseNo = row['เลขคดี'] || '-';
-          const time = row['วัน-เวลาบันทึก'] || row['Timestamp'] || '-';
+          const rawTime = row['วัน-เวลาบันทึก'] || row['Timestamp'] || '-';
+          const formattedTime = formatThaiDateDisplay(rawTime);
           const loc = row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '-';
           const imgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
+          const hasImage = imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http');
 
           const tr = document.createElement('tr');
           tr.className = 'border-b border-gray-100 hover:bg-blue-50/50 transition';
           tr.innerHTML = `
             <td class="p-2 font-bold text-gray-900">${caseNo}</td>
-            <td class="p-2 font-mono text-gray-600 whitespace-nowrap">${time}</td>
+            <td class="p-2 font-mono text-gray-600 whitespace-nowrap">${formattedTime}</td>
             <td class="p-2 text-gray-600 max-w-[150px] truncate" title="${loc}">${loc}</td>
             <td class="p-2 text-center">
               <button type="button" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition">
@@ -1404,7 +1472,15 @@ window.openManualUploadModal = async function() {
             selectedRowData = row;
             document.getElementById('manualSelectedCaseBox').classList.remove('hidden');
             document.getElementById('manualSelectedCaseText').textContent = caseNo;
-            document.getElementById('manualSelectedTimestampText').textContent = time;
+            document.getElementById('manualSelectedTimestampText').textContent = formattedTime;
+
+            const warningBox = document.getElementById('manualExistingImageWarning');
+            if (hasImage) {
+              warningBox.classList.remove('hidden');
+            } else {
+              warningBox.classList.add('hidden');
+            }
+
             document.getElementById('manualUploadSection').classList.remove('hidden');
             if (selectedImageDataUrl) confirmBtn.disabled = false;
           });
@@ -1446,8 +1522,30 @@ window.openManualUploadModal = async function() {
     if (result.isConfirmed && result.value) {
       const { row, dataUrl } = result.value;
       const caseNumber = row['เลขคดี'] || '';
+      const existingImgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
+      const hasExistingImage = existingImgUrl && String(existingImgUrl).trim() !== '' && String(existingImgUrl).startsWith('http');
       const baseFilename = caseNumber.replace(/\//g, '-');
       const imageFilename = baseFilename + '.jpg';
+
+      // หากมีไฟล์ภาพเดิมในระบบอยู่แล้ว ให้เตือนและสอบถามการแทนที่ไฟล์เดิม
+      if (hasExistingImage) {
+        const confirmOverwrite = await Swal.fire({
+          title: 'ยืนยันการแทนที่ไฟล์เดิม?',
+          html: `<p class="text-sm text-gray-700">รายการเลขคดี <b>"${caseNumber}"</b> มีไฟล์ภาพในระบบแล้ว<br>ท่านต้องการอัปโหลดเพื่อแทนที่ไฟล์เดิมหรือไม่?</p>`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'ยืนยันแทนที่ไฟล์เดิม',
+          cancelButtonText: 'ยกเลิก',
+          confirmButtonColor: '#d97706',
+          cancelButtonColor: '#6b7280',
+          showCloseButton: true,
+          allowOutsideClick: false
+        });
+
+        if (!confirmOverwrite.isConfirmed) {
+          return;
+        }
+      }
 
       try {
         // บีบอัดรูปภาพให้ <= 1MB
@@ -1455,6 +1553,10 @@ window.openManualUploadModal = async function() {
 
         const uploadPayload = {
           action: 'upload_image',
+          overwrite: hasExistingImage,
+          oldFileId: row['Drive File ID'] || '',
+          rowIndex: row.originalIndex !== undefined ? (row.originalIndex + 2) : undefined,
+          timestamp: row['วัน-เวลาบันทึก'] || row['Timestamp'] || '',
           caseNumber: caseNumber,
           courtType: row['ประเภทศาล'] || 'ศาลจังหวัดอุดรธานี',
           district: row['อำเภอ'] || '',
@@ -1475,10 +1577,10 @@ window.openManualUploadModal = async function() {
 
         Swal.fire({
           icon: 'success',
-          title: 'อัปโหลดภาพสำเร็จ!',
+          title: hasExistingImage ? 'แทนที่ไฟล์ภาพสำเร็จ!' : 'อัปโหลดภาพสำเร็จ!',
           showCloseButton: true,
           allowOutsideClick: false,
-          html: `<p class="text-gray-700">อัปโหลดภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงใน Google Drive & Sheet เรียบร้อยแล้ว</p>
+          html: `<p class="text-gray-700">${hasExistingImage ? 'แทนที่ภาพถ่ายเดิมของเลขคดี' : 'อัปโหลดภาพถ่ายเลขคดี'} <b>${caseNumber}</b> ลงใน Google Drive & Sheet เรียบร้อยแล้ว</p>
                  ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
           confirmButtonColor: '#2563eb'
         }).then(() => {
@@ -1496,6 +1598,161 @@ window.openManualUploadModal = async function() {
           confirmButtonColor: '#2563eb'
         });
       }
+    }
+  });
+};
+
+/**
+ * Modal ค้นหาข้อมูลหมายบนหน้าจอมือถือ (< 768px)
+ * แสดงรายการในรูปแบบ ListView สำหรับหน้าจอมือถือ
+ * แต่ละรายการมี: 3.1 ปุ่มเลขคดี, 3.2 ปุ่มพิกัด, 3.3 ปุ่มดูภาพที่อัปโหลด (ถ้ามี)
+ */
+window.openMobileCaseSearchModal = async function() {
+  // ตรวจสอบและดึงข้อมูลสดจาก Google Sheet หากยังไม่มีข้อมูล
+  if (!state.allSheetRows || state.allSheetRows.length === 0) {
+    showCustomLoading('กำลังดึงข้อมูลหมาย...', 'กำลังเชื่อมต่อ Google Sheet');
+    try {
+      const now = Date.now();
+      const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${now}`;
+      const freshRows = await new Promise((resolve, reject) => {
+        Papa.parse(csvFetchUrl, {
+          download: true,
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => resolve(results.data || []),
+          error: (err) => reject(err)
+        });
+      });
+      hideCustomLoading();
+      state.allSheetRows = freshRows;
+      renderDataTable(freshRows);
+    } catch (e) {
+      hideCustomLoading();
+      console.warn('Mobile search load error:', e);
+    }
+  }
+
+  Swal.fire({
+    title: 'ค้นหาข้อมูลหมาย',
+    html: `
+      <div class="text-left space-y-3 pt-1">
+        <!-- ช่องค้นหาเลขคดี + ปุ่มค้นหา -->
+        <div class="flex gap-2">
+          <input type="text" id="mobileSearchInput" placeholder="พิมพ์เลขคดี เช่น ผบE2100/2569..." class="flex-1 bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition">
+          <button type="button" id="btnTriggerMobileSearch" class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <span>ค้นหา</span>
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between text-xs text-gray-500 px-1">
+          <span id="mobileSearchResultCountText">แสดงรายการล่าสุด</span>
+        </div>
+
+        <!-- รายการคดีแบบ ListView สำหรับจอมือถือ -->
+        <div id="mobileSearchResultsContainer" class="max-h-[58vh] overflow-y-auto space-y-2.5 pr-0.5">
+          <!-- Injected by JS -->
+        </div>
+      </div>
+    `,
+    width: '95%',
+    showCloseButton: true,
+    showConfirmButton: false,
+    allowOutsideClick: false,
+    didOpen: () => {
+      const searchInput = document.getElementById('mobileSearchInput');
+      const searchBtn = document.getElementById('btnTriggerMobileSearch');
+      const container = document.getElementById('mobileSearchResultsContainer');
+      const countTxt = document.getElementById('mobileSearchResultCountText');
+
+      const renderList = (query = '') => {
+        const q = query.trim().toLowerCase();
+        const rows = state.allSheetRows || [];
+        const filtered = rows.filter(r => {
+          const c = (r['เลขคดี'] || '').toLowerCase();
+          const d = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').toLowerCase();
+          return !q || c.includes(q) || d.includes(q);
+        });
+
+        countTxt.textContent = q ? `พบทั้งหมด ${filtered.length} รายการ` : `แสดง ${Math.min(filtered.length, 20)} รายการล่าสุด`;
+        container.innerHTML = '';
+
+        if (filtered.length === 0) {
+          container.innerHTML = `
+            <div class="p-6 text-center text-gray-400 bg-gray-50 rounded-2xl border border-gray-200">
+              <i class="fa-solid fa-folder-open text-3xl mb-2 text-gray-300"></i>
+              <p class="text-xs">ไม่พบข้อมูลเลขคดีที่ค้นหา</p>
+            </div>
+          `;
+          return;
+        }
+
+        const displayRows = q ? filtered : filtered.slice(0, 20);
+
+        displayRows.forEach(row => {
+          const caseNo = row['เลขคดี'] || '-';
+          const rawTime = row['วัน-เวลาบันทึก'] || row['Timestamp'] || '';
+          const formattedDate = formatThaiDateDisplay(rawTime);
+          const loc = row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '-';
+          const lat = row['ละติจูด (Lat)'] || row['ละติจูด'] || '';
+          const lng = row['ลองจิจูด (Lng)'] || row['ลองจิจูด'] || '';
+          const imgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
+          const hasImage = imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http');
+
+          const card = document.createElement('div');
+          card.className = 'bg-white rounded-xl border border-gray-200 p-3.5 shadow-sm space-y-2.5 text-left transition hover:border-blue-300';
+          
+          card.innerHTML = `
+            <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2">
+              <div>
+                <span class="font-bold text-gray-900 text-sm text-blue-700">${caseNo}</span>
+                <p class="text-[11px] text-gray-500 font-mono mt-0.5"><i class="fa-regular fa-calendar-check mr-1"></i>${formattedDate}</p>
+              </div>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${hasImage ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}">
+                ${hasImage ? 'มีภาพถ่าย' : 'ไม่มีภาพ'}
+              </span>
+            </div>
+
+            <p class="text-xs text-gray-700 leading-relaxed">
+              <i class="fa-solid fa-location-dot text-red-500 mr-1"></i>${loc}
+            </p>
+
+            <!-- Action Buttons: 3.1 เลขคดี, 3.2 พิกัด, 3.3 ดูภาพ (ถ้ามี) -->
+            <div class="flex items-center gap-1.5 flex-wrap pt-1">
+              <!-- 3.1 ปุ่มเลขคดี -->
+              <button type="button" class="px-2.5 py-1.5 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
+                <i class="fa-solid fa-scale-balanced text-blue-600"></i>
+                <span>${caseNo}</span>
+              </button>
+
+              <!-- 3.2 ปุ่มพิกัด -->
+              ${lat && lng ? `
+                <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-sm inline-flex items-center gap-1 hover:bg-emerald-100 transition" title="คัดลอกพิกัด">
+                  <i class="fa-solid fa-location-crosshairs text-emerald-600"></i>
+                  <span>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</span>
+                </button>
+              ` : ''}
+
+              <!-- 3.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะเมื่อมีภาพในระบบ) -->
+              ${hasImage ? `
+                <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNo}', '${loc.replace(/'/g, "\\'")}', '${formattedDate}', '${lat}', '${lng}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm inline-flex items-center gap-1 active:scale-95 transition">
+                  <i class="fa-solid fa-image"></i>
+                  <span>ดูภาพ</span>
+                </button>
+              ` : ''}
+            </div>
+          `;
+
+          container.appendChild(card);
+        });
+      };
+
+      renderList('');
+      searchInput.addEventListener('input', (e) => renderList(e.target.value));
+      searchBtn.addEventListener('click', () => renderList(searchInput.value));
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') renderList(searchInput.value);
+      });
     }
   });
 };
