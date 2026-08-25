@@ -430,10 +430,10 @@ function updateAuthUI() {
     if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
   }
 
-  // ปุ่มอัปโหลดภาพหมายย้อนหลัง (แสดงเมื่อล็อกอิน และอยู่บนหน้าจอกว้าง > 768px)
+  // ปุ่มอัปโหลดภาพหมาย (แสดงบนหน้าจอกว้าง > 768px)
   const btnManualUpload = document.getElementById('btnManualUploadPhoto');
   if (btnManualUpload) {
-    if (isLoggedIn && isDesktop) {
+    if (isDesktop) {
       btnManualUpload.classList.remove('hidden');
       btnManualUpload.classList.add('inline-flex');
     } else {
@@ -1490,288 +1490,446 @@ window.openCaseHistoryModal = function(caseNumber) {
 };
 
 /**
- * Modal อัปโหลดภาพหมายย้อนหลัง (สำหรับกรณีไม่ได้อัปโหลดขณะถ่าย หรืออัปโหลดล้มเหลว)
- * ตรวจสอบและดึงข้อมูลสดล่าสุดจาก Google Sheet ก่อนแสดงรายการเสมอ
- * หากรายการที่เลือกมีรูปภาพอยู่แล้ว จะแจ้งเตือนและสอบถามการแทนที่ไฟล์เดิม
+ * Modal อัปโหลดภาพหมาย (นำเข้าข้อมูลส่งหมายพร้อมรูปภาพ)
+ * กรอกข้อมูลเหมือนหน้าบันทึกส่งหมายทุกประการ:
+ * - ประเภทศาล (ศาลจังหวัดอุดรธานี / ศาลอื่น)
+ * - เลขคดี (อักษรนำหน้า + เลขคดี + ปี พ.ศ.)
+ * - ที่ตั้ง (อำเภอ, ตำบล, ประเภทสถานที่, บ้านเลขที่/หมู่ที่/อบต./สถานที่อื่นๆ)
+ * - พิกัด GPS (ดึงจากเครื่องปัจจุบัน หรือกดเช็คพิกัดใหม่)
+ * - เลือกไฟล์รูปภาพ (เฉพาะไฟล์รูปภาพ accept="image/*")
+ * - แสดงตัวอย่างภาพ และสามารถกดดูภาพขนาดเต็มได้
+ * - ทำการประมวลผลลายน้ำ และลดขนาดภาพไม่ให้เกิน 1MB ก่อนอัปโหลด
  */
-window.openManualUploadModal = async function() {
-  // 1. แสดง Loading และดึงข้อมูลสดล่าสุดจาก Google Sheet เพื่อตรวจสอบข้อมูล
-  showCustomLoading('กำลังตรวจสอบข้อมูลใน Google Sheet...', 'กำลังดึงรายการเลขคดีล่าสุดจาก Google Sheet เพื่อตรวจสอบ');
-
-  try {
-    const now = Date.now();
-    const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${now}`;
-
-    const freshRows = await new Promise((resolve, reject) => {
-      Papa.parse(csvFetchUrl, {
-        download: true,
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => resolve(results.data || []),
-        error: (err) => reject(err)
-      });
-    });
-
-    hideCustomLoading();
-
-    // บันทึกลง cache และอัปเดต state
-    state.allSheetRows = freshRows;
-    try {
-      localStorage.setItem(CACHE_KEY_SHEET_DATA, JSON.stringify(freshRows));
-      localStorage.setItem(CACHE_KEY_SHEET_TIME, String(Date.now()));
-    } catch (saveErr) {
-      console.warn('Could not save to localStorage:', saveErr);
-    }
-    const timeStr = new Date().toLocaleTimeString('th-TH');
-    updateCacheBadgeUI(false, timeStr);
-    renderDataTable(freshRows);
-
-  } catch (err) {
-    console.error('Check Google Sheet error:', err);
-    hideCustomLoading();
-    if (!state.allSheetRows || state.allSheetRows.length === 0) {
-      Swal.fire({
-        icon: 'error',
-        title: 'ไม่สามารถเชื่อมต่อ Google Sheet ได้',
-        text: 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ตของท่าน: ' + err.message,
-        showCloseButton: true,
-        allowOutsideClick: false,
-        confirmButtonColor: '#2563eb'
-      });
-      return;
-    }
+window.openManualUploadModal = function() {
+  const currentBuddhistYear = new Date().getFullYear() + (new Date().getFullYear() < 2400 ? 543 : 0);
+  
+  // สร้างตัวเลือกปี พ.ศ.
+  let yearOptionsHtml = '';
+  for (let y = currentBuddhistYear; y >= currentBuddhistYear - 15; y--) {
+    yearOptionsHtml += `<option value="${y}">${y}</option>`;
   }
 
-  if (!state.allSheetRows || state.allSheetRows.length === 0) {
-    Swal.fire({
-      icon: 'info',
-      title: 'ยังไม่มีข้อมูลในระบบ',
-      text: 'ไม่พบรายการส่งหมายใน Google Sheet',
-      showCloseButton: true,
-      allowOutsideClick: false
-    });
-    return;
-  }
+  // สร้างตัวเลือกอำเภอ
+  let districtOptionsHtml = '';
+  const districts = typeof UDON_THANI_DATA !== 'undefined' ? Object.keys(UDON_THANI_DATA) : ['เมืองอุดรธานี'];
+  districts.forEach(d => {
+    districtOptionsHtml += `<option value="${d}">${d}</option>`;
+  });
 
-  let selectedRowData = null;
+  // สร้าง datalist สำหรับ autocomplete อักษรนำหน้าเลขคดี
+  let prefixOptionsHtml = '';
+  const prefixes = state.casePrefixHistory || ['ผบE', 'ผบ', 'พ', 'ผชE', 'ผช', 'ม', 'กE', 'ก'];
+  prefixes.forEach(p => {
+    prefixOptionsHtml += `<option value="${p}">`;
+  });
+
+  // พิกัดปัจจุบัน
+  const defaultLat = state.lat ? Number(state.lat).toFixed(6) : '';
+  const defaultLng = state.lng ? Number(state.lng).toFixed(6) : '';
+
   let selectedImageDataUrl = null;
 
   Swal.fire({
-    title: 'อัปโหลดภาพหมายย้อนหลัง',
+    title: '<div class="flex items-center justify-center gap-2 text-gray-900 font-bold text-base sm:text-lg"><i class="fa-solid fa-cloud-arrow-up text-blue-600"></i><span>อัปโหลดภาพส่งหมาย</span></div>',
     html: `
-      <div class="text-left space-y-4 pt-1">
-        <!-- 1. ค้นหาเลขคดี Realtime -->
-        <div>
-          <label class="block text-xs font-bold text-gray-700 mb-1">
-            <i class="fa-solid fa-magnifying-glass text-blue-600 mr-1"></i> 1. ค้นหาเลขคดี (พิมพ์ค้นหาแบบ Real-time):
-          </label>
-          <input type="text" id="manualSearchCaseInput" placeholder="พิมพ์เลขคดี เช่น ผบE1245/2569 หรือ 2097..." class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition">
+      <div class="text-left space-y-4 pt-1 max-h-[72vh] overflow-y-auto pr-1 text-xs">
+        
+        <!-- 1. ข้อมูลศาลและเลขคดี -->
+        <div class="bg-gray-50/80 p-3.5 rounded-xl border border-gray-200 space-y-2.5">
+          <p class="font-bold text-gray-800 flex items-center gap-1.5 text-xs">
+            <i class="fa-solid fa-scale-balanced text-blue-600"></i> ข้อมูลศาลและเลขคดี
+          </p>
+          
+          <div>
+            <label class="block font-semibold text-gray-700 mb-1">ประเภทศาล</label>
+            <select id="mUp_courtType" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium focus:border-blue-500 focus:ring-1 focus:ring-blue-200">
+              <option value="ศาลจังหวัดอุดรธานี" selected>ศาลจังหวัดอุดรธานี</option>
+              <option value="ศาลอื่น">ศาลอื่น</option>
+            </select>
+          </div>
+
+          <!-- เลขคดี: ศาลจังหวัดอุดรธานี -->
+          <div id="mUp_udonCaseBox" class="space-y-1">
+            <label class="block font-semibold text-gray-700">เลขคดี (อักษรนำหน้า / เลข / ปี) *</label>
+            <div class="flex items-center gap-1.5">
+              <input type="text" id="mUp_udonPrefix" list="mUp_prefixDatalist" value="ผบE" placeholder="อักษร เช่น ผบE" class="w-24 bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-bold text-blue-700 text-center uppercase">
+              <datalist id="mUp_prefixDatalist">${prefixOptionsHtml}</datalist>
+              <input type="text" id="mUp_udonCaseNo" placeholder="เลขคดี เช่น 2100" class="flex-1 bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 text-center">
+              <span class="text-gray-400 font-bold text-sm">/</span>
+              <select id="mUp_udonYear" class="w-24 bg-white border border-gray-300 rounded-xl px-2 py-2 text-xs font-bold text-gray-800 text-center">
+                ${yearOptionsHtml}
+              </select>
+            </div>
+          </div>
+
+          <!-- เลขคดี: ศาลอื่น -->
+          <div id="mUp_otherCaseBox" class="hidden space-y-1">
+            <label class="block font-semibold text-gray-700">เลขคดีเต็ม (ศาลอื่น) *</label>
+            <div class="flex items-center gap-1.5">
+              <input type="text" id="mUp_otherCaseNo" placeholder="พิมพ์เลขคดี เช่น ผบE100/2569" class="flex-1 bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+              <select id="mUp_otherYear" class="w-24 bg-white border border-gray-300 rounded-xl px-2 py-2 text-xs font-bold text-gray-800 text-center">
+                ${yearOptionsHtml}
+              </select>
+            </div>
+          </div>
         </div>
 
-        <!-- ผลลัพธ์การค้นหา -->
-        <div class="max-h-48 overflow-y-auto border border-gray-200 rounded-xl bg-gray-50/50">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-gray-100 text-gray-700 font-bold sticky top-0">
-              <tr>
-                <th class="p-2">เลขคดี</th>
-                <th class="p-2">วัน-เวลา</th>
-                <th class="p-2">ที่ตั้ง</th>
-                <th class="p-2 text-center">เลือก</th>
-              </tr>
-            </thead>
-            <tbody id="manualSearchResultsBody">
-              <!-- Injected by realtime search -->
-            </tbody>
-          </table>
+        <!-- 2. ข้อมูลที่ตั้งส่งหมาย -->
+        <div class="bg-gray-50/80 p-3.5 rounded-xl border border-gray-200 space-y-2.5">
+          <p class="font-bold text-gray-800 flex items-center gap-1.5 text-xs">
+            <i class="fa-solid fa-location-dot text-red-500"></i> ข้อมูลที่ตั้งส่งหมาย
+          </p>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block font-semibold text-gray-700 mb-1">อำเภอ *</label>
+              <select id="mUp_district" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-medium focus:border-blue-500">
+                ${districtOptionsHtml}
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold text-gray-700 mb-1">ตำบล *</label>
+              <select id="mUp_subdistrict" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-medium focus:border-blue-500">
+                <!-- Injected dynamic -->
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-semibold text-gray-700 mb-1">ประเภทสถานที่</label>
+            <select id="mUp_locationType" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium focus:border-blue-500">
+              <option value="หมายบ้าน" selected>หมายบ้าน (บ้านเลขที่/หมู่ที่)</option>
+              <option value="หมาย อบต./เทศบาล">หมาย อบต./เทศบาล</option>
+              <option value="อื่นๆ">อื่นๆ (ระบุชื่อสถานที่)</option>
+            </select>
+          </div>
+
+          <!-- ฟิลด์หมายบ้าน -->
+          <div id="mUp_houseFields" class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block font-semibold text-gray-700 mb-1">บ้านเลขที่ *</label>
+              <input type="text" id="mUp_houseNo" placeholder="เช่น 141, 99/1" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium">
+            </div>
+            <div>
+              <label class="block font-semibold text-gray-700 mb-1">หมู่ที่</label>
+              <input type="text" id="mUp_moo" placeholder="เช่น 5" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium">
+            </div>
+          </div>
+
+          <!-- ฟิลด์ อบต./เทศบาล -->
+          <div id="mUp_localAdminFields" class="hidden">
+            <label class="block font-semibold text-gray-700 mb-1">ชื่อ อบต. / เทศบาล *</label>
+            <input type="text" id="mUp_localAdminName" placeholder="เช่น อบต.กุดสระ, เทศบาลนครอุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium">
+          </div>
+
+          <!-- ฟิลด์ อื่นๆ -->
+          <div id="mUp_customOtherFields" class="hidden">
+            <label class="block font-semibold text-gray-700 mb-1">ชื่อสถานที่ส่งหมาย *</label>
+            <input type="text" id="mUp_customOtherLocation" placeholder="เช่น โรงเรียนบ้านนาดี, วัดโพธิสมภรณ์" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium">
+          </div>
         </div>
 
-        <!-- กล่องแสดงรายการที่เลือก -->
-        <div id="manualSelectedCaseBox" class="hidden p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs space-y-1.5">
+        <!-- 3. ข้อมูลพิกัด GPS -->
+        <div class="bg-gray-50/80 p-3.5 rounded-xl border border-gray-200 space-y-2">
           <div class="flex items-center justify-between">
-            <p class="font-bold text-blue-900">
-              <i class="fa-solid fa-check-circle text-emerald-600 mr-1"></i> รายการที่เลือก: <span id="manualSelectedCaseText" class="font-mono text-sm text-blue-700"></span>
+            <p class="font-bold text-gray-800 flex items-center gap-1.5 text-xs">
+              <i class="fa-solid fa-location-crosshairs text-emerald-600"></i> พิกัดสถานที่ (GPS Coordinates)
             </p>
-            <span id="manualSelectedTimestampText" class="text-gray-500 font-mono text-[11px]"></span>
+            <button type="button" id="mUp_btnRefreshGps" class="text-[11px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
+              <i class="fa-solid fa-arrows-rotate"></i> เช็คพิกัดใหม่
+            </button>
           </div>
-          <!-- Alert ถ้ามีไฟล์ภาพอยู่แล้ว -->
-          <div id="manualExistingImageWarning" class="hidden p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-1.5">
-            <i class="fa-solid fa-triangle-exclamation text-amber-600"></i>
-            <span><b>แจ้งเตือน:</b> รายการนี้มีภาพถ่ายในระบบแล้ว การอัปโหลดจะเป็นการ<b>แทนที่ไฟล์เดิม</b></span>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] text-gray-500 mb-0.5">ละติจูด (Lat)</label>
+              <input type="text" id="mUp_lat" value="${defaultLat}" placeholder="เช่น 17.4144" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-gray-700 text-center">
+            </div>
+            <div>
+              <label class="block text-[10px] text-gray-500 mb-0.5">ลองจิจูด (Lng)</label>
+              <input type="text" id="mUp_lng" value="${defaultLng}" placeholder="เช่น 102.7882" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-gray-700 text-center">
+            </div>
           </div>
         </div>
 
-        <!-- 2. กล่องอัปโหลดไฟล์รูปภาพ -->
-        <div id="manualUploadSection" class="hidden space-y-3 pt-2 border-t border-gray-200">
-          <label class="block text-xs font-bold text-gray-700">
-            <i class="fa-solid fa-image text-blue-600 mr-1"></i> 2. เลือกไฟล์รูปภาพ (เฉพาะไฟล์รูปภาพ):
-          </label>
-          <input type="file" id="manualImageFileInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+        <!-- 4. เลือกไฟล์รูปภาพ (เฉพาะรูปภาพเท่านั้น) -->
+        <div class="bg-blue-50/60 p-3.5 rounded-xl border border-blue-200 space-y-3">
+          <div>
+            <label class="block font-bold text-blue-900 mb-1 text-xs">
+              <i class="fa-solid fa-image text-blue-600 mr-1"></i> เลือกไฟล์รูปภาพ (เฉพาะไฟล์รูปภาพเท่านั้น) *
+            </label>
+            <input type="file" id="mUp_fileInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer">
+          </div>
 
-          <!-- ตัวอย่างรูปภาพ (Thumbnail Preview) -->
-          <div id="manualImagePreviewContainer" class="hidden space-y-2">
+          <!-- ตัวอย่างรูปภาพ (Thumbnail Preview) & คลิกดูภาพเต็ม -->
+          <div id="mUp_previewContainer" class="hidden space-y-2">
+            <p class="text-[11px] font-bold text-gray-700">ตัวอย่างภาพที่เลือก (คลิกที่ภาพเพื่อดูขนาดเต็ม):</p>
             <div class="relative bg-gray-900 rounded-xl p-2 flex items-center justify-center max-h-48 overflow-hidden cursor-pointer group" onclick="viewManualFullPreview()" title="คลิกเพื่อดูภาพขนาดเต็ม">
-              <img id="manualPreviewImg" src="" class="max-h-44 object-contain rounded-lg shadow">
+              <img id="mUp_previewImg" src="" class="max-h-44 object-contain rounded-lg shadow">
               <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5">
                 <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
                 <span>คลิกเพื่อดูภาพเต็ม</span>
               </div>
             </div>
-            <p id="manualImageInfoText" class="text-[11px] text-gray-500 text-center font-mono"></p>
+            <p id="mUp_fileInfoText" class="text-[11px] text-gray-500 text-center font-mono"></p>
           </div>
         </div>
+
       </div>
     `,
     width: '700px',
     showCloseButton: true,
     showCancelButton: true,
-    confirmButtonText: '<i class="fa-solid fa-cloud-arrow-up mr-1.5"></i> ยืนยันอัปโหลดภาพขึ้น Google Drive',
+    confirmButtonText: '<i class="fa-solid fa-cloud-arrow-up mr-1.5"></i> บันทึกและอัปโหลดภาพขึ้น Google Drive',
     cancelButtonText: 'ยกเลิก',
     confirmButtonColor: '#2563eb',
     cancelButtonColor: '#6b7280',
     didOpen: () => {
-      const searchInput = document.getElementById('manualSearchCaseInput');
-      const resultsBody = document.getElementById('manualSearchResultsBody');
-      const fileInput = document.getElementById('manualImageFileInput');
-      const confirmBtn = Swal.getConfirmButton();
-      confirmBtn.disabled = true;
+      const courtTypeSelect = document.getElementById('mUp_courtType');
+      const udonCaseBox = document.getElementById('mUp_udonCaseBox');
+      const otherCaseBox = document.getElementById('mUp_otherCaseBox');
+      const districtSelect = document.getElementById('mUp_district');
+      const subdistrictSelect = document.getElementById('mUp_subdistrict');
+      const locationTypeSelect = document.getElementById('mUp_locationType');
+      const houseFields = document.getElementById('mUp_houseFields');
+      const localAdminFields = document.getElementById('mUp_localAdminFields');
+      const customOtherFields = document.getElementById('mUp_customOtherFields');
+      const fileInput = document.getElementById('mUp_fileInput');
+      const previewContainer = document.getElementById('mUp_previewContainer');
+      const previewImg = document.getElementById('mUp_previewImg');
+      const fileInfoText = document.getElementById('mUp_fileInfoText');
+      const btnRefreshGps = document.getElementById('mUp_btnRefreshGps');
+      const latInput = document.getElementById('mUp_lat');
+      const lngInput = document.getElementById('mUp_lng');
 
-      // ฟังก์ชัน Render ผลการค้นหา
-      const renderSearch = (query = '') => {
-        const q = query.trim().toLowerCase();
-        const filtered = state.allSheetRows.filter(r => {
-          const c = (r['เลขคดี'] || '').toLowerCase();
-          const d = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').toLowerCase();
-          return !q || c.includes(q) || d.includes(q);
-        }).slice(0, 15);
-
-        resultsBody.innerHTML = '';
-        if (filtered.length === 0) {
-          resultsBody.innerHTML = `<tr><td colspan="4" class="p-3 text-center text-gray-400 text-xs">ไม่พบเลขคดีที่ตรงกัน</td></tr>`;
-          return;
-        }
-
-        filtered.forEach(row => {
-          const caseNo = row['เลขคดี'] || '-';
-          const rawTime = row['วัน-เวลาบันทึก'] || row['Timestamp'] || '-';
-          const formattedTime = formatThaiDateDisplay(rawTime);
-          const loc = row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '-';
-          const imgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
-          const hasImage = imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http');
-
-          const tr = document.createElement('tr');
-          tr.className = 'border-b border-gray-100 hover:bg-blue-50/50 transition';
-          tr.innerHTML = `
-            <td class="p-2 font-bold text-gray-900">${caseNo}</td>
-            <td class="p-2 font-mono text-gray-600 whitespace-nowrap">${formattedTime}</td>
-            <td class="p-2 text-gray-600 max-w-[150px] truncate" title="${loc}">${loc}</td>
-            <td class="p-2 text-center">
-              <button type="button" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition">
-                เลือก
-              </button>
-            </td>
-          `;
-          tr.querySelector('button').addEventListener('click', () => {
-            selectedRowData = row;
-            document.getElementById('manualSelectedCaseBox').classList.remove('hidden');
-            document.getElementById('manualSelectedCaseText').textContent = caseNo;
-            document.getElementById('manualSelectedTimestampText').textContent = formattedTime;
-
-            const warningBox = document.getElementById('manualExistingImageWarning');
-            if (hasImage) {
-              warningBox.classList.remove('hidden');
-            } else {
-              warningBox.classList.add('hidden');
-            }
-
-            document.getElementById('manualUploadSection').classList.remove('hidden');
-            if (selectedImageDataUrl) confirmBtn.disabled = false;
-          });
-          resultsBody.appendChild(tr);
+      // อัปเดตตำบลตามอำเภอ
+      const updateSubdistricts = () => {
+        const d = districtSelect.value;
+        const subs = (typeof UDON_THANI_DATA !== 'undefined' && UDON_THANI_DATA[d]) || [];
+        subdistrictSelect.innerHTML = '';
+        subs.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s;
+          opt.textContent = s;
+          subdistrictSelect.appendChild(opt);
         });
       };
+      updateSubdistricts();
+      districtSelect.addEventListener('change', updateSubdistricts);
 
-      renderSearch('');
-      searchInput.addEventListener('input', (e) => renderSearch(e.target.value));
+      // สลับประเภทศาล
+      courtTypeSelect.addEventListener('change', () => {
+        if (courtTypeSelect.value === 'ศาลอื่น') {
+          udonCaseBox.classList.add('hidden');
+          otherCaseBox.classList.remove('hidden');
+        } else {
+          udonCaseBox.classList.remove('hidden');
+          otherCaseBox.classList.add('hidden');
+        }
+      });
+
+      // สลับประเภทสถานที่
+      locationTypeSelect.addEventListener('change', () => {
+        const val = locationTypeSelect.value;
+        houseFields.classList.toggle('hidden', val !== 'หมายบ้าน');
+        localAdminFields.classList.toggle('hidden', val !== 'หมาย อบต./เทศบาล');
+        customOtherFields.classList.toggle('hidden', val !== 'อื่นๆ');
+      });
+
+      // ดึงพิกัด GPS ใหม่
+      btnRefreshGps.addEventListener('click', () => {
+        btnRefreshGps.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังค้นหา...';
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            latInput.value = pos.coords.latitude.toFixed(6);
+            lngInput.value = pos.coords.longitude.toFixed(6);
+            btnRefreshGps.innerHTML = '<i class="fa-solid fa-check text-emerald-600"></i> ได้พิกัดแล้ว';
+            setTimeout(() => {
+              btnRefreshGps.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> เช็คพิกัดใหม่';
+            }, 2000);
+          },
+          (err) => {
+            btnRefreshGps.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> เช็คพิกัดใหม่';
+            Swal.showValidationMessage('ไม่สามารถรับพิกัด GPS ได้: ' + err.message);
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      });
 
       // เมื่อเลือกไฟล์รูปภาพ
-      fileInput.addEventListener('change', async (e) => {
+      fileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+          Swal.showValidationMessage('กรุณาเลือกเฉพาะไฟล์รูปภาพ (jpg, png, webp, heic ฯลฯ)');
+          fileInput.value = '';
+          return;
+        }
 
         const reader = new FileReader();
         reader.onload = (ev) => {
           selectedImageDataUrl = ev.target.result;
           window._manualTempDataUrl = selectedImageDataUrl;
-          const previewImg = document.getElementById('manualPreviewImg');
           previewImg.src = selectedImageDataUrl;
-          document.getElementById('manualImagePreviewContainer').classList.remove('hidden');
+          previewContainer.classList.remove('hidden');
           const sizeKb = Math.round(file.size / 1024);
-          document.getElementById('manualImageInfoText').textContent = `ไฟล์: ${file.name} (${sizeKb} KB)`;
-
-          if (selectedRowData) confirmBtn.disabled = false;
+          fileInfoText.textContent = `ไฟล์: ${file.name} (${sizeKb} KB)`;
         };
         reader.readAsDataURL(file);
       });
     },
     preConfirm: () => {
-      if (!selectedRowData || !selectedImageDataUrl) {
-        Swal.showValidationMessage('กรุณาเลือกรายการเลขคดีและเลือกไฟล์รูปภาพ');
+      const courtType = document.getElementById('mUp_courtType').value;
+      let caseNumber = '';
+
+      if (courtType === 'ศาลอื่น') {
+        const otherNo = document.getElementById('mUp_otherCaseNo').value.trim();
+        const otherYr = document.getElementById('mUp_otherYear').value;
+        if (!otherNo) {
+          Swal.showValidationMessage('กรุณากรอกเลขคดี');
+          return false;
+        }
+        caseNumber = otherNo.includes('/') ? otherNo : `${otherNo}/${otherYr}`;
+      } else {
+        const prefix = document.getElementById('mUp_udonPrefix').value.trim();
+        const no = document.getElementById('mUp_udonCaseNo').value.trim();
+        const yr = document.getElementById('mUp_udonYear').value;
+        if (!prefix || !no) {
+          Swal.showValidationMessage('กรุณากรอกอักษรนำหน้าและเลขคดี');
+          return false;
+        }
+        caseNumber = `${prefix}${no}/${yr}`;
+      }
+
+      const district = document.getElementById('mUp_district').value;
+      const subdistrict = document.getElementById('mUp_subdistrict').value;
+      const locationType = document.getElementById('mUp_locationType').value;
+
+      let locationText = '';
+      if (locationType === 'หมายบ้าน') {
+        const houseNo = document.getElementById('mUp_houseNo').value.trim();
+        const moo = document.getElementById('mUp_moo').value.trim();
+        if (!houseNo) {
+          Swal.showValidationMessage('กรุณากรอกบ้านเลขที่');
+          return false;
+        }
+        locationText = `${houseNo}${moo ? ' ม.' + moo : ''} ต.${subdistrict} อ.${district}`;
+      } else if (locationType === 'หมาย อบต./เทศบาล') {
+        const adminName = document.getElementById('mUp_localAdminName').value.trim();
+        if (!adminName) {
+          Swal.showValidationMessage('กรุณาระบุชื่อ อบต. หรือเทศบาล');
+          return false;
+        }
+        locationText = `${adminName} ต.${subdistrict} อ.${district}`;
+      } else {
+        const otherLoc = document.getElementById('mUp_customOtherLocation').value.trim();
+        if (!otherLoc) {
+          Swal.showValidationMessage('กรุณาระบุชื่อสถานที่');
+          return false;
+        }
+        locationText = `${otherLoc} ต.${subdistrict} อ.${district}`;
+      }
+
+      const lat = document.getElementById('mUp_lat').value.trim() || state.lat || '17.4144';
+      const lng = document.getElementById('mUp_lng').value.trim() || state.lng || '102.7882';
+
+      if (!selectedImageDataUrl) {
+        Swal.showValidationMessage('กรุณาเลือกไฟล์รูปภาพ');
         return false;
       }
-      return { row: selectedRowData, dataUrl: selectedImageDataUrl };
+
+      return {
+        caseNumber,
+        courtType,
+        district,
+        subdistrict,
+        locationType,
+        locationText,
+        lat: Number(lat),
+        lng: Number(lng),
+        dataUrl: selectedImageDataUrl
+      };
     }
-  }).then(async (result) => {
-    if (result.isConfirmed && result.value) {
-      const { row, dataUrl } = result.value;
-      const caseNumber = row['เลขคดี'] || '';
-      const existingImgUrl = row['ลิงก์รูปภาพใน Google Drive'] || row['ลิงก์รูปภาพ'] || '';
-      const hasExistingImage = existingImgUrl && String(existingImgUrl).trim() !== '' && String(existingImgUrl).startsWith('http');
-      const baseFilename = caseNumber.replace(/\//g, '-');
-      const imageFilename = baseFilename + '.jpg';
-
-      // หากมีไฟล์ภาพเดิมในระบบอยู่แล้ว ให้เตือนและสอบถามการแทนที่ไฟล์เดิม
-      if (hasExistingImage) {
-        const confirmOverwrite = await Swal.fire({
-          title: 'ยืนยันการแทนที่ไฟล์เดิม?',
-          html: `<p class="text-sm text-gray-700">รายการเลขคดี <b>"${caseNumber}"</b> มีไฟล์ภาพในระบบแล้ว<br>ท่านต้องการอัปโหลดเพื่อแทนที่ไฟล์เดิมหรือไม่?</p>`,
-          icon: 'warning',
-          showCancelButton: true,
-          confirmButtonText: 'ยืนยันแทนที่ไฟล์เดิม',
-          cancelButtonText: 'ยกเลิก',
-          confirmButtonColor: '#d97706',
-          cancelButtonColor: '#6b7280',
-          showCloseButton: true,
-          allowOutsideClick: false
-        });
-
-        if (!confirmOverwrite.isConfirmed) {
-          return;
-        }
-      }
+  }).then(async (res) => {
+    if (res.isConfirmed && res.value) {
+      const formData = res.value;
+      showCustomLoading('กำลังประมวลผลลายน้ำและรูปภาพ...', 'กำลังสร้างภาพถ่ายพร้อมข้อมูลส่งหมาย');
 
       try {
-        // บีบอัดรูปภาพให้ <= 1MB
-        const compressedDataUrl = await compressImageToMax1MB(dataUrl);
+        const img = new Image();
+        img.src = formData.dataUrl;
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+        });
+
+        const heading = window.compassManager ? window.compassManager.getHeading() : 0;
+        const payloadData = {
+          caseNumber: formData.caseNumber,
+          courtType: formData.courtType,
+          district: formData.district,
+          subdistrict: formData.subdistrict,
+          locationType: formData.locationType,
+          locationText: formData.locationText,
+          lat: formData.lat,
+          lng: formData.lng,
+          heading: heading,
+          dateTime: WatermarkEngine.formatThaiDateTime(new Date())
+        };
+
+        // วาดลายน้ำลงบนรูปภาพ
+        const watermarkedResult = await WatermarkEngine.renderWatermark(img, payloadData);
+        const baseFilename = formData.caseNumber.replace(/\//g, '-');
+        const imageFilename = baseFilename + '.jpg';
+
+        hideCustomLoading();
+
+        // 1. บันทึกลงอุปกรณ์เงียบๆ
+        WatermarkEngine.triggerDownload(watermarkedResult.dataUrl, imageFilename);
+
+        // 2. บีบอัดรูปภาพให้ขนาด <= 1MB
+        const compressedImageBase64 = await compressImageToMax1MB(watermarkedResult.dataUrl);
 
         const uploadPayload = {
           action: 'upload_image',
-          overwrite: hasExistingImage,
-          oldFileId: row['Drive File ID'] || '',
-          rowIndex: row.originalIndex !== undefined ? (row.originalIndex + 2) : undefined,
-          timestamp: row['วัน-เวลาบันทึก'] || row['Timestamp'] || '',
-          caseNumber: caseNumber,
-          courtType: row['ประเภทศาล'] || 'ศาลจังหวัดอุดรธานี',
-          district: row['อำเภอ'] || '',
-          subdistrict: row['ตำบล'] || '',
-          locationType: row['ประเภทสถานที่'] || 'หมายบ้าน',
-          locationText: row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '',
-          lat: row['ละติจูด (Lat)'] || row['ละติจูด'] || '',
-          lng: row['ลองจิจูด (Lng)'] || row['ลองจิจูด'] || '',
+          ...payloadData,
           fileName: imageFilename,
-          imageBase64: compressedDataUrl
+          imageBase64: compressedImageBase64
         };
 
-        const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
+        // 3. ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต
+        if (!navigator.onLine) {
+          addToOfflineQueue({
+            payload: uploadPayload,
+            fileName: imageFilename,
+            caseNumber: formData.caseNumber
+          });
+
+          Swal.fire({
+            icon: 'info',
+            title: 'บันทึกสำเร็จ (โหมดออฟไลน์)',
+            html: `
+              <div class="text-left text-xs space-y-2 text-gray-700">
+                <p>บันทึกภาพถ่ายเลขคดี <b>${formData.caseNumber}</b> ลงในเครื่องเรียบร้อยแล้ว</p>
+                <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800">
+                  <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-600"></i>
+                  <b>แจ้งเตือน:</b> เนื่องจากขณะนี้ไม่มีสัญญาณอินเทอร์เน็ต ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์</b> ในเครื่องไว้แล้ว และจะทำการอัปโหลดขึ้น Google Drive & Sheet ให้โดยอัตโนมัติเมื่อท่านเชื่อมต่ออินเทอร์เน็ต
+                </div>
+              </div>
+            `,
+            confirmButtonText: 'ตกลง',
+            confirmButtonColor: '#2563eb',
+            showCloseButton: true,
+            allowOutsideClick: false
+          });
+          return;
+        }
+
+        // 4. บันทึกข้อมูลเบื้องต้นลงใน Google Sheet
+        saveInitialRecordToSheet(payloadData, imageFilename);
+
+        // 5. อัปโหลดขึ้น Google Drive พร้อม Progress Bar
+        const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${formData.caseNumber}...`);
 
         // เคลียร์แคชและโหลดข้อมูลใหม่
         localStorage.removeItem(CACHE_KEY_SHEET_DATA);
@@ -1779,10 +1937,10 @@ window.openManualUploadModal = async function() {
 
         Swal.fire({
           icon: 'success',
-          title: hasExistingImage ? 'แทนที่ไฟล์ภาพสำเร็จ!' : 'อัปโหลดภาพสำเร็จ!',
+          title: 'อัปโหลดภาพสำเร็จ!',
           showCloseButton: true,
           allowOutsideClick: false,
-          html: `<p class="text-gray-700">${hasExistingImage ? 'แทนที่ภาพถ่ายเดิมของเลขคดี' : 'อัปโหลดภาพถ่ายเลขคดี'} <b>${caseNumber}</b> ลงใน Google Drive & Sheet เรียบร้อยแล้ว</p>
+          html: `<p class="text-gray-700">อัปโหลดภาพถ่ายเลขคดี <b>${formData.caseNumber}</b> ลงใน Google Drive & Sheet เรียบร้อยแล้ว</p>
                  ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
           confirmButtonColor: '#2563eb'
         }).then(() => {
@@ -1790,7 +1948,8 @@ window.openManualUploadModal = async function() {
         });
 
       } catch (err) {
-        console.error('Manual upload error:', err);
+        console.error('Manual full upload error:', err);
+        hideCustomLoading();
         Swal.fire({
           icon: 'error',
           title: 'การอัปโหลดไม่สำเร็จ',
