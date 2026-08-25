@@ -1090,25 +1090,21 @@ function updateCacheBadgeUI(isFromCache, timeStr) {
 }
 
 /**
- * บีบอัดไฟล์ภาพให้มีขนาดไม่เกิน 1MB (<= 1,048,576 bytes)
+ * บีบอัดไฟล์ภาพให้มีความคมชัดสูงสุด และปรับขนาดไฟล์ให้อยู่ระหว่าง 300KB - 800KB (ไม่เกิน 1MB)
+ * เพื่อให้อัปโหลดขึ้น Google Drive ได้เร็วที่สุด โดยยังคงความคมชัดของภาพ ลายน้ำ และข้อความเอกสาร
  */
 async function compressImageToMax1MB(dataUrl) {
-  const approxBytes = Math.round((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75);
-  if (approxBytes <= 1024 * 1024) {
-    return dataUrl;
-  }
-
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       let canvas = document.createElement('canvas');
       let width = img.width;
       let height = img.height;
-      let quality = 0.85;
 
-      // ปรับลดความกว้าง/ความสูงถ้าใหญ่เกินไป
-      if (width > 1600 || height > 1600) {
-        const scale = Math.min(1600 / width, 1600 / height);
+      // ปรับขนาดความกว้าง/สูงสูงสุดไม่เกิน 1600px (ความคมชัดระดับ Full HD คมชัดทุกตัวอักษร)
+      const MAX_DIMENSION = 1600;
+      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+        const scale = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
         width = Math.round(width * scale);
         height = Math.round(height * scale);
       }
@@ -1116,20 +1112,16 @@ async function compressImageToMax1MB(dataUrl) {
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, width, height);
 
+      let quality = 0.82;
       let resultDataUrl = canvas.toDataURL('image/jpeg', quality);
       let currentBytes = Math.round((resultDataUrl.length - resultDataUrl.indexOf(',') - 1) * 0.75);
 
-      while (currentBytes > 1024 * 1024 && quality > 0.25) {
-        quality -= 0.12;
-        if (quality < 0.6) {
-          width = Math.round(width * 0.85);
-          height = Math.round(height * 0.85);
-          canvas.width = width;
-          canvas.height = height;
-          ctx.drawImage(img, 0, 0, width, height);
-        }
+      while (currentBytes > 1024 * 1024 && quality > 0.3) {
+        quality -= 0.1;
         resultDataUrl = canvas.toDataURL('image/jpeg', quality);
         currentBytes = Math.round((resultDataUrl.length - resultDataUrl.indexOf(',') - 1) * 0.75);
       }
@@ -1933,10 +1925,7 @@ window.openManualUploadModal = function() {
           return;
         }
 
-        // 4. บันทึกข้อมูลเบื้องต้นลงใน Google Sheet
-        saveInitialRecordToSheet(payloadData, imageFilename);
-
-        // 5. อัปโหลดขึ้น Google Drive พร้อม Progress Bar
+        // อัปโหลดขึ้น Google Drive พร้อมนำเข้าข้อมูลลง Google Sheet ในขั้นตอนเดียว
         const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${formData.caseNumber}...`);
 
         // เคลียร์แคชและโหลดข้อมูลใหม่
@@ -2293,35 +2282,6 @@ window.copyCoordinates = function(lat, lng) {
   }
 };
 
-/**
- * บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันทีเมื่อกดถ่ายภาพ (แม้ยังไม่กดส่ง Drive)
- */
-async function saveInitialRecordToSheet(data, fileName) {
-  if (!state.appsScriptUrl) return;
-  try {
-    const payload = {
-      action: 'record_initial',
-      ...data,
-      fileName: fileName
-    };
-    fetch(state.appsScriptUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8'
-      },
-      body: JSON.stringify(payload)
-    }).then(res => res.json()).then(resJson => {
-      if (resJson && resJson.status === 'success') {
-        localStorage.removeItem(CACHE_KEY_SHEET_DATA);
-        localStorage.removeItem(CACHE_KEY_SHEET_TIME);
-      }
-    }).catch(err => {
-      console.warn('Initial sheet background save notice:', err);
-    });
-  } catch (err) {
-    console.warn('Initial sheet save error:', err);
-  }
-}
 
 /**
  * แสดงภาพถ่ายเต็มด้วย SweetAlert พร้อมปุ่มดาวน์โหลด และคลิกดูเต็มหน้าจอได้
@@ -3006,10 +2966,7 @@ async function handleDesktopUpload() {
       return;
     }
 
-    // 4. บันทึกข้อมูลเบื้องต้นลงใน Google Sheet
-    saveInitialRecordToSheet(payloadData, imageFilename);
-
-    // 5. อัปโหลดขึ้น Google Drive พร้อม Progress Bar
+    // อัปโหลดขึ้น Google Drive พร้อมนำเข้าข้อมูลลง Google Sheet ในขั้นตอนเดียว
     const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
 
     // เคลียร์แคชและโหลดข้อมูลใหม่
@@ -3370,10 +3327,7 @@ async function captureAndProcessPhoto() {
       return;
     }
 
-    // 4. บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที (Background)
-    saveInitialRecordToSheet(payloadData, imageFilename);
-
-    // 5. อัปโหลดขึ้น Google Drive ทันทีพร้อม Progress Bar (ปิดไม่ได้จนกว่าจะเสร็จ)
+    // อัปโหลดขึ้น Google Drive ทันทีพร้อมบันทึกข้อมูลเข้า Google Sheet (Single Step) พร้อม Progress Bar
     const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
 
     // เคลียร์แคช
@@ -3511,10 +3465,7 @@ async function handleFallbackFile(e) {
       return;
     }
 
-    // 3. บันทึกข้อมูลรายละเอียดลงใน Google Sheet ทันที
-    saveInitialRecordToSheet(payloadData, imageFilename);
-
-    // 4. อัปโหลดขึ้น Google Drive ทันทีพร้อม Progress Bar
+    // อัปโหลดขึ้น Google Drive ทันทีพร้อมบันทึกข้อมูลเข้า Google Sheet (Single Step) พร้อม Progress Bar
     const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
 
     localStorage.removeItem(CACHE_KEY_SHEET_DATA);
