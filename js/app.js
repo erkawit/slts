@@ -2637,30 +2637,43 @@ window.showProvinceSelectorModal = function(force = false) {
         <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>สามารถเปลี่ยนจังหวัดได้ภายหลังจากปุ่มที่มุมขวาล่าง</p>
       </div>
     `,
+    position: 'top',
     showConfirmButton: false,
     showCloseButton: !force && !!state.selectedProvince,
     allowOutsideClick: !force && !!state.selectedProvince,
     customClass: {
+      container: 'slts-swal-top-container',
       popup: 'slts-swal-fullscreen-80 slts-swal-no-padding',
       closeButton: 'slts-close-btn'
     },
     didOpen: () => {
       const popup = document.querySelector('.swal2-popup');
+      const grid = document.getElementById('swalProvinceGrid');
+      const searchInput = document.getElementById('swalProvinceSearchInput');
       if (!popup) return;
+
+      const adjustProvinceModal = () => {
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        const maxH = Math.max(160, Math.floor(vh - 16));
+        popup.style.maxHeight = `${maxH}px`;
+        if (grid) {
+          grid.style.maxHeight = `${Math.max(80, maxH - 115)}px`;
+        }
+      };
+
+      adjustProvinceModal();
+
       const vv = window.visualViewport;
       if (vv) {
-        const onViewportResize = () => {
-          const vvHeight = vv.height;
-          const vvOffsetTop = vv.offsetTop;
-          popup.style.maxHeight = `${vvHeight * 0.9}px`;
-          popup.style.top = `${vvOffsetTop}px`;
-          popup.style.bottom = 'auto';
-          popup.style.transform = 'none';
-          popup.style.margin = '0 auto';
-        };
-        vv.addEventListener('resize', onViewportResize);
-        vv.addEventListener('scroll', onViewportResize);
-        popup._vvResizeHandler = onViewportResize;
+        vv.addEventListener('resize', adjustProvinceModal);
+        vv.addEventListener('scroll', adjustProvinceModal);
+        popup._vvResizeHandler = adjustProvinceModal;
+      }
+
+      if (searchInput) {
+        searchInput.addEventListener('focus', () => {
+          setTimeout(adjustProvinceModal, 150);
+        });
       }
     },
     didClose: () => {
@@ -2891,40 +2904,41 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
         </div>
       </div>
     `,
+    position: 'top',
     showConfirmButton: false,
     showCancelButton: false,
     allowOutsideClick: false,
     customClass: {
+      container: 'slts-swal-top-container',
       popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
     },
     didOpen: () => {
       // ── ป้องกัน keyboard บดบัง input ใน SweetAlert บน Mobile ──
       const popup = document.querySelector('.swal2-popup');
+      const formBody = document.querySelector('.slts-form-body');
       if (!popup) return;
+
+      const adjustFormModal = () => {
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        const maxH = Math.max(180, Math.floor(vh - 16));
+        popup.style.maxHeight = `${maxH}px`;
+        if (formBody) {
+          formBody.style.maxHeight = `${Math.max(90, maxH - 120)}px`;
+        }
+        const focused = document.activeElement;
+        if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'SELECT' || focused.tagName === 'TEXTAREA')) {
+          setTimeout(() => focused.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+        }
+      };
+
+      adjustFormModal();
 
       // ใช้ visualViewport API (รองรับ iOS Safari 13+ / Android Chrome 62+)
       const vv = window.visualViewport;
       if (vv) {
-        const onViewportResize = () => {
-          // ความสูง viewport จริง (หลัง keyboard ขึ้น)
-          const vvHeight = vv.height;
-          const vvOffsetTop = vv.offsetTop;
-          // ปรับ popup ให้ fit กับ visual viewport
-          popup.style.maxHeight = `${vvHeight * 0.9}px`;
-          popup.style.top = `${vvOffsetTop}px`;
-          popup.style.bottom = 'auto';
-          popup.style.transform = 'none';
-          popup.style.margin = '0 auto';
-          // Scroll focused input ให้อยู่ในมุมมอง
-          const focused = document.activeElement;
-          if (focused && focused !== document.body) {
-            setTimeout(() => focused.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
-          }
-        };
-        vv.addEventListener('resize', onViewportResize);
-        vv.addEventListener('scroll', onViewportResize);
-        // เก็บ reference ไว้สำหรับ cleanup
-        popup._vvResizeHandler = onViewportResize;
+        vv.addEventListener('resize', adjustFormModal);
+        vv.addEventListener('scroll', adjustFormModal);
+        popup._vvResizeHandler = adjustFormModal;
       }
 
       // Fallback: focus event scroll สำหรับ browser ที่ไม่รองรับ visualViewport
@@ -2932,7 +2946,10 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
       if (formEl) {
         const onFocusIn = (e) => {
           if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) {
-            setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+            setTimeout(() => {
+              adjustFormModal();
+              e.target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }, 100);
           }
         };
         formEl.addEventListener('focusin', onFocusIn);
