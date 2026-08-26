@@ -46,7 +46,7 @@
     <div class="w-full max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
       
       <!-- Brand Logo & Court Name -->
-      <div class="flex items-center space-x-3.5 cursor-pointer select-none" onclick="switchTab('form')">
+      <div class="flex items-center space-x-3.5 cursor-pointer select-none" onclick="switchTab('camera')">
         <div class="w-11 h-11 sm:w-12 sm:h-12 flex items-center justify-center flex-shrink-0">
           <img src="img/logo.png" alt="ตราศาลจังหวัดอุดรธานี" class="w-full h-full object-contain drop-shadow-sm transition-transform hover:scale-105">
         </div>
@@ -62,9 +62,9 @@
 
       <!-- Desktop Nav Tabs (แสดงเมื่อจอ > 768px) -->
       <nav class="hidden md:flex items-center space-x-1.5 bg-gray-100/90 p-1.5 rounded-2xl border border-gray-200/80 text-sm font-medium shadow-inner">
-        <button type="button" id="tabBtnForm" onclick="switchTab('form')" class="tab-nav-btn active px-4 py-2 rounded-xl transition-all flex items-center gap-2">
-          <i class="fa-solid fa-pen-to-square text-blue-600"></i>
-          <span>บันทึกส่งหมาย</span>
+        <button type="button" id="tabBtnCamera" onclick="switchTab('camera')" class="tab-nav-btn active px-4 py-2 rounded-xl transition-all flex items-center gap-2">
+          <i class="fa-solid fa-camera text-blue-600"></i>
+          <span>กล้องถ่ายภาพส่งหมาย</span>
         </button>
         <button type="button" id="tabBtnTable" onclick="switchTab('table')" class="tab-nav-btn px-4 py-2 rounded-xl transition-all flex items-center gap-2">
           <i class="fa-solid fa-table-list text-emerald-600"></i>
@@ -154,9 +154,9 @@
   <main class="w-full max-w-[1700px] mx-auto p-3 sm:p-5 lg:px-10 lg:py-6 flex-1">
     
     <!-- ========================================================= -->
-    <!-- TAB 1: หน้าแบบฟอร์มบันทึกส่งหมาย (Desktop 2-Column Command Center) -->
+    <!-- TAB 1: Hidden Background State Form (Sync state only) -->
     <!-- ========================================================= -->
-    <div id="tabContentForm" class="tab-pane active">
+    <div id="tabContentForm" class="tab-pane hidden" style="display:none !important;">
       
       <div class="w-full">
         
@@ -466,7 +466,7 @@
     <!-- ========================================================= -->
     <!-- TAB 2: ตารางประวัติข้อมูลส่งหมาย (DataTables History View - Full Width) -->
     <!-- ========================================================= -->
-    <div id="tabContentTable" class="tab-pane hidden">
+    <div id="tabContentTable" class="tab-pane active">
       <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-7 overflow-hidden">
         
         <!-- Table Header & Actions -->

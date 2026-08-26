@@ -275,25 +275,31 @@ document.addEventListener('DOMContentLoaded', () => {
   initResponsiveUI();
   initFullscreenEvents();
 
-  // Mobile-First: เปิดหน้ากล้องทันทีบนจอ < 768px แล้วค่อยเด้ง modal ทับ
-  if (window.innerWidth < 768) {
-    if (isMobileSmallScreen()) {
-      requestAppFullscreen();
-    }
-    openCameraModal().then(() => {
-      setTimeout(() => {
-        if (!state.selectedProvince) {
-          showProvinceSelectorModal(true);
-        } else {
-          showMobileSummonsFormModal(false);
-        }
-      }, 400);
-    });
+  // Always Camera-First: เปิดหน้ากล้องทันทีเป็นโหมดหลักของระบบ
+  if (isMobileSmallScreen()) {
+    requestAppFullscreen();
   }
+  openCameraModal().then(() => {
+    setTimeout(() => {
+      if (!state.selectedProvince) {
+        showProvinceSelectorModal(true);
+      } else {
+        showMobileSummonsFormModal(false);
+      }
+    }, 400);
+  });
 });
 
 
 function initDOMElements() {
+  elements.tabBtnCamera = document.getElementById('tabBtnCamera');
+  elements.tabBtnForm = document.getElementById('tabBtnForm') || elements.tabBtnCamera;
+  elements.tabBtnTable = document.getElementById('tabBtnTable');
+  elements.tabBtnUsers = document.getElementById('tabBtnUsers');
+  elements.tabContentForm = document.getElementById('tabContentForm');
+  elements.tabContentTable = document.getElementById('tabContentTable');
+  elements.tabContentUsers = document.getElementById('tabContentUsers');
+
   elements.form = document.getElementById('summonsForm');
   elements.provinceSelect = document.getElementById('province');
   elements.districtSelect = document.getElementById('district');
@@ -986,24 +992,36 @@ window.deleteUser = function(username) {
 window.switchTab = function(tabName) {
   document.querySelectorAll('.tab-nav-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(pane => {
-    pane.classList.add('hidden');
-    pane.classList.remove('active');
+    if (pane.id !== 'tabContentForm') {
+      pane.classList.add('hidden');
+      pane.classList.remove('active');
+    }
   });
 
-  if (tabName === 'form') {
-    elements.tabBtnForm.classList.add('active');
-    elements.tabContentForm.classList.remove('hidden');
-    elements.tabContentForm.classList.add('active');
+  if (tabName === 'camera' || tabName === 'form') {
+    if (elements.tabBtnCamera) elements.tabBtnCamera.classList.add('active');
+    if (elements.tabBtnForm) elements.tabBtnForm.classList.add('active');
+    if (elements.tabContentTable) {
+      elements.tabContentTable.classList.remove('hidden');
+      elements.tabContentTable.classList.add('active');
+    }
+    openCameraModal();
   } else if (tabName === 'table') {
-    elements.tabBtnTable.classList.add('active');
-    elements.tabContentTable.classList.remove('hidden');
-    elements.tabContentTable.classList.add('active');
+    closeCameraModal();
+    if (elements.tabBtnTable) elements.tabBtnTable.classList.add('active');
+    if (elements.tabContentTable) {
+      elements.tabContentTable.classList.remove('hidden');
+      elements.tabContentTable.classList.add('active');
+    }
     // โหลดข้อมูลแบบ Smart Cache 1 นาที
     loadGoogleSheetData(false);
   } else if (tabName === 'users') {
-    elements.tabBtnUsers.classList.add('active');
-    elements.tabContentUsers.classList.remove('hidden');
-    elements.tabContentUsers.classList.add('active');
+    closeCameraModal();
+    if (elements.tabBtnUsers) elements.tabBtnUsers.classList.add('active');
+    if (elements.tabContentUsers) {
+      elements.tabContentUsers.classList.remove('hidden');
+      elements.tabContentUsers.classList.add('active');
+    }
     renderUserList();
   }
 };
@@ -3720,7 +3738,13 @@ function initCameraEvents() {
   }
 
   if (elements.btnCloseCamera) {
-    elements.btnCloseCamera.addEventListener('click', closeCameraModal);
+    elements.btnCloseCamera.addEventListener('click', () => {
+      if (window.innerWidth < 768) {
+        showMobileSummonsFormModal(true);
+      } else {
+        switchTab('table');
+      }
+    });
   }
 
   if (elements.btnFlipCamera) {
