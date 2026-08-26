@@ -273,9 +273,13 @@ document.addEventListener('DOMContentLoaded', () => {
   initDesktopUploadEvents();
   initSettings();
   initResponsiveUI();
+  initFullscreenEvents();
 
   // Mobile-First: เปิดหน้ากล้องทันทีบนจอ < 768px แล้วค่อยเด้ง modal ทับ
   if (window.innerWidth < 768) {
+    if (isMobileSmallScreen()) {
+      requestAppFullscreen();
+    }
     openCameraModal().then(() => {
       setTimeout(() => {
         if (!state.selectedProvince) {
@@ -1010,6 +1014,78 @@ function initResponsiveUI() {
   };
   window.addEventListener('resize', handleResize);
   handleResize();
+}
+
+// =========================================================================
+// Fullscreen Management System (สำหรับหน้าจอมือถือ <= 456px)
+// =========================================================================
+function isMobileSmallScreen() {
+  return (window.innerWidth <= 456 || (window.screen && window.screen.width <= 456));
+}
+
+function requestAppFullscreen(force = false) {
+  if (force || isMobileSmallScreen()) {
+    const docEl = document.documentElement;
+    if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+      const req = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+      if (req) {
+        try {
+          const p = req.call(docEl);
+          if (p && p.catch) p.catch(() => {});
+        } catch (e) {}
+      }
+    }
+  }
+}
+
+function toggleAppFullscreen() {
+  const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  if (isFull) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+    if (exit) {
+      try {
+        const p = exit.call(document);
+        if (p && p.catch) p.catch(() => {});
+      } catch (e) {}
+    }
+  } else {
+    requestAppFullscreen(true);
+  }
+}
+
+function updateFullscreenIcon() {
+  const icon = document.getElementById('iconFullscreen');
+  const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  if (icon) {
+    if (isFull) {
+      icon.className = 'fa-solid fa-compress text-base text-amber-400';
+    } else {
+      icon.className = 'fa-solid fa-expand text-base text-gray-300';
+    }
+  }
+}
+
+function initFullscreenEvents() {
+  const btnToggle = document.getElementById('btnToggleFullscreen');
+  if (btnToggle) {
+    btnToggle.addEventListener('click', toggleAppFullscreen);
+  }
+
+  document.addEventListener('fullscreenchange', updateFullscreenIcon);
+  document.addEventListener('webkitfullscreenchange', updateFullscreenIcon);
+  document.addEventListener('mozfullscreenchange', updateFullscreenIcon);
+  document.addEventListener('MSFullscreenChange', updateFullscreenIcon);
+
+  // Auto request fullscreen on user interaction if width <= 456px
+  const triggerAutoFullscreen = () => {
+    if (isMobileSmallScreen()) {
+      requestAppFullscreen();
+    }
+  };
+
+  window.addEventListener('touchstart', triggerAutoFullscreen, { passive: true });
+  window.addEventListener('pointerdown', triggerAutoFullscreen, { passive: true });
+  window.addEventListener('click', triggerAutoFullscreen, { passive: true });
 }
 
 // =========================================================================
@@ -2745,6 +2821,7 @@ window.filterProvinceList = function(query) {
 
 window.selectProvinceAndProceed = function(provinceName) {
   setProvince(provinceName);
+  requestAppFullscreen();
   Swal.close();
   
   const Toast = Swal.mixin({
@@ -3996,6 +4073,7 @@ function validateForm() {
 }
 
 async function openCameraModal() {
+  requestAppFullscreen();
   // เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
   setCaptureOrientation('landscape');
 

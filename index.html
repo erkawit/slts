@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย - ศาลจังหวัดอุดรธานี</title>
   
   <!-- PWA & Mobile Web App Meta -->
@@ -746,6 +746,12 @@
           <i class="fa-solid fa-arrows-rotate text-white text-xs"></i>
           <span id="txtOrientationMode">แนวนอน 4:3</span>
         </button>
+
+        <!-- ปุ่มเปิด/ปิด เต็มหน้าจอ Fullscreen -->
+        <button id="btnToggleFullscreen" type="button" class="p-2 text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition" title="เปิด/ปิด เต็มหน้าจอ">
+          <i class="fa-solid fa-expand text-base" id="iconFullscreen"></i>
+        </button>
+
         <button id="btnCloseCamera" type="button" class="p-2 text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition">
           <i class="fa-solid fa-xmark text-lg"></i>
         </button>
