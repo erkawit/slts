@@ -2516,6 +2516,47 @@ function extractPrefixesFromRows(rows) {
 }
 
 // =========================================================================
+// ตัวเลือกหน่วยงานปกครองส่วนท้องถิ่น (Local Admin Agency Options)
+// =========================================================================
+function getLocalAdminOptions(subdistrictName = '', isBkk = false) {
+  let cleanSub = (subdistrictName || '').trim();
+  cleanSub = cleanSub.replace(/^(ตำบล|แขวง)/, '');
+  
+  const kamnanOption = cleanSub 
+    ? `ที่ทำการกำนัน${isBkk ? 'แขวง' : 'ตำบล'}${cleanSub}` 
+    : 'ที่ทำการกำนัน';
+
+  const baseOptions = [
+    'ที่ทำการปกครองส่วนท้องถิ่น',
+    kamnanOption,
+    'ที่ทำการผู้ใหญ่บ้านหมู่ที่ '
+  ];
+
+  const stored = JSON.parse(localStorage.getItem('slts_local_admin_names') || '[]');
+  const customs = stored.filter(s => {
+    if (!s || typeof s !== 'string') return false;
+    const t = s.trim();
+    return t && !baseOptions.includes(t) && !t.startsWith('ที่ทำการกำนัน') && !t.startsWith('ที่ทำการผู้ใหญ่บ้านหมู่ที่');
+  });
+
+  return [...baseOptions, ...customs];
+}
+
+function saveLocalAdminName(name) {
+  if (!name || typeof name !== 'string') return;
+  const clean = name.trim();
+  if (!clean) return;
+  if (clean === 'ที่ทำการปกครองส่วนท้องถิ่น' || clean.startsWith('ที่ทำการกำนัน') || clean.startsWith('ที่ทำการผู้ใหญ่บ้านหมู่ที่')) {
+    return;
+  }
+  let stored = JSON.parse(localStorage.getItem('slts_local_admin_names') || '[]');
+  if (!stored.includes(clean)) {
+    stored.push(clean);
+    localStorage.setItem('slts_local_admin_names', JSON.stringify(stored));
+  }
+}
+
+// =========================================================================
 // Province & Address Management System (77 จังหวัด ทั่วประเทศ)
 // =========================================================================
 
@@ -2789,6 +2830,20 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
     subdistrictOpts += `<option value="${s}" ${s === curSubdistrict ? 'selected' : ''}>${s}</option>`;
   });
 
+  const isBkk = prov === 'กรุงเทพมหานคร';
+  const adminOptions = getLocalAdminOptions(curSubdistrict, isBkk);
+  let adminDatalistHtml = '';
+  let adminChipsHtml = '';
+  adminOptions.forEach(o => {
+    const isSelected = o === curAdminName;
+    adminDatalistHtml += `<option value="${o}">`;
+    adminChipsHtml += `
+      <button type="button" class="slts-prefix-chip slts-admin-chip ${isSelected ? 'active' : ''}" data-val="${o}" onclick="selectModalAdminName('${o}')">
+        ${o}
+      </button>
+    `;
+  });
+
   Swal.fire({
     html: `
       <div class="slts-form-modal">
@@ -2822,7 +2877,7 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
               </div>
               <div class="slts-field-col">
                 <label class="slts-label">ตำบล / แขวง <span class="slts-required">*</span></label>
-                <select id="m_subdistrict" class="slts-select">
+                <select id="m_subdistrict" class="slts-select" onchange="updateModalAdminChips()">
                   ${subdistrictOpts}
                 </select>
               </div>
@@ -2900,9 +2955,19 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
               </div>
             </div>
 
-            <div id="m_adminBox" class="${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? '' : 'hidden'}">
-              <label class="slts-label">ชื่อหน่วยงาน <span class="slts-required">*</span></label>
-              <input type="text" id="m_adminName" value="${curAdminName}" placeholder="ระบุ อบต. / เทศบาล / อบจ." class="slts-input">
+            <div id="m_adminBox" class="${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'block' : 'hidden'} space-y-1.5">
+              <label class="slts-label">ชื่อหน่วยงาน / ที่ทำการ <span class="slts-required">*</span></label>
+              <input type="text" id="m_adminName" list="m_adminNameList" value="${curAdminName}" placeholder="ระบุ อบต. / เทศบาล / ที่ทำการ..." class="slts-input" autocomplete="off" oninput="handleModalAdminNameInput(this.value)">
+              <datalist id="m_adminNameList">
+                ${adminDatalistHtml}
+              </datalist>
+              <!-- แถบเลือกหน่วยงานปกครองด่วน -->
+              <div class="slts-prefix-chips-container">
+                <span class="slts-prefix-chips-label"><i class="fa-solid fa-building-flag text-[9px] mr-1"></i>เลือก:</span>
+                <div class="slts-prefix-chips-wrap" id="m_adminChips">
+                  ${adminChipsHtml}
+                </div>
+              </div>
             </div>
 
             <div id="m_otherBox" class="${curLocType === 'อื่นๆ' ? '' : 'hidden'}">
@@ -3024,6 +3089,56 @@ window.selectModalPrefix = function(prefix) {
   }
 };
 
+window.handleModalAdminNameInput = function(val) {
+  const clean = (val || '').trim();
+  const chips = document.querySelectorAll('.slts-admin-chip');
+  chips.forEach(c => {
+    const chipVal = c.getAttribute('data-val') || c.textContent.trim();
+    if (chipVal === clean || (chipVal.startsWith('ที่ทำการผู้ใหญ่บ้านหมู่ที่') && clean.startsWith('ที่ทำการผู้ใหญ่บ้านหมู่ที่'))) {
+      c.classList.add('active');
+      try {
+        c.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+      } catch (e) {}
+    } else {
+      c.classList.remove('active');
+    }
+  });
+};
+
+window.selectModalAdminName = function(name) {
+  const input = document.getElementById('m_adminName');
+  if (input) {
+    input.value = name;
+    window.handleModalAdminNameInput(name);
+    if (name.includes('ผู้ใหญ่บ้าน')) {
+      input.focus();
+      input.setSelectionRange(name.length, name.length);
+    }
+  }
+};
+
+window.updateModalAdminChips = function() {
+  const prov = state.selectedProvince;
+  const isBkk = prov === 'กรุงเทพมหานคร';
+  const subdistrictSelect = document.getElementById('m_subdistrict');
+  const subName = subdistrictSelect?.value || '';
+  const adminOptions = getLocalAdminOptions(subName, isBkk);
+  const curVal = document.getElementById('m_adminName')?.value || '';
+
+  const datalist = document.getElementById('m_adminNameList');
+  if (datalist) {
+    datalist.innerHTML = adminOptions.map(o => `<option value="${o}">`).join('');
+  }
+
+  const chipsWrap = document.getElementById('m_adminChips');
+  if (chipsWrap) {
+    chipsWrap.innerHTML = adminOptions.map(o => {
+      const isSelected = o === curVal || (o.startsWith('ที่ทำการผู้ใหญ่บ้านหมู่ที่') && curVal.startsWith('ที่ทำการผู้ใหญ่บ้านหมู่ที่'));
+      return `<button type="button" class="slts-prefix-chip slts-admin-chip ${isSelected ? 'active' : ''}" data-val="${o}" onclick="selectModalAdminName('${o}')">${o}</button>`;
+    }).join('');
+  }
+};
+
 window.handleModalDistrictChange = function(districtName) {
   const prov = state.selectedProvince;
   const subdistricts = getSubdistrictsByDistrict(prov, districtName);
@@ -3036,6 +3151,7 @@ window.handleModalDistrictChange = function(districtName) {
     opt.textContent = s;
     subSelect.appendChild(opt);
   });
+  window.updateModalAdminChips();
 };
 
 window.handleModalCourtTypeChange = function(courtType) {
@@ -3192,6 +3308,7 @@ function applyModalFormValues(val) {
     elements.localAdminAddressFields?.classList.remove('hidden');
     elements.customOtherAddressFields?.classList.add('hidden');
     if (elements.localAdminNameInput) elements.localAdminNameInput.value = val.adminName;
+    saveLocalAdminName(val.adminName);
   } else {
     elements.houseAddressFields?.classList.add('hidden');
     elements.localAdminAddressFields?.classList.add('hidden');
