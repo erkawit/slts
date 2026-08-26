@@ -2643,6 +2643,33 @@ window.showProvinceSelectorModal = function(force = false) {
     customClass: {
       popup: 'slts-swal-fullscreen-80 slts-swal-no-padding',
       closeButton: 'slts-close-btn'
+    },
+    didOpen: () => {
+      const popup = document.querySelector('.swal2-popup');
+      if (!popup) return;
+      const vv = window.visualViewport;
+      if (vv) {
+        const onViewportResize = () => {
+          const vvHeight = vv.height;
+          const vvOffsetTop = vv.offsetTop;
+          popup.style.maxHeight = `${vvHeight * 0.9}px`;
+          popup.style.top = `${vvOffsetTop}px`;
+          popup.style.bottom = 'auto';
+          popup.style.transform = 'none';
+          popup.style.margin = '0 auto';
+        };
+        vv.addEventListener('resize', onViewportResize);
+        vv.addEventListener('scroll', onViewportResize);
+        popup._vvResizeHandler = onViewportResize;
+      }
+    },
+    didClose: () => {
+      const vv = window.visualViewport;
+      const popup = document.querySelector('.swal2-popup');
+      if (vv && popup?._vvResizeHandler) {
+        vv.removeEventListener('resize', popup._vvResizeHandler);
+        vv.removeEventListener('scroll', popup._vvResizeHandler);
+      }
     }
   });
 };
@@ -2869,6 +2896,61 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
     allowOutsideClick: false,
     customClass: {
       popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
+    },
+    didOpen: () => {
+      // ── ป้องกัน keyboard บดบัง input ใน SweetAlert บน Mobile ──
+      const popup = document.querySelector('.swal2-popup');
+      if (!popup) return;
+
+      // ใช้ visualViewport API (รองรับ iOS Safari 13+ / Android Chrome 62+)
+      const vv = window.visualViewport;
+      if (vv) {
+        const onViewportResize = () => {
+          // ความสูง viewport จริง (หลัง keyboard ขึ้น)
+          const vvHeight = vv.height;
+          const vvOffsetTop = vv.offsetTop;
+          // ปรับ popup ให้ fit กับ visual viewport
+          popup.style.maxHeight = `${vvHeight * 0.9}px`;
+          popup.style.top = `${vvOffsetTop}px`;
+          popup.style.bottom = 'auto';
+          popup.style.transform = 'none';
+          popup.style.margin = '0 auto';
+          // Scroll focused input ให้อยู่ในมุมมอง
+          const focused = document.activeElement;
+          if (focused && focused !== document.body) {
+            setTimeout(() => focused.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
+          }
+        };
+        vv.addEventListener('resize', onViewportResize);
+        vv.addEventListener('scroll', onViewportResize);
+        // เก็บ reference ไว้สำหรับ cleanup
+        popup._vvResizeHandler = onViewportResize;
+      }
+
+      // Fallback: focus event scroll สำหรับ browser ที่ไม่รองรับ visualViewport
+      const formEl = document.getElementById('mobileSummonsModalForm');
+      if (formEl) {
+        const onFocusIn = (e) => {
+          if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) {
+            setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+          }
+        };
+        formEl.addEventListener('focusin', onFocusIn);
+        popup._focusInHandler = onFocusIn;
+        popup._formEl = formEl;
+      }
+    },
+    didClose: () => {
+      // ── Cleanup viewport listeners เมื่อปิด modal ──
+      const vv = window.visualViewport;
+      const popup = document.querySelector('.swal2-popup');
+      if (vv && popup?._vvResizeHandler) {
+        vv.removeEventListener('resize', popup._vvResizeHandler);
+        vv.removeEventListener('scroll', popup._vvResizeHandler);
+      }
+      if (popup?._formEl && popup?._focusInHandler) {
+        popup._formEl.removeEventListener('focusin', popup._focusInHandler);
+      }
     }
   });
 };

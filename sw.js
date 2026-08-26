@@ -1,28 +1,30 @@
-﻿/**
+/**
  * sw.js - Service Worker for Offline-First PWA Support
  * ระบบจัดเก็บข้อมูลพิกัดส่งหมาย - ศาลจังหวัดอุดรธานี
  */
 
-const CACHE_NAME = 'slts-court-cache-v1';
+const CACHE_NAME = 'slts-court-cache-v4';
 
 const STATIC_ASSETS = [
   './',
   'index.html',
   'manifest.json',
+  'sw.js',
   'css/style.css',
   'js/app.js',
+  'js/data.js',
   'js/watermark.js',
   'js/compass.js',
-  'js/map-snapshot.js',
+  'js/map.js',
   'img/logo.png',
-  'img/north.png',
   'https://cdn.tailwindcss.com',
   'https://code.jquery.com/jquery-3.7.1.min.js',
   'https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css',
   'https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js',
   'https://cdn.jsdelivr.net/npm/sweetalert2@11',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
+  'https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@300;400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap'
 ];
 
 // 1. Install Event: Cache all essential core assets
