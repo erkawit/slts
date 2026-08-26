@@ -290,3 +290,55 @@ table.dataTable tbody td {
   margin-top: 4px;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
+
+/* SweetAlert 80% Fullscreen Form on Mobile */
+.slts-swal-fullscreen-80 {
+  width: 94% !important;
+  max-width: 580px !important;
+  max-height: 88vh !important;
+  border-radius: 1.5rem !important;
+  padding: 1.25rem !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.slts-swal-body-scroll {
+  max-height: calc(88vh - 120px) !important;
+  overflow-y: auto !important;
+  padding-right: 4px !important;
+  margin: 0 !important;
+  text-align: left !important;
+}
+
+/* Custom Scrollbar for Form */
+.slts-swal-body-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.slts-swal-body-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+.slts-swal-body-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+/* Province Picker Grid Item */
+.province-btn-item {
+  transition: all 0.15s ease;
+  border: 1px solid #e2e8f0;
+}
+.province-btn-item:hover, .province-btn-item:focus {
+  border-color: #3b82f6;
+  background-color: #eff6ff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.15);
+}
+.province-btn-item.active {
+  background-color: #2563eb;
+  color: white;
+  border-color: #1d4ed8;
+  font-weight: bold;
+}
+

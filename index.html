@@ -183,11 +183,24 @@
             <!-- Form Content -->
             <form id="summonsForm" class="p-6 space-y-5" onsubmit="return false;">
               
-              <!-- 2.1 อำเภอและตำบล (อุดรธานี 20 อำเภอ) -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <!-- 2.1 จังหวัด อำเภอ และตำบล (77 จังหวัด ทั่วประเทศ) -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                <div>
+                  <label for="province" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                    <i class="fa-solid fa-map-location-dot text-blue-600 mr-1"></i> จังหวัด <span class="text-red-500">*</span>
+                  </label>
+                  <div class="relative">
+                    <select id="province" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-500">
+                      <i class="fa-solid fa-chevron-down text-xs"></i>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <label for="district" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                    <i class="fa-solid fa-landmark text-blue-600 mr-1"></i> อำเภอ (อุดรธานี) <span class="text-red-500">*</span>
+                    <i class="fa-solid fa-landmark text-blue-600 mr-1"></i> อำเภอ / เขต <span class="text-red-500">*</span>
                   </label>
                   <div class="relative">
                     <select id="district" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
@@ -200,7 +213,7 @@
 
                 <div>
                   <label for="subdistrict" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                    <i class="fa-solid fa-location-dot text-blue-600 mr-1"></i> ตำบล <span class="text-red-500">*</span>
+                    <i class="fa-solid fa-location-dot text-blue-600 mr-1"></i> ตำบล / แขวง <span class="text-red-500">*</span>
                   </label>
                   <div class="relative">
                     <select id="subdistrict" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
@@ -602,10 +615,19 @@
     </div>
 
   </main>
+ 
+  <!-- Floating Reset Province Button (แสดงที่มุมขวาล่าง) -->
+  <div id="floatingProvinceContainer" class="fixed bottom-4 right-4 z-40">
+    <button id="btnFloatingResetProvince" type="button" onclick="handleResetProvince()" class="flex items-center gap-2 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white hover:from-blue-800 hover:to-indigo-900 px-3.5 py-2 rounded-full shadow-2xl border border-blue-300/40 text-xs font-bold active:scale-95 transition-all" title="คลิกเพื่อรีเซ็ตจังหวัดตั้งต้น">
+      <i class="fa-solid fa-map-location-dot text-amber-300"></i>
+      <span id="floatingProvinceName">จ.อุดรธานี</span>
+      <span class="bg-white/20 text-white text-[10px] px-1.5 py-0.5 rounded-full font-normal">รีเซ็ต</span>
+    </button>
+  </div>
 
   <!-- Main Footer -->
   <footer class="bg-white border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400">
-    <p>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System) © ศาลจังหวัดอุดรธานี</p>
+    <p>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System)</p>
   </footer>
 
   <!-- Modal: ล็อกอินเข้าสู่ระบบ (Login Modal) -->
@@ -713,6 +735,12 @@
       </div>
       
       <div class="flex items-center gap-2">
+        <!-- ปุ่มแก้ไขข้อมูลหมายด่วน -->
+        <button id="btnEditMobileForm" type="button" class="px-3 py-1.5 bg-amber-600/90 hover:bg-amber-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 border border-amber-400/50 shadow-sm" title="คลิกเพื่อแก้ไขข้อมูลหมาย">
+          <i class="fa-solid fa-pen-to-square text-white text-xs"></i>
+          <span>แก้ไขข้อมูล</span>
+        </button>
+
         <!-- ปุ่มสลับมุมมอง แนวนอน 4:3 (ค่าเริ่มต้น) / แนวตั้ง 3:4 -->
         <button id="btnToggleOrientation" type="button" class="px-3 py-1.5 bg-blue-600/90 hover:bg-blue-600 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 border border-blue-400/50 shadow-sm" title="คลิกเพื่อสลับ แนวนอน 4:3 / แนวตั้ง 3:4">
           <i class="fa-solid fa-arrows-rotate text-white text-xs"></i>

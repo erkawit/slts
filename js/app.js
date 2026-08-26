@@ -25,7 +25,8 @@ const state = {
   googleSheetCsvUrl: 'https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/gviz/tq?tqx=out:csv',
   isUploading: false,
   currentUser: null,
-  dataTableInstance: null
+  dataTableInstance: null,
+  selectedProvince: localStorage.getItem('slts_selected_province') || null
 };
 
 // Cache Constants
@@ -263,7 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initDOMElements();
   initAuthSystem();
   initOfflineSyncSystem();
-  initDistrictsDropdown();
+  initProvinceSystem();
   initCasePrefixes();
   initCaseYearDropdowns();
   initFormEventListeners();
@@ -272,13 +273,29 @@ document.addEventListener('DOMContentLoaded', () => {
   initDesktopUploadEvents();
   initSettings();
   initResponsiveUI();
+
+  // Mobile-First Camera & Form Initialization for screen width < 768px
+  if (window.innerWidth < 768) {
+    if (!state.selectedProvince) {
+      showProvinceSelectorModal(true);
+    } else {
+      setTimeout(() => {
+        showMobileSummonsFormModal(false);
+      }, 350);
+    }
+  }
 });
 
 function initDOMElements() {
   elements.form = document.getElementById('summonsForm');
+  elements.provinceSelect = document.getElementById('province');
   elements.districtSelect = document.getElementById('district');
   elements.subdistrictSelect = document.getElementById('subdistrict');
   elements.courtTypeSelect = document.getElementById('courtType');
+  elements.floatingProvinceContainer = document.getElementById('floatingProvinceContainer');
+  elements.floatingProvinceName = document.getElementById('floatingProvinceName');
+  elements.btnFloatingResetProvince = document.getElementById('btnFloatingResetProvince');
+  elements.btnEditMobileForm = document.getElementById('btnEditMobileForm');
   
   // เลขคดี
   elements.udonCaseField = document.getElementById('udonCaseField');
@@ -1514,7 +1531,8 @@ window.openManualUploadModal = function() {
 
   // สร้างตัวเลือกอำเภอ
   let districtOptionsHtml = '';
-  const districts = typeof UDON_THANI_DATA !== 'undefined' ? Object.keys(UDON_THANI_DATA) : ['เมืองอุดรธานี'];
+  const currentProv = state.selectedProvince || 'กรุงเทพมหานคร';
+  const districts = getDistrictsByProvince(currentProv);
   districts.forEach(d => {
     districtOptionsHtml += `<option value="${d}">${d}</option>`;
   });
@@ -1707,7 +1725,8 @@ window.openManualUploadModal = function() {
       // อัปเดตตำบลตามอำเภอ
       const updateSubdistricts = () => {
         const d = districtSelect.value;
-        const subs = (typeof UDON_THANI_DATA !== 'undefined' && UDON_THANI_DATA[d]) || [];
+        const prov = state.selectedProvince || 'กรุงเทพมหานคร';
+        const subs = getSubdistrictsByDistrict(prov, d);
         subdistrictSelect.innerHTML = '';
         subs.forEach(s => {
           const opt = document.createElement('option');
@@ -2489,24 +2508,78 @@ function extractPrefixesFromRows(rows) {
   }
 }
 
-function initDistrictsDropdown() {
+// =========================================================================
+// Province & Address Management System (77 จังหวัด ทั่วประเทศ)
+// =========================================================================
+
+function initProvinceSystem() {
+  const savedProv = localStorage.getItem('slts_selected_province');
+  state.selectedProvince = savedProv || (typeof THAILAND_PROVINCES !== 'undefined' && THAILAND_PROVINCES.length > 0 ? THAILAND_PROVINCES[0].name : 'กรุงเทพมหานคร');
+
+  if (elements.provinceSelect) {
+    elements.provinceSelect.innerHTML = '';
+    if (typeof THAILAND_PROVINCES !== 'undefined') {
+      THAILAND_PROVINCES.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.name;
+        opt.textContent = p.name;
+        if (p.name === state.selectedProvince) {
+          opt.selected = true;
+        }
+        elements.provinceSelect.appendChild(opt);
+      });
+    }
+
+    elements.provinceSelect.addEventListener('change', (e) => {
+      setProvince(e.target.value);
+    });
+  }
+
+  updateDistricts(state.selectedProvince);
+  updateFloatingProvinceBadge();
+}
+
+function setProvince(provinceName) {
+  state.selectedProvince = provinceName;
+  localStorage.setItem('slts_selected_province', provinceName);
+  if (elements.provinceSelect && elements.provinceSelect.value !== provinceName) {
+    elements.provinceSelect.value = provinceName;
+  }
+  updateDistricts(provinceName);
+  updateFloatingProvinceBadge();
+}
+
+function updateFloatingProvinceBadge() {
+  if (elements.floatingProvinceName) {
+    elements.floatingProvinceName.textContent = state.selectedProvince ? `จ.${state.selectedProvince}` : 'เลือกจังหวัด';
+  }
+}
+
+function updateDistricts(provinceName, selectDistrict = null) {
+  if (!elements.districtSelect) return;
+  const districts = getDistrictsByProvince(provinceName);
   elements.districtSelect.innerHTML = '';
-  DISTRICT_ORDER.forEach(district => {
+  districts.forEach(district => {
     const opt = document.createElement('option');
     opt.value = district;
     opt.textContent = district;
     elements.districtSelect.appendChild(opt);
   });
 
-  updateSubdistricts(DISTRICT_ORDER[0]);
+  const chosenDistrict = selectDistrict && districts.includes(selectDistrict) ? selectDistrict : (districts[0] || '');
+  if (chosenDistrict) {
+    elements.districtSelect.value = chosenDistrict;
+  }
+  updateSubdistricts(provinceName, chosenDistrict);
 
-  elements.districtSelect.addEventListener('change', (e) => {
-    updateSubdistricts(e.target.value);
-  });
+  elements.districtSelect.onchange = (e) => {
+    updateSubdistricts(state.selectedProvince || provinceName, e.target.value);
+  };
 }
 
-function updateSubdistricts(districtName) {
-  const subdistricts = UDON_THANI_DATA[districtName] || [];
+function updateSubdistricts(provinceName, districtName, selectSubdistrict = null) {
+  if (!elements.subdistrictSelect) return;
+  const subdistricts = getSubdistrictsByDistrict(provinceName, districtName);
   elements.subdistrictSelect.innerHTML = '';
   subdistricts.forEach(sub => {
     const opt = document.createElement('option');
@@ -2514,7 +2587,468 @@ function updateSubdistricts(districtName) {
     opt.textContent = sub;
     elements.subdistrictSelect.appendChild(opt);
   });
+  if (selectSubdistrict && subdistricts.includes(selectSubdistrict)) {
+    elements.subdistrictSelect.value = selectSubdistrict;
+  }
 }
+
+// -------------------------------------------------------------------------
+// Modal เลือกจังหวัด (77 จังหวัด)
+// -------------------------------------------------------------------------
+window.showProvinceSelectorModal = function(force = false) {
+  let provincesHtml = '';
+  if (typeof THAILAND_PROVINCES !== 'undefined') {
+    THAILAND_PROVINCES.forEach(p => {
+      const isSelected = p.name === state.selectedProvince;
+      provincesHtml += `
+        <button type="button" class="province-btn-item p-2.5 text-xs font-semibold rounded-xl bg-white hover:bg-blue-50 text-gray-800 flex items-center justify-between ${isSelected ? 'border-2 border-blue-600 bg-blue-50 text-blue-700 font-bold' : ''}" onclick="selectProvinceAndProceed('${p.name}')">
+          <span>${p.name}</span>
+          ${isSelected ? '<i class="fa-solid fa-circle-check text-blue-600 text-sm"></i>' : ''}
+        </button>
+      `;
+    });
+  }
+
+  Swal.fire({
+    title: '<div class="text-base sm:text-lg font-bold text-gray-900 flex items-center justify-center gap-2"><i class="fa-solid fa-map-location-dot text-blue-600"></i> เลือกจังหวัดตั้งต้น</div>',
+    html: `
+      <div class="space-y-3 text-left">
+        <p class="text-xs text-gray-500">เลือกจังหวัดที่คุณปฏิบัติงานส่งหมาย ระบบจะบันทึกและโหลดข้อมูลอำเภอ/ตำบลของจังหวัดนี้โดยอัตโนมัติ</p>
+        <div class="relative">
+          <input type="text" id="swalProvinceSearchInput" placeholder="🔍 ค้นหาจังหวัด เช่น อุดรธานี, ขอนแก่น, กรุงเทพ..." class="w-full bg-gray-50 border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs font-medium focus:border-blue-500 focus:bg-white" oninput="filterProvinceList(this.value)">
+        </div>
+        <div id="swalProvinceGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto p-1 slts-swal-body-scroll">
+          ${provincesHtml}
+        </div>
+      </div>
+    `,
+    showConfirmButton: false,
+    showCloseButton: !force && !!state.selectedProvince,
+    allowOutsideClick: !force && !!state.selectedProvince,
+    customClass: {
+      popup: 'slts-swal-fullscreen-80'
+    }
+  });
+};
+
+window.filterProvinceList = function(query) {
+  const grid = document.getElementById('swalProvinceGrid');
+  if (!grid) return;
+  const q = (query || '').trim().toLowerCase();
+  const buttons = grid.querySelectorAll('.province-btn-item');
+  buttons.forEach(btn => {
+    const text = btn.textContent.toLowerCase();
+    btn.style.display = text.includes(q) ? '' : 'none';
+  });
+};
+
+window.selectProvinceAndProceed = function(provinceName) {
+  setProvince(provinceName);
+  Swal.close();
+  
+  const Toast = Swal.mixin({
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 1500,
+    timerProgressBar: true
+  });
+  Toast.fire({
+    icon: 'success',
+    title: `ตั้งค่า จ.${provinceName} เรียบร้อยแล้ว`
+  });
+
+  if (window.innerWidth < 768) {
+    setTimeout(() => {
+      showMobileSummonsFormModal(false);
+    }, 350);
+  }
+};
+
+// -------------------------------------------------------------------------
+// SweetAlert Form บันทึกข้อมูลส่งหมาย 80% สำหรับ Mobile
+// -------------------------------------------------------------------------
+window.showMobileSummonsFormModal = function(isEditing = false) {
+  if (!state.selectedProvince) {
+    showProvinceSelectorModal(true);
+    return;
+  }
+
+  const prov = state.selectedProvince;
+  const districts = getDistrictsByProvince(prov);
+  
+  const curDistrict = (elements.districtSelect?.value && districts.includes(elements.districtSelect.value)) ? elements.districtSelect.value : (districts[0] || '');
+  const subdistricts = getSubdistrictsByDistrict(prov, curDistrict);
+  const curSubdistrict = (elements.subdistrictSelect?.value && subdistricts.includes(elements.subdistrictSelect.value)) ? elements.subdistrictSelect.value : (subdistricts[0] || '');
+
+  const curCourtType = elements.courtTypeSelect?.value || 'ศาลประจำจังหวัด';
+  const curPrefix = elements.udonPrefixInput?.value || '';
+  const curCaseNo = elements.udonCaseNoInput?.value || '';
+  const curCaseYear = elements.udonCaseYearSelect?.value || (new Date().getFullYear() + 543);
+  const curOtherCaseNo = elements.otherCaseNoInput?.value || '';
+  const curOtherCaseYear = elements.otherCaseYearSelect?.value || (new Date().getFullYear() + 543);
+  const curLocType = elements.locationTypeSelect?.value || 'หมายบ้าน';
+  const curHouseNo = elements.houseNoInput?.value || '';
+  const curMoo = elements.mooInput?.value || '';
+  const curAdminName = elements.localAdminNameInput?.value || 'ที่ทำการปกครองส่วนท้องถิ่น';
+  const curOtherLoc = elements.customOtherLocationName?.value || '';
+  const curCoords = elements.coordinatesInput?.value || (state.lat ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : '');
+
+  const currentThaiYear = new Date().getFullYear() + 543;
+  let yearOpts = '';
+  for (let i = 0; i <= 20; i++) {
+    const y = currentThaiYear - i;
+    yearOpts += `<option value="${y}" ${y == curCaseYear ? 'selected' : ''}>${y}</option>`;
+  }
+  let otherYearOpts = '';
+  for (let i = 0; i <= 20; i++) {
+    const y = currentThaiYear - i;
+    otherYearOpts += `<option value="${y}" ${y == curOtherCaseYear ? 'selected' : ''}>${y}</option>`;
+  }
+
+  let districtOpts = '';
+  districts.forEach(d => {
+    districtOpts += `<option value="${d}" ${d === curDistrict ? 'selected' : ''}>${d}</option>`;
+  });
+
+  let subdistrictOpts = '';
+  subdistricts.forEach(s => {
+    subdistrictOpts += `<option value="${s}" ${s === curSubdistrict ? 'selected' : ''}>${s}</option>`;
+  });
+
+  Swal.fire({
+    title: `
+      <div class="flex items-center justify-between border-b pb-2.5">
+        <div class="text-left">
+          <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5">
+            <i class="fa-solid fa-file-pen text-blue-600"></i>
+            <span>${isEditing ? 'แก้ไขข้อมูลหมาย' : 'ฟอร์มบันทึกข้อมูลหมาย'}</span>
+          </h3>
+          <p class="text-[11px] text-blue-600 font-semibold">📍 จ.${prov}</p>
+        </div>
+        <button type="button" onclick="showProvinceSelectorModal(false)" class="text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-2.5 py-1 rounded-lg border border-blue-200 shadow-sm">
+          เปลี่ยนจังหวัด
+        </button>
+      </div>
+    `,
+    html: `
+      <form id="mobileSummonsModalForm" class="space-y-3 pt-1 text-left slts-swal-body-scroll" onsubmit="return false;">
+        <!-- 1. อำเภอ & ตำบล -->
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] font-bold text-gray-700 mb-1">อำเภอ / เขต <span class="text-red-500">*</span></label>
+            <select id="m_district" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-medium focus:border-blue-500" onchange="handleModalDistrictChange(this.value)">
+              ${districtOpts}
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-gray-700 mb-1">ตำบล / แขวง <span class="text-red-500">*</span></label>
+            <select id="m_subdistrict" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-medium focus:border-blue-500">
+              ${subdistrictOpts}
+            </select>
+          </div>
+        </div>
+
+        <!-- 2. ข้อมูลเลขคดี -->
+        <div>
+          <label class="block text-[11px] font-bold text-gray-700 mb-1">ประเภทศาล & เลขคดี <span class="text-red-500">*</span></label>
+          <select id="m_courtType" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-medium mb-1.5" onchange="handleModalCourtTypeChange(this.value)">
+            <option value="ศาลประจำจังหวัด" ${curCourtType !== 'ศาลอื่น' ? 'selected' : ''}>ศาลประจำจังหวัด (${prov})</option>
+            <option value="ศาลอื่น" ${curCourtType === 'ศาลอื่น' ? 'selected' : ''}>หมายศาลอื่น (ต...)</option>
+          </select>
+
+          <!-- ศาลประจำจังหวัด -->
+          <div id="m_provCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'hidden' : 'flex'} items-stretch">
+            <input type="text" id="m_prefix" value="${curPrefix}" placeholder="อักษร เช่น ผบE" class="w-24 bg-white border border-r-0 border-gray-300 rounded-l-xl px-2.5 py-2 text-xs font-bold text-gray-800" autocomplete="off">
+            <input type="text" id="m_caseNo" value="${curCaseNo}" placeholder="เลขคดี เช่น 1245 *" inputmode="numeric" class="flex-1 min-w-0 bg-white border-y border-gray-300 px-2.5 py-2 text-xs font-bold text-gray-800">
+            <span class="inline-flex items-center px-2 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold text-xs">/</span>
+            <select id="m_caseYear" class="w-20 bg-white border border-l-0 border-gray-300 rounded-r-xl px-1.5 py-2 text-xs font-bold text-gray-800">
+              ${yearOpts}
+            </select>
+          </div>
+
+          <!-- หมายศาลอื่น -->
+          <div id="m_otherCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'flex' : 'hidden'} items-stretch">
+            <span class="inline-flex items-center px-3 bg-blue-50 border border-r-0 border-gray-300 rounded-l-xl text-blue-700 font-bold text-xs select-none">ต</span>
+            <input type="text" id="m_otherCaseNo" value="${curOtherCaseNo}" placeholder="เลขคดี เช่น 2097 *" inputmode="numeric" class="flex-1 min-w-0 bg-white border-y border-gray-300 px-2.5 py-2 text-xs font-bold text-gray-800">
+            <span class="inline-flex items-center px-2 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold text-xs">/</span>
+            <select id="m_otherCaseYear" class="w-20 bg-white border border-l-0 border-gray-300 rounded-r-xl px-1.5 py-2 text-xs font-bold text-gray-800">
+              ${otherYearOpts}
+            </select>
+          </div>
+        </div>
+
+        <!-- 3. ที่ตั้งส่งหมาย -->
+        <div>
+          <label class="block text-[11px] font-bold text-gray-700 mb-1">ประเภทสถานที่ & ที่ตั้ง <span class="text-red-500">*</span></label>
+          <select id="m_locType" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-medium mb-1.5" onchange="handleModalLocTypeChange(this.value)">
+            <option value="หมายบ้าน" ${curLocType === 'หมายบ้าน' ? 'selected' : ''}>หมายบ้าน</option>
+            <option value="ที่ทำการปกครองส่วนท้องถิ่น" ${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'selected' : ''}>ที่ทำการปกครองส่วนท้องถิ่น</option>
+            <option value="อื่นๆ" ${curLocType === 'อื่นๆ' ? 'selected' : ''}>อื่นๆ</option>
+          </select>
+
+          <div id="m_houseBox" class="${curLocType === 'หมายบ้าน' ? 'grid' : 'hidden'} grid-cols-2 gap-2">
+            <input type="text" id="m_houseNo" value="${curHouseNo}" placeholder="บ้านเลขที่ เช่น 154/2 *" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs text-gray-800">
+            <input type="text" id="m_moo" value="${curMoo}" placeholder="หมู่ (ตัวเลข)" inputmode="numeric" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs text-gray-800">
+          </div>
+
+          <div id="m_adminBox" class="${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'block' : 'hidden'}">
+            <input type="text" id="m_adminName" value="${curAdminName}" placeholder="ระบุหน่วยงาน เช่น อบต. / เทศบาล *" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs text-gray-800">
+          </div>
+
+          <div id="m_otherBox" class="${curLocType === 'อื่นๆ' ? 'block' : 'hidden'}">
+            <input type="text" id="m_otherLocName" value="${curOtherLoc}" placeholder="ระบุสถานที่ เช่น โรงเรียน, วัด, โรงพยาบาล *" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs text-gray-800">
+          </div>
+        </div>
+
+        <!-- 4. พิกัด GPS -->
+        <div class="pt-1">
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-[11px] font-bold text-gray-700">พิกัด GPS</label>
+            <button type="button" onclick="refreshModalCoordinates()" class="text-[10px] text-blue-600 font-bold flex items-center gap-1 hover:underline">
+              <i class="fa-solid fa-arrows-rotate"></i> ดึงพิกัดสด
+            </button>
+          </div>
+          <input type="text" id="m_coords" value="${curCoords}" placeholder="เช่น 17.4144, 102.7882" class="w-full bg-gray-50 border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-mono font-semibold text-gray-800">
+        </div>
+      </form>
+    `,
+    confirmButtonText: '<i class="fa-solid fa-camera mr-1.5 text-base"></i> ยืนยันข้อมูลและเปิดกล้องถ่ายภาพ',
+    confirmButtonColor: '#2563eb',
+    showCancelButton: isEditing,
+    cancelButtonText: 'กลับไปยังกล้อง',
+    cancelButtonColor: '#6b7280',
+    allowOutsideClick: false,
+    customClass: {
+      popup: 'slts-swal-fullscreen-80',
+      confirmButton: 'w-full py-3 text-sm font-bold rounded-xl shadow-lg shadow-blue-500/25'
+    },
+    preConfirm: () => {
+      return validateAndExtractModalForm();
+    }
+  }).then((result) => {
+    if (result.isConfirmed && result.value) {
+      applyModalFormValues(result.value);
+      openCameraModal();
+    }
+  });
+};
+
+window.handleModalDistrictChange = function(districtName) {
+  const prov = state.selectedProvince;
+  const subdistricts = getSubdistrictsByDistrict(prov, districtName);
+  const subSelect = document.getElementById('m_subdistrict');
+  if (!subSelect) return;
+  subSelect.innerHTML = '';
+  subdistricts.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    subSelect.appendChild(opt);
+  });
+};
+
+window.handleModalCourtTypeChange = function(courtType) {
+  const provBox = document.getElementById('m_provCourtBox');
+  const otherBox = document.getElementById('m_otherCourtBox');
+  if (courtType === 'ศาลอื่น') {
+    provBox?.classList.add('hidden');
+    provBox?.classList.remove('flex');
+    otherBox?.classList.remove('hidden');
+    otherBox?.classList.add('flex');
+  } else {
+    otherBox?.classList.add('hidden');
+    otherBox?.classList.remove('flex');
+    provBox?.classList.remove('hidden');
+    provBox?.classList.add('flex');
+  }
+};
+
+window.handleModalLocTypeChange = function(locType) {
+  const houseBox = document.getElementById('m_houseBox');
+  const adminBox = document.getElementById('m_adminBox');
+  const otherBox = document.getElementById('m_otherBox');
+
+  houseBox?.classList.add('hidden');
+  adminBox?.classList.add('hidden');
+  otherBox?.classList.add('hidden');
+
+  if (locType === 'หมายบ้าน') {
+    houseBox?.classList.remove('hidden');
+  } else if (locType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+    adminBox?.classList.remove('hidden');
+  } else {
+    otherBox?.classList.remove('hidden');
+  }
+};
+
+window.refreshModalCoordinates = function() {
+  fetchCurrentLocation(false);
+  setTimeout(() => {
+    const coordInput = document.getElementById('m_coords');
+    if (coordInput && state.lat && state.lng) {
+      coordInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+    }
+  }, 800);
+};
+
+function validateAndExtractModalForm() {
+  const district = document.getElementById('m_district')?.value;
+  const subdistrict = document.getElementById('m_subdistrict')?.value;
+  const courtType = document.getElementById('m_courtType')?.value;
+  const prefix = (document.getElementById('m_prefix')?.value || '').trim();
+  const caseNo = (document.getElementById('m_caseNo')?.value || '').trim();
+  const caseYear = document.getElementById('m_caseYear')?.value;
+  const otherCaseNo = (document.getElementById('m_otherCaseNo')?.value || '').trim();
+  const otherCaseYear = document.getElementById('m_otherCaseYear')?.value;
+  const locType = document.getElementById('m_locType')?.value;
+  const houseNo = (document.getElementById('m_houseNo')?.value || '').trim();
+  const moo = (document.getElementById('m_moo')?.value || '').trim();
+  const adminName = (document.getElementById('m_adminName')?.value || '').trim();
+  const otherLocName = (document.getElementById('m_otherLocName')?.value || '').trim();
+  const coords = (document.getElementById('m_coords')?.value || '').trim();
+
+  if (!district || !subdistrict) {
+    Swal.showValidationMessage('กรุณาเลือกอำเภอและตำบล');
+    return false;
+  }
+
+  if (courtType === 'ศาลอื่น') {
+    if (!otherCaseNo) {
+      Swal.showValidationMessage('กรุณากรอกเลขคดีหมายศาลอื่น');
+      return false;
+    }
+  } else {
+    if (!prefix) {
+      Swal.showValidationMessage('กรุณากรอกอักษรนำหน้าเลขคดี เช่น ผบE');
+      return false;
+    }
+    if (!caseNo) {
+      Swal.showValidationMessage('กรุณากรอกเลขคดี');
+      return false;
+    }
+  }
+
+  if (locType === 'หมายบ้าน') {
+    if (!houseNo) {
+      Swal.showValidationMessage('สำหรับหมายบ้าน บังคับต้องระบุบ้านเลขที่');
+      return false;
+    }
+  } else if (locType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+    if (!adminName) {
+      Swal.showValidationMessage('กรุณาระบุชื่อที่ทำการปกครองส่วนท้องถิ่น');
+      return false;
+    }
+  } else if (locType === 'อื่นๆ') {
+    if (!otherLocName) {
+      Swal.showValidationMessage('กรุณาระบุชื่อสถานที่อื่นๆ');
+      return false;
+    }
+  }
+
+  return {
+    district,
+    subdistrict,
+    courtType,
+    prefix,
+    caseNo,
+    caseYear,
+    otherCaseNo,
+    otherCaseYear,
+    locType,
+    houseNo,
+    moo,
+    adminName,
+    otherLocName,
+    coords
+  };
+}
+
+function applyModalFormValues(val) {
+  if (!val) return;
+
+  if (elements.districtSelect) {
+    elements.districtSelect.value = val.district;
+    updateSubdistricts(state.selectedProvince, val.district, val.subdistrict);
+  }
+
+  if (val.courtType === 'ศาลอื่น') {
+    if (elements.courtTypeSelect) elements.courtTypeSelect.value = 'ศาลอื่น';
+    elements.udonCaseField?.classList.add('hidden');
+    elements.otherCourtCaseField?.classList.remove('hidden');
+    elements.otherCourtCaseField?.classList.add('flex');
+    if (elements.otherCaseNoInput) elements.otherCaseNoInput.value = val.otherCaseNo;
+    if (elements.otherCaseYearSelect) elements.otherCaseYearSelect.value = val.otherCaseYear;
+  } else {
+    if (elements.courtTypeSelect) elements.courtTypeSelect.value = `ศาลประจำจังหวัด`;
+    elements.otherCourtCaseField?.classList.add('hidden');
+    elements.otherCourtCaseField?.classList.remove('flex');
+    elements.udonCaseField?.classList.remove('hidden');
+    if (elements.udonPrefixInput) elements.udonPrefixInput.value = val.prefix;
+    if (elements.udonCaseNoInput) elements.udonCaseNoInput.value = val.caseNo;
+    if (elements.udonCaseYearSelect) elements.udonCaseYearSelect.value = val.caseYear;
+    saveCasePrefix(val.prefix);
+  }
+
+  if (elements.locationTypeSelect) elements.locationTypeSelect.value = val.locType;
+  if (val.locType === 'หมายบ้าน') {
+    elements.houseAddressFields?.classList.remove('hidden');
+    elements.localAdminAddressFields?.classList.add('hidden');
+    elements.customOtherAddressFields?.classList.add('hidden');
+    if (elements.houseNoInput) elements.houseNoInput.value = val.houseNo;
+    if (elements.mooInput) elements.mooInput.value = val.moo;
+  } else if (val.locType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+    elements.houseAddressFields?.classList.add('hidden');
+    elements.localAdminAddressFields?.classList.remove('hidden');
+    elements.customOtherAddressFields?.classList.add('hidden');
+    if (elements.localAdminNameInput) elements.localAdminNameInput.value = val.adminName;
+  } else {
+    elements.houseAddressFields?.classList.add('hidden');
+    elements.localAdminAddressFields?.classList.add('hidden');
+    elements.customOtherAddressFields?.classList.remove('hidden');
+    if (elements.customOtherLocationName) elements.customOtherLocationName.value = val.otherLocName;
+  }
+
+  if (val.coords && elements.coordinatesInput) {
+    elements.coordinatesInput.value = val.coords;
+  }
+}
+
+// -------------------------------------------------------------------------
+// ฟังก์ชันรีเซ็ตจังหวัดตั้งต้น (Reset Province)
+// -------------------------------------------------------------------------
+window.handleResetProvince = function() {
+  Swal.fire({
+    title: 'รีเซ็ตการตั้งค่าจังหวัด?',
+    html: `
+      <div class="space-y-2 text-sm text-gray-600">
+        <p>คุณต้องการรีเซ็ตจังหวัด <b>จ.${state.selectedProvince || 'ที่เลือกไว้'}</b> ใช่หรือไม่?</p>
+        <p class="text-xs text-rose-600 font-semibold bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+          <i class="fa-solid fa-triangle-exclamation mr-1"></i> คำเตือน: หากรีเซ็ตแล้ว คุณจะต้องเลือกและตั้งค่าจังหวัดใหม่อีกครั้งในการใช้งาน
+        </p>
+      </div>
+    `,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'ยืนยันรีเซ็ตจังหวัด',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#dc2626',
+    cancelButtonColor: '#6b7280',
+    customClass: {
+      popup: 'rounded-2xl shadow-xl'
+    }
+  }).then((res) => {
+    if (res.isConfirmed) {
+      localStorage.removeItem('slts_selected_province');
+      state.selectedProvince = null;
+      if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
+        closeCameraModal();
+      }
+      updateFloatingProvinceBadge();
+      showProvinceSelectorModal(true);
+    }
+  });
+};
 
 /**
  * สร้างตัวเลือก ปี พ.ศ. ปัจจุบัน และถอยหลังไปอีก 20 ปี (รวม 21 ปี)
@@ -2652,21 +3186,27 @@ function initFormEventListeners() {
 }
 
 function getFullLocationText() {
-  const district = elements.districtSelect.value;
-  const subdistrict = elements.subdistrictSelect.value;
-  const locationType = elements.locationTypeSelect.value;
+  const province = elements.provinceSelect ? elements.provinceSelect.value : (state.selectedProvince || '');
+  const district = elements.districtSelect ? elements.districtSelect.value : '';
+  const subdistrict = elements.subdistrictSelect ? elements.subdistrictSelect.value : '';
+  const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
+
+  const isBkk = province === 'กรุงเทพมหานคร';
+  const subPrefix = isBkk ? '' : 'ต.';
+  const distPrefix = isBkk ? '' : 'อ.';
+  const provSuffix = province ? ` จ.${province}` : '';
 
   if (locationType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
-    const adminText = (elements.localAdminNameInput.value || 'ที่ทำการปกครองส่วนท้องถิ่น').trim();
-    return `${adminText} ต.${subdistrict} อ.${district}`;
+    const adminText = (elements.localAdminNameInput?.value || 'ที่ทำการปกครองส่วนท้องถิ่น').trim();
+    return `${adminText} ${subPrefix}${subdistrict} ${distPrefix}${district}${provSuffix}`.trim();
   } else if (locationType === 'อื่นๆ') {
-    const otherText = (elements.customOtherLocationName.value || 'อื่นๆ').trim();
-    return `${otherText} ต.${subdistrict} อ.${district}`;
+    const otherText = (elements.customOtherLocationName?.value || 'อื่นๆ').trim();
+    return `${otherText} ${subPrefix}${subdistrict} ${distPrefix}${district}${provSuffix}`.trim();
   } else {
-    const houseNo = elements.houseNoInput.value.trim();
-    const moo = elements.mooInput.value.trim();
+    const houseNo = elements.houseNoInput ? elements.houseNoInput.value.trim() : '';
+    const moo = elements.mooInput ? elements.mooInput.value.trim() : '';
     const mooText = moo ? ` ม.${moo}` : '';
-    return `${houseNo}${mooText} ต.${subdistrict} อ.${district}`;
+    return `${houseNo}${mooText} ${subPrefix}${subdistrict} ${distPrefix}${district}${provSuffix}`.trim();
   }
 }
 
@@ -2812,6 +3352,12 @@ function initCameraEvents() {
   }
   if (elements.btnFlipOrientationQuick) {
     elements.btnFlipOrientationQuick.addEventListener('click', toggleOrientation);
+  }
+
+  if (elements.btnEditMobileForm) {
+    elements.btnEditMobileForm.addEventListener('click', () => {
+      showMobileSummonsFormModal(true);
+    });
   }
 
   if (elements.btnCapture) {
@@ -3037,7 +3583,7 @@ function validateForm() {
   const courtType = elements.courtTypeSelect.value;
   const caseNumber = getFormattedCaseNumber();
 
-  if (courtType === 'ศาลจังหวัดอุดรธานี') {
+  if (courtType !== 'ศาลอื่น') {
     const prefix = (elements.udonPrefixInput ? elements.udonPrefixInput.value : '').trim();
     const caseNo = (elements.udonCaseNoInput ? elements.udonCaseNoInput.value : '').trim();
 
@@ -3616,21 +4162,26 @@ async function executeUpload() {
 }
 
 function resetFormForNextCase() {
-  const courtType = elements.courtTypeSelect.value;
+  const courtType = elements.courtTypeSelect ? elements.courtTypeSelect.value : '';
   if (courtType === 'ศาลอื่น') {
     if (elements.otherCaseNoInput) {
       elements.otherCaseNoInput.value = '';
-      elements.otherCaseNoInput.focus();
     }
   } else {
     if (elements.udonCaseNoInput) {
       elements.udonCaseNoInput.value = '';
-      elements.udonCaseNoInput.focus();
     }
   }
   if (elements.houseNoInput) elements.houseNoInput.value = '';
   if (elements.mooInput) elements.mooInput.value = '';
   if (elements.customOtherLocationName) elements.customOtherLocationName.value = '';
+
+  // บนจอมือถือ หากยังเปิดกล้องอยู่ ให้เด้งฟอร์มกรอกหมายถัดไปทันที
+  if (window.innerWidth < 768 && elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
+    setTimeout(() => {
+      showMobileSummonsFormModal(false);
+    }, 400);
+  }
 }
 
 function initSettings() {
