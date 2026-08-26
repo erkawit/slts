@@ -274,17 +274,20 @@ document.addEventListener('DOMContentLoaded', () => {
   initSettings();
   initResponsiveUI();
 
-  // Mobile-First Camera & Form Initialization for screen width < 768px
+  // Mobile-First: เปิดหน้ากล้องทันทีบนจอ < 768px แล้วค่อยเด้ง modal ทับ
   if (window.innerWidth < 768) {
-    if (!state.selectedProvince) {
-      showProvinceSelectorModal(true);
-    } else {
+    openCameraModal().then(() => {
       setTimeout(() => {
-        showMobileSummonsFormModal(false);
-      }, 350);
-    }
+        if (!state.selectedProvince) {
+          showProvinceSelectorModal(true);
+        } else {
+          showMobileSummonsFormModal(false);
+        }
+      }, 400);
+    });
   }
 });
+
 
 function initDOMElements() {
   elements.form = document.getElementById('summonsForm');
@@ -2601,32 +2604,45 @@ window.showProvinceSelectorModal = function(force = false) {
     THAILAND_PROVINCES.forEach(p => {
       const isSelected = p.name === state.selectedProvince;
       provincesHtml += `
-        <button type="button" class="province-btn-item p-2.5 text-xs font-semibold rounded-xl bg-white hover:bg-blue-50 text-gray-800 flex items-center justify-between ${isSelected ? 'border-2 border-blue-600 bg-blue-50 text-blue-700 font-bold' : ''}" onclick="selectProvinceAndProceed('${p.name}')">
-          <span>${p.name}</span>
-          ${isSelected ? '<i class="fa-solid fa-circle-check text-blue-600 text-sm"></i>' : ''}
+        <button type="button" class="province-btn-item ${isSelected ? 'province-btn-selected' : ''}" onclick="selectProvinceAndProceed('${p.name}')">
+          ${isSelected ? '<i class="fa-solid fa-circle-check text-blue-600 text-xs shrink-0"></i>' : '<span class="province-btn-dot"></span>'}
+          <span class="flex-1 text-left">${p.name}</span>
         </button>
       `;
     });
   }
 
   Swal.fire({
-    title: '<div class="text-base sm:text-lg font-bold text-gray-900 flex items-center justify-center gap-2"><i class="fa-solid fa-map-location-dot text-blue-600"></i> เลือกจังหวัดตั้งต้น</div>',
     html: `
-      <div class="space-y-3 text-left">
-        <p class="text-xs text-gray-500">เลือกจังหวัดที่คุณปฏิบัติงานส่งหมาย ระบบจะบันทึกและโหลดข้อมูลอำเภอ/ตำบลของจังหวัดนี้โดยอัตโนมัติ</p>
-        <div class="relative">
-          <input type="text" id="swalProvinceSearchInput" placeholder="🔍 ค้นหาจังหวัด เช่น อุดรธานี, ขอนแก่น, กรุงเทพ..." class="w-full bg-gray-50 border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs font-medium focus:border-blue-500 focus:bg-white" oninput="filterProvinceList(this.value)">
+      <div class="slts-province-modal">
+        <!-- Header -->
+        <div class="slts-modal-header">
+          <div class="slts-modal-header-icon">
+            <i class="fa-solid fa-map-location-dot"></i>
+          </div>
+          <div>
+            <h2 class="slts-modal-title">เลือกจังหวัดปฏิบัติงาน</h2>
+            <p class="slts-modal-subtitle">ระบบจะบันทึกจังหวัดไว้สำหรับการใช้งานครั้งต่อไป</p>
+          </div>
         </div>
-        <div id="swalProvinceGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto p-1 slts-swal-body-scroll">
+        <!-- Search -->
+        <div class="slts-search-wrap">
+          <i class="fa-solid fa-magnifying-glass slts-search-icon"></i>
+          <input type="text" id="swalProvinceSearchInput" placeholder="ค้นหาจังหวัด เช่น อุดรธานี, กรุงเทพ..." class="slts-search-input" oninput="filterProvinceList(this.value)" autocomplete="off">
+        </div>
+        <!-- Province grid -->
+        <div id="swalProvinceGrid" class="slts-province-grid slts-swal-body-scroll">
           ${provincesHtml}
         </div>
+        <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>สามารถเปลี่ยนจังหวัดได้ภายหลังจากปุ่มที่มุมขวาล่าง</p>
       </div>
     `,
     showConfirmButton: false,
     showCloseButton: !force && !!state.selectedProvince,
     allowOutsideClick: !force && !!state.selectedProvince,
     customClass: {
-      popup: 'slts-swal-fullscreen-80'
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding',
+      closeButton: 'slts-close-btn'
     }
   });
 };
@@ -2717,119 +2733,142 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
   });
 
   Swal.fire({
-    title: `
-      <div class="flex items-center justify-between border-b pb-2.5">
-        <div class="text-left">
-          <h3 class="text-sm font-bold text-gray-900 flex items-center gap-1.5">
-            <i class="fa-solid fa-file-pen text-blue-600"></i>
-            <span>${isEditing ? 'แก้ไขข้อมูลหมาย' : 'ฟอร์มบันทึกข้อมูลหมาย'}</span>
-          </h3>
-          <p class="text-[11px] text-blue-600 font-semibold">📍 จ.${prov}</p>
+    html: `
+      <div class="slts-form-modal">
+        <!-- Header -->
+        <div class="slts-modal-header">
+          <div class="slts-modal-header-icon slts-icon-form">
+            <i class="fa-solid fa-file-pen"></i>
+          </div>
+          <div class="flex-1">
+            <h2 class="slts-modal-title">${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</h2>
+            <p class="slts-modal-subtitle">📍 จังหวัด${prov}</p>
+          </div>
+          <button type="button" onclick="showProvinceSelectorModal(false)" class="slts-change-prov-btn">
+            <i class="fa-solid fa-arrow-right-arrow-left text-[9px]"></i> เปลี่ยนจังหวัด
+          </button>
         </div>
-        <button type="button" onclick="showProvinceSelectorModal(false)" class="text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold px-2.5 py-1 rounded-lg border border-blue-200 shadow-sm">
-          เปลี่ยนจังหวัด
-        </button>
+
+        <form id="mobileSummonsModalForm" class="slts-form-body slts-swal-body-scroll" onsubmit="return false;">
+
+          <!-- Section: อำเภอ & ตำบล -->
+          <div class="slts-form-section">
+            <div class="slts-section-label">
+              <i class="fa-solid fa-location-dot text-blue-600"></i> พื้นที่ส่งหมาย
+            </div>
+            <div class="slts-field-row">
+              <div class="slts-field-col">
+                <label class="slts-label">อำเภอ / เขต <span class="slts-required">*</span></label>
+                <select id="m_district" class="slts-select" onchange="handleModalDistrictChange(this.value)">
+                  ${districtOpts}
+                </select>
+              </div>
+              <div class="slts-field-col">
+                <label class="slts-label">ตำบล / แขวง <span class="slts-required">*</span></label>
+                <select id="m_subdistrict" class="slts-select">
+                  ${subdistrictOpts}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: เลขคดี -->
+          <div class="slts-form-section">
+            <div class="slts-section-label">
+              <i class="fa-solid fa-scale-balanced text-amber-600"></i> ข้อมูลเลขคดี
+            </div>
+            <div class="slts-field-stack">
+              <label class="slts-label">ประเภทศาล <span class="slts-required">*</span></label>
+              <select id="m_courtType" class="slts-select" onchange="handleModalCourtTypeChange(this.value)">
+                <option value="ศาลประจำจังหวัด" ${curCourtType !== 'ศาลอื่น' ? 'selected' : ''}>ศาลจังหวัด${prov}</option>
+                <option value="ศาลอื่น" ${curCourtType === 'ศาลอื่น' ? 'selected' : ''}>หมายศาลอื่น (ต...)</option>
+              </select>
+            </div>
+
+            <!-- ศาลประจำจังหวัด -->
+            <div id="m_provCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'hidden' : ''} slts-case-row">
+              <input type="text" id="m_prefix" value="${curPrefix}" placeholder="อักษรนำหน้า เช่น ผบE" class="slts-input slts-input-prefix" autocomplete="off">
+              <input type="text" id="m_caseNo" value="${curCaseNo}" placeholder="เลขคดี *" inputmode="numeric" class="slts-input slts-input-caseno">
+              <span class="slts-case-sep">/</span>
+              <select id="m_caseYear" class="slts-select slts-select-year">
+                ${yearOpts}
+              </select>
+            </div>
+
+            <!-- หมายศาลอื่น -->
+            <div id="m_otherCourtBox" class="${curCourtType === 'ศาลอื่น' ? '' : 'hidden'} slts-case-row">
+              <span class="slts-case-prefix-tag">ต</span>
+              <input type="text" id="m_otherCaseNo" value="${curOtherCaseNo}" placeholder="เลขคดี *" inputmode="numeric" class="slts-input slts-input-caseno">
+              <span class="slts-case-sep">/</span>
+              <select id="m_otherCaseYear" class="slts-select slts-select-year">
+                ${otherYearOpts}
+              </select>
+            </div>
+          </div>
+
+          <!-- Section: ที่ตั้งส่งหมาย -->
+          <div class="slts-form-section">
+            <div class="slts-section-label">
+              <i class="fa-solid fa-house text-emerald-600"></i> สถานที่ส่งหมาย
+            </div>
+            <div class="slts-field-stack">
+              <label class="slts-label">ประเภทสถานที่ <span class="slts-required">*</span></label>
+              <select id="m_locType" class="slts-select" onchange="handleModalLocTypeChange(this.value)">
+                <option value="หมายบ้าน" ${curLocType === 'หมายบ้าน' ? 'selected' : ''}>หมายบ้าน</option>
+                <option value="ที่ทำการปกครองส่วนท้องถิ่น" ${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'selected' : ''}>ที่ทำการปกครองส่วนท้องถิ่น</option>
+                <option value="อื่นๆ" ${curLocType === 'อื่นๆ' ? 'selected' : ''}>อื่นๆ</option>
+              </select>
+            </div>
+
+            <div id="m_houseBox" class="${curLocType === 'หมายบ้าน' ? 'slts-field-row' : 'hidden slts-field-row'}">
+              <div class="slts-field-col">
+                <label class="slts-label">บ้านเลขที่ <span class="slts-required">*</span></label>
+                <input type="text" id="m_houseNo" value="${curHouseNo}" placeholder="เช่น 154/2" class="slts-input">
+              </div>
+              <div class="slts-field-col">
+                <label class="slts-label">หมู่ที่</label>
+                <input type="text" id="m_moo" value="${curMoo}" placeholder="เลขหมู่" inputmode="numeric" class="slts-input">
+              </div>
+            </div>
+
+            <div id="m_adminBox" class="${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? '' : 'hidden'}">
+              <label class="slts-label">ชื่อหน่วยงาน <span class="slts-required">*</span></label>
+              <input type="text" id="m_adminName" value="${curAdminName}" placeholder="ระบุ อบต. / เทศบาล / อบจ." class="slts-input">
+            </div>
+
+            <div id="m_otherBox" class="${curLocType === 'อื่นๆ' ? '' : 'hidden'}">
+              <label class="slts-label">ระบุสถานที่ <span class="slts-required">*</span></label>
+              <input type="text" id="m_otherLocName" value="${curOtherLoc}" placeholder="เช่น โรงเรียน, วัด, โรงพยาบาล" class="slts-input">
+            </div>
+          </div>
+
+          <!-- Section: GPS -->
+          <div class="slts-form-section">
+            <div class="slts-section-label">
+              <i class="fa-solid fa-satellite-dish text-violet-600"></i> พิกัด GPS
+              <button type="button" onclick="refreshModalCoordinates()" class="slts-gps-btn">
+                <i class="fa-solid fa-arrows-rotate"></i> ดึงพิกัดสด
+              </button>
+            </div>
+            <input type="text" id="m_coords" value="${curCoords}" placeholder="เช่น 17.4144, 102.7882" class="slts-input slts-input-mono">
+          </div>
+
+        </form>
+
+        <!-- Confirm button -->
+        <div class="slts-form-footer">
+          <button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
+            <i class="fa-solid fa-camera mr-1.5"></i> ยืนยันข้อมูลและเปิดกล้องถ่ายภาพ
+          </button>
+          ${isEditing ? '<button type="button" class="slts-cancel-btn" onclick="Swal.close()"><i class="fa-solid fa-xmark mr-1"></i> กลับไปยังกล้อง</button>' : ''}
+        </div>
       </div>
     `,
-    html: `
-      <form id="mobileSummonsModalForm" class="space-y-3 pt-1 text-left slts-swal-body-scroll" onsubmit="return false;">
-        <!-- 1. อำเภอ & ตำบล -->
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block text-[11px] font-bold text-gray-700 mb-1">อำเภอ / เขต <span class="text-red-500">*</span></label>
-            <select id="m_district" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-medium focus:border-blue-500" onchange="handleModalDistrictChange(this.value)">
-              ${districtOpts}
-            </select>
-          </div>
-          <div>
-            <label class="block text-[11px] font-bold text-gray-700 mb-1">ตำบล / แขวง <span class="text-red-500">*</span></label>
-            <select id="m_subdistrict" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-medium focus:border-blue-500">
-              ${subdistrictOpts}
-            </select>
-          </div>
-        </div>
-
-        <!-- 2. ข้อมูลเลขคดี -->
-        <div>
-          <label class="block text-[11px] font-bold text-gray-700 mb-1">ประเภทศาล & เลขคดี <span class="text-red-500">*</span></label>
-          <select id="m_courtType" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-medium mb-1.5" onchange="handleModalCourtTypeChange(this.value)">
-            <option value="ศาลประจำจังหวัด" ${curCourtType !== 'ศาลอื่น' ? 'selected' : ''}>ศาลประจำจังหวัด (${prov})</option>
-            <option value="ศาลอื่น" ${curCourtType === 'ศาลอื่น' ? 'selected' : ''}>หมายศาลอื่น (ต...)</option>
-          </select>
-
-          <!-- ศาลประจำจังหวัด -->
-          <div id="m_provCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'hidden' : 'flex'} items-stretch">
-            <input type="text" id="m_prefix" value="${curPrefix}" placeholder="อักษร เช่น ผบE" class="w-24 bg-white border border-r-0 border-gray-300 rounded-l-xl px-2.5 py-2 text-xs font-bold text-gray-800" autocomplete="off">
-            <input type="text" id="m_caseNo" value="${curCaseNo}" placeholder="เลขคดี เช่น 1245 *" inputmode="numeric" class="flex-1 min-w-0 bg-white border-y border-gray-300 px-2.5 py-2 text-xs font-bold text-gray-800">
-            <span class="inline-flex items-center px-2 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold text-xs">/</span>
-            <select id="m_caseYear" class="w-20 bg-white border border-l-0 border-gray-300 rounded-r-xl px-1.5 py-2 text-xs font-bold text-gray-800">
-              ${yearOpts}
-            </select>
-          </div>
-
-          <!-- หมายศาลอื่น -->
-          <div id="m_otherCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'flex' : 'hidden'} items-stretch">
-            <span class="inline-flex items-center px-3 bg-blue-50 border border-r-0 border-gray-300 rounded-l-xl text-blue-700 font-bold text-xs select-none">ต</span>
-            <input type="text" id="m_otherCaseNo" value="${curOtherCaseNo}" placeholder="เลขคดี เช่น 2097 *" inputmode="numeric" class="flex-1 min-w-0 bg-white border-y border-gray-300 px-2.5 py-2 text-xs font-bold text-gray-800">
-            <span class="inline-flex items-center px-2 bg-gray-100 border-y border-gray-300 text-gray-500 font-bold text-xs">/</span>
-            <select id="m_otherCaseYear" class="w-20 bg-white border border-l-0 border-gray-300 rounded-r-xl px-1.5 py-2 text-xs font-bold text-gray-800">
-              ${otherYearOpts}
-            </select>
-          </div>
-        </div>
-
-        <!-- 3. ที่ตั้งส่งหมาย -->
-        <div>
-          <label class="block text-[11px] font-bold text-gray-700 mb-1">ประเภทสถานที่ & ที่ตั้ง <span class="text-red-500">*</span></label>
-          <select id="m_locType" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-medium mb-1.5" onchange="handleModalLocTypeChange(this.value)">
-            <option value="หมายบ้าน" ${curLocType === 'หมายบ้าน' ? 'selected' : ''}>หมายบ้าน</option>
-            <option value="ที่ทำการปกครองส่วนท้องถิ่น" ${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'selected' : ''}>ที่ทำการปกครองส่วนท้องถิ่น</option>
-            <option value="อื่นๆ" ${curLocType === 'อื่นๆ' ? 'selected' : ''}>อื่นๆ</option>
-          </select>
-
-          <div id="m_houseBox" class="${curLocType === 'หมายบ้าน' ? 'grid' : 'hidden'} grid-cols-2 gap-2">
-            <input type="text" id="m_houseNo" value="${curHouseNo}" placeholder="บ้านเลขที่ เช่น 154/2 *" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs text-gray-800">
-            <input type="text" id="m_moo" value="${curMoo}" placeholder="หมู่ (ตัวเลข)" inputmode="numeric" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs text-gray-800">
-          </div>
-
-          <div id="m_adminBox" class="${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'block' : 'hidden'}">
-            <input type="text" id="m_adminName" value="${curAdminName}" placeholder="ระบุหน่วยงาน เช่น อบต. / เทศบาล *" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs text-gray-800">
-          </div>
-
-          <div id="m_otherBox" class="${curLocType === 'อื่นๆ' ? 'block' : 'hidden'}">
-            <input type="text" id="m_otherLocName" value="${curOtherLoc}" placeholder="ระบุสถานที่ เช่น โรงเรียน, วัด, โรงพยาบาล *" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs text-gray-800">
-          </div>
-        </div>
-
-        <!-- 4. พิกัด GPS -->
-        <div class="pt-1">
-          <div class="flex items-center justify-between mb-1">
-            <label class="block text-[11px] font-bold text-gray-700">พิกัด GPS</label>
-            <button type="button" onclick="refreshModalCoordinates()" class="text-[10px] text-blue-600 font-bold flex items-center gap-1 hover:underline">
-              <i class="fa-solid fa-arrows-rotate"></i> ดึงพิกัดสด
-            </button>
-          </div>
-          <input type="text" id="m_coords" value="${curCoords}" placeholder="เช่น 17.4144, 102.7882" class="w-full bg-gray-50 border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-mono font-semibold text-gray-800">
-        </div>
-      </form>
-    `,
-    confirmButtonText: '<i class="fa-solid fa-camera mr-1.5 text-base"></i> ยืนยันข้อมูลและเปิดกล้องถ่ายภาพ',
-    confirmButtonColor: '#2563eb',
-    showCancelButton: isEditing,
-    cancelButtonText: 'กลับไปยังกล้อง',
-    cancelButtonColor: '#6b7280',
+    showConfirmButton: false,
+    showCancelButton: false,
     allowOutsideClick: false,
     customClass: {
-      popup: 'slts-swal-fullscreen-80',
-      confirmButton: 'w-full py-3 text-sm font-bold rounded-xl shadow-lg shadow-blue-500/25'
-    },
-    preConfirm: () => {
-      return validateAndExtractModalForm();
-    }
-  }).then((result) => {
-    if (result.isConfirmed && result.value) {
-      applyModalFormValues(result.value);
-      openCameraModal();
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
     }
   });
 };
