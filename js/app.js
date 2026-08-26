@@ -2457,12 +2457,16 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
 // 5. ฟอร์มและระบบบันทึกส่งหมาย (Summons Form & Camera)
 // =========================================================================
 
-// ค่าตั้งต้นอักษรนำหน้าเลขคดี ศาลจังหวัดอุดรธานี
-const DEFAULT_CASE_PREFIXES = ['อ', 'ย', 'พ', 'ผบ', 'พE', 'ผบE', 'ร', 'รส', 'ม', 'มE', 'มย', 'มยE'];
+// ค่าตั้งต้นอักษรนำหน้าเลขคดี
+const DEFAULT_CASE_PREFIXES = ['อ', 'ย', 'พ', 'พE', 'ผบ', 'ผบE', 'ม', 'มE', 'มย', 'มยE', 'ร', 'รส'];
+
+function getAllCasePrefixes() {
+  const stored = JSON.parse(localStorage.getItem('slts_case_prefixes') || '[]');
+  return Array.from(new Set([...DEFAULT_CASE_PREFIXES, ...stored]));
+}
 
 function initCasePrefixes() {
-  const stored = JSON.parse(localStorage.getItem('slts_case_prefixes') || '[]');
-  const combined = Array.from(new Set([...DEFAULT_CASE_PREFIXES, ...stored]));
+  const combined = getAllCasePrefixes();
   renderPrefixDatalist(combined);
 }
 
@@ -2482,7 +2486,7 @@ function saveCasePrefix(prefix) {
   if (!prefix || !prefix.trim()) return;
   const clean = prefix.trim();
   let stored = JSON.parse(localStorage.getItem('slts_case_prefixes') || '[]');
-  if (!stored.includes(clean)) {
+  if (!DEFAULT_CASE_PREFIXES.includes(clean) && !stored.includes(clean)) {
     stored.push(clean);
     localStorage.setItem('slts_case_prefixes', JSON.stringify(stored));
     initCasePrefixes();
@@ -2738,7 +2742,8 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
   const curSubdistrict = (elements.subdistrictSelect?.value && subdistricts.includes(elements.subdistrictSelect.value)) ? elements.subdistrictSelect.value : (subdistricts[0] || '');
 
   const curCourtType = elements.courtTypeSelect?.value || 'ศาลประจำจังหวัด';
-  const curPrefix = elements.udonPrefixInput?.value || '';
+  const allPrefixes = getAllCasePrefixes();
+  const curPrefix = elements.udonPrefixInput?.value || (allPrefixes.includes('ผบE') ? 'ผบE' : (allPrefixes[0] || 'อ'));
   const curCaseNo = elements.udonCaseNoInput?.value || '';
   const curCaseYear = elements.udonCaseYearSelect?.value || (new Date().getFullYear() + 543);
   const curOtherCaseNo = elements.otherCaseNoInput?.value || '';
@@ -2761,6 +2766,18 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
     const y = currentThaiYear - i;
     otherYearOpts += `<option value="${y}" ${y == curOtherCaseYear ? 'selected' : ''}>${y}</option>`;
   }
+
+  let prefixDatalistHtml = '';
+  let prefixChipsHtml = '';
+  allPrefixes.forEach(p => {
+    const isSelected = p === curPrefix;
+    prefixDatalistHtml += `<option value="${p}">`;
+    prefixChipsHtml += `
+      <button type="button" class="slts-prefix-chip ${isSelected ? 'active' : ''}" onclick="selectModalPrefix('${p}')">
+        ${p}
+      </button>
+    `;
+  });
 
   let districtOpts = '';
   districts.forEach(d => {
@@ -2826,17 +2843,29 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
             </div>
 
             <!-- ศาลประจำจังหวัด -->
-            <div id="m_provCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'hidden' : ''} slts-case-row">
-              <input type="text" id="m_prefix" value="${curPrefix}" placeholder="อักษรนำหน้า เช่น ผบE" class="slts-input slts-input-prefix" autocomplete="off">
-              <input type="text" id="m_caseNo" value="${curCaseNo}" placeholder="เลขคดี *" inputmode="numeric" class="slts-input slts-input-caseno">
-              <span class="slts-case-sep">/</span>
-              <select id="m_caseYear" class="slts-select slts-select-year">
-                ${yearOpts}
-              </select>
+            <div id="m_provCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'hidden' : 'block'} space-y-1.5">
+              <div class="slts-case-row">
+                <input type="text" id="m_prefix" list="m_prefixList" value="${curPrefix}" placeholder="อักษร เช่น ผบE" class="slts-input slts-input-prefix" autocomplete="off" oninput="handleModalPrefixInput(this.value)">
+                <datalist id="m_prefixList">
+                  ${prefixDatalistHtml}
+                </datalist>
+                <input type="text" id="m_caseNo" value="${curCaseNo}" placeholder="เลขคดี *" inputmode="numeric" class="slts-input slts-input-caseno">
+                <span class="slts-case-sep">/</span>
+                <select id="m_caseYear" class="slts-select slts-select-year">
+                  ${yearOpts}
+                </select>
+              </div>
+              <!-- แถบเลือกอักษรนำหน้าด่วน -->
+              <div class="slts-prefix-chips-container">
+                <span class="slts-prefix-chips-label"><i class="fa-solid fa-list-check text-[9px] mr-1"></i>เลือกอักษร:</span>
+                <div class="slts-prefix-chips-wrap" id="m_prefixChips">
+                  ${prefixChipsHtml}
+                </div>
+              </div>
             </div>
 
             <!-- หมายศาลอื่น -->
-            <div id="m_otherCourtBox" class="${curCourtType === 'ศาลอื่น' ? '' : 'hidden'} slts-case-row">
+            <div id="m_otherCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'flex' : 'hidden'} slts-case-row">
               <span class="slts-case-prefix-tag">ต</span>
               <input type="text" id="m_otherCaseNo" value="${curOtherCaseNo}" placeholder="เลขคดี *" inputmode="numeric" class="slts-input slts-input-caseno">
               <span class="slts-case-sep">/</span>
@@ -2970,6 +2999,29 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
       }
     }
   });
+};
+
+window.handleModalPrefixInput = function(val) {
+  const clean = (val || '').trim();
+  const chips = document.querySelectorAll('.slts-prefix-chip');
+  chips.forEach(c => {
+    if (c.textContent.trim() === clean) {
+      c.classList.add('active');
+      try {
+        c.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+      } catch (e) {}
+    } else {
+      c.classList.remove('active');
+    }
+  });
+};
+
+window.selectModalPrefix = function(prefix) {
+  const input = document.getElementById('m_prefix');
+  if (input) {
+    input.value = prefix;
+    window.handleModalPrefixInput(prefix);
+  }
 };
 
 window.handleModalDistrictChange = function(districtName) {
