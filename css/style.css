@@ -869,4 +869,42 @@ table.dataTable tbody td {
   }
 }
 
+/* Camera Circular Action Buttons */
+.camera-circle-btn {
+  width: 52px !important;
+  height: 52px !important;
+  min-width: 52px !important;
+  min-height: 52px !important;
+  max-width: 52px !important;
+  max-height: 52px !important;
+  border-radius: 50% !important;
+  aspect-ratio: 1 / 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  background: rgba(255, 255, 255, 0.22) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
+  color: #ffffff !important;
+  transition: all 0.15s ease !important;
+  touch-action: manipulation;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.camera-circle-btn:hover {
+  background: rgba(255, 255, 255, 0.35) !important;
+  border-color: rgba(255, 255, 255, 0.7) !important;
+  transform: scale(1.06);
+}
+
+.camera-circle-btn:active {
+  transform: scale(0.92);
+  background: rgba(255, 255, 255, 0.5) !important;
+}
+
 

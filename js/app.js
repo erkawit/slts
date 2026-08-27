@@ -3661,11 +3661,10 @@ function startLocationInterval() {
 
 function fetchCurrentLocation(isManual = false) {
   if (!navigator.geolocation) {
-    Swal.fire('ข้อผิดพลาด', 'อุปกรณ์หรือเบราว์เซอร์ไม่รองรับ Geolocation', 'error');
     return;
   }
 
-  if (isManual) {
+  if (isManual && elements.locationStatus) {
     elements.locationStatus.textContent = 'กำลังดึงพิกัดล่าสุด...';
     elements.locationStatus.className = 'text-xs text-blue-600 font-semibold';
   }
@@ -3684,23 +3683,24 @@ function fetchCurrentLocation(isManual = false) {
       }
 
       if (!state.isManuallyEditedCoords || isManual) {
-        elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+        if (elements.coordinatesInput) {
+          elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+        }
+        const modalCoordInput = document.getElementById('m_coords');
+        if (modalCoordInput) {
+          modalCoordInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+        }
         state.isManuallyEditedCoords = false;
       }
       
       const timeStr = state.lastLocationTime.toLocaleTimeString('th-TH');
-      elements.locationStatus.textContent = `● อัปเดตล่าสุด ${timeStr} (ความแม่นยำ ±${state.accuracy}ม.)`;
-      elements.locationStatus.className = 'text-xs text-emerald-600 font-medium';
-
-      if (isManual) {
-        Swal.fire({
-          icon: 'success',
-          title: 'อัปเดตพิกัดสำเร็จ',
-          text: `พิกัดปัจจุบัน: ${state.lat}, ${state.lng}`,
-          timer: 1500,
-          showConfirmButton: false
-        });
+      if (elements.locationStatus) {
+        elements.locationStatus.textContent = `● อัปเดตล่าสุด ${timeStr} (ความแม่นยำ ±${state.accuracy}ม.)`;
+        elements.locationStatus.className = 'text-xs text-emerald-600 font-medium';
       }
+
+      // Realtime map snapshot update
+      updateLiveMapHUD();
     },
     (error) => {
       console.warn('Geolocation error:', error);
@@ -3708,10 +3708,9 @@ function fetchCurrentLocation(isManual = false) {
       if (error.code === error.PERMISSION_DENIED) {
         msg = 'กรุณาเปิดสิทธิ์ Location ในเบราว์เซอร์ของคุณ';
       }
-      elements.locationStatus.textContent = msg;
-      elements.locationStatus.className = 'text-xs text-red-500';
-      if (isManual) {
-        Swal.fire('ไม่พบพิกัด', msg, 'warning');
+      if (elements.locationStatus) {
+        elements.locationStatus.textContent = msg;
+        elements.locationStatus.className = 'text-xs text-red-500';
       }
     },
     {
@@ -3763,7 +3762,9 @@ function initCameraEvents() {
   }
 
   if (elements.btnEditMobileForm) {
-    elements.btnEditMobileForm.addEventListener('click', () => {
+    elements.btnEditMobileForm.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       showMobileSummonsFormModal(true);
     });
   }
