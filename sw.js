@@ -3,7 +3,7 @@
  * ระบบจัดเก็บข้อมูลพิกัดส่งหมาย - ศาลจังหวัดอุดรธานี
  */
 
-const CACHE_NAME = 'slts-court-cache-v4';
+const CACHE_NAME = 'slts-court-cache-v7';
 
 const STATIC_ASSETS = [
   './',
@@ -29,24 +29,24 @@ const STATIC_ASSETS = [
 
 // 1. Install Event: Cache all essential core assets
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[Service Worker] Pre-caching static assets for offline use');
       return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[Service Worker] Some assets failed to cache during install:', err);
+        console.warn('[Service Worker] Pre-cache warning:', err);
       });
-    }).then(() => self.skipWaiting())
+    })
   );
 });
 
-// 2. Activate Event: Clean up outdated caches
+// 2. Activate Event: Clean up all outdated caches immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((name) => {
           if (name !== CACHE_NAME) {
-            console.log('[Service Worker] Deleting old cache:', name);
+            console.log('[Service Worker] Purging old cache:', name);
             return caches.delete(name);
           }
         })
@@ -55,45 +55,28 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// 3. Fetch Event: Stale-While-Revalidate / Network-First with Cache Fallback
+// 3. Fetch Event: Network-First with Cache Fallback for instant update delivery
 self.addEventListener('fetch', (event) => {
   const requestUrl = new URL(event.request.url);
 
-  // Don't intercept Google Apps Script POST requests
+  // Skip Google Apps Script & external non-GET APIs
   if (event.request.method !== 'GET' || requestUrl.hostname.includes('script.google.com') || requestUrl.hostname.includes('googleusercontent.com')) {
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Fetch in background to update cache (Stale-while-revalidate)
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, networkResponse);
-            });
-          }
-        }).catch(() => {
-          // Ignore network errors when offline
-        });
-        return cachedResponse;
-      }
-
-      // If not in cache, fetch from network and store in cache
-      return fetch(event.request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic' && !event.request.url.startsWith('https://')) {
-          return networkResponse;
-        }
-
+    fetch(event.request).then((networkResponse) => {
+      if (networkResponse && networkResponse.status === 200) {
         const responseToCache = networkResponse.clone();
         caches.open(CACHE_NAME).then((cache) => {
           cache.put(event.request, responseToCache);
         });
-
-        return networkResponse;
-      }).catch(() => {
-        // If offline and request is for page navigation, return index.html
+      }
+      return networkResponse;
+    }).catch(() => {
+      // Offline fallback: serve from cache
+      return caches.match(event.request).then((cachedResponse) => {
+        if (cachedResponse) return cachedResponse;
         if (event.request.mode === 'navigate') {
           return caches.match('./index.html') || caches.match('index.html');
         }
