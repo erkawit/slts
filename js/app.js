@@ -289,6 +289,10 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
     switchTab('form');
+    // ตรวจสอบและขออนุญาตเข้าถึงกล้องในระบบสำหรับหน้าจอคอมพิวเตอร์ (> 768px)
+    setTimeout(() => {
+      checkAndRequestCameraPermission(false);
+    }, 400);
   }
 });
 
@@ -5255,6 +5259,64 @@ function validateForm() {
 
   return true;
 }
+
+/**
+ * ตรวจสอบและขออนุญาตเข้าถึงกล้องในระบบสำหรับหน้าจอคอมพิวเตอร์และอุปกรณ์
+ * @param {boolean} isUserInitiated - หากเป็นการกดสั่งจากผู้ใช้โดยตรง ให้แสดงกล่องข้อความแจ้งเตือนเมื่อไม่อนุญาต
+ */
+async function checkAndRequestCameraPermission(isUserInitiated = false) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    console.warn('[Camera] navigator.mediaDevices.getUserMedia is not supported in this browser.');
+    return false;
+  }
+
+  try {
+    // 1. ตรวจสอบสถานะการอนุญาตผ่าน Permissions API หากเบราว์เซอร์รองรับ
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const permissionStatus = await navigator.permissions.query({ name: 'camera' });
+        console.log('[Camera] Current permission status:', permissionStatus.state);
+        
+        if (permissionStatus.state === 'granted') {
+          return true;
+        }
+
+        permissionStatus.onchange = () => {
+          console.log('[Camera] Permission status changed to:', permissionStatus.state);
+        };
+      } catch (permErr) {
+        console.log('[Camera] Permissions API query not supported on this browser, fallback to getUserMedia check.');
+      }
+    }
+
+    // 2. ขอสิทธิ์เข้าถึงกล้องผ่าน getUserMedia
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+
+    if (stream) {
+      // เมื่อได้รับสิทธิ์ ให้หยุดแทร็กทันที เพื่อไม่ให้ไฟกล้องเปิดค้าง
+      stream.getTracks().forEach(track => track.stop());
+      console.log('[Camera] Camera access permission granted.');
+      return true;
+    }
+  } catch (err) {
+    console.warn('[Camera] Camera permission request error / denied:', err);
+    if (isUserInitiated) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'ไม่สามารถเข้าถึงกล้องถ่ายภาพได้',
+        text: 'โปรดอนุญาตให้เว็บไซต์เข้าถึงกล้องในการตั้งค่าของเบราว์เซอร์ เพื่อใช้งานกล้องถ่ายภาพ',
+        confirmButtonColor: '#2563eb'
+      });
+    }
+    return false;
+  }
+  return false;
+}
+
+window.checkAndRequestCameraPermission = checkAndRequestCameraPermission;
 
 async function openCameraModal() {
   // เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
