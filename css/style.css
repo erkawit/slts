@@ -295,14 +295,19 @@ table.dataTable tbody td {
 /* ================================================================
    SweetAlert2 — 80% Fullscreen Modal Base & Top Alignment on Mobile
    ================================================================ */
+.swal2-container,
 .slts-swal-top-container {
+  z-index: 10000000 !important;
   align-items: flex-start !important;
   padding-top: max(8px, env(safe-area-inset-top, 8px)) !important;
   padding-bottom: 0 !important;
   overflow-y: hidden !important;
 }
 
+.swal2-popup,
 .slts-swal-fullscreen-80 {
+  z-index: 10000001 !important;
+  position: relative !important;
   width: 95% !important;
   max-width: 520px !important;
   max-height: 88vh !important;
@@ -865,7 +870,7 @@ table.dataTable tbody td {
     width: 100vw !important;
     height: 100vh !important;
     height: 100dvh !important;
-    z-index: 99999 !important;
+    z-index: 40 !important;
   }
 }
 
