@@ -3181,6 +3181,16 @@ window.autofillModalFormFromRecord = function(caseNumber, district, subdistrict,
 // -------------------------------------------------------------------------
 window.showMobileHistorySearchModal = function() {
   const prov = state.selectedProvince || 'อุดรธานี';
+
+  if (!state.allSheetRows || state.allSheetRows.length === 0) {
+    const cachedStr = localStorage.getItem(CACHE_KEY_SHEET_DATA);
+    if (cachedStr) {
+      try {
+        state.allSheetRows = JSON.parse(cachedStr);
+      } catch (e) {}
+    }
+  }
+
   const allRows = state.allSheetRows || [];
 
   // กรองเฉพาะข้อมูลของจังหวัดปัจจุบัน
@@ -3387,21 +3397,20 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
       <div class="slts-form-modal">
         <!-- Header -->
         <div class="slts-modal-header">
-          <div class="slts-modal-header-icon slts-icon-form">
-            <i class="fa-solid fa-file-pen"></i>
-          </div>
-          <div class="flex-1">
-            <h2 class="slts-modal-title">${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</h2>
+          <!-- ปุ่มค้นหาข้อมูลประวัติส่งหมาย ที่มุมซ้ายบนแทนสัญลักษณ์เดิม -->
+          <button type="button" onclick="saveTempModalFormState(); showMobileHistorySearchModal();" class="slts-header-search-icon-btn" title="คลิกเพื่อค้นหาประวัติการส่งหมาย">
+            <i class="fa-solid fa-magnifying-glass"></i>
+          </button>
+          <div class="flex-1 cursor-pointer" onclick="saveTempModalFormState(); showMobileHistorySearchModal();" title="คลิกเพื่อค้นหาประวัติการส่งหมาย">
+            <h2 class="slts-modal-title flex items-center gap-1.5">
+              <span>${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</span>
+              <span class="text-[10px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 px-1.5 py-0.2 rounded font-normal inline-flex items-center gap-1"><i class="fa-solid fa-magnifying-glass text-[8px]"></i>ค้นหา</span>
+            </h2>
             <p class="slts-modal-subtitle">📍 จังหวัด${prov}</p>
           </div>
-          <div class="flex items-center gap-1.5 shrink-0">
-            <button type="button" onclick="saveTempModalFormState(); showMobileHistorySearchModal();" class="slts-search-nav-btn" title="ค้นหาประวัติการส่งหมาย">
-              <i class="fa-solid fa-magnifying-glass text-[9px]"></i> ค้นหาข้อมูล
-            </button>
-            <button type="button" onclick="saveTempModalFormState(); showProvinceSelectorModal(false)" class="slts-change-prov-btn" title="เปลี่ยนจังหวัด">
-              <i class="fa-solid fa-arrow-right-arrow-left text-[9px]"></i> เปลี่ยนจังหวัด
-            </button>
-          </div>
+          <button type="button" onclick="saveTempModalFormState(); showProvinceSelectorModal(false)" class="slts-change-prov-btn" title="เปลี่ยนจังหวัด">
+            <i class="fa-solid fa-arrow-right-arrow-left text-[9px]"></i> เปลี่ยนจังหวัด
+          </button>
         </div>
 
         <form id="mobileSummonsModalForm" class="slts-form-body slts-swal-body-scroll" onsubmit="return false;">
