@@ -23,6 +23,7 @@ const state = {
   hudIntervalId: null,
   appsScriptUrl: localStorage.getItem('slts_apps_script_url') || 'https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec',
   googleSheetCsvUrl: 'https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/gviz/tq?tqx=out:csv',
+  usersGoogleSheetCsvUrl: 'https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/gviz/tq?tqx=out:csv&sheet=users',
   isUploading: false,
   currentUser: null,
   dataTableInstance: null,
@@ -436,6 +437,130 @@ function initAuthSystem() {
   }
 
   updateAuthUI();
+
+  // ดึงข้อมูลรายชื่อผู้ใช้งานสดจาก Google Sheet (Tab: users)
+  loadUsersData(false);
+}
+
+/**
+ * ดึงข้อมูลรายชื่อผู้ใช้งานจาก Google Sheet Tab: users
+ */
+window.loadUsersData = async function(forceRefresh = false) {
+  if (!navigator.onLine) {
+    if (forceRefresh) {
+      Swal.fire({
+        icon: 'info',
+        title: 'โหมดออฟไลน์',
+        text: 'ไม่สามารถดึงข้อมูลผู้ใช้จาก Google Sheet ขณะออฟไลน์ได้ กำลังใช้ข้อมูลในเครื่อง',
+        timer: 1500,
+        showConfirmButton: false
+      });
+    }
+    renderUserList();
+    return;
+  }
+
+  if (forceRefresh) {
+    showCustomLoading('กำลังดึงข้อมูลผู้ใช้งาน...', 'กำลังเชื่อมต่อ Google Sheet (Tab: users)');
+  }
+
+  const now = Date.now();
+  const csvFetchUrl = `${state.usersGoogleSheetCsvUrl}&_t=${now}`;
+
+  try {
+    Papa.parse(csvFetchUrl, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete: function(results) {
+        if (forceRefresh) hideCustomLoading();
+        let fetchedRows = results.data || [];
+        
+        let sheetUsers = fetchedRows
+          .filter(r => (r.username || r['ชื่อผู้ใช้'] || '').trim() !== '')
+          .map(r => ({
+            username: (r.username || r['ชื่อผู้ใช้'] || '').trim(),
+            password: (r.password || r['รหัสผ่าน'] || '123456').trim(),
+            role: (r.role || r['สิทธิ์'] || 'user').trim(),
+            name: (r.name || r['ชื่อ-นามสกุล'] || r.username || '').trim(),
+            createdAt: (r.createdAt || r['วันที่สร้าง'] || '').trim()
+          }));
+
+        // ตรวจสอบความปลอดภัย: ให้มี admin หลักเสมอ
+        if (!sheetUsers.some(u => u.username.toLowerCase() === 'admin')) {
+          sheetUsers.unshift({
+            username: 'admin',
+            password: 'caogikojt02',
+            role: 'admin',
+            name: 'ผู้ดูแลระบบ (Admin)',
+            createdAt: '25/08/2569'
+          });
+        }
+
+        if (sheetUsers.length > 0) {
+          localStorage.setItem('slts_users', JSON.stringify(sheetUsers));
+          renderUserList();
+        }
+
+        if (forceRefresh) {
+          Swal.fire({
+            icon: 'success',
+            title: 'รีเฟรชสำเร็จ',
+            text: `ดึงข้อมูลผู้ใช้งาน ${sheetUsers.length} รายการจาก Google Sheet เรียบร้อยแล้ว`,
+            timer: 1500,
+            showConfirmButton: false
+          });
+        }
+      },
+      error: function(err) {
+        console.warn('Users CSV fetch error, trying GAS API fallback:', err);
+        fetchUsersFromGasApi(forceRefresh);
+      }
+    });
+  } catch (e) {
+    if (forceRefresh) hideCustomLoading();
+    console.warn('loadUsersData error:', e);
+    renderUserList();
+  }
+};
+
+async function fetchUsersFromGasApi(showNotification = false) {
+  if (!state.appsScriptUrl) return;
+  try {
+    const response = await fetch(state.appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'get_users' })
+    });
+    const res = await response.json();
+    if (showNotification) hideCustomLoading();
+    if (res && res.status === 'success' && Array.isArray(res.users) && res.users.length > 0) {
+      localStorage.setItem('slts_users', JSON.stringify(res.users));
+      renderUserList();
+      if (showNotification) {
+        Swal.fire({ icon: 'success', title: 'รีเฟรชสำเร็จ', text: 'ดึงรายชื่อผู้ใช้จาก Google Sheet เรียบร้อยแล้ว', timer: 1500, showConfirmButton: false });
+      }
+    }
+  } catch (err) {
+    if (showNotification) hideCustomLoading();
+    console.warn('fetchUsersFromGasApi error:', err);
+  }
+}
+
+async function syncUserToGoogleSheet(action, payload) {
+  if (!state.appsScriptUrl || !navigator.onLine) return;
+  try {
+    await fetch(state.appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: action,
+        ...payload
+      })
+    });
+  } catch (err) {
+    console.warn('syncUserToGoogleSheet error:', err);
+  }
 }
 
 function updateAuthUI() {
@@ -628,6 +753,7 @@ window.handleSaveProfile = function(e) {
   if (idx !== -1) {
     users[idx].name = newName;
     localStorage.setItem('slts_users', JSON.stringify(users));
+    syncUserToGoogleSheet('save_user', users[idx]);
   }
 
   // อัปเดต current session
@@ -691,12 +817,15 @@ window.handleSaveNewPassword = function(e) {
   user.password = newPass;
   localStorage.setItem('slts_users', JSON.stringify(users));
 
+  // ซิงค์รหัสผ่านใหม่ไปยัง Google Sheet (Tab: users)
+  syncUserToGoogleSheet('update_user_password', { username: user.username, password: newPass });
+
   closeChangePasswordModal();
 
   Swal.fire({
     icon: 'success',
     title: 'เปลี่ยนรหัสผ่านสำเร็จ',
-    text: 'รหัสผ่านของคุณได้รับการเปลี่ยนเรียบร้อยแล้ว',
+    text: 'รหัสผ่านของคุณได้รับการเปลี่ยนและซิงค์ไปยัง Google Sheet เรียบร้อยแล้ว',
     timer: 1800,
     showConfirmButton: false
   });
@@ -728,22 +857,26 @@ function handleCreateUser(e) {
 
   const dateNow = WatermarkEngine.formatThaiDateTime(new Date()).split(' ')[0] + ' ' + WatermarkEngine.formatThaiDateTime(new Date()).split(' ')[1] + ' ' + WatermarkEngine.formatThaiDateTime(new Date()).split(' ')[2];
   
-  users.push({
+  const newUser = {
     username: username,
     password: password,
     role: role,
     name: fullName || (role === 'admin' ? `Admin (${username})` : `เจ้าหน้าที่ (${username})`),
     createdAt: dateNow
-  });
+  };
 
+  users.push(newUser);
   localStorage.setItem('slts_users', JSON.stringify(users));
   document.getElementById('addUserForm').reset();
   renderUserList();
 
+  // ซิงค์ผู้ใช้ใหม่ไปยัง Google Sheet (Tab: users)
+  syncUserToGoogleSheet('save_user', newUser);
+
   Swal.fire({
     icon: 'success',
     title: 'เพิ่มผู้ใช้งานสำเร็จ',
-    text: `สร้างผู้ใช้ "${username}" สิทธิ์ [${role.toUpperCase()}] เรียบร้อยแล้ว`,
+    text: `สร้างผู้ใช้ "${username}" และบันทึกลง Google Sheet เรียบร้อยแล้ว`,
     timer: 1800,
     showConfirmButton: false
   });
@@ -857,7 +990,11 @@ window.editUserModal = function(username) {
       }
 
       updateAuthUI();
-      Swal.fire('สำเร็จ', `อัปเดตข้อมูลผู้ใช้ @${username} เรียบร้อยแล้ว`, 'success');
+
+      // ซิงค์ไปยัง Google Sheet (Tab: users)
+      syncUserToGoogleSheet('save_user', user);
+
+      Swal.fire('สำเร็จ', `อัปเดตข้อมูลผู้ใช้ @${username} ใน Google Sheet เรียบร้อยแล้ว`, 'success');
     }
   });
 };
@@ -919,12 +1056,15 @@ window.resetUserPasswordModal = function(username) {
       user.password = res.value;
       localStorage.setItem('slts_users', JSON.stringify(users));
 
+      // ซิงค์รหัสผ่านใหม่ไปยัง Google Sheet (Tab: users)
+      syncUserToGoogleSheet('update_user_password', { username: username, password: res.value });
+
       Swal.fire({
         icon: 'success',
         title: 'รีเซ็ตรหัสผ่านสำเร็จ',
         showCloseButton: true,
         allowOutsideClick: false,
-        html: `รีเซ็ตรหัสผ่านของ <b>@${username}</b> เป็น: <br><span class="font-mono text-base font-bold text-blue-600 mt-1 inline-block bg-blue-50 px-3 py-1 rounded-lg border border-blue-200">${res.value}</span>`,
+        html: `รีเซ็ตรหัสผ่านของ <b>@${username}</b> ใน Google Sheet เป็น: <br><span class="font-mono text-base font-bold text-blue-600 mt-1 inline-block bg-blue-50 px-3 py-1 rounded-lg border border-blue-200">${res.value}</span>`,
         confirmButtonColor: '#2563eb'
       });
     }
@@ -967,9 +1107,14 @@ window.openDefaultPasswordConfigModal = function() {
 window.deleteUser = function(username) {
   if (!state.currentUser || state.currentUser.role !== 'admin') return;
 
+  if (username.toLowerCase() === 'admin') {
+    Swal.fire('ไม่สามารถลบได้', 'ไม่สามารถลบผู้ดูแลระบบหลัก (admin) ได้', 'warning');
+    return;
+  }
+
   Swal.fire({
     title: `ยืนยันการลบผู้ใช้ "${username}"?`,
-    text: 'เมื่อลบแล้วจะไม่สามารถกู้คืนบัญชีนี้ได้',
+    text: 'เมื่อลบแล้วจะไม่สามารถกู้คืนบัญชีนี้ได้ และจะถูกลบออกจาก Google Sheet',
     icon: 'warning',
     showCancelButton: true,
     confirmButtonText: 'ลบผู้ใช้',
@@ -981,7 +1126,11 @@ window.deleteUser = function(username) {
       users = users.filter(u => u.username !== username);
       localStorage.setItem('slts_users', JSON.stringify(users));
       renderUserList();
-      Swal.fire('ลบสำเร็จ', `ลบผู้ใช้ "${username}" เรียบร้อยแล้ว`, 'success');
+
+      // ซิงค์การลบไปยัง Google Sheet (Tab: users)
+      syncUserToGoogleSheet('delete_user', { username: username });
+
+      Swal.fire('ลบสำเร็จ', `ลบผู้ใช้ "${username}" ออกจากระบบและ Google Sheet เรียบร้อยแล้ว`, 'success');
     }
   });
 };

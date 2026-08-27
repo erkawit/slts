@@ -9,6 +9,7 @@
 const FOLDER_ID = "1ArsWIsoIIYeQY3o_dPrsTpBXy4pEXQuQ";
 const SPREADSHEET_ID = "1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo";
 const SHEET_NAME = "บันทึกการส่งหมาย";
+const USERS_SHEET_NAME = "users";
 
 /**
  * ฟังก์ชันสำหรับรับคำขอแบบ POST จากเว็บแอป
@@ -28,7 +29,126 @@ function doPost(e) {
     }
 
     const folder = DriveApp.getFolderById(FOLDER_ID);
-    const sheet = getTargetSpreadsheet(folder);
+    const spreadsheet = getTargetSpreadsheetFile(folder);
+    const sheet = getSummonsSheet(spreadsheet);
+    const usersSheet = getUsersSheet(spreadsheet);
+
+    // ==========================================
+    // ACTION: USER MANAGEMENT (จัดการผู้ใช้งานใน Sheet 'users')
+    // ==========================================
+    if (data.action === "get_users") {
+      const uData = usersSheet.getDataRange().getValues();
+      const usersList = [];
+      for (let i = 1; i < uData.length; i++) {
+        if (uData[i][0]) {
+          usersList.push({
+            username: String(uData[i][0] || '').trim(),
+            password: String(uData[i][1] || '').trim(),
+            role: String(uData[i][2] || 'user').trim(),
+            name: String(uData[i][3] || uData[i][0]).trim(),
+            createdAt: String(uData[i][4] || '').trim()
+          });
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        users: usersList
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "save_user" || data.action === "update_user_password" || data.action === "update_user_profile") {
+      const uData = usersSheet.getDataRange().getValues();
+      const targetUsername = String(data.username || '').trim();
+      if (!targetUsername) {
+        throw new Error("ไม่พบชื่อผู้ใช้งาน (Username is required)");
+      }
+
+      let foundRow = -1;
+      for (let i = 1; i < uData.length; i++) {
+        if (String(uData[i][0] || '').trim().toLowerCase() === targetUsername.toLowerCase()) {
+          foundRow = i + 1;
+          break;
+        }
+      }
+
+      const dateNow = data.createdAt || Utilities.formatDate(new Date(), "Asia/Bangkok", "dd/MM/yyyy");
+
+      if (foundRow !== -1) {
+        // อัปเดตข้อมูลผู้ใช้เดิม
+        if (data.password) usersSheet.getRange(foundRow, 2).setValue(String(data.password));
+        if (data.role && targetUsername !== 'admin') usersSheet.getRange(foundRow, 3).setValue(String(data.role));
+        if (data.name) usersSheet.getRange(foundRow, 4).setValue(String(data.name));
+      } else {
+        // เพิ่มผู้ใช้ใหม่
+        usersSheet.appendRow([
+          targetUsername,
+          String(data.password || '123456'),
+          String(data.role || 'user'),
+          String(data.name || targetUsername),
+          dateNow
+        ]);
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: `บันทึกข้อมูลผู้ใช้ @${targetUsername} ใน Google Sheet สำเร็จ`
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "delete_user") {
+      const targetUsername = String(data.username || '').trim();
+      if (targetUsername.toLowerCase() === 'admin') {
+        throw new Error("ไม่สามารถลบผู้ดูแลระบบหลัก (admin) ได้");
+      }
+
+      const uData = usersSheet.getDataRange().getValues();
+      let foundRow = -1;
+      for (let i = 1; i < uData.length; i++) {
+        if (String(uData[i][0] || '').trim().toLowerCase() === targetUsername.toLowerCase()) {
+          foundRow = i + 1;
+          break;
+        }
+      }
+
+      if (foundRow > 1) {
+        usersSheet.deleteRow(foundRow);
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          message: `ลบผู้ใช้ @${targetUsername} ออกจาก Google Sheet เรียบร้อยแล้ว`
+        })).setMimeType(ContentService.MimeType.JSON);
+      } else {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: `ไม่พบผู้ใช้ @${targetUsername} ใน Google Sheet`
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    if (data.action === "sync_all_users" && Array.isArray(data.users)) {
+      const uData = usersSheet.getDataRange().getValues();
+      const existingUsernames = new Set();
+      for (let i = 1; i < uData.length; i++) {
+        existingUsernames.add(String(uData[i][0] || '').trim().toLowerCase());
+      }
+
+      data.users.forEach(u => {
+        const uName = String(u.username || '').trim();
+        if (uName && !existingUsernames.has(uName.toLowerCase())) {
+          usersSheet.appendRow([
+            uName,
+            String(u.password || '123456'),
+            String(u.role || 'user'),
+            String(u.name || uName),
+            String(u.createdAt || Utilities.formatDate(new Date(), "Asia/Bangkok", "dd/MM/yyyy"))
+          ]);
+        }
+      });
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "ซิงค์รายชื่อผู้ใช้งานกับ Google Sheet สำเร็จ"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
 
     // ==========================================
     // ACTION 1: DELETE (ลบเฉพาะ 1 แถวเป้าหมายที่ระบุใน Google Sheet และลบไฟล์ใน Google Drive)
@@ -221,9 +341,9 @@ function doPost(e) {
 }
 
 /**
- * ดึง Google Sheet ตาม Spreadsheet ID ที่กำหนด
+ * ดึง Google Spreadsheet Object ตาม Spreadsheet ID
  */
-function getTargetSpreadsheet(folder) {
+function getTargetSpreadsheetFile(folder) {
   let spreadsheet;
 
   try {
@@ -239,11 +359,16 @@ function getTargetSpreadsheet(folder) {
       DriveApp.getRootFolder().removeFile(ssFile);
     }
   }
+  return spreadsheet;
+}
 
+/**
+ * ดึงหรือสร้าง Sheet 'บันทึกการส่งหมาย'
+ */
+function getSummonsSheet(spreadsheet) {
   let sheet = spreadsheet.getSheetByName(SHEET_NAME);
   if (!sheet) {
-    sheet = spreadsheet.getActiveSheet();
-    sheet.setName(SHEET_NAME);
+    sheet = spreadsheet.insertSheet(SHEET_NAME);
   }
 
   if (sheet.getLastRow() === 0) {
@@ -278,9 +403,71 @@ function getTargetSpreadsheet(folder) {
 }
 
 /**
+ * ดึงหรือสร้าง Sheet 'users' สำหรับเก็บรายชื่อผู้ใช้งาน
+ */
+function getUsersSheet(spreadsheet) {
+  let sheet = spreadsheet.getSheetByName(USERS_SHEET_NAME);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(USERS_SHEET_NAME);
+  }
+
+  if (sheet.getLastRow() === 0) {
+    const headers = ["username", "password", "role", "name", "createdAt"];
+    sheet.appendRow(headers);
+    
+    // สร้างผู้ดูแลระบบตั้งต้น (admin / caogikojt02)
+    sheet.appendRow(["admin", "caogikojt02", "admin", "ผู้ดูแลระบบ (Admin)", "25/08/2569"]);
+
+    const headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setBackground("#7c3aed");
+    headerRange.setFontColor("#ffffff");
+    headerRange.setFontWeight("bold");
+    headerRange.setHorizontalAlignment("center");
+    sheet.setFrozenRows(1);
+  }
+
+  return sheet;
+}
+
+function getTargetSpreadsheet(folder) {
+  const ss = getTargetSpreadsheetFile(folder);
+  return getSummonsSheet(ss);
+}
+
+/**
  * ฟังก์ชันทดสอบการทำงานผ่าน Browser (GET)
  */
 function doGet(e) {
+  if (e && e.parameter && (e.parameter.action === "get_users" || e.parameter.sheet === "users")) {
+    try {
+      const folder = DriveApp.getFolderById(FOLDER_ID);
+      const ss = getTargetSpreadsheetFile(folder);
+      const uSheet = getUsersSheet(ss);
+      const uData = uSheet.getDataRange().getValues();
+      const usersList = [];
+      for (let i = 1; i < uData.length; i++) {
+        if (uData[i][0]) {
+          usersList.push({
+            username: String(uData[i][0] || '').trim(),
+            password: String(uData[i][1] || '').trim(),
+            role: String(uData[i][2] || 'user').trim(),
+            name: String(uData[i][3] || uData[i][0]).trim(),
+            createdAt: String(uData[i][4] || '').trim()
+          });
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        users: usersList
+      })).setMimeType(ContentService.MimeType.JSON);
+    } catch (err) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "error",
+        message: err.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   return ContentService.createTextOutput(JSON.stringify({
     status: "online",
     message: "Summons Location Tracking API is running.",
