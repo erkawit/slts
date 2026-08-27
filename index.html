@@ -37,7 +37,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260827_06">
+  <link rel="stylesheet" href="css/style.css?v=20260827_07">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -227,19 +227,43 @@
 
               <!-- 2.2 ข้อมูลเลขคดี -->
               <div>
-                <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                  <i class="fa-solid fa-gavel text-blue-600 mr-1"></i> ข้อมูลเลขคดี <span class="text-red-500">*</span>
-                </label>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                    <i class="fa-solid fa-gavel text-blue-600 mr-1"></i> ข้อมูลเลขคดี <span class="text-red-500">*</span>
+                  </label>
+                  <button type="button" onclick="showDesktopCourtTypeSelectorModal(state.selectedProvince)" class="text-xs text-blue-600 hover:text-blue-800 font-semibold hover:underline flex items-center gap-1 transition" title="คลิกเพื่อเปลี่ยนประเภทศาล">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                    <span>เปลี่ยนประเภทศาล</span>
+                  </button>
+                </div>
                 <div class="space-y-2">
-                  <div class="relative">
-                    <select id="courtType" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-medium text-gray-800 transition appearance-none cursor-pointer">
-                      <option value="ศาลจังหวัดอุดรธานี">ศาลจังหวัดอุดรธานี</option>
-                      <option value="ศาลอื่น">หมายศาลอื่น</option>
-                    </select>
-                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-gray-500">
-                      <i class="fa-solid fa-chevron-down text-xs"></i>
+                  <!-- กล่องแสดง / แก้ไขประเภทศาล -->
+                  <div class="relative flex items-stretch">
+                    <div class="relative flex-1">
+                      <input 
+                        type="text" 
+                        id="courtNameInput" 
+                        readonly 
+                        class="w-full bg-gray-100 border border-gray-300 rounded-l-xl px-3.5 py-2.5 text-sm font-bold text-gray-800 transition cursor-default focus:outline-none focus:ring-2 focus:ring-blue-100"
+                        value="ศาลจังหวัดอุดรธานี"
+                        placeholder="ระบุหรือเลือกประเภทศาล"
+                      >
+                      <input type="hidden" id="courtType" value="ศาลจังหวัดอุดรธานี">
                     </div>
+                    <button 
+                      type="button" 
+                      id="btnOpenCourtTypeModal" 
+                      onclick="showDesktopCourtTypeSelectorModal(state.selectedProvince)" 
+                      class="px-3.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-r-xl border border-blue-600 transition flex items-center gap-1.5 shrink-0 shadow-sm"
+                      title="เลือกประเภทศาล"
+                    >
+                      <i class="fa-solid fa-building-columns"></i>
+                      <span>เลือกประเภทศาล</span>
+                    </button>
                   </div>
+
+                  <!-- คำแนะนำกรณีเลือกศาลที่ไม่สังกัดภาค -->
+                  <p id="courtTypeHelpText" class="text-[11px] text-amber-700 font-medium bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 hidden"></p>
                   
                   <!-- กรณีเลือก: ศาลจังหวัดอุดรธานี (อักษรนำหน้า + เลขคดี + / + ปี พ.ศ.) -->
                   <div id="udonCaseField" class="flex items-stretch">
@@ -845,17 +869,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260827_06"></script>
-  <script src="js/compass.js?v=20260827_06"></script>
-  <script src="js/map.js?v=20260827_06"></script>
-  <script src="js/watermark.js?v=20260827_06"></script>
-  <script src="js/app.js?v=20260827_06"></script>
+  <script src="js/data.js?v=20260827_07"></script>
+  <script src="js/compass.js?v=20260827_07"></script>
+  <script src="js/map.js?v=20260827_07"></script>
+  <script src="js/watermark.js?v=20260827_07"></script>
+  <script src="js/app.js?v=20260827_07"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260827_06')
+        navigator.serviceWorker.register('./sw.js?v=20260827_07')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
