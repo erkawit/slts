@@ -37,7 +37,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260827_05">
+  <link rel="stylesheet" href="css/style.css?v=20260827_06">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -843,17 +843,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260827_05"></script>
-  <script src="js/compass.js?v=20260827_05"></script>
-  <script src="js/map.js?v=20260827_05"></script>
-  <script src="js/watermark.js?v=20260827_05"></script>
-  <script src="js/app.js?v=20260827_05"></script>
+  <script src="js/data.js?v=20260827_06"></script>
+  <script src="js/compass.js?v=20260827_06"></script>
+  <script src="js/map.js?v=20260827_06"></script>
+  <script src="js/watermark.js?v=20260827_06"></script>
+  <script src="js/app.js?v=20260827_06"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260827_05')
+        navigator.serviceWorker.register('./sw.js?v=20260827_06')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

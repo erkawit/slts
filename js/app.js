@@ -3180,6 +3180,17 @@ window.autofillModalFormFromRecord = function(caseNumber, district, subdistrict,
 // SweetAlert Popup ค้นหาประวัติส่งหมายบน Mobile
 // -------------------------------------------------------------------------
 window.showMobileHistorySearchModal = function() {
+  if (!navigator.onLine) {
+    Swal.fire({
+      icon: 'info',
+      title: 'โหมดออฟไลน์',
+      text: 'การค้นหาประวัติการส่งหมายสามารถใช้งานได้เฉพาะเมื่อเชื่อมต่ออินเทอร์เน็ตเท่านั้น',
+      confirmButtonText: 'ตกลง',
+      confirmButtonColor: '#2563eb'
+    });
+    return;
+  }
+
   const prov = state.selectedProvince || 'อุดรธานี';
 
   if (!state.allSheetRows || state.allSheetRows.length === 0) {
@@ -3193,7 +3204,7 @@ window.showMobileHistorySearchModal = function() {
 
   const allRows = state.allSheetRows || [];
 
-  // กรองเฉพาะข้อมูลของจังหวัดปัจจุบัน
+  // กรองเฉพาะข้อมูลของจังหวัดปัจจุบันเท่านั้น
   const provRows = allRows.filter(r => getRowProvince(r) === prov);
 
   // จัดกลุ่มตามเลขคดี
@@ -3241,31 +3252,60 @@ window.showMobileHistorySearchModal = function() {
       const safeAdmin = adminName.replace(/'/g, "\\'");
       const safeOther = otherLoc.replace(/'/g, "\\'");
 
-      cardsHtml += `
-        <div class="slts-history-card" data-search="${caseNum.toLowerCase()} ${district.toLowerCase()} ${subdistrict.toLowerCase()} ${locText.toLowerCase()}">
-          <div class="flex items-start justify-between gap-2 mb-1.5">
-            <div>
-              <span class="slts-history-caseno">${caseNum}</span>
-              <span class="slts-history-date"><i class="fa-regular fa-clock text-[9px] mr-1"></i>${timeStr}</span>
+      // กรณีมีมากกว่า 1 รายการส่งหมาย
+      if (records.length > 1) {
+        cardsHtml += `
+          <div class="slts-history-card border-indigo-200 hover:border-indigo-400" data-search="${caseNum.toLowerCase()} ${district.toLowerCase()} ${subdistrict.toLowerCase()} ${locText.toLowerCase()}">
+            <div class="flex items-start justify-between gap-2 mb-1.5">
+              <div>
+                <span class="slts-history-caseno">${caseNum}</span>
+                <span class="slts-history-date"><i class="fa-regular fa-clock text-[9px] mr-1"></i>ส่งล่าสุด: ${timeStr}</span>
+              </div>
+              <span class="slts-history-badge bg-indigo-50 text-indigo-700 border-indigo-200">
+                <i class="fa-solid fa-clock-rotate-left mr-1"></i>ส่งแล้ว ${records.length} ครั้ง
+              </span>
             </div>
-            ${records.length > 1 ? `<span class="slts-history-badge">${records.length} ครั้ง</span>` : ''}
-          </div>
-          <p class="slts-history-loc text-xs text-gray-700 truncate" title="${locText}">
-            <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${locText || (district ? `อ.${district} ต.${subdistrict}` : '-')}
-          </p>
-          ${lat && lng ? `<p class="text-[10px] text-gray-500 font-mono mt-0.5"><i class="fa-solid fa-satellite-dish text-violet-500 mr-1"></i>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</p>` : ''}
-          <div class="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
-            ${imgUrl ? `
-              <button type="button" onclick="viewPhotoModal('${imgUrl}', '${safeCase}', '${locText.replace(/'/g, "\\'")}', '${timeStr}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition">
-                <i class="fa-solid fa-image text-blue-600"></i> ดูรูป
+            <p class="slts-history-loc text-xs text-gray-700 truncate" title="${locText}">
+              <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${locText || (district ? `อ.${district} ต.${subdistrict}` : '-')}
+            </p>
+            ${lat && lng ? `<p class="text-[10px] text-gray-500 font-mono mt-0.5"><i class="fa-solid fa-satellite-dish text-violet-500 mr-1"></i>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</p>` : ''}
+            <div class="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-gray-100 flex-wrap">
+              <button type="button" onclick="showCaseSubRecordsModal('${safeCase}')" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-lg text-[11px] font-bold shadow-sm flex items-center gap-1.5 transition">
+                <i class="fa-solid fa-list-check"></i> ดูรายละเอียดทั้งหมด (${records.length} รายการ)
               </button>
-            ` : ''}
-            <button type="button" onclick="autofillModalFormFromRecord('${safeCase}', '${safeDist}', '${safeSub}', '${safeLocType}', '${safeHouse}', '${safeMoo}', '${safeAdmin}', '${safeOther}')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-[11px] font-bold shadow-sm flex items-center gap-1 transition">
-              <i class="fa-solid fa-arrow-turn-down"></i> ใช้ข้อมูลนี้
-            </button>
+              <button type="button" onclick="autofillModalFormFromRecord('${safeCase}', '${safeDist}', '${safeSub}', '${safeLocType}', '${safeHouse}', '${safeMoo}', '${safeAdmin}', '${safeOther}')" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 active:scale-95 rounded-lg text-[11px] font-bold shadow-sm flex items-center gap-1 transition" title="ใช้ข้อมูลส่งหมายครั้งล่าสุด">
+                <i class="fa-solid fa-arrow-turn-down"></i> ข้อมูลล่าสุด
+              </button>
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      } else {
+        // กรณีมีรายการเดียว
+        cardsHtml += `
+          <div class="slts-history-card" data-search="${caseNum.toLowerCase()} ${district.toLowerCase()} ${subdistrict.toLowerCase()} ${locText.toLowerCase()}">
+            <div class="flex items-start justify-between gap-2 mb-1.5">
+              <div>
+                <span class="slts-history-caseno">${caseNum}</span>
+                <span class="slts-history-date"><i class="fa-regular fa-clock text-[9px] mr-1"></i>${timeStr}</span>
+              </div>
+            </div>
+            <p class="slts-history-loc text-xs text-gray-700 truncate" title="${locText}">
+              <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${locText || (district ? `อ.${district} ต.${subdistrict}` : '-')}
+            </p>
+            ${lat && lng ? `<p class="text-[10px] text-gray-500 font-mono mt-0.5"><i class="fa-solid fa-satellite-dish text-violet-500 mr-1"></i>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</p>` : ''}
+            <div class="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
+              ${imgUrl ? `
+                <button type="button" onclick="viewPhotoModal('${imgUrl}', '${safeCase}', '${locText.replace(/'/g, "\\'")}', '${timeStr}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition">
+                  <i class="fa-solid fa-image text-blue-600"></i> ดูรูป
+                </button>
+              ` : ''}
+              <button type="button" onclick="autofillModalFormFromRecord('${safeCase}', '${safeDist}', '${safeSub}', '${safeLocType}', '${safeHouse}', '${safeMoo}', '${safeAdmin}', '${safeOther}')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-[11px] font-bold shadow-sm flex items-center gap-1 transition">
+                <i class="fa-solid fa-arrow-turn-down"></i> ใช้ข้อมูลนี้
+              </button>
+            </div>
+          </div>
+        `;
+      }
     });
   }
 
@@ -3292,7 +3332,7 @@ window.showMobileHistorySearchModal = function() {
         <div id="swalHistoryCardsWrap" class="p-3 space-y-2.5 overflow-y-auto max-h-[calc(86dvh-120px)] slts-swal-body-scroll">
           ${cardsHtml}
         </div>
-        <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>กด "ใช้ข้อมูลนี้" เพื่อนำข้อมูลหมายที่เคยบันทึกไว้มากรอกในฟอร์มทันที</p>
+        <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>กด "ใช้ข้อมูลนี้" หรือ "ดูรายละเอียด" เพื่อเลือกข้อมูลหมายมากรอกในฟอร์มทันที</p>
       </div>
     `,
     position: 'top',
@@ -3304,7 +3344,6 @@ window.showMobileHistorySearchModal = function() {
       popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
     },
     didOpen: () => {
-      const popup = document.querySelector('.swal2-popup');
       const searchInput = document.getElementById('swalHistorySearchInput');
       if (searchInput) {
         setTimeout(() => searchInput.focus(), 150);
@@ -3325,6 +3364,99 @@ window.filterMobileHistoryList = function(query) {
 };
 
 // -------------------------------------------------------------------------
+// Popup แสดงรายละเอียดประวัติส่งหมายทั้งหมดของเลขคดี (เมื่อมี > 1 รายการ)
+// -------------------------------------------------------------------------
+window.showCaseSubRecordsModal = function(caseNumber) {
+  const prov = state.selectedProvince || 'อุดรธานี';
+  const allRows = state.allSheetRows || [];
+  const records = allRows.filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim() && getRowProvince(r) === prov);
+
+  if (!records || records.length === 0) {
+    showMobileHistorySearchModal();
+    return;
+  }
+
+  let itemsHtml = '';
+  records.forEach((rec, idx) => {
+    const rawTimestamp = rec['วัน-เวลาบันทึก'] || rec['Timestamp'] || '';
+    const timeFormatted = formatThaiDateDisplay(rawTimestamp);
+    const district = rec['อำเภอ'] || '';
+    const subdistrict = rec['ตำบล'] || '';
+    const locText = rec['ที่ตั้งส่งหมาย (เต็ม)'] || rec['ที่ตั้งส่งหมาย'] || '';
+    const locType = rec['ประเภทสถานที่'] || 'หมายบ้าน';
+    const houseNo = rec['บ้านเลขที่'] || '';
+    const moo = rec['หมู่ที่'] || '';
+    const adminName = rec['ชื่อหน่วยงาน/ที่ทำการ'] || '';
+    const otherLoc = rec['สถานที่อื่นๆ'] || '';
+    const lat = rec['ละติจูด (Lat)'] || rec['ละติจูด'] || '';
+    const lng = rec['ลองจิจูด (Lng)'] || rec['ลองจิจูด'] || '';
+    const imgUrl = rec['ลิงก์รูปภาพใน Google Drive'] || rec['ลิงก์รูปภาพ'] || '';
+
+    const safeCase = caseNumber.replace(/'/g, "\\'");
+    const safeDist = district.replace(/'/g, "\\'");
+    const safeSub = subdistrict.replace(/'/g, "\\'");
+    const safeLocType = locType.replace(/'/g, "\\'");
+    const safeHouse = houseNo.replace(/'/g, "\\'");
+    const safeMoo = moo.replace(/'/g, "\\'");
+    const safeAdmin = adminName.replace(/'/g, "\\'");
+    const safeOther = otherLoc.replace(/'/g, "\\'");
+
+    itemsHtml += `
+      <div class="slts-subrecord-card">
+        <div class="flex items-center justify-between gap-2 mb-1.5">
+          <span class="slts-subrecord-num">ครั้งที่ ${records.length - idx}</span>
+          <span class="slts-subrecord-time"><i class="fa-regular fa-clock text-[9.5px] mr-1"></i>${timeFormatted}</span>
+        </div>
+        <p class="text-xs text-gray-800 font-medium mb-1">
+          <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${locText || (district ? `อ.${district} ต.${subdistrict}` : '-')}
+        </p>
+        ${lat && lng ? `<p class="text-[10px] text-gray-500 font-mono"><i class="fa-solid fa-satellite-dish text-violet-500 mr-1"></i>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</p>` : ''}
+        <div class="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
+          ${imgUrl ? `
+            <button type="button" onclick="viewPhotoModal('${imgUrl}', '${safeCase}', '${locText.replace(/'/g, "\\'")}', '${timeFormatted}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition">
+              <i class="fa-solid fa-image text-blue-600"></i> ดูรูป
+            </button>
+          ` : ''}
+          <button type="button" onclick="autofillModalFormFromRecord('${safeCase}', '${safeDist}', '${safeSub}', '${safeLocType}', '${safeHouse}', '${safeMoo}', '${safeAdmin}', '${safeOther}')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-[11px] font-bold shadow-sm flex items-center gap-1 transition">
+            <i class="fa-solid fa-arrow-turn-down"></i> ใช้ข้อมูลครั้งนี้
+          </button>
+        </div>
+      </div>
+    `;
+  });
+
+  Swal.fire({
+    html: `
+      <div class="slts-province-modal">
+        <!-- Header with Back Button -->
+        <div class="slts-modal-header">
+          <button type="button" onclick="showMobileHistorySearchModal()" class="slts-back-header-btn" title="กลับไปหน้ารายการค้นหา">
+            <i class="fa-solid fa-arrow-left"></i>
+            <span>กลับ</span>
+          </button>
+          <div class="flex-1 text-center pr-8">
+            <h2 class="slts-modal-title">ประวัติการส่งหมาย</h2>
+            <p class="slts-modal-subtitle">${caseNumber} (ทั้งหมด ${records.length} ครั้ง)</p>
+          </div>
+        </div>
+        <div class="p-3 space-y-2.5 overflow-y-auto max-h-[calc(86dvh-80px)] slts-swal-body-scroll">
+          ${itemsHtml}
+        </div>
+        <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>เลือก "ใช้ข้อมูลครั้งนี้" จากรายการที่ท่านต้องการนำมากรอกในฟอร์ม</p>
+      </div>
+    `,
+    position: 'top',
+    showConfirmButton: false,
+    showCloseButton: false,
+    allowOutsideClick: false,
+    customClass: {
+      container: 'slts-swal-top-container',
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
+    }
+  });
+};
+
+// -------------------------------------------------------------------------
 // SweetAlert Form บันทึกข้อมูลส่งหมาย 80% สำหรับ Mobile
 // -------------------------------------------------------------------------
 window.showMobileSummonsFormModal = function(isEditing = false) {
@@ -3333,6 +3465,7 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
     return;
   }
 
+  const isOnline = navigator.onLine;
   const prov = state.selectedProvince;
   const districts = getDistrictsByProvince(prov);
   
@@ -3392,19 +3525,32 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
     `;
   });
 
+  // ปุ่มค้นหาที่มุมซ้ายบน (Active เมื่อออนไลน์ / Disabled เมื่อออฟไลน์)
+  const searchBtnHtml = isOnline
+    ? `<button type="button" onclick="saveTempModalFormState(); showMobileHistorySearchModal();" class="slts-header-search-icon-btn" title="คลิกเพื่อค้นหาประวัติการส่งหมาย">
+         <i class="fa-solid fa-magnifying-glass"></i>
+       </button>`
+    : `<button type="button" disabled class="slts-header-search-icon-btn opacity-40 cursor-not-allowed pointer-events-none" title="ค้นหาประวัติได้เฉพาะเมื่อเชื่อมต่ออินเทอร์เน็ต">
+         <i class="fa-solid fa-magnifying-glass text-gray-300"></i>
+       </button>`;
+
+  const searchBadge = isOnline
+    ? `<span class="text-[10px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 px-1.5 py-0.2 rounded font-normal inline-flex items-center gap-1"><i class="fa-solid fa-magnifying-glass text-[8px]"></i>ค้นหา</span>`
+    : `<span class="text-[10px] bg-amber-500/30 text-amber-200 border border-amber-400/40 px-1.5 py-0.2 rounded font-normal inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up text-[8px]"></i>ออฟไลน์</span>`;
+
+  const headerTitleAction = isOnline ? `onclick="saveTempModalFormState(); showMobileHistorySearchModal();" title="คลิกเพื่อค้นหาประวัติการส่งหมาย"` : '';
+
   Swal.fire({
     html: `
       <div class="slts-form-modal">
         <!-- Header -->
         <div class="slts-modal-header">
-          <!-- ปุ่มค้นหาข้อมูลประวัติส่งหมาย ที่มุมซ้ายบนแทนสัญลักษณ์เดิม -->
-          <button type="button" onclick="saveTempModalFormState(); showMobileHistorySearchModal();" class="slts-header-search-icon-btn" title="คลิกเพื่อค้นหาประวัติการส่งหมาย">
-            <i class="fa-solid fa-magnifying-glass"></i>
-          </button>
-          <div class="flex-1 cursor-pointer" onclick="saveTempModalFormState(); showMobileHistorySearchModal();" title="คลิกเพื่อค้นหาประวัติการส่งหมาย">
+          <!-- ปุ่มค้นหาข้อมูลประวัติส่งหมาย ที่มุมซ้ายบนแทนสัญลักษณ์เดิม (Disabled เมื่อออฟไลน์) -->
+          ${searchBtnHtml}
+          <div class="flex-1 ${isOnline ? 'cursor-pointer' : ''}" ${headerTitleAction}>
             <h2 class="slts-modal-title flex items-center gap-1.5">
               <span>${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</span>
-              <span class="text-[10px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 px-1.5 py-0.2 rounded font-normal inline-flex items-center gap-1"><i class="fa-solid fa-magnifying-glass text-[8px]"></i>ค้นหา</span>
+              ${searchBadge}
             </h2>
             <p class="slts-modal-subtitle">📍 จังหวัด${prov}</p>
           </div>
