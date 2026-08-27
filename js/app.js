@@ -3010,27 +3010,19 @@ window.selectProvinceAndProceed = function(provinceName) {
     title: `ตั้งค่า จ.${provinceName} เรียบร้อยแล้ว`
   });
 
-  const isDesktop = window.innerWidth > 768;
-  if (!isDesktop) {
-    // โหมดหน้าจอมือถือ (< 768px): เปิด SweetAlert ฟอร์มบันทึกการส่งหมาย
-    setTimeout(() => {
-      showMobileSummonsFormModal(false);
-    }, 200);
-  } else {
-    // โหมดหน้าจอคอมพิวเตอร์ (> 768px): ไม่เปิด popup ฟอร์มมือถือ แต่เปิดหน้าต่างเลือกประเภทศาลแทน
-    setTimeout(() => {
-      showDesktopCourtTypeSelectorModal(provinceName);
-    }, 250);
-  }
+  // ทั้ง Mobile (< 768px) และ Desktop (> 768px): เมื่อเลือกจังหวัดแล้ว ให้แสดงหน้าต่าง "เลือกประเภทศาล" ทันที
+  setTimeout(() => {
+    showCourtTypeSelectorModal(provinceName, false);
+  }, 250);
 };
 
 /**
- * Modal เลือกประเภทศาลสำหรับหน้าจอคอมพิวเตอร์ (> 768px)
+ * Modal เลือกประเภทศาล (ใช้ร่วมกันทั้งหน้าจอมือถือ < 768px และคอมพิวเตอร์ > 768px)
  * มี 5 ตัวเลือก: ศาลที่ไม่สังกัดภาค, ศาลจังหวัด, ศาลแขวง, ศาลเยาวชนและครอบครัว, หมายศาลอื่น
  */
-window.showDesktopCourtTypeSelectorModal = function(provinceName) {
+window.showCourtTypeSelectorModal = function(provinceName, isReturnToForm = false) {
   const prov = provinceName || state.selectedProvince || 'อุดรธานี';
-  const curCategory = state.desktopCourtCategory || localStorage.getItem('slts_desktop_court_category') || 'ศาลจังหวัด';
+  const curCategory = state.selectedCourtCategory || state.desktopCourtCategory || localStorage.getItem('slts_selected_court_category') || 'ศาลจังหวัด';
 
   const courtOptions = [
     {
@@ -3084,7 +3076,7 @@ window.showDesktopCourtTypeSelectorModal = function(provinceName) {
   courtOptions.forEach(opt => {
     const isSelected = curCategory === opt.category;
     listHtml += `
-      <button type="button" class="province-btn-item flex items-center gap-3 p-3 rounded-xl border border-gray-200 hover:border-blue-500 hover:bg-blue-50/60 transition text-left group w-full ${isSelected ? 'province-btn-selected bg-blue-50/80 border-blue-500 shadow-sm' : 'bg-white'}" onclick="selectDesktopCourtType('${opt.category}', '${prov}')">
+      <button type="button" class="province-btn-item flex items-center gap-3 p-3 rounded-xl border border-gray-200 hover:border-blue-500 hover:bg-blue-50/60 transition text-left group w-full ${isSelected ? 'province-btn-selected bg-blue-50/80 border-blue-500 shadow-sm' : 'bg-white'}" onclick="selectCourtTypeChoice('${opt.category}', '${prov}', ${isReturnToForm})">
         <div class="w-9 h-9 rounded-xl flex items-center justify-center ${isSelected ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 group-hover:bg-blue-100 group-hover:text-blue-600'} shrink-0 transition">
           <i class="fa-solid ${opt.icon} text-base"></i>
         </div>
@@ -3102,15 +3094,20 @@ window.showDesktopCourtTypeSelectorModal = function(provinceName) {
     `;
   });
 
+  const headerLeftIcon = isReturnToForm
+    ? `<button type="button" onclick="showMobileSummonsFormModal(true)" class="slts-back-header-btn" title="กลับไปฟอร์ม">
+         <i class="fa-solid fa-arrow-left"></i>
+         <span>กลับ</span>
+       </button>`
+    : `<div class="slts-modal-header-icon"><i class="fa-solid fa-gavel"></i></div>`;
+
   Swal.fire({
     html: `
       <div class="slts-province-modal text-left">
         <!-- Header -->
         <div class="slts-modal-header">
-          <div class="slts-modal-header-icon">
-            <i class="fa-solid fa-gavel"></i>
-          </div>
-          <div class="flex-1">
+          ${headerLeftIcon}
+          <div class="flex-1 ${isReturnToForm ? 'text-center pr-8' : ''}">
             <h2 class="slts-modal-title">เลือกประเภทศาล</h2>
             <p class="slts-modal-subtitle">จังหวัด ${prov}</p>
           </div>
@@ -3134,7 +3131,15 @@ window.showDesktopCourtTypeSelectorModal = function(provinceName) {
   });
 };
 
+// Aliases for compatibility
+window.showDesktopCourtTypeSelectorModal = window.showCourtTypeSelectorModal;
 window.selectDesktopCourtType = function(category, provinceName) {
+  selectCourtTypeChoice(category, provinceName, false);
+};
+
+window.selectCourtTypeChoice = function(category, provinceName, isReturnToForm = false) {
+  const isDesktop = window.innerWidth > 768;
+
   if (category === 'ศาลที่ไม่สังกัดภาค') {
     Swal.fire({
       title: 'ระบุชื่อศาลที่ไม่สังกัดภาค',
@@ -3158,18 +3163,22 @@ window.selectDesktopCourtType = function(category, provinceName) {
       }
     }).then((res) => {
       if (res.isConfirmed && res.value) {
-        setDesktopCourtType('ศาลที่ไม่สังกัดภาค', res.value, provinceName);
-        Swal.fire({
-          icon: 'success',
-          title: 'ตั้งค่าประเภทศาลเรียบร้อย',
-          text: `เลือก: ${res.value}`,
-          timer: 1200,
-          showConfirmButton: false
-        });
+        applyCourtTypeSettings('ศาลที่ไม่สังกัดภาค', res.value, provinceName);
+        if (!isDesktop) {
+          showMobileSummonsFormModal(isReturnToForm);
+        } else {
+          Swal.fire({
+            icon: 'success',
+            title: 'ตั้งค่าประเภทศาลเรียบร้อย',
+            text: `เลือก: ${res.value}`,
+            timer: 1200,
+            showConfirmButton: false
+          });
+        }
       }
     });
   } else {
-    setDesktopCourtType(category, '', provinceName);
+    applyCourtTypeSettings(category, '', provinceName);
     Swal.close();
     
     let displayName = '';
@@ -3182,14 +3191,54 @@ window.selectDesktopCourtType = function(category, provinceName) {
       toast: true,
       position: 'top-end',
       showConfirmButton: false,
-      timer: 1200,
+      timer: 1000,
       timerProgressBar: true
     });
     Toast.fire({
       icon: 'success',
       title: `เลือก: ${displayName}`
     });
+
+    if (!isDesktop) {
+      setTimeout(() => {
+        showMobileSummonsFormModal(isReturnToForm);
+      }, 150);
+    }
   }
+};
+
+/**
+ * ใช้งานการตั้งค่าประเภทศาลทั้งระบบ (Mobile & Desktop)
+ */
+window.applyCourtTypeSettings = function(category, customName = '', provinceName = state.selectedProvince || 'อุดรธานี') {
+  state.selectedCourtCategory = category;
+  state.desktopCourtCategory = category;
+  localStorage.setItem('slts_selected_court_category', category);
+  localStorage.setItem('slts_desktop_court_category', category);
+
+  let finalName = '';
+  if (category === 'ศาลที่ไม่สังกัดภาค') {
+    finalName = customName || 'ศาลแพ่ง';
+    if (customName) localStorage.setItem('slts_custom_court_name', customName);
+  } else if (category === 'ศาลจังหวัด') {
+    finalName = `ศาลจังหวัด${provinceName}`;
+  } else if (category === 'ศาลแขวง') {
+    finalName = `ศาลแขวง${provinceName}`;
+  } else if (category === 'ศาลเยาวชนและครอบครัว') {
+    finalName = `ศาลเยาวชนและครอบครัวจังหวัด${provinceName}`;
+  } else {
+    finalName = 'หมายศาลอื่น (หมาย ต.)';
+  }
+
+  state.selectedCourtName = finalName;
+  localStorage.setItem('slts_selected_court_name', finalName);
+
+  if (!state.tempModalValues) state.tempModalValues = {};
+  state.tempModalValues.courtCategory = category;
+  state.tempModalValues.courtType = category === 'ศาลอื่น' ? 'ศาลอื่น' : category;
+  state.tempModalValues.courtName = finalName;
+
+  setDesktopCourtType(category, customName, provinceName);
 };
 
 /**
@@ -3298,6 +3347,7 @@ window.setDesktopCourtType = function(category, customName = '', provinceName = 
 // -------------------------------------------------------------------------
 window.saveTempModalFormState = function() {
   const cType = document.getElementById('m_courtType')?.value;
+  const cName = document.getElementById('m_courtNameInput')?.value;
   const pref = document.getElementById('m_prefix')?.value;
   const cNo = document.getElementById('m_caseNo')?.value;
   const cYear = document.getElementById('m_caseYear')?.value;
@@ -3311,7 +3361,9 @@ window.saveTempModalFormState = function() {
   const coords = document.getElementById('m_coords')?.value;
 
   state.tempModalValues = {
-    courtType: cType !== undefined ? cType : (state.tempModalValues?.courtType || 'ศาลประจำจังหวัด'),
+    courtCategory: cType !== undefined ? cType : (state.tempModalValues?.courtCategory || 'ศาลจังหวัด'),
+    courtType: cType !== undefined ? cType : (state.tempModalValues?.courtType || 'ศาลจังหวัด'),
+    courtName: cName !== undefined ? cName : (state.tempModalValues?.courtName || ''),
     prefix: pref !== undefined ? pref : (state.tempModalValues?.prefix || ''),
     caseNo: cNo !== undefined ? cNo : (state.tempModalValues?.caseNo || ''),
     caseYear: cYear !== undefined ? cYear : (state.tempModalValues?.caseYear || ''),
@@ -3915,7 +3967,18 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
   const subdistricts = getSubdistrictsByDistrict(prov, curDistrict);
   const curSubdistrict = (elements.subdistrictSelect?.value && subdistricts.includes(elements.subdistrictSelect.value)) ? elements.subdistrictSelect.value : (subdistricts[0] || '');
 
-  const curCourtType = state.tempModalValues?.courtType || elements.courtTypeSelect?.value || 'ศาลประจำจังหวัด';
+  const curCategory = state.tempModalValues?.courtCategory || state.selectedCourtCategory || state.desktopCourtCategory || localStorage.getItem('slts_selected_court_category') || 'ศาลจังหวัด';
+  let curCourtName = state.tempModalValues?.courtName || state.selectedCourtName || '';
+  if (!curCourtName) {
+    if (curCategory === 'ศาลจังหวัด') curCourtName = `ศาลจังหวัด${prov}`;
+    else if (curCategory === 'ศาลแขวง') curCourtName = `ศาลแขวง${prov}`;
+    else if (curCategory === 'ศาลเยาวชนและครอบครัว') curCourtName = `ศาลเยาวชนและครอบครัวจังหวัด${prov}`;
+    else if (curCategory === 'ศาลอื่น' || curCategory === 'หมายศาลอื่น') curCourtName = 'หมายศาลอื่น (หมาย ต.)';
+    else curCourtName = 'ศาลแพ่ง';
+  }
+  const isUnaffiliated = curCategory === 'ศาลที่ไม่สังกัดภาค';
+  const isOtherCourt = curCategory === 'ศาลอื่น' || curCategory === 'หมายศาลอื่น';
+
   const allPrefixes = getAllCasePrefixes();
   const curPrefix = state.tempModalValues?.prefix || elements.udonPrefixInput?.value || (allPrefixes.includes('ผบE') ? 'ผบE' : (allPrefixes[0] || 'อ'));
   const curCaseNo = (state.tempModalValues?.caseNo !== undefined) ? state.tempModalValues.caseNo : (elements.udonCaseNoInput?.value || '');
@@ -4030,19 +4093,33 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
 
           <!-- Section: เลขคดี -->
           <div class="slts-form-section">
-            <div class="slts-section-label">
-              <i class="fa-solid fa-scale-balanced text-amber-600"></i> ข้อมูลเลขคดี
+            <div class="slts-section-label flex items-center justify-between">
+              <span><i class="fa-solid fa-scale-balanced text-amber-600"></i> ข้อมูลเลขคดี</span>
+              <button type="button" onclick="saveTempModalFormState(); showCourtTypeSelectorModal(state.selectedProvince, true);" class="text-[11px] text-blue-600 font-bold hover:underline flex items-center gap-1">
+                <i class="fa-solid fa-pen-to-square text-[10px]"></i> เปลี่ยนประเภทศาล
+              </button>
             </div>
             <div class="slts-field-stack">
               <label class="slts-label">ประเภทศาล <span class="slts-required">*</span></label>
-              <select id="m_courtType" class="slts-select" onchange="handleModalCourtTypeChange(this.value)">
-                <option value="ศาลประจำจังหวัด" ${curCourtType !== 'ศาลอื่น' ? 'selected' : ''}>ศาลจังหวัด${prov}</option>
-                <option value="ศาลอื่น" ${curCourtType === 'ศาลอื่น' ? 'selected' : ''}>หมายศาลอื่น (ต...)</option>
-              </select>
+              <div class="flex items-stretch gap-1.5">
+                <input 
+                  type="text" 
+                  id="m_courtNameInput" 
+                  ${isUnaffiliated ? 'placeholder="ระบุชื่อศาลที่ไม่สังกัดภาค เช่น ศาลแพ่ง"' : 'readonly'} 
+                  value="${curCourtName}" 
+                  class="slts-input flex-1 font-bold ${isUnaffiliated ? 'bg-white text-gray-900 border-blue-400 focus:ring-2 focus:ring-blue-100' : 'bg-gray-100 text-gray-800 cursor-not-allowed'}"
+                >
+                <input type="hidden" id="m_courtType" value="${curCategory}">
+                <button type="button" onclick="saveTempModalFormState(); showCourtTypeSelectorModal(state.selectedProvince, true);" class="px-3 py-2 bg-blue-50 hover:bg-blue-100 active:scale-95 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 shrink-0 transition flex items-center gap-1 shadow-sm" title="เลือกประเภทศาล">
+                  <i class="fa-solid fa-building-columns"></i>
+                  <span>เลือก</span>
+                </button>
+              </div>
+              ${isUnaffiliated ? '<p class="text-[10px] text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200 mt-1">* กรุณาระบุชื่อศาลที่ไม่สังกัดภาค เช่น ศาลแพ่ง, ศาลอาญา</p>' : ''}
             </div>
 
-            <!-- ศาลประจำจังหวัด -->
-            <div id="m_provCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'hidden' : 'block'} space-y-1.5">
+            <!-- ศาลปกติ -->
+            <div id="m_provCourtBox" class="${isOtherCourt ? 'hidden' : 'block'} space-y-1.5">
               <div class="slts-case-row">
                 <input type="text" id="m_prefix" list="m_prefixList" value="${curPrefix}" placeholder="อักษร เช่น ผบE" class="slts-input slts-input-prefix" autocomplete="off" oninput="handleModalPrefixInput(this.value)">
                 <datalist id="m_prefixList">
@@ -4064,7 +4141,7 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
             </div>
 
             <!-- หมายศาลอื่น -->
-            <div id="m_otherCourtBox" class="${curCourtType === 'ศาลอื่น' ? 'flex' : 'hidden'} slts-case-row">
+            <div id="m_otherCourtBox" class="${isOtherCourt ? 'flex' : 'hidden'} slts-case-row">
               <span class="slts-case-prefix-tag">ต</span>
               <input type="text" id="m_otherCaseNo" value="${curOtherCaseNo}" placeholder="เลขคดี *" inputmode="numeric" class="slts-input slts-input-caseno">
               <span class="slts-case-sep">/</span>
@@ -4298,6 +4375,12 @@ window.handleModalDistrictChange = function(districtName) {
   window.updateModalAdminChips();
 };
 
+window.handleModalCourtNameInput = function(val) {
+  if (state.tempModalValues) {
+    state.tempModalValues.courtName = val;
+  }
+};
+
 window.handleModalCourtTypeChange = function(courtType) {
   const provBox = document.getElementById('m_provCourtBox');
   const otherBox = document.getElementById('m_otherCourtBox');
@@ -4345,7 +4428,8 @@ window.refreshModalCoordinates = function() {
 function validateAndExtractModalForm() {
   const district = document.getElementById('m_district')?.value;
   const subdistrict = document.getElementById('m_subdistrict')?.value;
-  const courtType = document.getElementById('m_courtType')?.value;
+  const courtCategory = document.getElementById('m_courtType')?.value;
+  const courtName = (document.getElementById('m_courtNameInput')?.value || '').trim();
   const prefix = (document.getElementById('m_prefix')?.value || '').trim();
   const caseNo = (document.getElementById('m_caseNo')?.value || '').trim();
   const caseYear = document.getElementById('m_caseYear')?.value;
@@ -4363,7 +4447,13 @@ function validateAndExtractModalForm() {
     return false;
   }
 
-  if (courtType === 'ศาลอื่น') {
+  if (courtCategory === 'ศาลที่ไม่สังกัดภาค' && !courtName) {
+    Swal.showValidationMessage('กรุณาระบุชื่อศาลที่ไม่สังกัดภาค เช่น ศาลแพ่ง, ศาลอาญา');
+    return false;
+  }
+
+  const isOther = courtCategory === 'ศาลอื่น' || courtCategory === 'หมายศาลอื่น';
+  if (isOther) {
     if (!otherCaseNo) {
       Swal.showValidationMessage('กรุณากรอกเลขคดีหมายศาลอื่น');
       return false;
@@ -4399,7 +4489,9 @@ function validateAndExtractModalForm() {
   return {
     district,
     subdistrict,
-    courtType,
+    courtType: courtName || courtCategory,
+    courtCategory,
+    courtName,
     prefix,
     caseNo,
     caseYear,
@@ -4422,15 +4514,33 @@ function applyModalFormValues(val) {
     updateSubdistricts(state.selectedProvince, val.district, val.subdistrict);
   }
 
-  if (val.courtType === 'ศาลอื่น') {
+  const isOther = val.courtCategory === 'ศาลอื่น' || val.courtCategory === 'หมายศาลอื่น' || val.courtType === 'ศาลอื่น';
+  if (isOther) {
     if (elements.courtTypeSelect) elements.courtTypeSelect.value = 'ศาลอื่น';
+    if (elements.courtNameInput) {
+      elements.courtNameInput.value = 'หมายศาลอื่น (หมาย ต.)';
+      elements.courtNameInput.readOnly = true;
+    }
     elements.udonCaseField?.classList.add('hidden');
     elements.otherCourtCaseField?.classList.remove('hidden');
     elements.otherCourtCaseField?.classList.add('flex');
     if (elements.otherCaseNoInput) elements.otherCaseNoInput.value = val.otherCaseNo;
     if (elements.otherCaseYearSelect) elements.otherCaseYearSelect.value = val.otherCaseYear;
   } else {
-    if (elements.courtTypeSelect) elements.courtTypeSelect.value = `ศาลประจำจังหวัด`;
+    const finalName = val.courtName || (val.courtCategory ? `${val.courtCategory}${state.selectedProvince}` : `ศาลจังหวัด${state.selectedProvince}`);
+    if (elements.courtTypeSelect) elements.courtTypeSelect.value = finalName;
+    if (elements.courtNameInput) {
+      elements.courtNameInput.value = finalName;
+      if (val.courtCategory === 'ศาลที่ไม่สังกัดภาค') {
+        elements.courtNameInput.readOnly = false;
+        elements.courtNameInput.classList.remove('bg-gray-100', 'cursor-default');
+        elements.courtNameInput.classList.add('bg-white', 'cursor-text');
+      } else {
+        elements.courtNameInput.readOnly = true;
+        elements.courtNameInput.classList.add('bg-gray-100', 'cursor-default');
+        elements.courtNameInput.classList.remove('bg-white', 'cursor-text');
+      }
+    }
     elements.otherCourtCaseField?.classList.add('hidden');
     elements.otherCourtCaseField?.classList.remove('flex');
     elements.udonCaseField?.classList.remove('hidden');
