@@ -273,21 +273,18 @@ document.addEventListener('DOMContentLoaded', () => {
   initDesktopUploadEvents();
   initSettings();
   initResponsiveUI();
-  initFullscreenEvents();
 
-  // Always Camera-First: เปิดหน้ากล้องทันทีเป็นโหมดหลักของระบบ
-  if (isMobileSmallScreen()) {
-    requestAppFullscreen();
-  }
-  openCameraModal().then(() => {
-    setTimeout(() => {
-      if (!state.selectedProvince) {
-        showProvinceSelectorModal(true);
-      } else {
-        showMobileSummonsFormModal(false);
-      }
-    }, 400);
-  });
+  // Always Camera-First & SweetAlert Form-First:
+  openCameraModal().catch(e => console.warn('Camera open error:', e));
+
+  // เด้งหน้าต่าง SweetAlert ฟอร์มบันทึกข้อมูลส่งหมายเป็นค่าพื้นฐานทันที
+  setTimeout(() => {
+    if (!state.selectedProvince) {
+      showProvinceSelectorModal(true);
+    } else {
+      showMobileSummonsFormModal(false);
+    }
+  }, 120);
 });
 
 
@@ -1034,77 +1031,7 @@ function initResponsiveUI() {
   handleResize();
 }
 
-// =========================================================================
-// Fullscreen Management System (สำหรับหน้าจอมือถือ <= 456px)
-// =========================================================================
-function isMobileSmallScreen() {
-  return (window.innerWidth <= 456 || (window.screen && window.screen.width <= 456));
-}
 
-function requestAppFullscreen(force = false) {
-  if (force || isMobileSmallScreen()) {
-    const docEl = document.documentElement;
-    if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
-      const req = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
-      if (req) {
-        try {
-          const p = req.call(docEl);
-          if (p && p.catch) p.catch(() => {});
-        } catch (e) {}
-      }
-    }
-  }
-}
-
-function toggleAppFullscreen() {
-  const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-  if (isFull) {
-    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
-    if (exit) {
-      try {
-        const p = exit.call(document);
-        if (p && p.catch) p.catch(() => {});
-      } catch (e) {}
-    }
-  } else {
-    requestAppFullscreen(true);
-  }
-}
-
-function updateFullscreenIcon() {
-  const icon = document.getElementById('iconFullscreen');
-  const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-  if (icon) {
-    if (isFull) {
-      icon.className = 'fa-solid fa-compress text-base text-amber-400';
-    } else {
-      icon.className = 'fa-solid fa-expand text-base text-gray-300';
-    }
-  }
-}
-
-function initFullscreenEvents() {
-  const btnToggle = document.getElementById('btnToggleFullscreen');
-  if (btnToggle) {
-    btnToggle.addEventListener('click', toggleAppFullscreen);
-  }
-
-  document.addEventListener('fullscreenchange', updateFullscreenIcon);
-  document.addEventListener('webkitfullscreenchange', updateFullscreenIcon);
-  document.addEventListener('mozfullscreenchange', updateFullscreenIcon);
-  document.addEventListener('MSFullscreenChange', updateFullscreenIcon);
-
-  // Auto request fullscreen on user interaction if width <= 456px
-  const triggerAutoFullscreen = () => {
-    if (isMobileSmallScreen()) {
-      requestAppFullscreen();
-    }
-  };
-
-  window.addEventListener('touchstart', triggerAutoFullscreen, { passive: true });
-  window.addEventListener('pointerdown', triggerAutoFullscreen, { passive: true });
-  window.addEventListener('click', triggerAutoFullscreen, { passive: true });
-}
 
 // =========================================================================
 // 4. ตารางประวัติการส่งหมาย DataTables (Smart Cache 1 นาที ใน LocalStorage)
@@ -2854,11 +2781,9 @@ window.selectProvinceAndProceed = function(provinceName) {
     title: `ตั้งค่า จ.${provinceName} เรียบร้อยแล้ว`
   });
 
-  if (window.innerWidth < 768) {
-    setTimeout(() => {
-      showMobileSummonsFormModal(false);
-    }, 350);
-  }
+  setTimeout(() => {
+    showMobileSummonsFormModal(false);
+  }, 200);
 };
 
 // -------------------------------------------------------------------------
@@ -4098,7 +4023,6 @@ function validateForm() {
 }
 
 async function openCameraModal() {
-  requestAppFullscreen();
   // เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
   setCaptureOrientation('landscape');
 
