@@ -1299,6 +1299,41 @@ function formatThaiDateDisplay(dateInput) {
   return str;
 }
 
+// -------------------------------------------------------------------------
+// Helper ตรวจสอบและค้นหาจังหวัดของข้อมูลรายการ
+// -------------------------------------------------------------------------
+function findProvinceByDistrict(districtName) {
+  if (!districtName || typeof THAILAND_ADDRESS_DATA === 'undefined') return '';
+  const dClean = districtName.trim().replace(/^อ\./, '').replace(/^อำเภอ/, '').replace(/^เขต/, '');
+  for (const [prov, distObj] of Object.entries(THAILAND_ADDRESS_DATA)) {
+    for (const d of Object.keys(distObj)) {
+      if (d === districtName || d.replace(/^เขต/, '') === dClean || d.replace(/^อำเภอ/, '') === dClean) {
+        return prov;
+      }
+    }
+  }
+  return '';
+}
+
+function getRowProvince(row) {
+  let p = row['จังหวัด'] || row['province'] || '';
+  if (p && typeof p === 'string' && p.trim()) {
+    return p.trim().replace(/^จ\./, '');
+  }
+  const dist = (row['อำเภอ'] || row['district'] || '').trim();
+  if (dist) {
+    const matched = findProvinceByDistrict(dist);
+    if (matched) return matched;
+  }
+  const loc = (row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '').trim();
+  if (loc && typeof THAILAND_PROVINCES !== 'undefined') {
+    for (const prov of THAILAND_PROVINCES) {
+      if (loc.includes(prov.name)) return prov.name;
+    }
+  }
+  return state.selectedProvince || 'อุดรธานี';
+}
+
 function renderDataTable(rows) {
   state.allSheetRows = rows;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
@@ -1315,9 +1350,22 @@ function renderDataTable(rows) {
   const tableBody = document.getElementById('dataTableBody');
   tableBody.innerHTML = '';
 
-  // 2. จัดกลุ่มข้อมูลเลขคดีที่ซ้ำกัน และแสดงเฉพาะรายการล่าสุดในตารางหลัก
+  // 2. กรองข้อมูลเฉพาะจังหวัดที่เลือกใช้งาน (state.selectedProvince)
+  const currentProv = state.selectedProvince || 'อุดรธานี';
+  const filteredRows = rows.filter(row => {
+    const prov = getRowProvince(row);
+    row._resolvedProvince = prov;
+    return prov === currentProv;
+  });
+
+  const tableProvFilterBadge = document.getElementById('tableProvFilterBadge');
+  if (tableProvFilterBadge) {
+    tableProvFilterBadge.textContent = `📍 แสดง: จ.${currentProv} (${filteredRows.length} รายการ)`;
+  }
+
+  // 3. จัดกลุ่มข้อมูลเลขคดีที่ซ้ำกัน และแสดงเฉพาะรายการล่าสุดในตารางหลัก
   const caseGroups = new Map();
-  rows.forEach((row, index) => {
+  filteredRows.forEach((row, index) => {
     const caseNumber = (row['เลขคดี'] || '').trim();
     if (!caseNumber) return;
     if (!caseGroups.has(caseNumber)) {
@@ -1331,7 +1379,8 @@ function renderDataTable(rows) {
     const latest = recordList[0];
     const rawTimestamp = latest['วัน-เวลาบันทึก'] || latest['Timestamp'] || '';
     const formattedTimestamp = formatThaiDateDisplay(rawTimestamp);
-    const courtType = latest['ประเภทศาล'] || 'ศาลจังหวัดอุดรธานี';
+    const courtType = latest['ประเภทศาล'] || 'ศาลจังหวัด' + currentProv;
+    const rowProvince = latest._resolvedProvince || getRowProvince(latest);
     const district = latest['อำเภอ'] || '';
     const subdistrict = latest['ตำบล'] || '';
     const locationFull = latest['ที่ตั้งส่งหมาย (เต็ม)'] || latest['ที่ตั้งส่งหมาย'] || '';
@@ -1343,7 +1392,7 @@ function renderDataTable(rows) {
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-blue-50/40 transition';
 
-    // คอลัมน์พิกัดพร้อมปุ่มคัดลอก และปุ่มเปิดใน Google Maps ชัดเจนสวยงาม
+    // คอลัมน์พิกัดพร้อมปุ่มคัดลอก และปุ่มเปิดใน Google Maps
     let coordDisplay = '-';
     if (lat && lng) {
       const latFixed = Number(lat).toFixed(4);
@@ -1386,6 +1435,7 @@ function renderDataTable(rows) {
       <td class="font-mono text-xs text-gray-600 whitespace-nowrap">${formattedTimestamp}</td>
       <td class="font-bold text-gray-900 whitespace-nowrap">${caseNumber}</td>
       <td class="text-xs text-gray-700">${courtType}</td>
+      <td class="text-xs text-blue-700 font-semibold whitespace-nowrap">จ.${rowProvince}</td>
       <td class="text-xs text-gray-700">${district}</td>
       <td class="text-xs text-gray-700">${subdistrict}</td>
       <td class="text-xs text-gray-700 max-w-[200px] truncate" title="${locationFull}">${locationFull}</td>
@@ -1405,7 +1455,7 @@ function renderDataTable(rows) {
       search: "ค้นหาข้อมูล:",
       lengthMenu: "แสดง _MENU_ แถวต่อหน้า",
       info: "แสดง _START_ ถึง _END_ จากทั้งหมด _TOTAL_ รายการ",
-      infoEmpty: "ไม่มีข้อมูล",
+      infoEmpty: "ไม่มีข้อมูลในจังหวัดนี้",
       infoFiltered: "(กรองจากทั้งหมด _MAX_ รายการ)",
       paginate: {
         first: "แรกสุด",
@@ -1413,7 +1463,7 @@ function renderDataTable(rows) {
         next: "ถัดไป",
         previous: "ก่อนหน้า"
       },
-      zeroRecords: "ไม่พบข้อมูลที่ตรงกับการค้นหา"
+      zeroRecords: `ไม่พบข้อมูลที่ตรงกับการค้นหาใน จ.${currentProv}`
     }
   });
 }
@@ -2620,6 +2670,11 @@ function setProvince(provinceName) {
   }
   updateDistricts(provinceName);
   updateFloatingProvinceBadge();
+
+  // ปรับการกรองตารางประวัติส่งหมายตามจังหวัดใหม่ทันที
+  if (state.allSheetRows && state.allSheetRows.length > 0) {
+    renderDataTable(state.allSheetRows);
+  }
 }
 
 function updateFloatingProvinceBadge() {
@@ -3070,6 +3125,196 @@ window.selectSubdistrictAndReturn = function(subdistrictName) {
 };
 
 // -------------------------------------------------------------------------
+// Helper คัดลอก/Autofill ข้อมูลจากประวัติที่ค้นหามาใส่ในฟอร์ม
+// -------------------------------------------------------------------------
+window.autofillModalFormFromRecord = function(caseNumber, district, subdistrict, locType, houseNo, moo, adminName, otherLoc) {
+  const prov = state.selectedProvince;
+  if (district && elements.districtSelect) {
+    elements.districtSelect.value = district;
+    updateSubdistricts(prov, district, subdistrict || null);
+  }
+
+  let courtType = 'ศาลประจำจังหวัด';
+  let prefix = 'ผบE';
+  let cNo = '';
+  let cYear = new Date().getFullYear() + 543;
+  let oNo = '';
+  let oYear = new Date().getFullYear() + 543;
+
+  if (caseNumber.startsWith('ต')) {
+    courtType = 'ศาลอื่น';
+    const match = caseNumber.match(/ต\s*(\d+)\/(\d+)/);
+    if (match) {
+      oNo = match[1];
+      oYear = match[2];
+    }
+  } else {
+    courtType = 'ศาลประจำจังหวัด';
+    const match = caseNumber.match(/([^\d\s\/]+)\s*(\d+)\/(\d+)/);
+    if (match) {
+      prefix = match[1];
+      cNo = match[2];
+      cYear = match[3];
+    }
+  }
+
+  state.tempModalValues = {
+    courtType: courtType,
+    prefix: prefix,
+    caseNo: cNo,
+    caseYear: cYear,
+    otherCaseNo: oNo,
+    otherCaseYear: oYear,
+    locType: locType || 'หมายบ้าน',
+    houseNo: houseNo || '',
+    moo: moo || '',
+    adminName: adminName || '',
+    otherLocName: otherLoc || '',
+    coords: document.getElementById('m_coords')?.value || ''
+  };
+
+  showMobileSummonsFormModal(true);
+};
+
+// -------------------------------------------------------------------------
+// SweetAlert Popup ค้นหาประวัติส่งหมายบน Mobile
+// -------------------------------------------------------------------------
+window.showMobileHistorySearchModal = function() {
+  const prov = state.selectedProvince || 'อุดรธานี';
+  const allRows = state.allSheetRows || [];
+
+  // กรองเฉพาะข้อมูลของจังหวัดปัจจุบัน
+  const provRows = allRows.filter(r => getRowProvince(r) === prov);
+
+  // จัดกลุ่มตามเลขคดี
+  const caseGroups = new Map();
+  provRows.forEach(r => {
+    const cNo = (r['เลขคดี'] || '').trim();
+    if (!cNo) return;
+    if (!caseGroups.has(cNo)) {
+      caseGroups.set(cNo, []);
+    }
+    caseGroups.get(cNo).push(r);
+  });
+
+  let cardsHtml = '';
+  if (caseGroups.size === 0) {
+    cardsHtml = `
+      <div class="p-8 text-center text-gray-400">
+        <i class="fa-solid fa-folder-open text-3xl mb-2 text-gray-300"></i>
+        <p class="text-xs font-semibold">ยังไม่มีประวัติการส่งหมายใน จ.${prov}</p>
+        <p class="text-[10px] text-gray-400 mt-1">ท่านสามารถบันทึกข้อมูลและถ่ายภาพส่งหมายใหม่ได้ทันที</p>
+      </div>
+    `;
+  } else {
+    caseGroups.forEach((records, caseNum) => {
+      const latest = records[0];
+      const timeStr = formatThaiDateDisplay(latest['วัน-เวลาบันทึก'] || latest['Timestamp'] || '');
+      const district = latest['อำเภอ'] || '';
+      const subdistrict = latest['ตำบล'] || '';
+      const locText = latest['ที่ตั้งส่งหมาย (เต็ม)'] || latest['ที่ตั้งส่งหมาย'] || '';
+      const locType = latest['ประเภทสถานที่'] || 'หมายบ้าน';
+      const houseNo = latest['บ้านเลขที่'] || '';
+      const moo = latest['หมู่ที่'] || '';
+      const adminName = latest['ชื่อหน่วยงาน/ที่ทำการ'] || '';
+      const otherLoc = latest['สถานที่อื่นๆ'] || '';
+      const lat = latest['ละติจูด (Lat)'] || latest['ละติจูด'] || '';
+      const lng = latest['ลองจิจูด (Lng)'] || latest['ลองจิจูด'] || '';
+      const imgUrl = latest['ลิงก์รูปภาพใน Google Drive'] || latest['ลิงก์รูปภาพ'] || '';
+
+      const safeCase = caseNum.replace(/'/g, "\\'");
+      const safeDist = district.replace(/'/g, "\\'");
+      const safeSub = subdistrict.replace(/'/g, "\\'");
+      const safeLocType = locType.replace(/'/g, "\\'");
+      const safeHouse = houseNo.replace(/'/g, "\\'");
+      const safeMoo = moo.replace(/'/g, "\\'");
+      const safeAdmin = adminName.replace(/'/g, "\\'");
+      const safeOther = otherLoc.replace(/'/g, "\\'");
+
+      cardsHtml += `
+        <div class="slts-history-card" data-search="${caseNum.toLowerCase()} ${district.toLowerCase()} ${subdistrict.toLowerCase()} ${locText.toLowerCase()}">
+          <div class="flex items-start justify-between gap-2 mb-1.5">
+            <div>
+              <span class="slts-history-caseno">${caseNum}</span>
+              <span class="slts-history-date"><i class="fa-regular fa-clock text-[9px] mr-1"></i>${timeStr}</span>
+            </div>
+            ${records.length > 1 ? `<span class="slts-history-badge">${records.length} ครั้ง</span>` : ''}
+          </div>
+          <p class="slts-history-loc text-xs text-gray-700 truncate" title="${locText}">
+            <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${locText || (district ? `อ.${district} ต.${subdistrict}` : '-')}
+          </p>
+          ${lat && lng ? `<p class="text-[10px] text-gray-500 font-mono mt-0.5"><i class="fa-solid fa-satellite-dish text-violet-500 mr-1"></i>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</p>` : ''}
+          <div class="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
+            ${imgUrl ? `
+              <button type="button" onclick="viewPhotoModal('${imgUrl}', '${safeCase}', '${locText.replace(/'/g, "\\'")}', '${timeStr}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition">
+                <i class="fa-solid fa-image text-blue-600"></i> ดูรูป
+              </button>
+            ` : ''}
+            <button type="button" onclick="autofillModalFormFromRecord('${safeCase}', '${safeDist}', '${safeSub}', '${safeLocType}', '${safeHouse}', '${safeMoo}', '${safeAdmin}', '${safeOther}')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-[11px] font-bold shadow-sm flex items-center gap-1 transition">
+              <i class="fa-solid fa-arrow-turn-down"></i> ใช้ข้อมูลนี้
+            </button>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  Swal.fire({
+    html: `
+      <div class="slts-province-modal">
+        <!-- Header with Back Button -->
+        <div class="slts-modal-header">
+          <button type="button" onclick="showMobileSummonsFormModal(true)" class="slts-back-header-btn" title="กลับไปฟอร์ม">
+            <i class="fa-solid fa-arrow-left"></i>
+            <span>กลับ</span>
+          </button>
+          <div class="flex-1 text-center pr-8">
+            <h2 class="slts-modal-title">ค้นหาประวัติการส่งหมาย</h2>
+            <p class="slts-modal-subtitle">📍 จังหวัด${prov} (${caseGroups.size} คดี)</p>
+          </div>
+        </div>
+        <!-- Search -->
+        <div class="slts-search-wrap">
+          <i class="fa-solid fa-magnifying-glass slts-search-icon"></i>
+          <input type="text" id="swalHistorySearchInput" placeholder="พิมพ์เลขคดี, อำเภอ, ตำบล หรือสถานที่..." class="slts-search-input" oninput="filterMobileHistoryList(this.value)" autocomplete="off">
+        </div>
+        <!-- Cards List -->
+        <div id="swalHistoryCardsWrap" class="p-3 space-y-2.5 overflow-y-auto max-h-[calc(86dvh-120px)] slts-swal-body-scroll">
+          ${cardsHtml}
+        </div>
+        <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>กด "ใช้ข้อมูลนี้" เพื่อนำข้อมูลหมายที่เคยบันทึกไว้มากรอกในฟอร์มทันที</p>
+      </div>
+    `,
+    position: 'top',
+    showConfirmButton: false,
+    showCloseButton: false,
+    allowOutsideClick: false,
+    customClass: {
+      container: 'slts-swal-top-container',
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
+    },
+    didOpen: () => {
+      const popup = document.querySelector('.swal2-popup');
+      const searchInput = document.getElementById('swalHistorySearchInput');
+      if (searchInput) {
+        setTimeout(() => searchInput.focus(), 150);
+      }
+    }
+  });
+};
+
+window.filterMobileHistoryList = function(query) {
+  const wrap = document.getElementById('swalHistoryCardsWrap');
+  if (!wrap) return;
+  const q = (query || '').trim().toLowerCase();
+  const cards = wrap.querySelectorAll('.slts-history-card');
+  cards.forEach(card => {
+    const s = card.getAttribute('data-search') || '';
+    card.style.display = s.includes(q) ? '' : 'none';
+  });
+};
+
+// -------------------------------------------------------------------------
 // SweetAlert Form บันทึกข้อมูลส่งหมาย 80% สำหรับ Mobile
 // -------------------------------------------------------------------------
 window.showMobileSummonsFormModal = function(isEditing = false) {
@@ -3149,9 +3394,14 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
             <h2 class="slts-modal-title">${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</h2>
             <p class="slts-modal-subtitle">📍 จังหวัด${prov}</p>
           </div>
-          <button type="button" onclick="saveTempModalFormState(); showProvinceSelectorModal(false)" class="slts-change-prov-btn">
-            <i class="fa-solid fa-arrow-right-arrow-left text-[9px]"></i> เปลี่ยนจังหวัด
-          </button>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button type="button" onclick="saveTempModalFormState(); showMobileHistorySearchModal();" class="slts-search-nav-btn" title="ค้นหาประวัติการส่งหมาย">
+              <i class="fa-solid fa-magnifying-glass text-[9px]"></i> ค้นหาข้อมูล
+            </button>
+            <button type="button" onclick="saveTempModalFormState(); showProvinceSelectorModal(false)" class="slts-change-prov-btn" title="เปลี่ยนจังหวัด">
+              <i class="fa-solid fa-arrow-right-arrow-left text-[9px]"></i> เปลี่ยนจังหวัด
+            </button>
+          </div>
         </div>
 
         <form id="mobileSummonsModalForm" class="slts-form-body slts-swal-body-scroll" onsubmit="return false;">
@@ -4396,6 +4646,7 @@ async function captureAndProcessPhoto() {
     const payloadData = {
       caseNumber: caseNumber,
       courtType: elements.courtTypeSelect.value,
+      province: state.selectedProvince || 'อุดรธานี',
       district: elements.districtSelect.value,
       subdistrict: elements.subdistrictSelect.value,
       locationType: elements.locationTypeSelect.value,
@@ -4489,6 +4740,7 @@ async function captureAndProcessPhoto() {
         payload: {
           caseNumber: caseNumber,
           courtType: elements.courtTypeSelect.value,
+          province: state.selectedProvince || 'อุดรธานี',
           district: elements.districtSelect.value,
           subdistrict: elements.subdistrictSelect.value,
           locationType: elements.locationTypeSelect.value,
@@ -4544,6 +4796,7 @@ async function handleFallbackFile(e) {
     const payloadData = {
       caseNumber: caseNumber,
       courtType: elements.courtTypeSelect.value,
+      province: state.selectedProvince || 'อุดรธานี',
       district: elements.districtSelect.value,
       subdistrict: elements.subdistrictSelect.value,
       locationType: elements.locationTypeSelect.value,
