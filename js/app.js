@@ -1751,9 +1751,9 @@ window.openCaseHistoryModal = function(caseNumber) {
 window.openManualUploadModal = function() {
   const currentBuddhistYear = new Date().getFullYear() + (new Date().getFullYear() < 2400 ? 543 : 0);
   
-  // สร้างตัวเลือกปี พ.ศ.
+  // สร้างตัวเลือกปี พ.ศ. (ย้อนหลัง 40 ปี)
   let yearOptionsHtml = '';
-  for (let y = currentBuddhistYear; y >= currentBuddhistYear - 15; y--) {
+  for (let y = currentBuddhistYear; y >= currentBuddhistYear - 40; y--) {
     yearOptionsHtml += `<option value="${y}">${y}</option>`;
   }
 
@@ -3931,12 +3931,12 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
 
   const currentThaiYear = new Date().getFullYear() + 543;
   let yearOpts = '';
-  for (let i = 0; i <= 20; i++) {
+  for (let i = 0; i <= 40; i++) {
     const y = currentThaiYear - i;
     yearOpts += `<option value="${y}" ${y == curCaseYear ? 'selected' : ''}>${y}</option>`;
   }
   let otherYearOpts = '';
-  for (let i = 0; i <= 20; i++) {
+  for (let i = 0; i <= 40; i++) {
     const y = currentThaiYear - i;
     otherYearOpts += `<option value="${y}" ${y == curOtherCaseYear ? 'selected' : ''}>${y}</option>`;
   }
@@ -4502,7 +4502,7 @@ window.handleResetProvince = function() {
 };
 
 /**
- * สร้างตัวเลือก ปี พ.ศ. ปัจจุบัน และถอยหลังไปอีก 20 ปี (รวม 21 ปี)
+ * สร้างตัวเลือก ปี พ.ศ. ปัจจุบัน และถอยหลังไปอีก 40 ปี (รวม 41 ปี)
  */
 function initCaseYearDropdowns() {
   const currentThaiYear = new Date().getFullYear() + 543;
@@ -4511,7 +4511,7 @@ function initCaseYearDropdowns() {
   yearSelects.forEach(sel => {
     if (!sel) return;
     sel.innerHTML = '';
-    for (let i = 0; i <= 20; i++) {
+    for (let i = 0; i <= 40; i++) {
       const year = currentThaiYear - i;
       const opt = document.createElement('option');
       opt.value = year;

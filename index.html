@@ -37,7 +37,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260827_07">
+  <link rel="stylesheet" href="css/style.css?v=20260827_08">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -459,24 +459,6 @@
                 </div>
               </div>
 
-              <!-- Storage Connection Info -->
-              <div class="mt-5 pt-4 border-t border-gray-100 text-xs text-gray-400 space-y-1">
-                <div class="flex items-center justify-between text-gray-500">
-                  <span>Google Drive โฟลเดอร์:</span>
-                  <a href="https://drive.google.com/drive/folders/1whnbwZjGSevdo-KG8RVz9oFge8V-U5wp?usp=sharing" target="_blank" class="text-blue-600 font-medium hover:underline flex items-center gap-1">
-                    <span>เปิด Drive</span>
-                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
-                  </a>
-                </div>
-                <div class="flex items-center justify-between text-gray-500">
-                  <span>Google Sheet บันทึกผล:</span>
-                  <a href="https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/edit?usp=sharing" target="_blank" class="text-emerald-600 font-medium hover:underline flex items-center gap-1">
-                    <span>เปิด Sheet</span>
-                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
-                  </a>
-                </div>
-              </div>
-
             </div>
 
           </div>
@@ -869,17 +851,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260827_07"></script>
-  <script src="js/compass.js?v=20260827_07"></script>
-  <script src="js/map.js?v=20260827_07"></script>
-  <script src="js/watermark.js?v=20260827_07"></script>
-  <script src="js/app.js?v=20260827_07"></script>
+  <script src="js/data.js?v=20260827_08"></script>
+  <script src="js/compass.js?v=20260827_08"></script>
+  <script src="js/map.js?v=20260827_08"></script>
+  <script src="js/watermark.js?v=20260827_08"></script>
+  <script src="js/app.js?v=20260827_08"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260827_07')
+        navigator.serviceWorker.register('./sw.js?v=20260827_08')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
