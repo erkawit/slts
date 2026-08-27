@@ -274,17 +274,21 @@ document.addEventListener('DOMContentLoaded', () => {
   initSettings();
   initResponsiveUI();
 
-  // Always Camera-First & SweetAlert Form-First:
-  openCameraModal().catch(e => console.warn('Camera open error:', e));
-
-  // เด้งหน้าต่าง SweetAlert ฟอร์มบันทึกข้อมูลส่งหมายเป็นค่าพื้นฐานทันที
-  setTimeout(() => {
-    if (!state.selectedProvince) {
-      showProvinceSelectorModal(true);
-    } else {
-      showMobileSummonsFormModal(false);
-    }
-  }, 120);
+  // กำหนดขั้นตอนเริ่มต้นตามขนาดหน้าจอ (Mobile vs Desktop)
+  if (window.innerWidth < 768) {
+    // จอมือถือ (< 768px): Camera-first & SweetAlert Form
+    openCameraModal().catch(e => console.warn('Camera open error:', e));
+    setTimeout(() => {
+      if (!state.selectedProvince) {
+        showProvinceSelectorModal(true);
+      } else {
+        showMobileSummonsFormModal(false);
+      }
+    }, 120);
+  } else {
+    // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
+    switchTab('form');
+  }
 });
 
 
@@ -989,19 +993,19 @@ window.deleteUser = function(username) {
 window.switchTab = function(tabName) {
   document.querySelectorAll('.tab-nav-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(pane => {
-    if (pane.id !== 'tabContentForm') {
-      pane.classList.add('hidden');
-      pane.classList.remove('active');
-    }
+    pane.classList.add('hidden');
+    pane.classList.remove('active');
   });
 
-  if (tabName === 'camera' || tabName === 'form') {
-    if (elements.tabBtnCamera) elements.tabBtnCamera.classList.add('active');
+  if (tabName === 'form') {
+    closeCameraModal();
     if (elements.tabBtnForm) elements.tabBtnForm.classList.add('active');
-    if (elements.tabContentTable) {
-      elements.tabContentTable.classList.remove('hidden');
-      elements.tabContentTable.classList.add('active');
+    if (elements.tabContentForm) {
+      elements.tabContentForm.classList.remove('hidden');
+      elements.tabContentForm.classList.add('active');
     }
+  } else if (tabName === 'camera') {
+    if (elements.tabBtnCamera) elements.tabBtnCamera.classList.add('active');
     openCameraModal();
   } else if (tabName === 'table') {
     closeCameraModal();
@@ -2683,10 +2687,17 @@ window.showProvinceSelectorModal = function(force = false) {
       <div class="slts-province-modal">
         <!-- Header -->
         <div class="slts-modal-header">
-          <div class="slts-modal-header-icon">
-            <i class="fa-solid fa-map-location-dot"></i>
-          </div>
-          <div>
+          ${!force && state.selectedProvince ? `
+            <button type="button" onclick="showMobileSummonsFormModal(true)" class="slts-back-header-btn" title="กลับไปฟอร์ม">
+              <i class="fa-solid fa-arrow-left"></i>
+              <span>กลับ</span>
+            </button>
+          ` : `
+            <div class="slts-modal-header-icon">
+              <i class="fa-solid fa-map-location-dot"></i>
+            </div>
+          `}
+          <div class="flex-1 ${!force && state.selectedProvince ? 'text-center pr-8' : ''}">
             <h2 class="slts-modal-title">เลือกจังหวัดปฏิบัติงาน</h2>
             <p class="slts-modal-subtitle">ระบบจะบันทึกจังหวัดไว้สำหรับการใช้งานครั้งต่อไป</p>
           </div>
@@ -2786,6 +2797,279 @@ window.selectProvinceAndProceed = function(provinceName) {
 };
 
 // -------------------------------------------------------------------------
+// Helper เก็บสถานะ Form ที่ผู้ใช้กำลังกรอกไว้ชั่วคราว
+// -------------------------------------------------------------------------
+window.saveTempModalFormState = function() {
+  const cType = document.getElementById('m_courtType')?.value;
+  const pref = document.getElementById('m_prefix')?.value;
+  const cNo = document.getElementById('m_caseNo')?.value;
+  const cYear = document.getElementById('m_caseYear')?.value;
+  const oNo = document.getElementById('m_otherCaseNo')?.value;
+  const oYear = document.getElementById('m_otherCaseYear')?.value;
+  const lType = document.getElementById('m_locType')?.value;
+  const hNo = document.getElementById('m_houseNo')?.value;
+  const moo = document.getElementById('m_moo')?.value;
+  const admName = document.getElementById('m_adminName')?.value;
+  const oLoc = document.getElementById('m_otherLocName')?.value;
+  const coords = document.getElementById('m_coords')?.value;
+
+  state.tempModalValues = {
+    courtType: cType !== undefined ? cType : (state.tempModalValues?.courtType || 'ศาลประจำจังหวัด'),
+    prefix: pref !== undefined ? pref : (state.tempModalValues?.prefix || ''),
+    caseNo: cNo !== undefined ? cNo : (state.tempModalValues?.caseNo || ''),
+    caseYear: cYear !== undefined ? cYear : (state.tempModalValues?.caseYear || ''),
+    otherCaseNo: oNo !== undefined ? oNo : (state.tempModalValues?.otherCaseNo || ''),
+    otherCaseYear: oYear !== undefined ? oYear : (state.tempModalValues?.otherCaseYear || ''),
+    locType: lType !== undefined ? lType : (state.tempModalValues?.locType || 'หมายบ้าน'),
+    houseNo: hNo !== undefined ? hNo : (state.tempModalValues?.houseNo || ''),
+    moo: moo !== undefined ? moo : (state.tempModalValues?.moo || ''),
+    adminName: admName !== undefined ? admName : (state.tempModalValues?.adminName || ''),
+    otherLocName: oLoc !== undefined ? oLoc : (state.tempModalValues?.otherLocName || ''),
+    coords: coords !== undefined ? coords : (state.tempModalValues?.coords || '')
+  };
+};
+
+// -------------------------------------------------------------------------
+// Modal เลือกอำเภอ (เฉพาะในจังหวัดที่เลือก)
+// -------------------------------------------------------------------------
+window.showDistrictSelectorModal = function() {
+  const prov = state.selectedProvince;
+  if (!prov) {
+    showProvinceSelectorModal(true);
+    return;
+  }
+  const districts = getDistrictsByProvince(prov);
+  const curDistrict = elements.districtSelect?.value || districts[0] || '';
+
+  let districtsHtml = '';
+  districts.forEach(d => {
+    const isSelected = d === curDistrict;
+    districtsHtml += `
+      <button type="button" class="province-btn-item ${isSelected ? 'province-btn-selected' : ''}" onclick="selectDistrictAndReturn('${d}')">
+        ${isSelected ? '<i class="fa-solid fa-circle-check text-blue-600 text-xs shrink-0"></i>' : '<span class="province-btn-dot"></span>'}
+        <span class="flex-1 text-left">${d}</span>
+      </button>
+    `;
+  });
+
+  Swal.fire({
+    html: `
+      <div class="slts-province-modal">
+        <!-- Header with Back Button -->
+        <div class="slts-modal-header">
+          <button type="button" onclick="showMobileSummonsFormModal(true)" class="slts-back-header-btn" title="กลับไปฟอร์ม">
+            <i class="fa-solid fa-arrow-left"></i>
+            <span>กลับ</span>
+          </button>
+          <div class="flex-1 text-center pr-8">
+            <h2 class="slts-modal-title">เลือกอำเภอ / เขต</h2>
+            <p class="slts-modal-subtitle">📍 จังหวัด${prov}</p>
+          </div>
+        </div>
+        <!-- Search -->
+        <div class="slts-search-wrap">
+          <i class="fa-solid fa-magnifying-glass slts-search-icon"></i>
+          <input type="text" id="swalDistrictSearchInput" placeholder="ค้นหาอำเภอ / เขต ใน จ.${prov}..." class="slts-search-input" oninput="filterDistrictList(this.value)" autocomplete="off">
+        </div>
+        <!-- District grid -->
+        <div id="swalDistrictGrid" class="slts-province-grid slts-swal-body-scroll">
+          ${districtsHtml}
+        </div>
+        <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>แสดงเฉพาะอำเภอ / เขต ในขอบเขตจังหวัด${prov}</p>
+      </div>
+    `,
+    position: 'top',
+    showConfirmButton: false,
+    showCloseButton: false,
+    allowOutsideClick: false,
+    customClass: {
+      container: 'slts-swal-top-container',
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
+    },
+    didOpen: () => {
+      const popup = document.querySelector('.swal2-popup');
+      const grid = document.getElementById('swalDistrictGrid');
+      const searchInput = document.getElementById('swalDistrictSearchInput');
+      if (!popup) return;
+
+      const adjustDistrictModal = () => {
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        const maxH = Math.max(160, Math.floor(vh - 16));
+        popup.style.maxHeight = `${maxH}px`;
+        if (grid) {
+          grid.style.maxHeight = `${Math.max(80, maxH - 115)}px`;
+        }
+      };
+
+      adjustDistrictModal();
+
+      const vv = window.visualViewport;
+      if (vv) {
+        vv.addEventListener('resize', adjustDistrictModal);
+        vv.addEventListener('scroll', adjustDistrictModal);
+        popup._vvResizeHandler = adjustDistrictModal;
+      }
+
+      if (searchInput) {
+        searchInput.addEventListener('focus', () => {
+          setTimeout(adjustDistrictModal, 150);
+        });
+      }
+    },
+    didClose: () => {
+      const vv = window.visualViewport;
+      const popup = document.querySelector('.swal2-popup');
+      if (vv && popup?._vvResizeHandler) {
+        vv.removeEventListener('resize', popup._vvResizeHandler);
+        vv.removeEventListener('scroll', popup._vvResizeHandler);
+      }
+    }
+  });
+};
+
+window.filterDistrictList = function(query) {
+  const grid = document.getElementById('swalDistrictGrid');
+  if (!grid) return;
+  const q = (query || '').trim().toLowerCase();
+  const buttons = grid.querySelectorAll('.province-btn-item');
+  buttons.forEach(btn => {
+    const text = btn.textContent.toLowerCase();
+    btn.style.display = text.includes(q) ? '' : 'none';
+  });
+};
+
+window.selectDistrictAndReturn = function(districtName) {
+  const prov = state.selectedProvince;
+  if (elements.districtSelect) {
+    elements.districtSelect.value = districtName;
+  }
+  const subdistricts = getSubdistrictsByDistrict(prov, districtName);
+  const firstSub = subdistricts[0] || '';
+  if (elements.subdistrictSelect) {
+    updateSubdistricts(prov, districtName, firstSub);
+  }
+  showMobileSummonsFormModal(true);
+};
+
+// -------------------------------------------------------------------------
+// Modal เลือกตำบล (เฉพาะในอำเภอที่เลือก)
+// -------------------------------------------------------------------------
+window.showSubdistrictSelectorModal = function() {
+  const prov = state.selectedProvince;
+  if (!prov) {
+    showProvinceSelectorModal(true);
+    return;
+  }
+  const districts = getDistrictsByProvince(prov);
+  const curDistrict = elements.districtSelect?.value || districts[0] || '';
+  const subdistricts = getSubdistrictsByDistrict(prov, curDistrict);
+  const curSubdistrict = elements.subdistrictSelect?.value || subdistricts[0] || '';
+
+  let subdistrictsHtml = '';
+  subdistricts.forEach(s => {
+    const isSelected = s === curSubdistrict;
+    subdistrictsHtml += `
+      <button type="button" class="province-btn-item ${isSelected ? 'province-btn-selected' : ''}" onclick="selectSubdistrictAndReturn('${s}')">
+        ${isSelected ? '<i class="fa-solid fa-circle-check text-blue-600 text-xs shrink-0"></i>' : '<span class="province-btn-dot"></span>'}
+        <span class="flex-1 text-left">${s}</span>
+      </button>
+    `;
+  });
+
+  Swal.fire({
+    html: `
+      <div class="slts-province-modal">
+        <!-- Header with Back Button -->
+        <div class="slts-modal-header">
+          <button type="button" onclick="showMobileSummonsFormModal(true)" class="slts-back-header-btn" title="กลับไปฟอร์ม">
+            <i class="fa-solid fa-arrow-left"></i>
+            <span>กลับ</span>
+          </button>
+          <div class="flex-1 text-center pr-8">
+            <h2 class="slts-modal-title">เลือกตำบล / แขวง</h2>
+            <p class="slts-modal-subtitle">📍 อ.${curDistrict} จ.${prov}</p>
+          </div>
+        </div>
+        <!-- Search -->
+        <div class="slts-search-wrap">
+          <i class="fa-solid fa-magnifying-glass slts-search-icon"></i>
+          <input type="text" id="swalSubdistrictSearchInput" placeholder="ค้นหาตำบล / แขวง ใน อ.${curDistrict}..." class="slts-search-input" oninput="filterSubdistrictList(this.value)" autocomplete="off">
+        </div>
+        <!-- Subdistrict grid -->
+        <div id="swalSubdistrictGrid" class="slts-province-grid slts-swal-body-scroll">
+          ${subdistrictsHtml}
+        </div>
+        <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>แสดงเฉพาะตำบล / แขวง ในขอบเขตอำเภอ${curDistrict}</p>
+      </div>
+    `,
+    position: 'top',
+    showConfirmButton: false,
+    showCloseButton: false,
+    allowOutsideClick: false,
+    customClass: {
+      container: 'slts-swal-top-container',
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
+    },
+    didOpen: () => {
+      const popup = document.querySelector('.swal2-popup');
+      const grid = document.getElementById('swalSubdistrictGrid');
+      const searchInput = document.getElementById('swalSubdistrictSearchInput');
+      if (!popup) return;
+
+      const adjustSubdistrictModal = () => {
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        const maxH = Math.max(160, Math.floor(vh - 16));
+        popup.style.maxHeight = `${maxH}px`;
+        if (grid) {
+          grid.style.maxHeight = `${Math.max(80, maxH - 115)}px`;
+        }
+      };
+
+      adjustSubdistrictModal();
+
+      const vv = window.visualViewport;
+      if (vv) {
+        vv.addEventListener('resize', adjustSubdistrictModal);
+        vv.addEventListener('scroll', adjustSubdistrictModal);
+        popup._vvResizeHandler = adjustSubdistrictModal;
+      }
+
+      if (searchInput) {
+        searchInput.addEventListener('focus', () => {
+          setTimeout(adjustSubdistrictModal, 150);
+        });
+      }
+    },
+    didClose: () => {
+      const vv = window.visualViewport;
+      const popup = document.querySelector('.swal2-popup');
+      if (vv && popup?._vvResizeHandler) {
+        vv.removeEventListener('resize', popup._vvResizeHandler);
+        vv.removeEventListener('scroll', popup._vvResizeHandler);
+      }
+    }
+  });
+};
+
+window.filterSubdistrictList = function(query) {
+  const grid = document.getElementById('swalSubdistrictGrid');
+  if (!grid) return;
+  const q = (query || '').trim().toLowerCase();
+  const buttons = grid.querySelectorAll('.province-btn-item');
+  buttons.forEach(btn => {
+    const text = btn.textContent.toLowerCase();
+    btn.style.display = text.includes(q) ? '' : 'none';
+  });
+};
+
+window.selectSubdistrictAndReturn = function(subdistrictName) {
+  if (elements.subdistrictSelect) {
+    elements.subdistrictSelect.value = subdistrictName;
+  }
+  showMobileSummonsFormModal(true);
+};
+
+// -------------------------------------------------------------------------
 // SweetAlert Form บันทึกข้อมูลส่งหมาย 80% สำหรับ Mobile
 // -------------------------------------------------------------------------
 window.showMobileSummonsFormModal = function(isEditing = false) {
@@ -2801,19 +3085,19 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
   const subdistricts = getSubdistrictsByDistrict(prov, curDistrict);
   const curSubdistrict = (elements.subdistrictSelect?.value && subdistricts.includes(elements.subdistrictSelect.value)) ? elements.subdistrictSelect.value : (subdistricts[0] || '');
 
-  const curCourtType = elements.courtTypeSelect?.value || 'ศาลประจำจังหวัด';
+  const curCourtType = state.tempModalValues?.courtType || elements.courtTypeSelect?.value || 'ศาลประจำจังหวัด';
   const allPrefixes = getAllCasePrefixes();
-  const curPrefix = elements.udonPrefixInput?.value || (allPrefixes.includes('ผบE') ? 'ผบE' : (allPrefixes[0] || 'อ'));
-  const curCaseNo = elements.udonCaseNoInput?.value || '';
-  const curCaseYear = elements.udonCaseYearSelect?.value || (new Date().getFullYear() + 543);
-  const curOtherCaseNo = elements.otherCaseNoInput?.value || '';
-  const curOtherCaseYear = elements.otherCaseYearSelect?.value || (new Date().getFullYear() + 543);
-  const curLocType = elements.locationTypeSelect?.value || 'หมายบ้าน';
-  const curHouseNo = elements.houseNoInput?.value || '';
-  const curMoo = elements.mooInput?.value || '';
-  const curAdminName = elements.localAdminNameInput?.value || 'ที่ทำการปกครองส่วนท้องถิ่น';
-  const curOtherLoc = elements.customOtherLocationName?.value || '';
-  const curCoords = elements.coordinatesInput?.value || (state.lat ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : '');
+  const curPrefix = state.tempModalValues?.prefix || elements.udonPrefixInput?.value || (allPrefixes.includes('ผบE') ? 'ผบE' : (allPrefixes[0] || 'อ'));
+  const curCaseNo = (state.tempModalValues?.caseNo !== undefined) ? state.tempModalValues.caseNo : (elements.udonCaseNoInput?.value || '');
+  const curCaseYear = state.tempModalValues?.caseYear || elements.udonCaseYearSelect?.value || (new Date().getFullYear() + 543);
+  const curOtherCaseNo = (state.tempModalValues?.otherCaseNo !== undefined) ? state.tempModalValues.otherCaseNo : (elements.otherCaseNoInput?.value || '');
+  const curOtherCaseYear = state.tempModalValues?.otherCaseYear || elements.otherCaseYearSelect?.value || (new Date().getFullYear() + 543);
+  const curLocType = state.tempModalValues?.locType || elements.locationTypeSelect?.value || 'หมายบ้าน';
+  const curHouseNo = (state.tempModalValues?.houseNo !== undefined) ? state.tempModalValues.houseNo : (elements.houseNoInput?.value || '');
+  const curMoo = (state.tempModalValues?.moo !== undefined) ? state.tempModalValues.moo : (elements.mooInput?.value || '');
+  const curAdminName = state.tempModalValues?.adminName || elements.localAdminNameInput?.value || 'ที่ทำการปกครองส่วนท้องถิ่น';
+  const curOtherLoc = (state.tempModalValues?.otherLocName !== undefined) ? state.tempModalValues.otherLocName : (elements.customOtherLocationName?.value || '');
+  const curCoords = (state.tempModalValues?.coords !== undefined) ? state.tempModalValues.coords : (elements.coordinatesInput?.value || (state.lat ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : ''));
 
   const currentThaiYear = new Date().getFullYear() + 543;
   let yearOpts = '';
@@ -2837,16 +3121,6 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
         ${p}
       </button>
     `;
-  });
-
-  let districtOpts = '';
-  districts.forEach(d => {
-    districtOpts += `<option value="${d}" ${d === curDistrict ? 'selected' : ''}>${d}</option>`;
-  });
-
-  let subdistrictOpts = '';
-  subdistricts.forEach(s => {
-    subdistrictOpts += `<option value="${s}" ${s === curSubdistrict ? 'selected' : ''}>${s}</option>`;
   });
 
   const isBkk = prov === 'กรุงเทพมหานคร';
@@ -2875,14 +3149,14 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
             <h2 class="slts-modal-title">${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</h2>
             <p class="slts-modal-subtitle">📍 จังหวัด${prov}</p>
           </div>
-          <button type="button" onclick="showProvinceSelectorModal(false)" class="slts-change-prov-btn">
+          <button type="button" onclick="saveTempModalFormState(); showProvinceSelectorModal(false)" class="slts-change-prov-btn">
             <i class="fa-solid fa-arrow-right-arrow-left text-[9px]"></i> เปลี่ยนจังหวัด
           </button>
         </div>
 
         <form id="mobileSummonsModalForm" class="slts-form-body slts-swal-body-scroll" onsubmit="return false;">
 
-          <!-- Section: อำเภอ & ตำบล -->
+          <!-- Section: อำเภอ & ตำบล (รูปแบบรายการแบบกดเลือก) -->
           <div class="slts-form-section">
             <div class="slts-section-label">
               <i class="fa-solid fa-location-dot text-blue-600"></i> พื้นที่ส่งหมาย
@@ -2890,15 +3164,19 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
             <div class="slts-field-row">
               <div class="slts-field-col">
                 <label class="slts-label">อำเภอ / เขต <span class="slts-required">*</span></label>
-                <select id="m_district" class="slts-select" onchange="handleModalDistrictChange(this.value)">
-                  ${districtOpts}
-                </select>
+                <button type="button" onclick="saveTempModalFormState(); showDistrictSelectorModal()" class="slts-select-trigger-btn">
+                  <span class="truncate">${curDistrict || 'เลือกอำเภอ / เขต'}</span>
+                  <i class="fa-solid fa-chevron-right text-[10px] text-gray-400"></i>
+                </button>
+                <input type="hidden" id="m_district" value="${curDistrict}">
               </div>
               <div class="slts-field-col">
                 <label class="slts-label">ตำบล / แขวง <span class="slts-required">*</span></label>
-                <select id="m_subdistrict" class="slts-select" onchange="updateModalAdminChips()">
-                  ${subdistrictOpts}
-                </select>
+                <button type="button" onclick="saveTempModalFormState(); showSubdistrictSelectorModal()" class="slts-select-trigger-btn">
+                  <span class="truncate">${curSubdistrict || 'เลือกตำบล / แขวง'}</span>
+                  <i class="fa-solid fa-chevron-right text-[10px] text-gray-400"></i>
+                </button>
+                <input type="hidden" id="m_subdistrict" value="${curSubdistrict}">
               </div>
             </div>
           </div>
@@ -3010,10 +3288,10 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
 
         <!-- Confirm button -->
         <div class="slts-form-footer">
-          <button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
+          <button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { state.tempModalValues = null; Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
             <i class="fa-solid fa-camera mr-1.5"></i> ยืนยันข้อมูลและเปิดกล้องถ่ายภาพ
           </button>
-          ${isEditing ? '<button type="button" class="slts-cancel-btn" onclick="Swal.close()"><i class="fa-solid fa-xmark mr-1"></i> กลับไปยังกล้อง</button>' : ''}
+          ${isEditing ? '<button type="button" class="slts-cancel-btn" onclick="state.tempModalValues = null; Swal.close()"><i class="fa-solid fa-xmark mr-1"></i> กลับไปยังกล้อง</button>' : ''}
         </div>
       </div>
     `,

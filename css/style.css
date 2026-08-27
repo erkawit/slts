@@ -545,6 +545,58 @@ table.dataTable tbody td {
 }
 .slts-change-prov-btn:hover { background: rgba(255,255,255,0.28); }
 
+.slts-back-header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4.5px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'Noto Serif Thai', 'Sarabun', serif;
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 7px;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.slts-back-header-btn:hover {
+  background: rgba(255,255,255,0.32);
+  transform: translateX(-1px);
+}
+.slts-back-header-btn:active { transform: translateX(0); }
+
+.slts-select-trigger-btn {
+  width: 100%;
+  padding: 6.5px 10px;
+  font-size: 11px;
+  font-family: 'Noto Serif Thai', 'Sarabun', serif;
+  font-weight: 600;
+  color: #1e293b;
+  background: #fff;
+  border: 1.5px solid #dde3ef;
+  border-radius: 8px;
+  outline: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+}
+.slts-select-trigger-btn:hover {
+  border-color: #3b82f6;
+  background: #f8fafc;
+}
+.slts-select-trigger-btn:active {
+  transform: scale(0.98);
+}
+
 .slts-form-body {
   flex: 1;
   overflow-y: auto;
