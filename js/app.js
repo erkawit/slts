@@ -2766,14 +2766,13 @@ window.filterProvinceList = function(query) {
 
 window.selectProvinceAndProceed = function(provinceName) {
   setProvince(provinceName);
-  requestAppFullscreen();
   Swal.close();
   
   const Toast = Swal.mixin({
     toast: true,
     position: 'top-end',
     showConfirmButton: false,
-    timer: 1500,
+    timer: 1200,
     timerProgressBar: true
   });
   Toast.fire({
@@ -3538,41 +3537,13 @@ function getFullLocationText() {
 }
 
 function initLocationService() {
-  const hasPermission = localStorage.getItem('slts_location_permission_granted') === 'true';
-
-  if (hasPermission) {
+  if (navigator.geolocation) {
     if (window.compassManager) {
       window.compassManager.requestPermission();
     }
     fetchCurrentLocation(false);
     startLocationInterval();
-    return;
   }
-
-  Swal.fire({
-    title: 'ขออนุญาตเข้าถึงตำแหน่ง (GPS)',
-    text: 'ระบบจำเป็นต้องใช้พิกัดตำแหน่งปัจจุบันเพื่อระบุพิกัดส่งหมายและปักหมุดบนภาพถ่าย',
-    icon: 'info',
-    showCancelButton: true,
-    confirmButtonText: 'อนุญาต / เข้าถึงพิกัด',
-    cancelButtonText: 'ยกเลิก',
-    confirmButtonColor: '#2563eb',
-    cancelButtonColor: '#dc2626',
-    customClass: {
-      popup: 'rounded-xl shadow-xl'
-    }
-  }).then((result) => {
-    if (result.isConfirmed) {
-      localStorage.setItem('slts_location_permission_granted', 'true');
-      if (window.compassManager) {
-        window.compassManager.requestPermission();
-      }
-      fetchCurrentLocation(true);
-      startLocationInterval();
-    } else {
-      elements.coordinatesInput.value = 'ยังไม่ได้เปิดใช้งานพิกัด GPS';
-    }
-  });
 }
 
 function startLocationInterval() {
