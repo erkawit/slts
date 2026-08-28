@@ -319,6 +319,7 @@ function initDOMElements() {
   elements.otherCourtCaseField = document.getElementById('otherCourtCaseField');
   elements.otherCaseNoInput = document.getElementById('otherCaseNo');
   elements.otherCaseYearSelect = document.getElementById('otherCaseYear');
+  elements.caseExtraInput = document.getElementById('caseExtraInput');
 
   // ข้อมูลที่ตั้ง
   elements.locationTypeSelect = document.getElementById('locationType');
@@ -1842,6 +1843,15 @@ window.openManualUploadModal = function() {
               </select>
             </div>
           </div>
+
+          <!-- ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี) -->
+          <div>
+            <label class="block font-semibold text-gray-700 mb-1 flex items-center justify-between">
+              <span>ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)</span>
+              <span class="text-[10px] text-gray-400 font-normal">ไม่บังคับ</span>
+            </label>
+            <input type="text" id="mUp_caseExtra" placeholder="เช่น ล.1-2 (เว้นวรรค 1 เคาะต่อท้ายเลขคดี)" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium text-gray-800">
+          </div>
         </div>
 
         <!-- 2. ข้อมูลที่ตั้งส่งหมาย -->
@@ -2063,6 +2073,9 @@ window.openManualUploadModal = function() {
       const courtType = document.getElementById('mUp_courtType').value;
       let caseNumber = '';
 
+      const extra = (document.getElementById('mUp_caseExtra')?.value || '').trim();
+      const extraSuffix = extra ? ` ${extra}` : '';
+
       if (courtType === 'ศาลอื่น') {
         const otherNo = document.getElementById('mUp_otherCaseNo').value.trim();
         const otherYr = document.getElementById('mUp_otherYear').value;
@@ -2070,7 +2083,7 @@ window.openManualUploadModal = function() {
           Swal.showValidationMessage('กรุณากรอกเลขคดี');
           return false;
         }
-        caseNumber = otherNo.includes('/') ? otherNo : `${otherNo}/${otherYr}`;
+        caseNumber = (otherNo.includes('/') ? otherNo : `${otherNo}/${otherYr}`) + extraSuffix;
       } else {
         const prefix = document.getElementById('mUp_udonPrefix').value.trim();
         const no = document.getElementById('mUp_udonCaseNo').value.trim();
@@ -2079,7 +2092,7 @@ window.openManualUploadModal = function() {
           Swal.showValidationMessage('กรุณากรอกอักษรนำหน้าและเลขคดี');
           return false;
         }
-        caseNumber = `${prefix}${no}/${yr}`;
+        caseNumber = `${prefix}${no}/${yr}${extraSuffix}`;
       }
 
       const district = document.getElementById('mUp_district').value;
@@ -3384,6 +3397,7 @@ window.saveTempModalFormState = function() {
   const cYear = document.getElementById('m_caseYear')?.value;
   const oNo = document.getElementById('m_otherCaseNo')?.value;
   const oYear = document.getElementById('m_otherCaseYear')?.value;
+  const cExtra = document.getElementById('m_caseExtra')?.value;
   const lType = document.getElementById('m_locType')?.value;
   const hNo = document.getElementById('m_houseNo')?.value;
   const moo = document.getElementById('m_moo')?.value;
@@ -3400,6 +3414,7 @@ window.saveTempModalFormState = function() {
     caseYear: cYear !== undefined ? cYear : (state.tempModalValues?.caseYear || ''),
     otherCaseNo: oNo !== undefined ? oNo : (state.tempModalValues?.otherCaseNo || ''),
     otherCaseYear: oYear !== undefined ? oYear : (state.tempModalValues?.otherCaseYear || ''),
+    caseExtra: cExtra !== undefined ? cExtra : (state.tempModalValues?.caseExtra || ''),
     locType: lType !== undefined ? lType : (state.tempModalValues?.locType || 'หมายบ้าน'),
     houseNo: hNo !== undefined ? hNo : (state.tempModalValues?.houseNo || ''),
     moo: moo !== undefined ? moo : (state.tempModalValues?.moo || ''),
@@ -4016,6 +4031,7 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
   const curCaseYear = state.tempModalValues?.caseYear || elements.udonCaseYearSelect?.value || (new Date().getFullYear() + 543);
   const curOtherCaseNo = (state.tempModalValues?.otherCaseNo !== undefined) ? state.tempModalValues.otherCaseNo : (elements.otherCaseNoInput?.value || '');
   const curOtherCaseYear = state.tempModalValues?.otherCaseYear || elements.otherCaseYearSelect?.value || (new Date().getFullYear() + 543);
+  const curCaseExtra = (state.tempModalValues?.caseExtra !== undefined) ? state.tempModalValues.caseExtra : (elements.caseExtraInput?.value || '');
   const curLocType = state.tempModalValues?.locType || elements.locationTypeSelect?.value || 'หมายบ้าน';
   const curHouseNo = (state.tempModalValues?.houseNo !== undefined) ? state.tempModalValues.houseNo : (elements.houseNoInput?.value || '');
   const curMoo = (state.tempModalValues?.moo !== undefined) ? state.tempModalValues.moo : (elements.mooInput?.value || '');
@@ -4179,6 +4195,22 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
               <select id="m_otherCaseYear" class="slts-select slts-select-year">
                 ${otherYearOpts}
               </select>
+            </div>
+
+            <!-- ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี เช่น ล.1-2) -->
+            <div class="slts-field-stack mt-2">
+              <label class="slts-label flex items-center justify-between">
+                <span><i class="fa-solid fa-circle-info text-blue-500 mr-1"></i>ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)</span>
+                <span class="text-[10px] text-gray-400 font-normal">ไม่บังคับ</span>
+              </label>
+              <input 
+                type="text" 
+                id="m_caseExtra" 
+                value="${curCaseExtra}" 
+                placeholder="เช่น ล.1-2, จำเลยที่ 1-2 (เว้นวรรค 1 เคาะต่อท้ายเลขคดี)" 
+                class="slts-input" 
+                autocomplete="off"
+              >
             </div>
           </div>
 
@@ -4477,6 +4509,7 @@ function validateAndExtractModalForm() {
   const caseYear = document.getElementById('m_caseYear')?.value;
   const otherCaseNo = (document.getElementById('m_otherCaseNo')?.value || '').trim();
   const otherCaseYear = document.getElementById('m_otherCaseYear')?.value;
+  const caseExtra = (document.getElementById('m_caseExtra')?.value || '').trim();
   const locType = document.getElementById('m_locType')?.value;
   const houseNo = (document.getElementById('m_houseNo')?.value || '').trim();
   const moo = (document.getElementById('m_moo')?.value || '').trim();
@@ -4539,6 +4572,7 @@ function validateAndExtractModalForm() {
     caseYear,
     otherCaseNo,
     otherCaseYear,
+    caseExtra,
     locType,
     houseNo,
     moo,
@@ -4550,6 +4584,10 @@ function validateAndExtractModalForm() {
 
 function applyModalFormValues(val) {
   if (!val) return;
+
+  if (elements.caseExtraInput) {
+    elements.caseExtraInput.value = val.caseExtra || '';
+  }
 
   if (elements.districtSelect) {
     elements.districtSelect.value = val.district;
@@ -4680,15 +4718,20 @@ function initCaseYearDropdowns() {
 function getFormattedCaseNumber() {
   const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || (document.getElementById('courtType') ? document.getElementById('courtType').value : '');
   const isOther = courtType === 'ศาลอื่น' || courtType === 'หมายศาลอื่น';
+  
+  // ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี เว้นวรรค 1 เคาะ เช่น "ล.1-2", "จำเลยที่ 1-2")
+  const extra = (elements.caseExtraInput ? elements.caseExtraInput.value : (document.getElementById('caseExtraInput')?.value || '')).trim();
+  const extraSuffix = extra ? ` ${extra}` : '';
+
   if (isOther) {
     const caseNo = (elements.otherCaseNoInput ? elements.otherCaseNoInput.value : '').trim();
     const year = elements.otherCaseYearSelect ? elements.otherCaseYearSelect.value : '';
-    return caseNo ? `ต${caseNo}/${year}` : '';
+    return caseNo ? `ต${caseNo}/${year}${extraSuffix}` : '';
   } else {
     const prefix = (elements.udonPrefixInput ? elements.udonPrefixInput.value : '').trim();
     const caseNo = (elements.udonCaseNoInput ? elements.udonCaseNoInput.value : '').trim();
     const year = elements.udonCaseYearSelect ? elements.udonCaseYearSelect.value : '';
-    return (prefix && caseNo) ? `${prefix}${caseNo}/${year}` : '';
+    return (prefix && caseNo) ? `${prefix}${caseNo}/${year}${extraSuffix}` : '';
   }
 }
 
@@ -4745,6 +4788,11 @@ function initFormEventListeners() {
       e.target.value = e.target.value.replace(/\D/g, '');
       updateCaptureButtonState();
     });
+  }
+
+  // ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)
+  if (elements.caseExtraInput) {
+    elements.caseExtraInput.addEventListener('input', updateCaptureButtonState);
   }
 
   // หมู่: กรอกได้เฉพาะตัวเลขเท่านั้น (ไม่บังคับกรอก)
@@ -5989,6 +6037,8 @@ function resetFormForNextCase() {
       elements.udonCaseNoInput.value = '';
     }
   }
+  if (elements.caseExtraInput) elements.caseExtraInput.value = '';
+  if (state.tempModalValues) state.tempModalValues.caseExtra = '';
   if (elements.houseNoInput) elements.houseNoInput.value = '';
   if (elements.mooInput) elements.mooInput.value = '';
   if (elements.customOtherLocationName) elements.customOtherLocationName.value = '';

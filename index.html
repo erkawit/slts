@@ -37,7 +37,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260828_03">
+  <link rel="stylesheet" href="css/style.css?v=20260828_04">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -325,6 +325,21 @@
                         <i class="fa-solid fa-chevron-down text-xs"></i>
                       </div>
                     </div>
+                  </div>
+
+                  <!-- กล่องข้อความ: ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี เช่น ล.1-2) -->
+                  <div>
+                    <label for="caseExtraInput" class="block text-[11px] font-semibold text-gray-600 mb-1 flex items-center justify-between">
+                      <span><i class="fa-solid fa-circle-info text-blue-500 mr-1"></i>ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)</span>
+                      <span class="text-[10px] text-gray-400 font-normal">ไม่บังคับ</span>
+                    </label>
+                    <input 
+                      type="text" 
+                      id="caseExtraInput" 
+                      placeholder="เช่น ล.1-2, จำเลยที่ 1-2 (เว้นวรรค 1 เคาะต่อท้ายเลขคดี)" 
+                      class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2 text-xs font-medium text-gray-800 placeholder-gray-400 transition"
+                      autocomplete="off"
+                    >
                   </div>
                 </div>
               </div>
@@ -881,17 +896,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260828_03"></script>
-  <script src="js/compass.js?v=20260828_03"></script>
-  <script src="js/map.js?v=20260828_03"></script>
-  <script src="js/watermark.js?v=20260828_03"></script>
-  <script src="js/app.js?v=20260828_03"></script>
+  <script src="js/data.js?v=20260828_04"></script>
+  <script src="js/compass.js?v=20260828_04"></script>
+  <script src="js/map.js?v=20260828_04"></script>
+  <script src="js/watermark.js?v=20260828_04"></script>
+  <script src="js/app.js?v=20260828_04"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260828_03')
+        navigator.serviceWorker.register('./sw.js?v=20260828_04')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
