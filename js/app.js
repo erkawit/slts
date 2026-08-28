@@ -343,6 +343,8 @@ function initDOMElements() {
   elements.desktopPreviewImg = document.getElementById('desktopPreviewImg');
   elements.desktopImageSizeBadge = document.getElementById('desktopImageSizeBadge');
   elements.btnConfirmDesktopUpload = document.getElementById('btnConfirmDesktopUpload');
+  elements.chkDesktopHasWatermark = document.getElementById('chkDesktopHasWatermark');
+  elements.desktopWatermarkBadge = document.getElementById('desktopWatermarkBadge');
   
   // Camera Modal Elements
   elements.cameraModal = document.getElementById('cameraModal');
@@ -5014,8 +5016,32 @@ function initDesktopUploadEvents() {
     });
   }
 
+  // โหลดค่าตัวเลือก "ภาพถ่ายมีพิกัดบนภาพ" ที่บันทึกไว้ใน localStorage
+  const savedHasWatermark = localStorage.getItem('slts_desktop_has_watermark') === 'true';
+  if (elements.chkDesktopHasWatermark) {
+    elements.chkDesktopHasWatermark.checked = savedHasWatermark;
+    updateDesktopWatermarkBadge(savedHasWatermark);
+
+    elements.chkDesktopHasWatermark.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      localStorage.setItem('slts_desktop_has_watermark', isChecked ? 'true' : 'false');
+      updateDesktopWatermarkBadge(isChecked);
+    });
+  }
+
   if (elements.btnConfirmDesktopUpload) {
     elements.btnConfirmDesktopUpload.addEventListener('click', handleDesktopUpload);
+  }
+}
+
+function updateDesktopWatermarkBadge(hasWatermark) {
+  if (!elements.desktopWatermarkBadge) return;
+  if (hasWatermark) {
+    elements.desktopWatermarkBadge.textContent = 'ภาพมีพิกัดแล้ว (ไม่ออกแบบลายน้ำทับ)';
+    elements.desktopWatermarkBadge.className = 'text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200';
+  } else {
+    elements.desktopWatermarkBadge.textContent = 'ประทับลายน้ำอัตโนมัติ';
+    elements.desktopWatermarkBadge.className = 'text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200';
   }
 }
 
@@ -5048,16 +5074,7 @@ async function handleDesktopUpload() {
     return;
   }
 
-  showCustomLoading('กำลังประมวลผลลายน้ำและรูปภาพ...', 'กำลังสร้างภาพถ่ายพร้อมข้อมูลส่งหมาย');
-
   try {
-    const img = new Image();
-    img.src = state.selectedDesktopImageDataUrl;
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-    });
-
     const caseNumber = getFormattedCaseNumber();
     const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || 'ศาลจังหวัดอุดรธานี';
     const province = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || 'อุดรธานี';
@@ -5081,15 +5098,34 @@ async function handleDesktopUpload() {
       dateTime: WatermarkEngine.formatThaiDateTime(new Date())
     };
 
-    // วาดลายน้ำลงบนรูปภาพ
-    const watermarkedResult = await WatermarkEngine.renderWatermark(img, payloadData);
+    const hasWatermarkAlready = elements.chkDesktopHasWatermark ? elements.chkDesktopHasWatermark.checked : false;
+    let finalImageDataUrl;
+
+    if (hasWatermarkAlready) {
+      // ผู้ใช้ระบุว่าภาพมีพิกัด/ลายน้ำอยู่แล้ว ไม่ต้องประทับลายน้ำซ้ำ
+      showCustomLoading('กำลังประมวลผลรูปภาพ...', 'กำลังเตรียมไฟล์รูปภาพเพื่ออัปโหลด');
+      finalImageDataUrl = state.selectedDesktopImageDataUrl;
+    } else {
+      // วาดลายน้ำลงบนรูปภาพ
+      showCustomLoading('กำลังประมวลผลลายน้ำและรูปภาพ...', 'กำลังสร้างภาพถ่ายพร้อมข้อมูลส่งหมาย');
+      const img = new Image();
+      img.src = state.selectedDesktopImageDataUrl;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      const watermarkedResult = await WatermarkEngine.renderWatermark(img, payloadData);
+      finalImageDataUrl = watermarkedResult.dataUrl;
+    }
+
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
 
     hideCustomLoading();
 
     // บีบอัดรูปภาพให้ไม่เกิน 1MB (ไม่ต้องดาวน์โหลดไฟล์ลงเครื่องเพราะเป็นการอัปโหลดไฟล์จากเครื่อง)
-    const compressedImageBase64 = await compressImageToMax1MB(watermarkedResult.dataUrl);
+    const compressedImageBase64 = await compressImageToMax1MB(finalImageDataUrl);
 
     const uploadPayload = {
       action: 'upload_image',

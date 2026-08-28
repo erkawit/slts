@@ -37,7 +37,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260828_02">
+  <link rel="stylesheet" href="css/style.css?v=20260828_03">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -422,7 +422,7 @@
                     <i class="fa-solid fa-camera text-blue-600"></i>
                     <span>ถ่ายภาพสดหรือเลือกไฟล์ส่งหมาย</span>
                   </h3>
-                  <span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
+                  <span id="desktopWatermarkBadge" class="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">
                     ประทับลายน้ำอัตโนมัติ
                   </span>
                 </div>
@@ -446,6 +446,24 @@
                       <i class="fa-solid fa-image text-blue-600 mr-1"></i> เลือกไฟล์รูปภาพจากเครื่อง (เฉพาะไฟล์รูปภาพ) <span class="text-red-500">*</span>
                     </label>
                     <input type="file" id="desktopImageFileInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border border-gray-300 rounded-xl p-1 bg-white">
+                  </div>
+
+                  <!-- ตัวเลือก: ภาพถ่ายมีพิกัดบนภาพแล้ว -->
+                  <div class="bg-amber-50/70 border border-amber-200/90 rounded-xl p-3 flex items-start gap-2.5 transition">
+                    <input 
+                      type="checkbox" 
+                      id="chkDesktopHasWatermark" 
+                      class="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                    >
+                    <label for="chkDesktopHasWatermark" class="text-xs text-gray-700 font-semibold cursor-pointer select-none leading-relaxed">
+                      <span class="text-amber-900 font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-location-crosshairs text-amber-600"></i>
+                        <span>ภาพถ่ายมีพิกัดบนภาพ</span>
+                      </span>
+                      <span class="block text-[11px] font-normal text-gray-600 mt-0.5">
+                        (หากติ๊กเลือก ระบบจะไม่ทำลายน้ำซ้ำบนภาพ และจะจำการตั้งค่านี้ไว้สำหรับการใช้งานครั้งต่อไป)
+                      </span>
+                    </label>
                   </div>
 
                   <!-- Thumbnail Preview Container -->
@@ -863,17 +881,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260828_02"></script>
-  <script src="js/compass.js?v=20260828_02"></script>
-  <script src="js/map.js?v=20260828_02"></script>
-  <script src="js/watermark.js?v=20260828_02"></script>
-  <script src="js/app.js?v=20260828_02"></script>
+  <script src="js/data.js?v=20260828_03"></script>
+  <script src="js/compass.js?v=20260828_03"></script>
+  <script src="js/map.js?v=20260828_03"></script>
+  <script src="js/watermark.js?v=20260828_03"></script>
+  <script src="js/app.js?v=20260828_03"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260828_02')
+        navigator.serviceWorker.register('./sw.js?v=20260828_03')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
