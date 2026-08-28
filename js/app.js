@@ -277,15 +277,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // กำหนดขั้นตอนเริ่มต้นตามขนาดหน้าจอ (Mobile vs Desktop)
   if (window.innerWidth < 768) {
-    // จอมือถือ (< 768px): Camera-first & SweetAlert Form
+    // จอมือถือ (< 768px): เปิดหน้ากล้องถ่ายภาพสดทันที (ไม่โหลดฟอร์ม SweetAlert ขึ้นมาก่อน)
     openCameraModal().catch(e => console.warn('Camera open error:', e));
-    setTimeout(() => {
-      if (!state.selectedProvince) {
-        showProvinceSelectorModal(true);
-      } else {
-        showMobileSummonsFormModal(false);
-      }
-    }, 120);
   } else {
     // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
     switchTab('form');
@@ -1980,6 +1973,16 @@ window.openManualUploadModal = function() {
           otherCaseBox.classList.add('hidden');
         }
       });
+
+      const mUpPrefixInput = document.getElementById('mUp_udonPrefix');
+      if (mUpPrefixInput) {
+        mUpPrefixInput.addEventListener('input', (e) => {
+          e.target.value = e.target.value
+            .replace(/[^a-zA-Zก-๙\s]/g, '')
+            .replace(/^\s+/, '')
+            .replace(/\s{2,}/g, ' ');
+        });
+      }
 
       // สลับประเภทสถานที่
       locationTypeSelect.addEventListener('change', () => {
@@ -4292,6 +4295,17 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
 };
 
 window.handleModalPrefixInput = function(val) {
+  const input = document.getElementById('m_prefix');
+  if (input && val) {
+    const formatted = val
+      .replace(/[^a-zA-Zก-๙\s]/g, '')
+      .replace(/^\s+/, '')
+      .replace(/\s{2,}/g, ' ');
+    if (formatted !== val) {
+      input.value = formatted;
+      val = formatted;
+    }
+  }
   const clean = (val || '').trim();
   const chips = document.querySelectorAll('.slts-prefix-chip');
   chips.forEach(c => {
@@ -4577,6 +4591,7 @@ function applyModalFormValues(val) {
   if (val.coords && elements.coordinatesInput) {
     elements.coordinatesInput.value = val.coords;
   }
+  updateCaptureButtonState();
 }
 
 // -------------------------------------------------------------------------
@@ -4681,10 +4696,14 @@ function initFormEventListeners() {
     });
   }
 
-  // อักษรนำหน้า: ให้กรอกได้เฉพาะตัวอักษร (ไทย / อังกฤษ)
+  // อักษรนำหน้า: ให้กรอกได้เฉพาะตัวอักษร (ไทย / อังกฤษ) และเคาะวรรคได้ 1 เคาะ
   if (elements.udonPrefixInput) {
     elements.udonPrefixInput.addEventListener('input', (e) => {
-      e.target.value = e.target.value.replace(/[^a-zA-Zก-๙]/g, '');
+      e.target.value = e.target.value
+        .replace(/[^a-zA-Zก-๙\s]/g, '')
+        .replace(/^\s+/, '')
+        .replace(/\s{2,}/g, ' ');
+      updateCaptureButtonState();
     });
   }
 
@@ -4692,6 +4711,7 @@ function initFormEventListeners() {
   if (elements.udonCaseNoInput) {
     elements.udonCaseNoInput.addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/\D/g, '');
+      updateCaptureButtonState();
     });
   }
 
@@ -4699,6 +4719,7 @@ function initFormEventListeners() {
   if (elements.otherCaseNoInput) {
     elements.otherCaseNoInput.addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/\D/g, '');
+      updateCaptureButtonState();
     });
   }
 
@@ -4706,7 +4727,21 @@ function initFormEventListeners() {
   if (elements.mooInput) {
     elements.mooInput.addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/\D/g, '');
+      updateCaptureButtonState();
     });
+  }
+
+  if (elements.houseNoInput) {
+    elements.houseNoInput.addEventListener('input', updateCaptureButtonState);
+  }
+  if (elements.customOtherLocationName) {
+    elements.customOtherLocationName.addEventListener('input', updateCaptureButtonState);
+  }
+  if (elements.localAdminNameInput) {
+    elements.localAdminNameInput.addEventListener('input', updateCaptureButtonState);
+  }
+  if (elements.courtNameInput) {
+    elements.courtNameInput.addEventListener('input', updateCaptureButtonState);
   }
 
   // สลับประเภทสถานที่ (หมายบ้าน / ที่ทำการปกครองส่วนท้องถิ่น / อื่นๆ)
@@ -5318,12 +5353,74 @@ async function checkAndRequestCameraPermission(isUserInitiated = false) {
 
 window.checkAndRequestCameraPermission = checkAndRequestCameraPermission;
 
+/**
+ * ตรวจสอบความสมบูรณ์ของข้อมูลส่งหมายก่อนอนุญาตให้ถ่ายภาพ
+ * - เลขคดี (ศาลปกติ: อักษร + เลขคดี | หมาย ต.: เลขคดี ต. | ศาลไม่สังกัดภาค: ชื่อศาล + อักษร + เลขคดี)
+ * - สถานที่ส่งหมาย (หมายบ้าน: บ้านเลขที่ | อื่นๆ: ระบุสถานที่ | ท้องถิ่น: ชื่อหน่วยงาน)
+ */
+function isFormValidForCapture() {
+  const courtCategory = state.selectedCourtCategory || state.desktopCourtCategory || (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || 'ศาลจังหวัด';
+  const isOther = courtCategory === 'ศาลอื่น' || courtCategory === 'หมายศาลอื่น';
+
+  if (isOther) {
+    const otherNo = (elements.otherCaseNoInput ? elements.otherCaseNoInput.value : '').trim();
+    if (!otherNo) return false;
+  } else {
+    const prefix = (elements.udonPrefixInput ? elements.udonPrefixInput.value : '').trim();
+    const caseNo = (elements.udonCaseNoInput ? elements.udonCaseNoInput.value : '').trim();
+    if (!prefix || !caseNo) return false;
+    if (courtCategory === 'ศาลที่ไม่สังกัดภาค') {
+      const customCourt = (elements.courtNameInput ? elements.courtNameInput.value : '').trim();
+      if (!customCourt) return false;
+    }
+  }
+
+  const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
+  if (locationType === 'หมายบ้าน') {
+    const houseNo = elements.houseNoInput ? elements.houseNoInput.value.trim() : '';
+    if (!houseNo) return false;
+  } else if (locationType === 'อื่นๆ') {
+    const otherLoc = elements.customOtherLocationName ? elements.customOtherLocationName.value.trim() : '';
+    if (!otherLoc) return false;
+  } else if (locationType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+    const adminName = elements.localAdminNameInput ? elements.localAdminNameInput.value.trim() : '';
+    if (!adminName) return false;
+  }
+
+  return true;
+}
+
+window.isFormValidForCapture = isFormValidForCapture;
+
+/**
+ * อัปเดตสถานะปุ่มชัตเตอร์ถ่ายภาพ (Disabled / Enabled)
+ */
+function updateCaptureButtonState() {
+  const btnCapture = elements.btnCapture || document.getElementById('btnCapture');
+  if (!btnCapture) return;
+
+  const isValid = isFormValidForCapture();
+  if (isValid) {
+    btnCapture.disabled = false;
+    btnCapture.classList.remove('opacity-40', 'cursor-not-allowed', 'filter', 'grayscale');
+    btnCapture.removeAttribute('title');
+    btnCapture.setAttribute('title', 'กดถ่ายภาพ');
+  } else {
+    btnCapture.disabled = true;
+    btnCapture.classList.add('opacity-40', 'cursor-not-allowed', 'filter', 'grayscale');
+    btnCapture.setAttribute('title', 'กรุณากรอกข้อมูลเลขคดีและสถานที่ส่งหมายก่อนถ่ายภาพ (กดปุ่ม "ฟอร์มข้อมูล")');
+  }
+}
+
+window.updateCaptureButtonState = updateCaptureButtonState;
+
 async function openCameraModal() {
   // เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
   setCaptureOrientation('landscape');
 
   elements.cameraModal.classList.remove('hidden');
   elements.cameraModal.classList.add('flex');
+  updateCaptureButtonState();
   await startCameraStream();
   startLiveCameraHUD();
 }
@@ -5357,10 +5454,20 @@ function startLiveCameraHUD() {
     const headingDeg = window.compassManager ? window.compassManager.getHeading() : 0;
     const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
 
+    const caseNum = getFormattedCaseNumber();
+    const locText = getFullLocationText();
+    const isReady = isFormValidForCapture();
+
     if (elements.liveBadgeDate) elements.liveBadgeDate.textContent = `📅  ${dateStr}`;
     if (elements.liveBadgeCoords) elements.liveBadgeCoords.textContent = `📍  ${latFormatted} ${lngFormatted} ${headingDeg}° ${dirText}`;
-    if (elements.liveBadgeLocation) elements.liveBadgeLocation.textContent = `🏠  ${getFullLocationText()}`;
-    if (elements.liveBadgeCase) elements.liveBadgeCase.textContent = `⚖️  เลขคดี: ${getFormattedCaseNumber()}`;
+    if (elements.liveBadgeLocation) {
+      elements.liveBadgeLocation.textContent = isReady && locText ? `🏠  ${locText}` : (locText || `🏠  (กด "ฟอร์มข้อมูล" เพื่อระบุสถานที่)`);
+    }
+    if (elements.liveBadgeCase) {
+      elements.liveBadgeCase.textContent = isReady && caseNum ? `⚖️  เลขคดี: ${caseNum}` : `⚖️  เลขคดี: (กด "ฟอร์มข้อมูล")`;
+    }
+
+    updateCaptureButtonState();
   };
 
   updateHUD();
@@ -5422,6 +5529,23 @@ async function startCameraStream() {
 }
 
 async function captureAndProcessPhoto() {
+  if (!isFormValidForCapture()) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ยังไม่ได้กรอกข้อมูลส่งหมาย',
+      text: 'กรุณากดปุ่ม "ฟอร์มข้อมูล" ด้านบน เพื่อระบุข้อมูลเลขคดีและสถานที่ส่งหมายให้ครบถ้วนก่อนถ่ายภาพ',
+      confirmButtonText: 'เปิดฟอร์มข้อมูล',
+      confirmButtonColor: '#2563eb',
+      showCancelButton: true,
+      cancelButtonText: 'ปิด'
+    }).then((res) => {
+      if (res.isConfirmed) {
+        showMobileSummonsFormModal(true);
+      }
+    });
+    return;
+  }
+
   if (!elements.videoPreview.videoWidth) {
     Swal.fire({
       icon: 'error',

@@ -37,7 +37,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260827_10">
+  <link rel="stylesheet" href="css/style.css?v=20260828_01">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -762,10 +762,10 @@
       </div>
       
       <div class="flex items-center gap-2 flex-nowrap">
-        <!-- ปุ่มแก้ไขข้อมูลหมายด่วน (Single-Line Compact) -->
-        <button id="btnEditMobileForm" type="button" onclick="showMobileSummonsFormModal(true)" class="px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap" title="คลิกเพื่อแก้ไขข้อมูลหมาย">
-          <i class="fa-solid fa-pen-to-square text-xs"></i>
-          <span class="whitespace-nowrap">แก้ไขข้อมูล</span>
+        <!-- ปุ่มเปิดฟอร์มกรอกข้อมูลส่งหมาย (Single-Line Compact) -->
+        <button id="btnEditMobileForm" type="button" onclick="showMobileSummonsFormModal(true)" class="px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap" title="คลิกเพื่อกรอก/แก้ไขข้อมูลส่งหมาย">
+          <i class="fa-solid fa-file-pen text-xs"></i>
+          <span class="whitespace-nowrap">ฟอร์มข้อมูล</span>
         </button>
 
         <!-- ปุ่มสลับมุมมอง แนวนอน 4:3 / แนวตั้ง 3:4 (Single-Line Compact) -->
@@ -863,17 +863,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260827_10"></script>
-  <script src="js/compass.js?v=20260827_10"></script>
-  <script src="js/map.js?v=20260827_10"></script>
-  <script src="js/watermark.js?v=20260827_10"></script>
-  <script src="js/app.js?v=20260827_10"></script>
+  <script src="js/data.js?v=20260828_01"></script>
+  <script src="js/compass.js?v=20260828_01"></script>
+  <script src="js/map.js?v=20260828_01"></script>
+  <script src="js/watermark.js?v=20260828_01"></script>
+  <script src="js/app.js?v=20260828_01"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260827_10')
+        navigator.serviceWorker.register('./sw.js?v=20260828_01')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

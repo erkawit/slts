@@ -1021,13 +1021,18 @@ table.dataTable tbody td {
 .slts-close-btn:hover { color: #fff !important; }
 
 /* ================================================================
-   Mobile Fullscreen Optimization (<= 456px)
+   Mobile Fullscreen & Performance Optimization (<= 468px)
    ================================================================ */
-@media (max-width: 456px) {
+@media (max-width: 468px) {
   html, body {
     height: 100%;
     height: 100dvh;
     overflow-x: hidden;
+  }
+
+  /* ซ่อนแบบฟอร์มพื้นหลังเพื่อประหยัดทรัพยากรการประมวลผลบนมือถือ */
+  #tabContentForm {
+    display: none !important;
   }
 
   #cameraModal {
