@@ -1369,7 +1369,8 @@ async function uploadWithProgressBar(payload, title = 'กำลังอัป�
       headers: {
         'Content-Type': 'text/plain;charset=utf-8'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      redirect: 'follow'
     });
 
     clearInterval(progressInterval);
@@ -1379,13 +1380,34 @@ async function uploadWithProgressBar(payload, title = 'กำลังอัป�
     if (bar) bar.style.width = '100%';
     if (txt) txt.textContent = '100%';
 
-    const resJson = await response.json();
+    const rawText = await response.text();
+    let resJson;
+    try {
+      resJson = JSON.parse(rawText);
+    } catch (parseErr) {
+      console.error('GAS response raw text:', rawText);
+      if (rawText.includes('<!DOCTYPE') || rawText.includes('<html')) {
+        if (rawText.includes('accounts.google.com') || rawText.includes('Sign in') || rawText.includes('เข้าสู่ระบบ')) {
+          throw new Error('Google Apps Script แจ้งเตือนสิทธิ์การเข้าถึง: โปรดตรวจสอบการ Deploy Web App ใน Google Apps Script ว่าได้ตั้งค่า "ผู้มีสิทธิ์เข้าถึง (Who has access)" เป็น "ทุกคน (Anyone)" หรือยัง');
+        }
+        if (rawText.includes('Service invoked too many times') || rawText.includes('Quota')) {
+          throw new Error('Google Apps Script ใช้งานเกินโควตาประจำวันของ Google');
+        }
+        throw new Error('Google Apps Script ส่งข้อมูลกลับมาเป็นหน้าเว็บ HTML (สาเหตุส่วนใหญ่เกิดจากการตั้งค่า Deploy Web App ใน Apps Script ที่ยังไม่ได้เลือก Anyone หรือ Web App URL ไม่ถูกต้อง)');
+      }
+      throw new Error('ไม่สามารถแปลงข้อมูลตอบกลับจาก Google Apps Script ได้ (Invalid JSON): ' + parseErr.message);
+    }
+
+    if (resJson && resJson.status === 'error') {
+      throw new Error(resJson.message || 'เกิดข้อผิดพลาดจาก Google Apps Script');
+    }
+
     return resJson;
 
   } catch (err) {
     clearInterval(progressInterval);
     console.error('uploadWithProgressBar fetch error:', err);
-    throw new Error('เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่าย หรือไม่สามารถติดต่อ Google Apps Script ได้: ' + err.message);
+    throw err;
   }
 }
 
@@ -5037,16 +5059,18 @@ async function handleDesktopUpload() {
     });
 
     const caseNumber = getFormattedCaseNumber();
-    const courtType = elements.courtTypeSelect.value;
-    const district = elements.districtSelect.value;
-    const subdistrict = elements.subdistrictSelect.value;
-    const locationType = elements.locationTypeSelect.value;
+    const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || 'ศาลจังหวัดอุดรธานี';
+    const province = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || 'อุดรธานี';
+    const district = elements.districtSelect ? elements.districtSelect.value : '';
+    const subdistrict = elements.subdistrictSelect ? elements.subdistrictSelect.value : '';
+    const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
     const locationText = getFullLocationText();
     const heading = window.compassManager ? window.compassManager.getHeading() : 0;
 
     const payloadData = {
       caseNumber: caseNumber,
       courtType: courtType,
+      province: province,
       district: district,
       subdistrict: subdistrict,
       locationType: locationType,
