@@ -1724,11 +1724,11 @@ window.openCaseHistoryModal = function(caseNumber) {
   Swal.fire({
     title: `ประวัติการส่งหมาย: ${caseNumber}`,
     html: `
-      <div class="text-left text-xs text-gray-600 mb-3">
-        <span>พบประวัติทั้งหมด <b>${records.length}</b> รายการ</span>
+      <div class="text-left text-xs sm:text-sm text-gray-600 mb-3 flex items-center justify-between">
+        <span>พบประวัติทั้งหมด <b class="text-blue-600 font-bold">${records.length}</b> รายการ</span>
       </div>
-      <div class="overflow-x-auto">
-        <table id="caseSubDataTable" class="w-full text-left text-xs stripe hover" style="width:100%">
+      <div class="overflow-x-auto w-full">
+        <table id="caseSubDataTable" class="w-full text-left text-xs sm:text-sm stripe hover" style="width:100%">
           <thead>
             <tr class="bg-gray-100 text-gray-700 font-bold">
               <th>วันเดือนปีและเวลา</th>
@@ -1743,7 +1743,10 @@ window.openCaseHistoryModal = function(caseNumber) {
         </table>
       </div>
     `,
-    width: showDeleteCol ? '750px' : '650px',
+    width: isDesktop ? '80%' : (showDeleteCol ? '750px' : '95%'),
+    customClass: {
+      popup: 'p-4 sm:p-6 rounded-2xl'
+    },
     showCloseButton: true,
     showConfirmButton: false,
     allowOutsideClick: false,
