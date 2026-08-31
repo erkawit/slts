@@ -30,13 +30,12 @@ function doPost(e) {
 
     const folder = DriveApp.getFolderById(FOLDER_ID);
     const spreadsheet = getTargetSpreadsheetFile(folder);
-    const sheet = getSummonsSheet(spreadsheet);
-    const usersSheet = getUsersSheet(spreadsheet);
 
     // ==========================================
     // ACTION: USER MANAGEMENT (จัดการผู้ใช้งานใน Sheet 'users')
     // ==========================================
     if (data.action === "get_users") {
+      const usersSheet = getUsersSheet(spreadsheet);
       const uData = usersSheet.getDataRange().getValues();
       const usersList = [];
       for (let i = 1; i < uData.length; i++) {
@@ -57,6 +56,7 @@ function doPost(e) {
     }
 
     if (data.action === "save_user" || data.action === "update_user_password" || data.action === "update_user_profile") {
+      const usersSheet = getUsersSheet(spreadsheet);
       const uData = usersSheet.getDataRange().getValues();
       const targetUsername = String(data.username || '').trim();
       if (!targetUsername) {
@@ -96,6 +96,7 @@ function doPost(e) {
     }
 
     if (data.action === "delete_user") {
+      const usersSheet = getUsersSheet(spreadsheet);
       const targetUsername = String(data.username || '').trim();
       if (targetUsername.toLowerCase() === 'admin') {
         throw new Error("ไม่สามารถลบผู้ดูแลระบบหลัก (admin) ได้");
@@ -125,6 +126,7 @@ function doPost(e) {
     }
 
     if (data.action === "sync_all_users" && Array.isArray(data.users)) {
+      const usersSheet = getUsersSheet(spreadsheet);
       const uData = usersSheet.getDataRange().getValues();
       const existingUsernames = new Set();
       for (let i = 1; i < uData.length; i++) {
@@ -155,6 +157,7 @@ function doPost(e) {
     // ป้องกันการลบแถวทั้งหมด 100% โดยอ้างอิง Row Index และ Drive File ID ที่ยืนยันแล้วเท่านั้น
     // ==========================================
     if (data.action === "delete") {
+      const sheet = getSummonsSheet(spreadsheet);
       let deletedRows = 0;
       let deletedFiles = 0;
 
@@ -245,6 +248,7 @@ function doPost(e) {
     // ACTION 2: UPLOAD_IMAGE (อัปโหลดรูปภาพลง Google Drive และบันทึกข้อมูลเข้า Google Sheet ในขั้นตอนเดียว)
     // ==========================================
     if (data.action === "upload_image" || !data.action) {
+      const sheet = getSummonsSheet(spreadsheet);
       let fileUrl = "";
       let fileId = "";
 
@@ -258,7 +262,7 @@ function doPost(e) {
         }
       }
 
-      // บันทึกรูปภาพ (Base64) ลงใน Google Drive Folder (ไม่สร้างไฟล์ .txt)
+      // บันทึกรูปภาพ (Base64) ลงใน Google Drive Folder (เร็วสูงสุด)
       if (data.imageBase64 && data.fileName) {
         let base64String = data.imageBase64;
         if (base64String.indexOf("base64,") !== -1) {
@@ -269,16 +273,15 @@ function doPost(e) {
         const blob = Utilities.newBlob(decodedBytes, "image/jpeg", data.fileName);
         const createdFile = folder.createFile(blob);
         
-        createdFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-        fileUrl = createdFile.getUrl();
         fileId = createdFile.getId();
+        fileUrl = createdFile.getUrl();
       }
 
-      const sheetData = sheet.getDataRange().getValues();
-      let targetRowIndex = -1;
-
-      // 1. ถ้าเป็นการแทนที่แถวเดิม (Overwrite โดยระบุ rowIndex หรือ ค้นหาแถวเป้าหมาย)
+      // 1. ถ้าเป็นการแทนที่แถวเดิม (Overwrite) -> ค้นหาและอัปเดตเฉพาะแถวเป้าหมาย
       if (data.overwrite) {
+        const sheetData = sheet.getDataRange().getValues();
+        let targetRowIndex = -1;
+
         if (data.rowIndex && Number(data.rowIndex) > 1 && Number(data.rowIndex) <= sheetData.length) {
           targetRowIndex = Number(data.rowIndex);
         } else if (data.oldFileId) {
@@ -289,15 +292,15 @@ function doPost(e) {
             }
           }
         }
-      }
 
-      if (targetRowIndex !== -1 && data.overwrite) {
-        // อัปเดตแถวเดิมใน Google Sheet (แทนที่รูปภาพ)
-        sheet.getRange(targetRowIndex, 11).setValue(data.fileName || "");
-        sheet.getRange(targetRowIndex, 12).setValue(fileUrl);
-        sheet.getRange(targetRowIndex, 14).setValue(fileId);
+        if (targetRowIndex !== -1) {
+          // อัปเดตแถวเดิมใน Google Sheet (แทนที่รูปภาพ)
+          sheet.getRange(targetRowIndex, 11).setValue(data.fileName || "");
+          sheet.getRange(targetRowIndex, 12).setValue(fileUrl);
+          sheet.getRange(targetRowIndex, 14).setValue(fileId);
+        }
       } else {
-        // เพิ่มข้อมูลใหม่ 1 แถวเท่านั้น (Single Unified Row)
+        // 2. การเพิ่มข้อมูลใหม่ (New Row) -> appendRow โดยตรงทันที ไม่ต้องโหลดตารางเก่ามาวน Loop (เร็วสูงสุด)
         const timestamp = new Date();
         const thaiDateStr = data.dateTime || Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
 

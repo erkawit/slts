@@ -168,9 +168,9 @@ class WatermarkEngine {
     // 7. [มุมขวาล่าง (Bottom-Right)]: กล่องข้อมูลสีดำสนิท ตัวหนังสือและสัญลักษณ์สีขาวล้วน ขยายขนาด 100%
     await this.drawInfoBadge(ctx, width, height, scale, data);
 
-    // แปลงผลลัพธ์เป็น Data URL และ Blob
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+    // แปลงผลลัพธ์เป็น Data URL และ Blob (คุณภาพ 0.88 คมชัดสูงและประมวลผลเร็ว)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.88));
     const textContent = this.generateTextFileContent(data);
 
     return { canvas, dataUrl, blob, textContent, orientation };
