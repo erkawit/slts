@@ -1745,7 +1745,8 @@ window.openCaseHistoryModal = function(caseNumber) {
     `,
     width: isDesktop ? '80%' : (showDeleteCol ? '750px' : '95%'),
     customClass: {
-      popup: 'p-4 sm:p-6 rounded-2xl'
+      container: 'case-history-swal-container',
+      popup: 'case-history-swal-popup p-4 sm:p-6 rounded-2xl'
     },
     showCloseButton: true,
     showConfirmButton: false,
