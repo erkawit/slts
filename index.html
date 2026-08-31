@@ -37,7 +37,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260828_04">
+  <link rel="stylesheet" href="css/style.css?v=20260831_01">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -164,7 +164,7 @@
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
           <!-- LEFT PANEL: แบบฟอร์มกรอกข้อมูลส่งหมาย (lg:col-span-7) -->
-          <div class="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+          <div id="desktopFormContainer" class="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             
             <!-- Panel Header -->
             <div class="bg-gradient-to-r from-blue-50/90 via-indigo-50/80 to-blue-50/90 border-b border-gray-100 px-6 py-4 flex items-center justify-between">
@@ -427,7 +427,7 @@
           </div>
 
           <!-- RIGHT PANEL: เมนูอัปโหลดไฟล์ภาพและศูนย์ควบคุม (แสดงเฉพาะจอคอมพิวเตอร์ > 768px) -->
-          <div class="hidden lg:block lg:col-span-5 space-y-5">
+          <div id="desktopUploadPanel" class="hidden lg:block lg:col-span-5 space-y-5">
             
             <!-- Upload & Dispatch Action Card -->
             <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
@@ -545,7 +545,7 @@
               <i class="fa-solid fa-rotate"></i>
               <span>รีเฟรชข้อมูล</span>
             </button>
-            <a href="https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/edit?usp=sharing" target="_blank" class="px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-xl text-xs sm:text-sm transition flex items-center gap-2 border border-emerald-200 shadow-sm">
+            <a id="btnOpenGoogleSheetDirect" href="https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/edit?usp=sharing" target="_blank" class="px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-xl text-xs sm:text-sm transition flex items-center gap-2 border border-emerald-200 shadow-sm">
               <i class="fa-solid fa-file-excel"></i>
               <span>เปิด Google Sheet</span>
             </a>
@@ -896,17 +896,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260828_04"></script>
-  <script src="js/compass.js?v=20260828_04"></script>
-  <script src="js/map.js?v=20260828_04"></script>
-  <script src="js/watermark.js?v=20260828_04"></script>
-  <script src="js/app.js?v=20260828_04"></script>
+  <script src="js/data.js?v=20260831_01"></script>
+  <script src="js/compass.js?v=20260831_01"></script>
+  <script src="js/map.js?v=20260831_01"></script>
+  <script src="js/watermark.js?v=20260831_01"></script>
+  <script src="js/app.js?v=20260831_01"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260828_04')
+        navigator.serviceWorker.register('./sw.js?v=20260831_01')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

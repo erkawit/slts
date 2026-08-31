@@ -1083,4 +1083,29 @@ table.dataTable tbody td {
   background: rgba(255, 255, 255, 0.5) !important;
 }
 
+/* ========================================================= */
+/* การแสดงผลเฉพาะหน้าจอความกว้างมากกว่า 768px (Desktop View) */
+/* ========================================================= */
+@media (min-width: 769px) {
+  /* ปิดการแสดงผลปุ่ม "เปิด Google Sheet" ในหน้าตารางประวัติส่งหมาย */
+  #btnOpenGoogleSheetDirect {
+    display: none !important;
+  }
+
+  /* ปิดการแสดงผล "ถ่ายภาพสดหรือเลือกไฟล์ส่งหมาย" ในหน้าบันทึกส่งหมาย */
+  #desktopUploadPanel {
+    display: none !important;
+  }
+
+  /* ขยายแบบฟอร์มบันทึกส่งหมายให้จัดกึ่งกลางและกว้างสมดุล */
+  #desktopFormContainer {
+    grid-column: span 12 / span 12 !important;
+    max-width: 56rem !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    width: 100% !important;
+  }
+}
+
+
 
