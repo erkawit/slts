@@ -7233,15 +7233,19 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 /**
- * จัดลำดับเส้นทางแบบ Nearest Neighbor TSP ให้ใกล้เคียงจุดเริ่มต้นที่สุด
+ * จัดลำดับเส้นทางแบบ Nearest Neighbor TSP เฉพาะจุดที่มีพิกัดถูกต้อง
  */
 function optimizeStopsSequence(stops, startLat = null, startLng = null) {
   if (!stops || stops.length <= 1) return stops;
-  const remaining = [...stops];
+
+  const stopsWithCoords = stops.filter(s => s.lat && s.lng && !isNaN(s.lat) && !isNaN(s.lng) && s.lat > 0 && s.lng > 0);
+  const stopsWithoutCoords = stops.filter(s => !s.lat || !s.lng || isNaN(s.lat) || isNaN(s.lng) || s.lat <= 0 || s.lng <= 0);
+
+  const remaining = [...stopsWithCoords];
   const ordered = [];
 
-  let currentLat = (startLat !== null && !isNaN(startLat)) ? startLat : stops[0].lat;
-  let currentLng = (startLng !== null && !isNaN(startLng)) ? startLng : stops[0].lng;
+  let currentLat = (startLat !== null && !isNaN(startLat)) ? startLat : (remaining[0] ? remaining[0].lat : 17.4138);
+  let currentLng = (startLng !== null && !isNaN(startLng)) ? startLng : (remaining[0] ? remaining[0].lng : 102.7872);
 
   while (remaining.length > 0) {
     let nearestIdx = 0;
@@ -7260,7 +7264,11 @@ function optimizeStopsSequence(stops, startLat = null, startLng = null) {
     currentLng = nextStop.lng;
   }
 
-  return ordered;
+  stopsWithoutCoords.forEach(s => {
+    s.legDistanceKm = 0;
+  });
+
+  return [...ordered, ...stopsWithoutCoords];
 }
 
 /**
@@ -7280,26 +7288,23 @@ function getApproximateCoords(district, subdistrict) {
 }
 
 /**
- * ตรวจสอบเปรียบเทียบแถวข้อมูลกับประวัติส่งหมายในระบบ
- * ถ้าตรงกับประวัติ -> matchType: 'exact' (ไฮไลต์)
- * ถ้าไม่ตรงกับประวัติ -> matchType: 'none' (แสดงรายการปกติ)
+ * ตรวจสอบเปรียบเทียบเลขคดีแต่ละคดีกับประวัติส่งหมายในระบบ
+ * ถ้าตรงกับประวัติ -> matchType: 'exact' (มีพิกัด Lat, Lng และภาพถ่าย)
+ * ถ้าไม่ตรงกับประวัติ -> matchType: 'none' (ไม่มีหมุดพิกัด ไม่ลากเส้น)
  */
-function matchRowWithHistory(cases, houseNo, subdistrict, district, locationText) {
+function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, locationText) {
   const allRows = state.allSheetRows || [];
   let matched = null;
 
-  // 1. ตรวจสอบจากทุกเลขคดีในแถวนี้
-  for (const c of cases) {
-    const cleanC = c.replace(/[\s\.\/\-\_]/g, '').toLowerCase();
-    if (!cleanC) continue;
+  const cleanC = (caseNumber || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+  if (cleanC) {
     matched = allRows.find(r => {
       const rowC = (r['เลขคดี'] || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
       return rowC && (rowC === cleanC || rowC.includes(cleanC) || cleanC.includes(rowC));
     });
-    if (matched) break;
   }
 
-  // 2. ถ้าไม่พบเลขคดี ให้ตรวจสอบจาก บ้านเลขที่ + หมู่ + ตำบล
+  // ถ้าไม่พบเลขคดี ให้ตรวจสอบจาก บ้านเลขที่ + หมู่ + ตำบล
   if (!matched && subdistrict && houseNo) {
     matched = allRows.find(r => {
       const rSub = (r['ตำบล'] || '').trim();
@@ -7314,7 +7319,7 @@ function matchRowWithHistory(cases, houseNo, subdistrict, district, locationText
   if (matched) {
     const lat = parseFloat(matched['ละติจูด (Lat)'] || matched['ละติจูด'] || 0);
     const lng = parseFloat(matched['ลองจิจูด (Lng)'] || matched['ลองจิจูด'] || 0);
-    if (lat > 0 && lng > 0) {
+    if (!isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0) {
       return {
         matchedRow: matched,
         lat: lat,
@@ -7327,12 +7332,11 @@ function matchRowWithHistory(cases, houseNo, subdistrict, district, locationText
     }
   }
 
-  // ไม่พบในประวัติ -> ใช้พิกัดประมาณการ และระบุเป็น 'none' เพื่อแสดงรายการปกติ
-  const approx = getApproximateCoords(district, subdistrict);
+  // ไม่พบในประวัติ -> ไม่มีหมุดพิกัด (lat = null, lng = null) ไม่ต้องปักหมุดและไม่ลากเส้น
   return {
     matchedRow: null,
-    lat: approx.lat,
-    lng: approx.lng,
+    lat: null,
+    lng: null,
     matchType: 'none',
     locationText: locationText,
     imageUrl: '',
@@ -7341,7 +7345,7 @@ function matchRowWithHistory(cases, houseNo, subdistrict, district, locationText
 }
 
 /**
- * สกัดรายการตารางจ่ายหมายจาก PDF Items ตามพิกัดแถวและคอลัมน์ (Table-Aware Parser)
+ * สกัดรายการตารางจ่ายหมายจาก PDF Items โดยแยกเลขคดีแต่ละรายการออกจากกันตามตาราง
  */
 async function parsePdfDispatchFile(file) {
   if (typeof pdfjsLib === 'undefined') {
@@ -7387,7 +7391,7 @@ async function parsePdfDispatchFile(file) {
       g.lineStr = g.items.map(it => it.text).filter(t => t).join(' ');
     });
 
-    // รวบรวมแต่ละแถวตาราง (1, 2, 3, 4...) โดยไม่รวมรายการปนกัน
+    // รวบรวมแต่ละแถวตาราง
     let currentTableRow = null;
     const tableRows = [];
     const casePattern = /([ตพดขฝผบมฟวยอEเส\.\s]{1,10}\d{1,6}\s*\/\s*\d{2,4})/i;
@@ -7418,7 +7422,7 @@ async function parsePdfDispatchFile(file) {
       tableRows.push(currentTableRow);
     }
 
-    // แปลงแต่ละแถวตารางให้เป็น 1 รายการส่งหมายตามลำดับ
+    // แปลงแต่ละแถวตาราง และแยกเลขคดีแต่ละคดีออกเป็น 1 รายการเดี่ยว
     tableRows.forEach(row => {
       const fullRowText = row.lines.join(' ');
 
@@ -7432,9 +7436,6 @@ async function parsePdfDispatchFile(file) {
       }
 
       if (allCases.length === 0) return;
-
-      const primaryCase = allCases[0];
-      const displayCase = allCases.join(', ');
 
       // 2. สกัดอำเภอ
       let district = 'เมืองอุดรธานี';
@@ -7467,24 +7468,25 @@ async function parsePdfDispatchFile(file) {
       const hMatch = locationText.match(/^(\d+(\/\d+)?)/);
       if (hMatch) houseNo = hMatch[1];
 
-      // 5. ตรวจสอบเปรียบเทียบกับประวัติส่งหมาย
-      const matchRes = matchRowWithHistory(allCases, houseNo, subdistrict, district, locationText);
+      // 5. แยกเลขคดีแต่ละคดีเป็น 1 รายการอิสระ และเทียบกับประวัติส่งหมาย
+      allCases.forEach(caseNo => {
+        const matchRes = matchSingleCaseWithHistory(caseNo, houseNo, subdistrict, district, locationText);
 
-      allParsedRows.push({
-        no: allParsedRows.length + 1,
-        pdfRowIndex: row.rowIndex || (allParsedRows.length + 1),
-        caseNumber: displayCase,
-        primaryCase: primaryCase,
-        allCases: allCases,
-        locationText: matchRes.locationText || locationText,
-        subdistrict: subdistrict || matchRes.subdistrict || '',
-        district: district,
-        lat: matchRes.lat,
-        lng: matchRes.lng,
-        imageUrl: matchRes.imageUrl || '',
-        matchType: matchRes.matchType,
-        isMatched: matchRes.matchType === 'exact',
-        matchedRow: matchRes.matchedRow
+        allParsedRows.push({
+          no: allParsedRows.length + 1,
+          pdfRowIndex: row.rowIndex || (allParsedRows.length + 1),
+          caseNumber: caseNo,
+          locationText: matchRes.locationText || locationText,
+          subdistrict: subdistrict || matchRes.subdistrict || '',
+          district: district,
+          lat: matchRes.lat,
+          lng: matchRes.lng,
+          imageUrl: matchRes.imageUrl || '',
+          matchType: matchRes.matchType,
+          isMatched: matchRes.matchType === 'exact',
+          hasCoords: Boolean(matchRes.lat && matchRes.lng),
+          matchedRow: matchRes.matchedRow
+        });
       });
     });
   }
@@ -7506,15 +7508,20 @@ async function parseImageDispatchFile(file) {
 
   const lines = ret.data.text.split('\n');
   const allParsedRows = [];
-  const casePattern = /([ตพดขฝผบมฟวยอEเส\.\s]{1,10}\d{1,6}\s*\/\s*\d{2,4})/i;
+  const globalCaseRegex = /([ตพดขฝผบมฟวยอEเส\.\s]{1,10}\d{1,6}\s*\/\s*\d{2,4})/gi;
 
   lines.forEach(line => {
     const trimmed = line.trim();
     if (!trimmed || trimmed.includes('บัญชีจ่ายหมาย') || trimmed.includes('ศาลจังหวัด')) return;
 
-    const matchCase = trimmed.match(casePattern);
-    if (matchCase) {
-      const caseNumber = matchCase[1].replace(/\s+/g, '').trim();
+    let m;
+    const allCases = [];
+    while ((m = globalCaseRegex.exec(trimmed)) !== null) {
+      const c = m[1].replace(/\s+/g, '').trim();
+      if (!allCases.includes(c)) allCases.push(c);
+    }
+
+    if (allCases.length > 0) {
       let district = 'เมืองอุดรธานี';
       if (trimmed.includes('กุมภวาปี')) district = 'กุมภวาปี';
       else if (trimmed.includes('หนองหาน')) district = 'หนองหาน';
@@ -7531,22 +7538,23 @@ async function parseImageDispatchFile(file) {
       const hMatch = locationText.match(/^(\d+(\/\d+)?)/);
       if (hMatch) houseNo = hMatch[1];
 
-      const matchRes = matchRowWithHistory([caseNumber], houseNo, subdistrict, district, locationText);
+      allCases.forEach(caseNo => {
+        const matchRes = matchSingleCaseWithHistory(caseNo, houseNo, subdistrict, district, locationText);
 
-      allParsedRows.push({
-        no: allParsedRows.length + 1,
-        caseNumber: caseNumber,
-        primaryCase: caseNumber,
-        allCases: [caseNumber],
-        locationText: matchRes.locationText || locationText,
-        subdistrict: subdistrict || matchRes.subdistrict || '',
-        district: district,
-        lat: matchRes.lat,
-        lng: matchRes.lng,
-        imageUrl: matchRes.imageUrl || '',
-        matchType: matchRes.matchType,
-        isMatched: matchRes.matchType === 'exact',
-        matchedRow: matchRes.matchedRow
+        allParsedRows.push({
+          no: allParsedRows.length + 1,
+          caseNumber: caseNo,
+          locationText: matchRes.locationText || locationText,
+          subdistrict: subdistrict || matchRes.subdistrict || '',
+          district: district,
+          lat: matchRes.lat,
+          lng: matchRes.lng,
+          imageUrl: matchRes.imageUrl || '',
+          matchType: matchRes.matchType,
+          isMatched: matchRes.matchType === 'exact',
+          hasCoords: Boolean(matchRes.lat && matchRes.lng),
+          matchedRow: matchRes.matchedRow
+        });
       });
     }
   });
@@ -8039,12 +8047,12 @@ function initLeafletMapInstance() {
 }
 
 /**
- * คำนวณและเรนเดอร์เส้นทางใหม่จากลำดับใน state.currentRouteStops
+ * คำนวณและเรนเดอร์เส้นทางใหม่จากลำดับใน state.currentRouteStops (ลากเส้นเฉพาะจุดที่มีหมุดพิกัด)
  */
 function recalculateRouteFromStops(isResetToOptimal = false) {
   if (!state.interactiveLeafletMap) return;
 
-  const stops = state.currentRouteStops;
+  const stops = state.currentRouteStops || [];
   const start = state.routeStartLocation;
 
   if (state.mapMarkerLayerGroup) {
@@ -8083,84 +8091,94 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
   let totalDistanceKm = 0;
   let prevLat = start.lat;
   let prevLng = start.lng;
+  let pinCounter = 0;
 
   stops.forEach((stop, index) => {
-    const stopNum = index + 1;
-    bounds.push([stop.lat, stop.lng]);
-    polylineCoords.push([stop.lat, stop.lng]);
+    const hasValidCoords = Boolean(stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && stop.lat > 0 && stop.lng > 0);
 
-    // คำนวณระยะทางจากจุดก่อนหน้า
-    const legDist = calculateHaversineDistance(prevLat, prevLng, stop.lat, stop.lng);
-    stop.legDistanceKm = legDist;
-    totalDistanceKm += legDist;
-    prevLat = stop.lat;
-    prevLng = stop.lng;
+    if (hasValidCoords) {
+      pinCounter++;
+      stop.pinNumber = pinCounter;
+      bounds.push([stop.lat, stop.lng]);
+      polylineCoords.push([stop.lat, stop.lng]);
 
-    // Custom Marker
-    const isExact = stop.matchType === 'exact';
-    const pinHtml = `
-      <div class="slts-map-pin-marker" title="จุดที่ ${stopNum}: ${stop.caseNumber}">
-        <div class="slts-pin-badge ${isExact ? '' : 'bg-gradient-to-r from-amber-500 to-amber-700'}">
-          <span>${stopNum}</span>
-        </div>
-      </div>
-    `;
+      // คำนวณระยะทางจากจุดก่อนหน้า
+      const legDist = calculateHaversineDistance(prevLat, prevLng, stop.lat, stop.lng);
+      stop.legDistanceKm = legDist;
+      totalDistanceKm += legDist;
+      prevLat = stop.lat;
+      prevLng = stop.lng;
 
-    const customIcon = L.divIcon({
-      html: pinHtml,
-      className: 'slts-custom-div-icon',
-      iconSize: [28, 28],
-      iconAnchor: [14, 28],
-      popupAnchor: [0, -28]
-    });
-
-    const safeCase = stop.caseNumber.replace(/'/g, "\\'");
-    const safeLoc = stop.locationText.replace(/'/g, "\\'");
-    const safeDate = stop.dateTime.replace(/'/g, "\\'");
-
-    const popupHtml = `
-      <div class="p-3 space-y-1.5 max-w-[280px] text-xs font-sans">
-        <div class="flex items-center justify-between border-b border-gray-100 pb-1 gap-2">
-          <span class="font-bold text-sm text-blue-700">ลำดับที่ ${stopNum}: ${stop.caseNumber}</span>
-          <span class="text-[10px] ${isExact ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'} px-2 py-0.5 rounded-full font-semibold">
-            ${isExact ? '✓ พิกัดประวัติ' : 'พิกัดประมาณการ'}
-          </span>
-        </div>
-        
-        <p class="text-gray-700 text-xs leading-relaxed"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${stop.locationText}</p>
-        <p class="text-[10px] text-gray-500"><i class="fa-solid fa-route text-blue-500 mr-1"></i>+${legDist.toFixed(1)} กม. จากจุดก่อนหน้า</p>
-
-        ${stop.imageUrl ? `
-          <div class="pt-1">
-            <img src="${stop.imageUrl}" alt="ภาพถ่ายหมาย" class="w-full h-24 object-cover rounded-xl border border-gray-200 cursor-pointer" onclick="viewPhotoModal('${stop.imageUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')">
+      // Custom Marker
+      const pinHtml = `
+        <div class="slts-map-pin-marker" title="หมุดที่ ${pinCounter}: ${stop.caseNumber}">
+          <div class="slts-pin-badge">
+            <span>${pinCounter}</span>
           </div>
-        ` : ''}
-
-        <div class="pt-1">
-          <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="block w-full text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs">
-            <i class="fa-solid fa-diamond-turn-right mr-1"></i> นำทางจุดนี้
-          </a>
         </div>
-      </div>
-    `;
+      `;
 
-    const marker = L.marker([stop.lat, stop.lng], { icon: customIcon })
-      .bindPopup(popupHtml, { className: 'slts-map-popup' });
+      const customIcon = L.divIcon({
+        html: pinHtml,
+        className: 'slts-custom-div-icon',
+        iconSize: [28, 28],
+        iconAnchor: [14, 28],
+        popupAnchor: [0, -28]
+      });
 
-    stop.leafletMarker = marker;
-    if (state.mapMarkerLayerGroup) {
-      state.mapMarkerLayerGroup.addLayer(marker);
+      const safeCase = (stop.caseNumber || '').replace(/'/g, "\\'");
+      const safeLoc = (stop.locationText || '').replace(/'/g, "\\'");
+      const safeDate = (stop.dateTime || '').replace(/'/g, "\\'");
+
+      const popupHtml = `
+        <div class="p-3 space-y-1.5 max-w-[280px] text-xs font-sans">
+          <div class="flex items-center justify-between border-b border-gray-100 pb-1 gap-2">
+            <span class="font-bold text-sm text-blue-700">หมุดที่ ${pinCounter}: ${stop.caseNumber}</span>
+            <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">
+              ✓ พิกัดประวัติ
+            </span>
+          </div>
+          
+          <p class="text-gray-700 text-xs leading-relaxed"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${stop.locationText}</p>
+          <p class="text-[10px] text-gray-500"><i class="fa-solid fa-route text-blue-500 mr-1"></i>+${legDist.toFixed(1)} กม. จากจุดก่อนหน้า</p>
+
+          ${stop.imageUrl ? `
+            <div class="pt-1">
+              <img src="${stop.imageUrl}" alt="ภาพถ่ายหมาย" class="w-full h-24 object-cover rounded-xl border border-gray-200 cursor-pointer" onclick="viewPhotoModal('${stop.imageUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')">
+            </div>
+          ` : ''}
+
+          <div class="pt-1">
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="block w-full text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs">
+              <i class="fa-solid fa-diamond-turn-right mr-1"></i> นำทางจุดนี้
+            </a>
+          </div>
+        </div>
+      `;
+
+      const marker = L.marker([stop.lat, stop.lng], { icon: customIcon })
+        .bindPopup(popupHtml, { className: 'slts-map-popup' });
+
+      stop.leafletMarker = marker;
+      if (state.mapMarkerLayerGroup) {
+        state.mapMarkerLayerGroup.addLayer(marker);
+      }
+    } else {
+      // รายการไม่มีหมุดพิกัดในระบบ -> ไม่ปักหมุดและไม่ลากเส้น
+      stop.pinNumber = null;
+      stop.legDistanceKm = 0;
+      stop.leafletMarker = null;
     }
   });
 
-  // ถ้าเลือก Round Trip -> วนกลับมาจุดเริ่มต้น
-  if (state.isRoundTrip && stops.length > 0) {
+  // ถ้าเลือก Round Trip -> วนกลับมาจุดเริ่มต้น (เฉพาะกรณีมีจุดหมุดอย่างน้อย 1 จุด)
+  if (state.isRoundTrip && polylineCoords.length > 1) {
     polylineCoords.push([start.lat, start.lng]);
     const returnDist = calculateHaversineDistance(prevLat, prevLng, start.lat, start.lng);
     totalDistanceKm += returnDist;
   }
 
-  // วาด Polyline
+  // วาด Polyline เฉพาะกรณีมีจุดหมุดอย่างน้อย 1 จุด
   if (polylineCoords.length > 1 && state.showRouteLayer) {
     state.mapRoutePolyline = L.polyline(polylineCoords, {
       color: '#2563eb',
@@ -8182,7 +8200,7 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
   const distDelta = totalDistanceKm - state.initialOptimalDistanceKm;
 
   if (deltaBanner && deltaText) {
-    if (!isResetToOptimal && Math.abs(distDelta) > 0.1) {
+    if (!isResetToOptimal && Math.abs(distDelta) > 0.1 && pinCounter > 1) {
       if (distDelta > 0) {
         deltaText.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1 text-amber-600"></i> ระยะทางเพิ่มขึ้น <strong>+${distDelta.toFixed(1)} กม.</strong> จากเส้นทางแนะนำ`;
         deltaBanner.className = 'px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800 font-semibold flex items-center justify-between';
@@ -8198,12 +8216,12 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
 
   // อัปเดต Badges
   const pinCountEl = document.getElementById('mapPinCountBadge');
-  if (pinCountEl) pinCountEl.textContent = stops.length;
+  if (pinCountEl) pinCountEl.textContent = pinCounter;
 
   const routeSummaryBadge = document.getElementById('mapRouteSummaryBadge');
   const totalDistEl = document.getElementById('mapTotalDistanceText');
   if (routeSummaryBadge && totalDistEl) {
-    if (stops.length > 0) {
+    if (pinCounter > 0) {
       totalDistEl.textContent = `${totalDistanceKm.toFixed(1)} กม.`;
       routeSummaryBadge.classList.remove('hidden');
       routeSummaryBadge.classList.add('flex');
@@ -8231,8 +8249,8 @@ function renderRouteSidebarList(stops, totalDistKm) {
     container.innerHTML = `
       <div class="p-8 text-center text-gray-400">
         <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
-        <p class="text-xs font-semibold">ไม่พบหมุดพิกัดในพื้นที่นี้</p>
-        <p class="text-[10px] text-gray-400 mt-1">กด "ระบุพื้นที่ / ตัวกรอง" หรือ "อ่านไฟล์บัญชีจ่ายหมาย" เพื่อเลือกหมุด</p>
+        <p class="text-xs font-semibold">ไม่พบรายการส่งหมาย</p>
+        <p class="text-[10px] text-gray-400 mt-1">กด "ระบุพื้นที่ / ตัวกรอง" หรือ "อ่านไฟล์บัญชีจ่ายหมาย" เพื่อเลือกรายการ</p>
       </div>
     `;
     return;
@@ -8240,9 +8258,9 @@ function renderRouteSidebarList(stops, totalDistKm) {
 
   let html = '';
   stops.forEach((stop, index) => {
-    const stopNum = index + 1;
     const isExact = stop.matchType === 'exact' || stop.isMatched;
-    const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
+    const hasPin = stop.pinNumber !== null && stop.pinNumber !== undefined;
+    const distText = hasPin ? `+ ${stop.legDistanceKm.toFixed(1)} กม.` : 'ไม่มีหมุด';
 
     html += `
       <div class="slts-route-stop-item p-2.5 rounded-xl border relative flex items-start gap-2 transition ${isExact ? 'slts-match-exact' : 'slts-match-none'}" draggable="true" id="routeStopItem_${index}" data-index="${index}">
@@ -8252,22 +8270,22 @@ function renderRouteSidebarList(stops, totalDistKm) {
         </div>
 
         <!-- Stop Number Badge -->
-        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600' : 'bg-blue-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
-          ${stopNum}
+        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700 font-bold'} text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+          ${hasPin ? stop.pinNumber : '-'}
         </span>
 
         <!-- Info Content -->
-        <div class="flex-1 min-w-0 cursor-pointer" onclick="focusMapOnStop(${index})">
+        <div class="flex-1 min-w-0 ${hasPin ? 'cursor-pointer' : ''}" ${hasPin ? `onclick="focusMapOnStop(${index})"` : ''}>
           <div class="flex items-center justify-between gap-1 mb-0.5">
             <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : 'text-gray-900'} truncate">${stop.caseNumber}</span>
-            <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
+            <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-gray-500 bg-gray-100 border-gray-200'} px-1.5 py-0.2 rounded border flex-shrink-0">
               ${distText}
             </span>
           </div>
           <p class="text-[11px] opacity-80 truncate" title="${stop.locationText}">
             ${stop.locationText}
           </p>
-          ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติส่งหมาย</span>` : ''}
+          ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติ (มีหมุดเส้นทาง)</span>` : `<span class="text-[9px] text-gray-400 font-normal inline-block mt-0.5">ไม่มีประวัติ (ไม่มีหมุด)</span>`}
         </div>
 
         <!-- Quick Reorder Buttons -->
@@ -8373,7 +8391,7 @@ window.moveStopDown = function(index, e) {
  */
 window.focusMapOnStop = function(index) {
   const stop = state.currentRouteStops[index];
-  if (!stop || !state.interactiveLeafletMap) return;
+  if (!stop || !stop.lat || !stop.lng || !state.interactiveLeafletMap) return;
 
   document.querySelectorAll('.slts-route-stop-item').forEach(el => el.classList.remove('active'));
   const targetItem = document.getElementById(`routeStopItem_${index}`);
@@ -8407,7 +8425,9 @@ window.fitMapToAllPins = function() {
   if (!state.interactiveLeafletMap) return;
   const bounds = [[state.routeStartLocation.lat, state.routeStartLocation.lng]];
   if (state.currentRouteStops) {
-    state.currentRouteStops.forEach(s => bounds.push([s.lat, s.lng]));
+    state.currentRouteStops.forEach(s => {
+      if (s.lat && s.lng) bounds.push([s.lat, s.lng]);
+    });
   }
   state.interactiveLeafletMap.fitBounds(bounds, { padding: [40, 40] });
 };
@@ -8426,11 +8446,11 @@ window.optimizeTripRoute = function() {
  * เปิดเส้นทางทั้งหมดใน Google Maps Directions (Multi-stop route)
  */
 window.openFullRouteInGoogleMaps = function() {
-  const stops = state.currentRouteStops;
+  const validStops = (state.currentRouteStops || []).filter(s => s.lat && s.lng && !isNaN(s.lat) && !isNaN(s.lng) && s.lat > 0 && s.lng > 0);
   const start = state.routeStartLocation;
 
-  if (!stops || stops.length === 0) {
-    Swal.fire('ไม่มีรายการหมุด', 'กรุณาระบุพื้นที่หรืออ่านไฟล์บัญชีจ่ายหมายก่อนเปิดนำทาง', 'info');
+  if (!validStops || validStops.length === 0) {
+    Swal.fire('ไม่มีรายการหมุด', 'ไม่พบหมุดพิกัดที่มีประวัติในรายการที่เลือก จึงไม่สามารถสร้างเส้นทางนำทางได้', 'info');
     return;
   }
 
@@ -8440,10 +8460,10 @@ window.openFullRouteInGoogleMaps = function() {
 
   if (state.isRoundTrip) {
     destination = `${start.lat},${start.lng}`;
-    waypoints = stops.map(s => `${s.lat},${s.lng}`);
+    waypoints = validStops.map(s => `${s.lat},${s.lng}`);
   } else {
-    destination = `${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}`;
-    waypoints = stops.slice(0, -1).map(s => `${s.lat},${s.lng}`);
+    destination = `${validStops[validStops.length - 1].lat},${validStops[validStops.length - 1].lng}`;
+    waypoints = validStops.slice(0, -1).map(s => `${s.lat},${s.lng}`);
   }
 
   let gmapUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
@@ -8476,24 +8496,24 @@ window.showMobileRouteMapModal = function() {
     `;
   } else {
     stops.forEach((stop, index) => {
-      const stopNum = index + 1;
       const isExact = stop.matchType === 'exact' || stop.isMatched;
-      const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
+      const hasPin = stop.pinNumber !== null && stop.pinNumber !== undefined;
+      const distText = hasPin ? `+ ${stop.legDistanceKm.toFixed(1)} กม.` : 'ไม่มีหมุด';
 
       stopsHtml += `
         <div class="p-2.5 rounded-xl border flex items-start gap-2 text-xs transition ${isExact ? 'slts-match-exact' : 'slts-match-none'}">
-          <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600' : 'bg-blue-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
-            ${stopNum}
+          <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700 font-bold'} text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+            ${hasPin ? stop.pinNumber : '-'}
           </span>
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between gap-1 mb-0.5">
               <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : 'text-gray-900'} truncate">${stop.caseNumber}</span>
-              <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
+              <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-gray-500 bg-gray-100 border-gray-200'} px-1.5 py-0.2 rounded border flex-shrink-0">
                 ${distText}
               </span>
             </div>
             <p class="text-[11px] opacity-80 truncate">${stop.locationText}</p>
-            ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5">✓ ตรงกับประวัติส่งหมาย</span>` : ''}
+            ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติ (มีหมุดเส้นทาง)</span>` : `<span class="text-[9px] text-gray-400 font-normal inline-block mt-0.5">ไม่มีประวัติ (ไม่มีหมุด)</span>`}
           </div>
           <div class="flex flex-col gap-0.5 flex-shrink-0">
             <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
@@ -8580,23 +8600,23 @@ window.renderMobileRouteList = function() {
   const stops = state.currentRouteStops || [];
   let stopsHtml = '';
   stops.forEach((stop, index) => {
-    const stopNum = index + 1;
     const isExact = stop.matchType === 'exact' || stop.isMatched;
-    const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
+    const hasPin = stop.pinNumber !== null && stop.pinNumber !== undefined;
+    const distText = hasPin ? `+ ${stop.legDistanceKm.toFixed(1)} กม.` : 'ไม่มีหมุด';
     stopsHtml += `
       <div class="p-2.5 rounded-xl border flex items-start gap-2 text-xs transition ${isExact ? 'slts-match-exact' : 'slts-match-none'}">
-        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600' : 'bg-blue-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
-          ${stopNum}
+        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700 font-bold'} text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+          ${hasPin ? stop.pinNumber : '-'}
         </span>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between gap-1 mb-0.5">
             <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : 'text-gray-900'} truncate">${stop.caseNumber}</span>
-            <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
+            <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-gray-500 bg-gray-100 border-gray-200'} px-1.5 py-0.2 rounded border flex-shrink-0">
               ${distText}
             </span>
           </div>
           <p class="text-[11px] opacity-80 truncate">${stop.locationText}</p>
-          ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5">✓ ตรงกับประวัติส่งหมาย</span>` : ''}
+          ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติ (มีหมุดเส้นทาง)</span>` : `<span class="text-[9px] text-gray-400 font-normal inline-block mt-0.5">ไม่มีประวัติ (ไม่มีหมุด)</span>`}
         </div>
         <div class="flex flex-col gap-0.5 flex-shrink-0">
           <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
