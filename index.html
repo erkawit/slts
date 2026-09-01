@@ -42,8 +42,12 @@
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
+  <!-- Leaflet.js Interactive Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260901_11">
+  <link rel="stylesheet" href="css/style.css?v=20260901_12">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -75,6 +79,10 @@
         <button type="button" id="tabBtnTable" onclick="switchTab('table')" class="tab-nav-btn px-4 py-2 rounded-xl transition-all flex items-center gap-2">
           <i class="fa-solid fa-table-list text-emerald-600"></i>
           <span>ตารางประวัติส่งหมาย</span>
+        </button>
+        <button type="button" id="tabBtnMap" onclick="switchTab('map')" class="tab-nav-btn px-4 py-2 rounded-xl transition-all flex items-center gap-2">
+          <i class="fa-solid fa-map-location-dot text-rose-500"></i>
+          <span>แผนที่และหมุด</span>
         </button>
         <button type="button" id="tabBtnUsers" onclick="switchTab('users')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2">
           <i class="fa-solid fa-users-gear text-purple-600"></i>
@@ -587,7 +595,93 @@
     </div>
 
     <!-- ========================================================= -->
-    <!-- TAB 3: จัดการผู้ใช้งาน (User Management View - Full Width Desktop) -->
+    <!-- TAB 3: หน้าแผนที่และหมุด (Map & Route Planning - Desktop > 768px) -->
+    <!-- ========================================================= -->
+    <div id="tabContentMap" class="tab-pane hidden w-full space-y-4">
+      
+      <!-- Top Control Bar (Search Filter & Summary Badges) -->
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+        <div class="flex items-center gap-3 flex-wrap">
+          <button type="button" onclick="openMapAreaSelectorModal()" class="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-xl text-xs sm:text-sm transition flex items-center gap-2 shadow-sm shadow-blue-500/20 active:scale-95">
+            <i class="fa-solid fa-layer-group"></i>
+            <span>ระบุพื้นที่ / ตัวกรอง</span>
+          </button>
+          
+          <div class="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-gray-800 bg-gray-50 border border-gray-200 px-3.5 py-2 rounded-xl">
+            <i class="fa-solid fa-location-dot text-rose-500"></i>
+            <span id="mapAreaCurrentBadge">จ.อุดรธานี (ทุกอำเภอ)</span>
+          </div>
+
+          <div class="flex items-center gap-2 text-xs font-semibold text-gray-600 bg-blue-50 border border-blue-200 px-3 py-2 rounded-xl">
+            <i class="fa-solid fa-map-pin text-blue-600"></i>
+            <span>แสดงทั้งหมด: <strong id="mapPinCountBadge" class="text-blue-700 font-bold">0</strong> หมุด</span>
+          </div>
+
+          <div id="mapRouteSummaryBadge" class="hidden items-center gap-2 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-xl">
+            <i class="fa-solid fa-route text-emerald-600"></i>
+            <span>ระยะทางรวม: <strong id="mapTotalDistanceText" class="text-emerald-700 font-bold">0 กม.</strong></span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 w-full md:w-auto justify-end">
+          <button type="button" onclick="fitMapToAllPins()" class="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl text-xs transition flex items-center gap-1.5 border border-gray-300" title="ปรับมุมมองแผนที่ให้ครอบคลุมทุกหมุด">
+            <i class="fa-solid fa-expand text-gray-600"></i>
+            <span>มุมมองรวม</span>
+          </button>
+          <button type="button" onclick="openFullRouteInGoogleMaps()" id="btnOpenFullRouteGMap" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 shadow-sm active:scale-95" title="เปิดเส้นทางนำทางใน Google Maps">
+            <i class="fa-solid fa-diamond-turn-right"></i>
+            <span>เปิด Google Maps นำทาง</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Map Grid (Map View + Route Timeline Sidebar) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        
+        <!-- Left: Interactive Leaflet Map Container (lg:col-span-8 or 9) -->
+        <div class="lg:col-span-8 xl:col-span-9 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden relative">
+          <div id="sltsInteractiveMap" class="w-full h-[620px] lg:h-[720px] bg-slate-100 z-0"></div>
+          
+          <!-- Map Overlay Controls (Toggle Route Layer / Baselayer Switch) -->
+          <div class="absolute top-3 right-3 z-[1000] bg-white/95 backdrop-blur-sm rounded-xl shadow-md border border-gray-200 p-1.5 flex flex-col gap-1 text-xs">
+            <button type="button" onclick="toggleMapRouteLayer()" id="btnToggleRouteLine" class="px-2.5 py-1.5 bg-blue-50 text-blue-700 font-bold rounded-lg hover:bg-blue-100 flex items-center gap-1.5 transition">
+              <i class="fa-solid fa-bezier-curve"></i>
+              <span id="txtToggleRouteLine">ซ่อนเส้นทาง</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Right: Route Stops & Distance Matrix Sidebar (lg:col-span-4 or 3) -->
+        <div class="lg:col-span-4 xl:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col h-[620px] lg:h-[720px] overflow-hidden">
+          <div class="p-3.5 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between flex-shrink-0">
+            <div>
+              <h3 class="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                <i class="fa-solid fa-list-ol text-blue-600"></i>
+                <span>ลำดับเส้นทางส่งหมาย</span>
+              </h3>
+              <p class="text-[11px] text-gray-500">เรียงตามลำดับจุดใกล้เคียงที่เหมาะสม</p>
+            </div>
+            <button type="button" onclick="optimizeTripRoute()" class="px-2 py-1 bg-white hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-gray-200 shadow-2xs transition" title="คำนวณลำดับจุดส่งหมายที่ใกล้ที่สุดใหม่">
+              <i class="fa-solid fa-arrows-rotate mr-0.5"></i> จัดลำดับใหม่
+            </button>
+          </div>
+
+          <!-- Stops List Scroll Area -->
+          <div id="mapRouteStopsList" class="flex-1 overflow-y-auto p-3 space-y-2 divide-y divide-gray-100 slts-swal-body-scroll">
+            <div class="p-8 text-center text-gray-400">
+              <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
+              <p class="text-xs font-semibold">ยังไม่มีรายการหมุดที่เลือก</p>
+              <p class="text-[10px] text-gray-400 mt-1">กด "ระบุพื้นที่ / ตัวกรอง" เพื่อแสดงหมุดบนแผนที่</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- TAB 4: จัดการผู้ใช้งาน (User Management View - Full Width Desktop) -->
     <!-- ========================================================= -->
     <div id="tabContentUsers" class="tab-pane hidden">
       <div class="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -904,17 +998,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260901_11"></script>
-  <script src="js/compass.js?v=20260901_11"></script>
-  <script src="js/map.js?v=20260901_11"></script>
-  <script src="js/watermark.js?v=20260901_11"></script>
-  <script src="js/app.js?v=20260901_11"></script>
+  <script src="js/data.js?v=20260901_12"></script>
+  <script src="js/compass.js?v=20260901_12"></script>
+  <script src="js/map.js?v=20260901_12"></script>
+  <script src="js/watermark.js?v=20260901_12"></script>
+  <script src="js/app.js?v=20260901_12"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260901_11')
+        navigator.serviceWorker.register('./sw.js?v=20260901_12')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

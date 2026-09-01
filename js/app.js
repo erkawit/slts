@@ -294,9 +294,11 @@ function initDOMElements() {
   elements.tabBtnCamera = document.getElementById('tabBtnCamera');
   elements.tabBtnForm = document.getElementById('tabBtnForm') || elements.tabBtnCamera;
   elements.tabBtnTable = document.getElementById('tabBtnTable');
+  elements.tabBtnMap = document.getElementById('tabBtnMap');
   elements.tabBtnUsers = document.getElementById('tabBtnUsers');
   elements.tabContentForm = document.getElementById('tabContentForm');
   elements.tabContentTable = document.getElementById('tabContentTable');
+  elements.tabContentMap = document.getElementById('tabContentMap');
   elements.tabContentUsers = document.getElementById('tabContentUsers');
 
   elements.form = document.getElementById('summonsForm');
@@ -1160,6 +1162,29 @@ window.switchTab = function(tabName) {
       setTimeout(() => {
         openTargetSearchModal();
       }, 250);
+    }
+  } else if (tabName === 'map') {
+    if (window.innerWidth <= 768) return;
+    closeCameraModal();
+    if (elements.tabBtnMap) elements.tabBtnMap.classList.add('active');
+    if (elements.tabContentMap) {
+      elements.tabContentMap.classList.remove('hidden');
+      elements.tabContentMap.classList.add('active');
+    }
+    // ดึงข้อมูลประวัติรอในเบื้องหลัง
+    loadGoogleSheetData(false);
+
+    // หากยังไม่ได้ระบุพื้นที่ หรือเข้าครั้งแรก ให้แสดง Pop Up เลือกพื้นที่ทันที
+    if (!state.currentMapFilter) {
+      setTimeout(() => {
+        openMapAreaSelectorModal();
+      }, 200);
+    } else {
+      setTimeout(() => {
+        if (state.interactiveLeafletMap) {
+          state.interactiveLeafletMap.invalidateSize();
+        }
+      }, 150);
     }
   } else if (tabName === 'users') {
     closeCameraModal();
@@ -7163,3 +7188,535 @@ function initSettings() {
     });
   }
 }
+
+// =========================================================================
+// 8. ระบบแผนที่และหมุดพิกัดส่งหมาย (Interactive Map & Route Planning Module)
+// เฉพาะหน้าจอความกว้างมากกว่า 768 pixel (Desktop > 768px)
+// =========================================================================
+
+state.interactiveLeafletMap = null;
+state.mapMarkerLayerGroup = null;
+state.mapRoutePolyline = null;
+state.currentMapFilter = null; // { province, district, subdistrict }
+state.currentRouteStops = [];  // Array of sorted stop objects
+state.showRouteLayer = true;
+
+/**
+ * คำนวณระยะทางระหว่าง 2 พิกัดเป็นกิโลเมตร (Haversine Formula)
+ */
+function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // รัศมีโลกเป็นกิโลเมตร
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * จัดลำดับเส้นทางแบบ Nearest Neighbor TSP ให้ใกล้เคียงจุดเริ่มต้นที่สุด
+ */
+function optimizeStopsSequence(stops, startLat = null, startLng = null) {
+  if (!stops || stops.length <= 1) return stops;
+  const remaining = [...stops];
+  const ordered = [];
+
+  let currentLat = (startLat !== null && !isNaN(startLat)) ? startLat : stops[0].lat;
+  let currentLng = (startLng !== null && !isNaN(startLng)) ? startLng : stops[0].lng;
+
+  while (remaining.length > 0) {
+    let nearestIdx = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const d = calculateHaversineDistance(currentLat, currentLng, remaining[i].lat, remaining[i].lng);
+      if (d < minDist) {
+        minDist = d;
+        nearestIdx = i;
+      }
+    }
+    const [nextStop] = remaining.splice(nearestIdx, 1);
+    nextStop.legDistanceKm = (ordered.length === 0 && startLat === null) ? 0 : minDist;
+    ordered.push(nextStop);
+    currentLat = nextStop.lat;
+    currentLng = nextStop.lng;
+  }
+
+  return ordered;
+}
+
+/**
+ * เปิด Pop Up ระบุพื้นที่ จังหวัด, อำเภอ, ตำบล เพื่อแสดงหมุดบนแผนที่
+ */
+window.openMapAreaSelectorModal = function() {
+  if (window.innerWidth <= 768) return;
+
+  const currentProvince = state.currentMapFilter?.province || state.selectedProvince || 'อุดรธานี';
+  const provinces = (typeof THAILAND_PROVINCES !== 'undefined') ? THAILAND_PROVINCES : [{ name: currentProvince }];
+  const districts = getDistrictsByProvince(currentProvince);
+  const currentDistrict = state.currentMapFilter?.district || '';
+  const subdistricts = currentDistrict ? getSubdistrictsByDistrict(currentProvince, currentDistrict) : (districts.length > 0 ? getSubdistrictsByDistrict(currentProvince, districts[0]) : []);
+  const currentSubdistrict = state.currentMapFilter?.subdistrict || '';
+
+  const provOptionsHtml = provinces.map(p => `<option value="${p.name}" ${p.name === currentProvince ? 'selected' : ''}>${p.name}</option>`).join('');
+  const distOptionsHtml = `<option value="">-- ทุกอำเภอในจังหวัด --</option>` + districts.map(d => `<option value="${d}" ${d === currentDistrict ? 'selected' : ''}>${d}</option>`).join('');
+  const subOptionsHtml = `<option value="">-- ทุกตำบลในอำเภอ --</option>` + subdistricts.map(s => `<option value="${s}" ${s === currentSubdistrict ? 'selected' : ''}>${s}</option>`).join('');
+
+  Swal.fire({
+    title: '<div class="flex items-center justify-center gap-2 text-base sm:text-lg font-bold text-gray-900"><i class="fa-solid fa-map-location-dot text-rose-500 text-xl"></i> ระบุพื้นที่เพื่อแสดงหมุดบนแผนที่</div>',
+    html: `
+      <div class="text-left space-y-3.5 text-xs">
+        <p class="text-gray-600 leading-relaxed bg-blue-50 border border-blue-200 rounded-xl p-3">
+          <i class="fa-solid fa-circle-info text-blue-600 mr-1"></i>
+          โปรดระบุจังหวัด อำเภอ และตำบลที่ต้องการดูหมุด ระบบจะดึงพิกัดส่งหมายทั้งหมดมาปักหมุดบนแผนที่ พร้อมคำนวณระยะทางและจัดลำดับเส้นทางให้อัตโนมัติ
+        </p>
+
+        <!-- 1. จังหวัด -->
+        <div>
+          <label class="block font-bold text-gray-800 mb-1">1. จังหวัด (พิมพ์ค้นหาหรือเลือก) *</label>
+          <div class="relative mb-1">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-gray-400 text-xs"></i>
+            <input type="text" id="map_provSearch" placeholder="พิมพ์ชื่อจังหวัดเพื่อค้นหา..." value="${currentProvince}" class="w-full bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off">
+          </div>
+          <select id="map_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 focus:border-blue-500">
+            ${provOptionsHtml}
+          </select>
+        </div>
+
+        <!-- 2. อำเภอ & 3. ตำบล -->
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="block font-bold text-gray-800 mb-1">2. อำเภอ</label>
+            <select id="map_distSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
+              ${distOptionsHtml}
+            </select>
+          </div>
+          <div>
+            <label class="block font-bold text-gray-800 mb-1">3. ตำบล</label>
+            <select id="map_subSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
+              ${subOptionsHtml}
+            </select>
+          </div>
+        </div>
+      </div>
+    `,
+    width: '520px',
+    customClass: {
+      popup: 'rounded-2xl p-4 sm:p-5'
+    },
+    showCloseButton: true,
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-check mr-1.5"></i> ตกลง (แสดงหมุดแผนที่)',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#2563eb',
+    cancelButtonColor: '#6b7280',
+    didOpen: () => {
+      const provSearch = document.getElementById('map_provSearch');
+      const provSelect = document.getElementById('map_provSelect');
+      const distSelect = document.getElementById('map_distSelect');
+      const subSelect = document.getElementById('map_subSelect');
+
+      if (provSearch && provSelect) {
+        provSearch.addEventListener('input', (e) => {
+          const q = e.target.value.trim().toLowerCase();
+          const matched = provinces.filter(p => p.name.toLowerCase().includes(q));
+          if (matched.length > 0) {
+            provSelect.innerHTML = matched.map((p, idx) => `<option value="${p.name}" ${idx === 0 ? 'selected' : ''}>${p.name}</option>`).join('');
+            provSelect.dispatchEvent(new Event('change'));
+          }
+        });
+      }
+
+      if (provSelect && distSelect && subSelect) {
+        provSelect.addEventListener('change', (e) => {
+          const prov = e.target.value;
+          if (provSearch) provSearch.value = prov;
+          const dists = getDistrictsByProvince(prov);
+          distSelect.innerHTML = `<option value="">-- ทุกอำเภอในจังหวัด --</option>` + dists.map(d => `<option value="${d}">${d}</option>`).join('');
+          const firstDist = dists[0] || '';
+          const subs = firstDist ? getSubdistrictsByDistrict(prov, firstDist) : [];
+          subSelect.innerHTML = `<option value="">-- ทุกตำบลในอำเภอ --</option>` + subs.map(s => `<option value="${s}">${s}</option>`).join('');
+        });
+
+        distSelect.addEventListener('change', (e) => {
+          const prov = provSelect.value;
+          const dist = e.target.value;
+          if (dist) {
+            const subs = getSubdistrictsByDistrict(prov, dist);
+            subSelect.innerHTML = `<option value="">-- ทุกตำบลในอำเภอ --</option>` + subs.map(s => `<option value="${s}">${s}</option>`).join('');
+          } else {
+            subSelect.innerHTML = `<option value="">-- ทุกตำบลในอำเภอ --</option>`;
+          }
+        });
+      }
+    },
+    preConfirm: () => {
+      const prov = document.getElementById('map_provSelect')?.value || currentProvince;
+      const dist = document.getElementById('map_distSelect')?.value || '';
+      const sub = document.getElementById('map_subSelect')?.value || '';
+      return { province: prov, district: dist, subdistrict: sub };
+    }
+  }).then((res) => {
+    if (res.isConfirmed && res.value) {
+      state.currentMapFilter = res.value;
+      renderMapAndPins(res.value.province, res.value.district, res.value.subdistrict);
+    }
+  });
+};
+
+/**
+ * เรนเดอร์หมุดและเส้นทางบน Leaflet Map
+ */
+window.renderMapAndPins = function(province, district, subdistrict) {
+  if (window.innerWidth <= 768) return;
+
+  const mapContainer = document.getElementById('sltsInteractiveMap');
+  if (!mapContainer) return;
+
+  // 1. อัปเดตข้อความ Badge หัวตาราง
+  const badgeEl = document.getElementById('mapAreaCurrentBadge');
+  if (badgeEl) {
+    let txt = `จ.${province}`;
+    if (district) txt += ` > อ.${district}`;
+    if (subdistrict) txt += ` > ต.${subdistrict}`;
+    if (!district) txt += ` (ทุกอำเภอ)`;
+    else if (!subdistrict) txt += ` (ทุกตำบล)`;
+    badgeEl.textContent = txt;
+  }
+
+  // 2. ดึงข้อมูลรายการจาก state.allSheetRows
+  const allRows = state.allSheetRows || [];
+  
+  // กรองตาม จังหวัด / อำเภอ / ตำบล
+  const matchedRows = allRows.filter(r => {
+    const rProv = getRowProvince(r);
+    if (rProv !== province) return false;
+
+    if (district) {
+      const rDist = (r['อำเภอ'] || r['district'] || '').trim();
+      if (rDist !== district) return false;
+    }
+
+    if (subdistrict) {
+      const rSub = (r['ตำบล'] || r['subdistrict'] || '').trim();
+      if (rSub !== subdistrict) return false;
+    }
+
+    return true;
+  });
+
+  // กรองเฉพาะแถวที่มีพิกัด Lat, Lng ถูกต้อง
+  const validStops = [];
+  matchedRows.forEach(r => {
+    const rawLat = r['ละติจูด (Lat)'] || r['ละติจูด'] || '';
+    const rawLng = r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || '';
+    const lat = parseFloat(rawLat);
+    const lng = parseFloat(rawLng);
+
+    if (!isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0) {
+      validStops.push({
+        raw: r,
+        caseNumber: (r['เลขคดี'] || '-').trim(),
+        dateTime: formatThaiDateDisplay(r['วัน-เวลาบันทึก'] || r['Timestamp'] || ''),
+        locationText: r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || (r['อำเภอ'] ? `อ.${r['อำเภอ']} ต.${r['ตำบล'] || ''}` : '-'),
+        district: (r['อำเภอ'] || '').trim(),
+        subdistrict: (r['ตำบล'] || '').trim(),
+        imageUrl: r['ลิงก์รูปภาพใน Google Drive'] || r['ลิงก์รูปภาพ'] || '',
+        lat: lat,
+        lng: lng
+      });
+    }
+  });
+
+  // 3. เริ่มต้น Leaflet Map หากยังไม่ได้สร้าง
+  if (!state.interactiveLeafletMap && typeof L !== 'undefined') {
+    state.interactiveLeafletMap = L.map('sltsInteractiveMap', {
+      zoomControl: true
+    }).setView([17.4138, 102.7872], 12);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(state.interactiveLeafletMap);
+
+    state.mapMarkerLayerGroup = L.layerGroup().addTo(state.interactiveLeafletMap);
+  }
+
+  if (state.interactiveLeafletMap) {
+    state.interactiveLeafletMap.invalidateSize();
+  }
+
+  // 4. จัดเรียงลำดับเส้นทางส่งหมาย (Optimize Trip Sequence)
+  const currentLat = state.lat || null;
+  const currentLng = state.lng || null;
+  const orderedStops = optimizeStopsSequence(validStops, currentLat, currentLng);
+  state.currentRouteStops = orderedStops;
+
+  // 5. เรนเดอร์หมุดบนแผนที่
+  if (state.mapMarkerLayerGroup) {
+    state.mapMarkerLayerGroup.clearLayers();
+  }
+  if (state.mapRoutePolyline && state.interactiveLeafletMap) {
+    state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
+    state.mapRoutePolyline = null;
+  }
+
+  const bounds = [];
+  const polylineCoords = [];
+
+  orderedStops.forEach((stop, index) => {
+    const stopNum = index + 1;
+    bounds.push([stop.lat, stop.lng]);
+    polylineCoords.push([stop.lat, stop.lng]);
+
+    // สร้าง Custom Numbered Pin
+    const isStart = stopNum === 1;
+    const pinHtml = `
+      <div class="slts-map-pin-marker" title="จุดที่ ${stopNum}: ${stop.caseNumber}">
+        <div class="slts-pin-badge ${isStart ? 'start-pin' : ''}">
+          <span>${stopNum}</span>
+        </div>
+      </div>
+    `;
+
+    const customIcon = L.divIcon({
+      html: pinHtml,
+      className: 'slts-custom-div-icon',
+      iconSize: [28, 28],
+      iconAnchor: [14, 28],
+      popupAnchor: [0, -28]
+    });
+
+    const safeCase = stop.caseNumber.replace(/'/g, "\\'");
+    const safeLoc = stop.locationText.replace(/'/g, "\\'");
+    const safeDate = stop.dateTime.replace(/'/g, "\\'");
+
+    const popupHtml = `
+      <div class="p-3.5 space-y-2 max-w-[280px] text-xs font-sans">
+        <div class="flex items-center justify-between border-b border-gray-100 pb-1.5 gap-2">
+          <span class="font-bold text-sm text-blue-700">ลำดับที่ ${stopNum}: ${stop.caseNumber}</span>
+          <span class="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-semibold">📍 ${stop.lat.toFixed(4)}, ${stop.lng.toFixed(4)}</span>
+        </div>
+        
+        <p class="text-gray-700 text-xs leading-relaxed">
+          <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${stop.locationText}
+        </p>
+
+        <p class="text-[11px] text-gray-500">
+          <i class="fa-regular fa-clock text-gray-400 mr-1"></i>${stop.dateTime}
+        </p>
+
+        ${stop.imageUrl ? `
+          <div class="pt-1">
+            <img src="${stop.imageUrl}" alt="ภาพถ่ายหมาย" class="w-full h-28 object-cover rounded-xl border border-gray-200 cursor-pointer hover:opacity-90 transition" onclick="viewPhotoModal('${stop.imageUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')">
+          </div>
+        ` : ''}
+
+        <div class="flex items-center gap-1.5 pt-1.5">
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="flex-1 text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition">
+            <i class="fa-solid fa-diamond-turn-right mr-1"></i> นำทางจุดนี้
+          </a>
+        </div>
+      </div>
+    `;
+
+    const marker = L.marker([stop.lat, stop.lng], { icon: customIcon })
+      .bindPopup(popupHtml, { className: 'slts-map-popup' });
+
+    stop.leafletMarker = marker;
+
+    if (state.mapMarkerLayerGroup) {
+      state.mapMarkerLayerGroup.addLayer(marker);
+    }
+  });
+
+  // 6. วาดเส้นเชื่อมโยงเส้นทาง (Polyline)
+  if (polylineCoords.length > 1 && state.interactiveLeafletMap && state.showRouteLayer) {
+    state.mapRoutePolyline = L.polyline(polylineCoords, {
+      color: '#2563eb',
+      weight: 3.5,
+      opacity: 0.85,
+      dashArray: '8, 8',
+      lineCap: 'round'
+    }).addTo(state.interactiveLeafletMap);
+  }
+
+  // 7. คำนวณระยะทางรวมทั้งหมด
+  let totalDistanceKm = 0;
+  orderedStops.forEach(s => {
+    if (s.legDistanceKm) totalDistanceKm += s.legDistanceKm;
+  });
+
+  // 8. อัปเดต Badges
+  const pinCountEl = document.getElementById('mapPinCountBadge');
+  if (pinCountEl) pinCountEl.textContent = orderedStops.length;
+
+  const routeSummaryBadge = document.getElementById('mapRouteSummaryBadge');
+  const totalDistEl = document.getElementById('mapTotalDistanceText');
+  if (routeSummaryBadge && totalDistEl) {
+    if (orderedStops.length > 1) {
+      totalDistEl.textContent = `${totalDistanceKm.toFixed(1)} กม.`;
+      routeSummaryBadge.classList.remove('hidden');
+      routeSummaryBadge.classList.add('flex');
+    } else {
+      routeSummaryBadge.classList.add('hidden');
+      routeSummaryBadge.classList.remove('flex');
+    }
+  }
+
+  // 9. เรนเดอร์รายการ Stops บน Sidebar ด้านขวา
+  renderRouteSidebarList(orderedStops, totalDistanceKm);
+
+  // 10. Fit Bounds
+  if (bounds.length > 0 && state.interactiveLeafletMap) {
+    state.interactiveLeafletMap.fitBounds(bounds, { padding: [40, 40] });
+  } else if (state.interactiveLeafletMap) {
+    state.interactiveLeafletMap.setView([17.4138, 102.7872], 11);
+  }
+};
+
+/**
+ * เรนเดอร์รายการลำดับจุดส่งหมายใน Sidebar ด้านขวา
+ */
+function renderRouteSidebarList(stops, totalDistKm) {
+  const container = document.getElementById('mapRouteStopsList');
+  if (!container) return;
+
+  if (!stops || stops.length === 0) {
+    container.innerHTML = `
+      <div class="p-8 text-center text-gray-400">
+        <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
+        <p class="text-xs font-semibold">ไม่พบหมุดพิกัดในพื้นที่นี้</p>
+        <p class="text-[10px] text-gray-400 mt-1">ลองเปลี่ยนขอบเขตอำเภอ หรือตำบลอื่น</p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+  stops.forEach((stop, index) => {
+    const stopNum = index + 1;
+    const isStart = stopNum === 1;
+    const distText = isStart ? 'จุดเริ่มต้น' : `+ ${stop.legDistanceKm.toFixed(1)} กม. จากจุดก่อนหน้า`;
+
+    html += `
+      <div class="slts-route-stop-item p-2.5 rounded-xl border border-gray-200 cursor-pointer bg-white" onclick="focusMapOnStop(${index})" id="routeStopItem_${index}">
+        <div class="flex items-start justify-between gap-1.5 mb-1">
+          <div class="flex items-center gap-1.5">
+            <span class="w-5 h-5 rounded-full ${isStart ? 'bg-blue-600' : 'bg-rose-500'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0">
+              ${stopNum}
+            </span>
+            <span class="font-bold text-xs text-gray-900">${stop.caseNumber}</span>
+          </div>
+          <span class="text-[10px] font-semibold ${isStart ? 'text-blue-700 bg-blue-50' : 'text-emerald-700 bg-emerald-50'} px-1.5 py-0.5 rounded-md border border-gray-200">
+            ${distText}
+          </span>
+        </div>
+
+        <p class="text-[11px] text-gray-600 truncate pl-6" title="${stop.locationText}">
+          ${stop.locationText}
+        </p>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
+/**
+ * โฟกัสแผนที่ไปยังหมุดที่เลือกจาก Sidebar
+ */
+window.focusMapOnStop = function(index) {
+  const stop = state.currentRouteStops[index];
+  if (!stop || !state.interactiveLeafletMap) return;
+
+  // ไฮไลต์รายการใน sidebar
+  document.querySelectorAll('.slts-route-stop-item').forEach(el => el.classList.remove('active'));
+  const targetItem = document.getElementById(`routeStopItem_${index}`);
+  if (targetItem) targetItem.classList.add('active');
+
+  state.interactiveLeafletMap.flyTo([stop.lat, stop.lng], 16, { duration: 0.8 });
+  if (stop.leafletMarker) {
+    stop.leafletMarker.openPopup();
+  }
+};
+
+/**
+ * สลับการแสดง/ซ่อนเส้นทาง Polyline บนแผนที่
+ */
+window.toggleMapRouteLayer = function() {
+  if (!state.interactiveLeafletMap) return;
+  state.showRouteLayer = !state.showRouteLayer;
+
+  const btnTxt = document.getElementById('txtToggleRouteLine');
+  if (btnTxt) {
+    btnTxt.textContent = state.showRouteLayer ? 'ซ่อนเส้นทาง' : 'แสดงเส้นทาง';
+  }
+
+  if (state.showRouteLayer) {
+    const coords = state.currentRouteStops.map(s => [s.lat, s.lng]);
+    if (coords.length > 1) {
+      if (state.mapRoutePolyline) state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
+      state.mapRoutePolyline = L.polyline(coords, {
+        color: '#2563eb',
+        weight: 3.5,
+        opacity: 0.85,
+        dashArray: '8, 8',
+        lineCap: 'round'
+      }).addTo(state.interactiveLeafletMap);
+    }
+  } else {
+    if (state.mapRoutePolyline) {
+      state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
+      state.mapRoutePolyline = null;
+    }
+  }
+};
+
+/**
+ * ปรับมุมมองแผนที่ให้เห็นครบทุกหมุด
+ */
+window.fitMapToAllPins = function() {
+  if (!state.interactiveLeafletMap || !state.currentRouteStops || state.currentRouteStops.length === 0) return;
+  const bounds = state.currentRouteStops.map(s => [s.lat, s.lng]);
+  state.interactiveLeafletMap.fitBounds(bounds, { padding: [40, 40] });
+};
+
+/**
+ * คำนวณจัดลำดับเส้นทางใหม่
+ */
+window.optimizeTripRoute = function() {
+  if (!state.currentMapFilter) return;
+  renderMapAndPins(state.currentMapFilter.province, state.currentMapFilter.district, state.currentMapFilter.subdistrict);
+};
+
+/**
+ * เปิดเส้นทางทั้งหมดใน Google Maps Directions (Multi-stop route)
+ */
+window.openFullRouteInGoogleMaps = function() {
+  const stops = state.currentRouteStops;
+  if (!stops || stops.length === 0) {
+    Swal.fire('ไม่มีรายการหมุด', 'กรุณาระบุพื้นที่ที่มีหมุดพิกัดส่งหมายก่อนเปิดนำทาง', 'info');
+    return;
+  }
+
+  if (stops.length === 1) {
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${stops[0].lat},${stops[0].lng}`, '_blank');
+    return;
+  }
+
+  // สร้าง URL เส้นทางแบบหลายจุดแวะ
+  const origin = `${stops[0].lat},${stops[0].lng}`;
+  const destination = `${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}`;
+  const waypoints = stops.slice(1, -1).map(s => `${s.lat},${s.lng}`).join('|');
+
+  let gmapUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+  if (waypoints) {
+    gmapUrl += `&waypoints=${encodeURIComponent(waypoints)}`;
+  }
+
+  window.open(gmapUrl, '_blank');
+};
+
