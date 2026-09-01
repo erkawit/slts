@@ -1248,12 +1248,13 @@ table.dataTable tbody td {
   cursor: grabbing;
 }
 
-/* Dispatch PDF Parser Highlight Styles */
+/* Dispatch & Route Stop Match Status Styles */
 .slts-match-exact {
   background-color: #ecfdf5 !important;
   border-color: #a7f3d0 !important;
   color: #065f46 !important;
 }
+.slts-match-near,
 .slts-match-approx {
   background-color: #fffbeb !important;
   border-color: #fde68a !important;
@@ -1269,6 +1270,12 @@ table.dataTable tbody td {
   background: linear-gradient(135deg, #10b981, #059669) !important;
   box-shadow: 0 4px 10px rgba(16, 185, 129, 0.45) !important;
 }
+
+.slts-pin-badge.near-pin {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  box-shadow: 0 4px 10px rgba(245, 158, 11, 0.45) !important;
+}
+
 
 
 

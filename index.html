@@ -663,7 +663,7 @@
         <div class="lg:col-span-4 xl:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col h-[620px] lg:h-[720px] overflow-hidden">
           
           <!-- Header & Reorder Tool -->
-          <div class="p-3.5 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between flex-shrink-0">
+          <div class="p-3.5 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between flex-shrink-0 gap-1.5">
             <div>
               <h3 class="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                 <i class="fa-solid fa-list-ol text-blue-600"></i>
@@ -671,9 +671,14 @@
               </h3>
               <p class="text-[10px] text-gray-500">คลิกซ้ายค้างเพื่อลากสลับลำดับได้</p>
             </div>
-            <button type="button" onclick="optimizeTripRoute()" class="px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-gray-200 shadow-2xs transition" title="คำนวณลำดับจุดส่งหมายที่ใกล้ที่สุดใหม่">
-              <i class="fa-solid fa-arrows-rotate mr-0.5"></i> จัดลำดับใหม่อัตโนมัติ
-            </button>
+            <div class="flex items-center gap-1.5 flex-wrap justify-end">
+              <button type="button" onclick="openAddRouteStopModal()" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-[10px] font-bold rounded-lg shadow-sm transition flex items-center gap-1" title="เพิ่มรายการส่งหมาย">
+                <i class="fa-solid fa-plus"></i> <span>เพิ่มรายการ</span>
+              </button>
+              <button type="button" onclick="optimizeTripRoute()" class="px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-gray-200 shadow-2xs transition" title="คำนวณลำดับจุดส่งหมายที่ใกล้ที่สุดใหม่">
+                <i class="fa-solid fa-arrows-rotate mr-0.5"></i> <span>จัดลำดับอัตโนมัติ</span>
+              </button>
+            </div>
           </div>
 
           <!-- Start Point & Round-Trip Config Box -->
@@ -711,7 +716,7 @@
             <div class="p-8 text-center text-gray-400">
               <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
               <p class="text-xs font-semibold">ยังไม่มีรายการหมุดที่เลือก</p>
-              <p class="text-[10px] text-gray-400 mt-1">กด "ระบุพื้นที่ / ตัวกรอง" หรือ "อ่านข้อมูลบัญชีจ่ายหมาย" เพื่อแสดงหมุดบนแผนที่</p>
+              <p class="text-[10px] text-gray-400 mt-1">กด "ระบุพื้นที่ / ตัวกรอง" หรือ "+ เพิ่มรายการ" เพื่อจัดตารางส่งหมายบนแผนที่</p>
             </div>
           </div>
         </div>
