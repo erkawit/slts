@@ -2067,24 +2067,13 @@ window.openManualUploadModal = function() {
         }
 
         const reader = new FileReader();
-        reader.onload = async (ev) => {
+        reader.onload = (ev) => {
           selectedImageDataUrl = ev.target.result;
           window._manualTempDataUrl = selectedImageDataUrl;
           previewImg.src = selectedImageDataUrl;
           previewContainer.classList.remove('hidden');
           const sizeKb = Math.round(file.size / 1024);
           fileInfoText.textContent = `ไฟล์: ${file.name} (${sizeKb} KB)`;
-
-          // บนหน้าจอ Desktop (> 768px): สแกนหาพิกัด GPS จากภาพอัตโนมัติ
-          if (window.innerWidth > 768) {
-            const gpsFound = await extractGpsFromImage(file, selectedImageDataUrl, false);
-            if (gpsFound && typeof gpsFound.lat === 'number' && typeof gpsFound.lng === 'number') {
-              const latInput = document.getElementById('mUp_lat');
-              const lngInput = document.getElementById('mUp_lng');
-              if (latInput) latInput.value = Number(gpsFound.lat).toFixed(6);
-              if (lngInput) lngInput.value = Number(gpsFound.lng).toFixed(6);
-            }
-          }
         };
         reader.readAsDataURL(file);
       });
@@ -2554,7 +2543,7 @@ window.openMobileSubRecordsModal = function(caseNumber) {
 };
 
 /**
- * ดูภาพตัวอย่างขนาดเต็มจาก Manual Upload
+ * ดูภาพตัวอย่างขนาดเต็มจาก Manual Upload (สเกลไม่เกิน 80% ความสูงหน้าจอ)
  */
 window.viewManualFullPreview = function() {
   if (!window._manualTempDataUrl) return;
@@ -2563,9 +2552,12 @@ window.viewManualFullPreview = function() {
     imageUrl: window._manualTempDataUrl,
     imageAlt: 'ตัวอย่างภาพ',
     showCloseButton: true,
-    allowOutsideClick: false,
-    confirmButtonText: 'ปิด',
-    confirmButtonColor: '#2563eb'
+    showConfirmButton: false,
+    width: 'auto',
+    customClass: {
+      popup: 'p-4 rounded-2xl slts-image-preview-popup',
+      image: 'slts-preview-image-constrained'
+    }
   });
 };
 
@@ -2595,7 +2587,7 @@ window.copyCoordinates = function(lat, lng) {
 
 
 /**
- * แสดงภาพถ่ายเต็มด้วย SweetAlert พร้อมปุ่มดาวน์โหลด และคลิกดูเต็มหน้าจอได้
+ * แสดงภาพถ่ายเต็มด้วย SweetAlert พร้อมปุ่มดาวน์โหลด และคลิกดูเต็มหน้าจอได้ (สเกลไม่เกิน 80vh)
  */
 window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, lat, lng) {
   let directImgUrl = imgUrl;
@@ -2607,20 +2599,23 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
   Swal.fire({
     title: `เลขคดี: ${caseNumber}`,
     html: `
-      <div class="text-left text-xs text-gray-600 mb-3 space-y-1">
+      <div class="text-left text-xs text-gray-600 mb-2.5 space-y-1">
         <p><b>📅 วันที่เวลา:</b> ${timestamp}</p>
         <p><b>🏠 ที่ตั้งส่งหมาย:</b> ${locationFull}</p>
         <p><b>📍 พิกัด GPS:</b> ${lat}, ${lng}</p>
       </div>
-      <div class="relative bg-gray-900 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center min-h-[250px] max-h-[60vh] cursor-pointer group" onclick="openFullScreenImage('${directImgUrl}')" title="คลิกที่ภาพเพื่อเปิดดูแบบเต็มหน้าจอ">
-        <img src="${directImgUrl}" alt="${caseNumber}" class="max-w-full max-h-[58vh] object-contain rounded-lg shadow-md transition group-hover:scale-[1.01]" onerror="this.onerror=null; this.src='${imgUrl}';">
+      <div class="relative bg-gray-900 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center min-h-[180px] max-h-[55vh] max-h-[55dvh] cursor-pointer group" onclick="openFullScreenImage('${directImgUrl}')" title="คลิกที่ภาพเพื่อเปิดดูแบบเต็มหน้าจอ">
+        <img src="${directImgUrl}" alt="${caseNumber}" class="max-w-full max-h-[52vh] max-h-[52dvh] object-contain rounded-lg shadow-md transition group-hover:scale-[1.01]" onerror="this.onerror=null; this.src='${imgUrl}';">
         <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5">
           <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
           <span>คลิกที่ภาพเพื่อเปิดดูแบบเต็มหน้าจอ</span>
         </div>
       </div>
     `,
-    width: '650px',
+    width: '600px',
+    customClass: {
+      popup: 'slts-photo-detail-popup rounded-2xl'
+    },
     showCloseButton: true,
     showCancelButton: true,
     allowOutsideClick: false,
@@ -2641,11 +2636,12 @@ window.openFullScreenImage = function(imgSrc) {
     imageAlt: 'ภาพขนาดเต็ม',
     showCloseButton: true,
     showConfirmButton: false,
-    width: '95vw',
+    width: 'auto',
     padding: '0.5rem',
     background: 'rgba(0, 0, 0, 0.95)',
     customClass: {
-      popup: 'border-0 rounded-2xl'
+      popup: 'border-0 rounded-2xl slts-image-preview-popup',
+      image: 'slts-preview-image-constrained'
     }
   });
 };
@@ -5231,7 +5227,7 @@ function initDesktopUploadEvents() {
       }
 
       const reader = new FileReader();
-      reader.onload = async (ev) => {
+      reader.onload = (ev) => {
         state.selectedDesktopImageDataUrl = ev.target.result;
         if (elements.desktopPreviewImg) {
           elements.desktopPreviewImg.src = state.selectedDesktopImageDataUrl;
@@ -5242,11 +5238,6 @@ function initDesktopUploadEvents() {
         if (elements.desktopImageSizeBadge) {
           const sizeKb = Math.round(file.size / 1024);
           elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB)`;
-        }
-
-        // ดึงพิกัด GPS อัตโนมัติจากภาพถ่าย (เฉพาะหน้าจอคอมพิวเตอร์ > 768px)
-        if (window.innerWidth > 768) {
-          await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
         }
       };
       reader.readAsDataURL(file);
@@ -5290,9 +5281,10 @@ window.viewDesktopFullPreview = function() {
     imageAlt: 'ตัวอย่างรูปภาพ',
     showCloseButton: true,
     showConfirmButton: false,
-    width: '80%',
+    width: 'auto',
     customClass: {
-      popup: 'p-4 rounded-2xl'
+      popup: 'p-4 rounded-2xl slts-image-preview-popup',
+      image: 'slts-preview-image-constrained'
     }
   });
 };

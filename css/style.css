@@ -1122,7 +1122,44 @@ table.dataTable tbody td {
   #btnOpenGoogleSheetDirect {
     display: none !important;
   }
+
+  /* ควบคุมขนาดการแสดงผลรูปภาพเมื่อคลิกดูภาพ ให้สมดุล ไม่ล้นจอ และสูงไม่เกิน 80% ของความสูงหน้าจอเสมอ */
+  .swal2-image,
+  .slts-preview-image-constrained,
+  .swal2-popup img.max-w-full {
+    max-height: 75vh !important;
+    max-height: 75dvh !important;
+    max-width: 85vw !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+    margin: 0 auto !important;
+    display: block !important;
+  }
+
+  .swal2-popup.slts-image-preview-popup {
+    max-height: 85vh !important;
+    max-height: 85dvh !important;
+    max-width: 85vw !important;
+    width: auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+    padding: 1.25rem !important;
+  }
+
+  .swal2-popup.slts-photo-detail-popup {
+    max-height: 85vh !important;
+    max-height: 85dvh !important;
+    max-width: 680px !important;
+    width: 90% !important;
+    overflow-y: auto !important;
+    padding: 1.5rem !important;
+  }
 }
+
 
 
 
