@@ -7745,7 +7745,7 @@ window.openMapAreaSelectorModal = function() {
                       <p class="text-[11px] truncate opacity-90">${r.locationText || '-'}</p>
                     </div>
                   </div>
-                  <span class="text-[10px] font-mono opacity-70 flex-shrink-0 ml-2">${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}</span>
+                  ${r.lat && r.lng ? `<span class="text-[10px] font-mono opacity-70 flex-shrink-0 ml-2">${Number(r.lat).toFixed(4)}, ${Number(r.lng).toFixed(4)}</span>` : `<span class="text-[10px] text-gray-400 font-sans flex-shrink-0 ml-2">ไม่มีหมุด</span>`}
                 </div>
               `).join('');
             }
