@@ -7269,7 +7269,6 @@ function optimizeStopsSequence(stops, startLat = null, startLng = null) {
 function getApproximateCoords(district, subdistrict) {
   const baseLat = 17.4138;
   const baseLng = 102.7872;
-  // เพิ่ม jitter เล็กน้อยตาม hash เพื่อไม่ให้หมุดซ้อนทับกันที่จุดเดียวกันเป๊ะ
   const hash = ((district || '') + (subdistrict || '')).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
   const jitterLat = ((hash % 100) - 50) * 0.0012;
   const jitterLng = (((hash * 7) % 100) - 50) * 0.0012;
@@ -7281,32 +7280,33 @@ function getApproximateCoords(district, subdistrict) {
 }
 
 /**
- * เปรียบเทียบข้อมูลที่อ่านได้กับประวัติส่งหมายในระบบ
+ * ตรวจสอบเปรียบเทียบแถวข้อมูลกับประวัติส่งหมายในระบบ
+ * ถ้าตรงกับประวัติ -> matchType: 'exact' (ไฮไลต์)
+ * ถ้าไม่ตรงกับประวัติ -> matchType: 'none' (แสดงรายการปกติ)
  */
-function matchRecordWithHistory(extracted) {
+function matchRowWithHistory(cases, houseNo, subdistrict, district, locationText) {
   const allRows = state.allSheetRows || [];
-  const cleanTargetCase = (extracted.caseNumber || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
-
-  // 1. ตรวจสอบจากเลขคดี (Primary Exact Match)
   let matched = null;
-  if (cleanTargetCase) {
+
+  // 1. ตรวจสอบจากทุกเลขคดีในแถวนี้
+  for (const c of cases) {
+    const cleanC = c.replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+    if (!cleanC) continue;
     matched = allRows.find(r => {
-      const rowCase = (r['เลขคดี'] || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
-      return rowCase && (rowCase === cleanTargetCase || rowCase.includes(cleanTargetCase) || cleanTargetCase.includes(rowCase));
+      const rowC = (r['เลขคดี'] || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+      return rowC && (rowC === cleanC || rowC.includes(cleanC) || cleanC.includes(rowC));
     });
+    if (matched) break;
   }
 
-  // 2. หากไม่พบเลขคดี ให้ตรวจสอบจาก บ้านเลขที่ + หมู่ + ตำบล
-  if (!matched && extracted.subdistrict) {
+  // 2. ถ้าไม่พบเลขคดี ให้ตรวจสอบจาก บ้านเลขที่ + หมู่ + ตำบล
+  if (!matched && subdistrict && houseNo) {
     matched = allRows.find(r => {
-      const rDist = (r['อำเภอ'] || '').trim();
       const rSub = (r['ตำบล'] || '').trim();
       const rHouse = (r['บ้านเลขที่'] || '').trim();
       const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
-
-      const subMatch = rSub && (rSub.includes(extracted.subdistrict) || extracted.subdistrict.includes(rSub));
-      const houseMatch = extracted.houseNo && (rHouse === extracted.houseNo || rLoc.includes(extracted.houseNo));
-
+      const subMatch = rSub && (rSub.includes(subdistrict) || subdistrict.includes(rSub));
+      const houseMatch = rHouse === houseNo || rLoc.includes(houseNo);
       return subMatch && houseMatch;
     });
   }
@@ -7320,101 +7320,28 @@ function matchRecordWithHistory(extracted) {
         lat: lat,
         lng: lng,
         matchType: 'exact',
-        locationText: matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || extracted.locationText,
+        locationText: matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || locationText,
         imageUrl: matched['ลิงก์รูปภาพใน Google Drive'] || matched['ลิงก์รูปภาพ'] || '',
-        caseNumber: matched['เลขคดี'] || extracted.caseNumber
+        subdistrict: matched['ตำบล'] || subdistrict
       };
     }
   }
 
-  // 3. กรณีไม่พบในประวัติ ให้ใช้พิกัดประมาณการ
-  const approx = getApproximateCoords(extracted.district || 'เมืองอุดรธานี', extracted.subdistrict || '');
+  // ไม่พบในประวัติ -> ใช้พิกัดประมาณการ และระบุเป็น 'none' เพื่อแสดงรายการปกติ
+  const approx = getApproximateCoords(district, subdistrict);
   return {
     matchedRow: null,
     lat: approx.lat,
     lng: approx.lng,
-    matchType: 'approx',
-    locationText: extracted.locationText || (extracted.subdistrict ? `ต.${extracted.subdistrict} อ.${extracted.district || ''}` : '-'),
+    matchType: 'none',
+    locationText: locationText,
     imageUrl: '',
-    caseNumber: extracted.caseNumber
+    subdistrict: subdistrict
   };
 }
 
 /**
- * แยกแยะและสกัดข้อมูลจาก Text Lines ของบัญชีจ่ายหมาย
- */
-function parseDispatchTextRows(textLines) {
-  const records = [];
-  const caseRegex = /([ตพดขฝผบมฟวยอEเส\.\s]{1,10}\d{1,6}\s*\/\s*\d{2,4})/i;
-
-  textLines.forEach((line, lineIdx) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.includes('บัญชีจ่ายหมาย') || trimmed.includes('ศาลจังหวัด') || trimmed.includes('เลขดำที่')) {
-      return;
-    }
-
-    const matchCase = trimmed.match(caseRegex);
-    if (matchCase) {
-      const caseNumber = matchCase[1].replace(/\s+/g, '').trim();
-
-      // สกัดที่อยู่, ตำบล, อำเภอ
-      let district = 'เมืองอุดรธานี';
-      if (trimmed.includes('เมืองอุดรธานี')) district = 'เมืองอุดรธานี';
-      else if (trimmed.includes('กุมภวาปี')) district = 'กุมภวาปี';
-      else if (trimmed.includes('หนองหาน')) district = 'หนองหาน';
-      else if (trimmed.includes('บ้านดุง')) district = 'บ้านดุง';
-      else if (trimmed.includes('เพ็ญ')) district = 'เพ็ญ';
-
-      let subdistrict = '';
-      const subMatch = trimmed.match(/(นาข่า|กุดสระ|หมากแข้ง|เชียงยืน|บ้านตาด|โนนสูง|บ้านจั่น|หนองบัว|หมูม่น|หนองนาคำ|สามพร้าว|หนองขอนกว้าง|นิคมสงเคราะห์|บ้านเลื่อม|เชียงผาง)/);
-      if (subMatch) {
-        subdistrict = subMatch[1];
-      }
-
-      // สกัดบ้านเลขที่ / หมู่
-      let locationText = '';
-      const addrMatch = trimmed.match(/(\d+(\/\d+)?\s*(ม\.|หมู่\s*)?\d*.*?(?=นาข่า|กุดสระ|หมากแข้ง|เชียงยืน|เมือง|$))/i);
-      if (addrMatch) {
-        locationText = addrMatch[1].trim();
-      } else {
-        locationText = `ต.${subdistrict || '-'} อ.${district}`;
-      }
-
-      let houseNo = '';
-      const hMatch = locationText.match(/^(\d+(\/\d+)?)/);
-      if (hMatch) houseNo = hMatch[1];
-
-      const extracted = {
-        rawLine: trimmed,
-        caseNumber: caseNumber,
-        locationText: locationText,
-        houseNo: houseNo,
-        subdistrict: subdistrict,
-        district: district
-      };
-
-      const matchRes = matchRecordWithHistory(extracted);
-
-      records.push({
-        no: records.length + 1,
-        caseNumber: matchRes.caseNumber || extracted.caseNumber,
-        locationText: matchRes.locationText || extracted.locationText,
-        subdistrict: extracted.subdistrict || matchRes.matchedRow?.['ตำบล'] || '',
-        district: extracted.district || matchRes.matchedRow?.['อำเภอ'] || 'เมืองอุดรธานี',
-        lat: matchRes.lat,
-        lng: matchRes.lng,
-        imageUrl: matchRes.imageUrl || '',
-        matchType: matchRes.matchType,
-        matchedRow: matchRes.matchedRow
-      });
-    }
-  });
-
-  return records;
-}
-
-/**
- * อ่านไฟล์ PDF บัญชีจ่ายหมายผ่าน PDF.js
+ * สกัดรายการตารางจ่ายหมายจาก PDF Items ตามพิกัดแถวและคอลัมน์ (Table-Aware Parser)
  */
 async function parsePdfDispatchFile(file) {
   if (typeof pdfjsLib === 'undefined') {
@@ -7424,34 +7351,145 @@ async function parsePdfDispatchFile(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const numPages = pdf.numPages;
-  const allTextLines = [];
+  const allParsedRows = [];
 
   for (let pageNum = 1; pageNum <= numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const textContent = await page.getTextContent();
     const items = textContent.items;
-    const rowMap = new Map();
 
-    items.forEach(item => {
-      const y = Math.round(item.transform[5] / 8) * 8;
-      if (!rowMap.has(y)) rowMap.set(y, []);
-      rowMap.get(y).push({
-        text: item.str.trim(),
-        x: item.transform[4]
-      });
+    if (!items || items.length === 0) continue;
+
+    // กรองข้อความ Header ตาราง
+    const validItems = items.filter(it => {
+      const s = (it.str || '').trim();
+      return s && !s.includes('บัญชีจ่ายหมาย') && !s.includes('ศาลจังหวัด') && !s.includes('ตั้งแต่วันที่') && !s.includes('เลขดำที่') && !s.includes('หมายอะไร');
     });
 
-    const sortedY = Array.from(rowMap.keys()).sort((a, b) => b - a);
-    sortedY.forEach(y => {
-      const lineItems = rowMap.get(y).sort((a, b) => a.x - b.x);
-      const lineStr = lineItems.map(it => it.text).filter(t => t).join(' ');
-      if (lineStr.trim()) {
-        allTextLines.push(lineStr);
+    // จัดกลุ่มตามตำแหน่ง Y (แบ่งเป็นแถวในตาราง)
+    const lineGroups = [];
+    const sortedItems = [...validItems].sort((a, b) => b.transform[5] - a.transform[5]);
+
+    sortedItems.forEach(item => {
+      const y = item.transform[5];
+      const x = item.transform[4];
+      let group = lineGroups.find(g => Math.abs(g.y - y) <= 8);
+      if (!group) {
+        group = { y: y, items: [] };
+        lineGroups.push(group);
       }
+      group.items.push({ text: item.str.trim(), x: x });
+    });
+
+    lineGroups.sort((a, b) => b.y - a.y);
+    lineGroups.forEach(g => {
+      g.items.sort((a, b) => a.x - b.x);
+      g.lineStr = g.items.map(it => it.text).filter(t => t).join(' ');
+    });
+
+    // รวบรวมแต่ละแถวตาราง (1, 2, 3, 4...) โดยไม่รวมรายการปนกัน
+    let currentTableRow = null;
+    const tableRows = [];
+    const casePattern = /([ตพดขฝผบมฟวยอEเส\.\s]{1,10}\d{1,6}\s*\/\s*\d{2,4})/i;
+
+    lineGroups.forEach(g => {
+      const firstItem = g.items[0];
+      const firstText = firstItem ? firstItem.text : '';
+      const hasRowIndex = /^\d{1,3}$/.test(firstText) && firstItem.x < 100;
+      const hasCaseMatch = casePattern.test(g.lineStr);
+
+      if (hasRowIndex || (hasCaseMatch && (!currentTableRow || currentTableRow.hasFinished))) {
+        if (currentTableRow && currentTableRow.lines.length > 0) {
+          tableRows.push(currentTableRow);
+        }
+        currentTableRow = {
+          rowIndex: hasRowIndex ? parseInt(firstText, 10) : (tableRows.length + 1),
+          lines: [g.lineStr],
+          items: [...g.items],
+          hasFinished: false
+        };
+      } else if (currentTableRow) {
+        currentTableRow.lines.push(g.lineStr);
+        currentTableRow.items.push(...g.items);
+      }
+    });
+
+    if (currentTableRow && currentTableRow.lines.length > 0) {
+      tableRows.push(currentTableRow);
+    }
+
+    // แปลงแต่ละแถวตารางให้เป็น 1 รายการส่งหมายตามลำดับ
+    tableRows.forEach(row => {
+      const fullRowText = row.lines.join(' ');
+
+      // 1. สกัดเลขคดีทั้งหมดในแถวนี้
+      const allCases = [];
+      const globalCaseRegex = /([ตพดขฝผบมฟวยอEเส\.\s]{1,10}\d{1,6}\s*\/\s*\d{2,4})/gi;
+      let m;
+      while ((m = globalCaseRegex.exec(fullRowText)) !== null) {
+        const c = m[1].replace(/\s+/g, '').trim();
+        if (!allCases.includes(c)) allCases.push(c);
+      }
+
+      if (allCases.length === 0) return;
+
+      const primaryCase = allCases[0];
+      const displayCase = allCases.join(', ');
+
+      // 2. สกัดอำเภอ
+      let district = 'เมืองอุดรธานี';
+      if (fullRowText.includes('เมืองอุดรธานี')) district = 'เมืองอุดรธานี';
+      else if (fullRowText.includes('กุมภวาปี')) district = 'กุมภวาปี';
+      else if (fullRowText.includes('หนองหาน')) district = 'หนองหาน';
+      else if (fullRowText.includes('บ้านดุง')) district = 'บ้านดุง';
+      else if (fullRowText.includes('เพ็ญ')) district = 'เพ็ญ';
+      else if (fullRowText.includes('โนนสะอาด')) district = 'โนนสะอาด';
+      else if (fullRowText.includes('หนองวัวซอ')) district = 'หนองวัวซอ';
+      else if (fullRowText.includes('กุดจับ')) district = 'กุดจับ';
+
+      // 3. สกัดตำบล
+      let subdistrict = '';
+      const subMatch = fullRowText.match(/(นาข่า|กุดสระ|หมากแข้ง|เชียงยืน|บ้านตาด|โนนสูง|บ้านจั่น|หนองบัว|หมูม่น|หนองนาคำ|สามพร้าว|หนองขอนกว้าง|นิคมสงเคราะห์|บ้านเลื่อม|เชียงผาง|บ้านขาว|หนองไฮ)/);
+      if (subMatch) {
+        subdistrict = subMatch[1];
+      }
+
+      // 4. สกัดที่อยู่ / บ้านเลขที่ / หมู่
+      let locationText = '';
+      const addrMatch = fullRowText.match(/(\d+(\/\d+)?\s*(ม\.|หมู่\s*)?\d*.*?(?=นาข่า|กุดสระ|หมากแข้ง|เชียงยืน|บ้านตาด|เมืองอุดรธานี|$))/i);
+      if (addrMatch && addrMatch[1].trim().length > 1) {
+        locationText = addrMatch[1].trim();
+      } else {
+        locationText = `ต.${subdistrict || '-'} อ.${district}`;
+      }
+
+      let houseNo = '';
+      const hMatch = locationText.match(/^(\d+(\/\d+)?)/);
+      if (hMatch) houseNo = hMatch[1];
+
+      // 5. ตรวจสอบเปรียบเทียบกับประวัติส่งหมาย
+      const matchRes = matchRowWithHistory(allCases, houseNo, subdistrict, district, locationText);
+
+      allParsedRows.push({
+        no: allParsedRows.length + 1,
+        pdfRowIndex: row.rowIndex || (allParsedRows.length + 1),
+        caseNumber: displayCase,
+        primaryCase: primaryCase,
+        allCases: allCases,
+        locationText: matchRes.locationText || locationText,
+        subdistrict: subdistrict || matchRes.subdistrict || '',
+        district: district,
+        lat: matchRes.lat,
+        lng: matchRes.lng,
+        imageUrl: matchRes.imageUrl || '',
+        matchType: matchRes.matchType,
+        isMatched: matchRes.matchType === 'exact',
+        matchedRow: matchRes.matchedRow
+      });
     });
   }
 
-  return parseDispatchTextRows(allTextLines);
+  return allParsedRows;
 }
 
 /**
@@ -7467,7 +7505,53 @@ async function parseImageDispatchFile(file) {
   await worker.terminate();
 
   const lines = ret.data.text.split('\n');
-  return parseDispatchTextRows(lines);
+  const allParsedRows = [];
+  const casePattern = /([ตพดขฝผบมฟวยอEเส\.\s]{1,10}\d{1,6}\s*\/\s*\d{2,4})/i;
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.includes('บัญชีจ่ายหมาย') || trimmed.includes('ศาลจังหวัด')) return;
+
+    const matchCase = trimmed.match(casePattern);
+    if (matchCase) {
+      const caseNumber = matchCase[1].replace(/\s+/g, '').trim();
+      let district = 'เมืองอุดรธานี';
+      if (trimmed.includes('กุมภวาปี')) district = 'กุมภวาปี';
+      else if (trimmed.includes('หนองหาน')) district = 'หนองหาน';
+
+      let subdistrict = '';
+      const subMatch = trimmed.match(/(นาข่า|กุดสระ|หมากแข้ง|เชียงยืน|บ้านตาด|โนนสูง|บ้านจั่น|หนองบัว|หมูม่น|หนองนาคำ|สามพร้าว|หนองขอนกว้าง|นิคมสงเคราะห์|บ้านเลื่อม|เชียงผาง)/);
+      if (subMatch) subdistrict = subMatch[1];
+
+      let locationText = `ต.${subdistrict || '-'} อ.${district}`;
+      const addrMatch = trimmed.match(/(\d+(\/\d+)?\s*(ม\.|หมู่\s*)?\d*.*?(?=นาข่า|กุดสระ|หมากแข้ง|เชียงยืน|เมือง|$))/i);
+      if (addrMatch) locationText = addrMatch[1].trim();
+
+      let houseNo = '';
+      const hMatch = locationText.match(/^(\d+(\/\d+)?)/);
+      if (hMatch) houseNo = hMatch[1];
+
+      const matchRes = matchRowWithHistory([caseNumber], houseNo, subdistrict, district, locationText);
+
+      allParsedRows.push({
+        no: allParsedRows.length + 1,
+        caseNumber: caseNumber,
+        primaryCase: caseNumber,
+        allCases: [caseNumber],
+        locationText: matchRes.locationText || locationText,
+        subdistrict: subdistrict || matchRes.subdistrict || '',
+        district: district,
+        lat: matchRes.lat,
+        lng: matchRes.lng,
+        imageUrl: matchRes.imageUrl || '',
+        matchType: matchRes.matchType,
+        isMatched: matchRes.matchType === 'exact',
+        matchedRow: matchRes.matchedRow
+      });
+    }
+  });
+
+  return allParsedRows;
 }
 
 /**
@@ -7564,12 +7648,12 @@ window.openMapAreaSelectorModal = function() {
             <div class="flex items-center justify-between text-[11px] font-bold text-gray-700">
               <span>พบรายการทั้งหมด: <strong id="dispatchParsedCount" class="text-blue-700">0</strong> รายการ</span>
               <div class="flex items-center gap-2 text-[10px]">
-                <span class="inline-flex items-center gap-1 text-emerald-700 font-semibold"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> ตรงกับประวัติ</span>
-                <span class="inline-flex items-center gap-1 text-amber-700 font-semibold"><span class="w-2 h-2 rounded-full bg-amber-500"></span> พิกัดประมาณการ</span>
+                <span class="inline-flex items-center gap-1 text-emerald-700 font-semibold"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> ตรงกับประวัติ (ไฮไลต์)</span>
+                <span class="inline-flex items-center gap-1 text-gray-600 font-semibold"><span class="w-2 h-2 rounded-full bg-gray-400"></span> รายการปกติ</span>
               </div>
             </div>
 
-            <div class="max-h-48 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-100 bg-white" id="dispatchParsedListContainer">
+            <div class="max-h-56 overflow-y-auto border border-gray-200 rounded-xl p-1.5 space-y-1.5 bg-gray-50/50" id="dispatchParsedListContainer">
               <!-- Injected by JS -->
             </div>
           </div>
@@ -7577,7 +7661,7 @@ window.openMapAreaSelectorModal = function() {
 
       </div>
     `,
-    width: '620px',
+    width: '640px',
     customClass: {
       popup: 'rounded-2xl p-4 sm:p-5'
     },
@@ -7640,17 +7724,20 @@ window.openMapAreaSelectorModal = function() {
             if (countBadge) countBadge.textContent = records.length;
             if (listContainer) {
               listContainer.innerHTML = records.map((r, i) => `
-                <div class="p-2 flex items-center justify-between text-xs ${r.matchType === 'exact' ? 'slts-match-exact' : 'slts-match-approx'}">
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="font-bold">${i + 1}. ${r.caseNumber}</span>
-                      <span class="text-[10px] px-1.5 py-0.2 rounded font-semibold ${r.matchType === 'exact' ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-800'}">
-                        ${r.matchType === 'exact' ? '✓ พบพิกัดประวัติ' : 'พิกัดประมาณการ'}
-                      </span>
+                <div class="p-2.5 flex items-center justify-between text-xs rounded-xl border transition ${r.isMatched ? 'slts-match-exact' : 'slts-match-none'}">
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="w-5 h-5 rounded-full ${r.isMatched ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700 font-bold'} text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+                      ${i + 1}
+                    </span>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+                        <span class="font-bold text-xs ${r.isMatched ? 'text-emerald-900' : 'text-gray-900'}">${r.caseNumber}</span>
+                        ${r.isMatched ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.2 rounded font-bold">✓ ตรงกับประวัติ (พบพิกัดจริง)</span>` : `<span class="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.2 rounded">ยังไม่มีประวัติ</span>`}
+                      </div>
+                      <p class="text-[11px] truncate opacity-90">${r.locationText || '-'}</p>
                     </div>
-                    <p class="text-[11px] opacity-80">${r.locationText || '-'}</p>
                   </div>
-                  <span class="text-[10px] font-mono opacity-70">${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}</span>
+                  <span class="text-[10px] font-mono opacity-70 flex-shrink-0 ml-2">${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}</span>
                 </div>
               `).join('');
             }
@@ -8154,32 +8241,33 @@ function renderRouteSidebarList(stops, totalDistKm) {
   let html = '';
   stops.forEach((stop, index) => {
     const stopNum = index + 1;
-    const isExact = stop.matchType === 'exact';
+    const isExact = stop.matchType === 'exact' || stop.isMatched;
     const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
 
     html += `
-      <div class="slts-route-stop-item p-2.5 rounded-xl border border-gray-200 bg-white relative flex items-start gap-2" draggable="true" id="routeStopItem_${index}" data-index="${index}">
+      <div class="slts-route-stop-item p-2.5 rounded-xl border relative flex items-start gap-2 transition ${isExact ? 'slts-match-exact' : 'slts-match-none'}" draggable="true" id="routeStopItem_${index}" data-index="${index}">
         <!-- Drag Handle -->
         <div class="slts-drag-handle text-gray-400 hover:text-gray-600 pt-1 cursor-grab" title="ลากเพื่อสลับตำแหน่ง">
           <i class="fa-solid fa-grip-vertical text-xs"></i>
         </div>
 
         <!-- Stop Number Badge -->
-        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-blue-600' : 'bg-amber-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600' : 'bg-blue-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
           ${stopNum}
         </span>
 
         <!-- Info Content -->
         <div class="flex-1 min-w-0 cursor-pointer" onclick="focusMapOnStop(${index})">
           <div class="flex items-center justify-between gap-1 mb-0.5">
-            <span class="font-bold text-xs text-gray-900 truncate">${stop.caseNumber}</span>
+            <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : 'text-gray-900'} truncate">${stop.caseNumber}</span>
             <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
               ${distText}
             </span>
           </div>
-          <p class="text-[11px] text-gray-600 truncate" title="${stop.locationText}">
+          <p class="text-[11px] opacity-80 truncate" title="${stop.locationText}">
             ${stop.locationText}
           </p>
+          ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติส่งหมาย</span>` : ''}
         </div>
 
         <!-- Quick Reorder Buttons -->
@@ -8389,22 +8477,23 @@ window.showMobileRouteMapModal = function() {
   } else {
     stops.forEach((stop, index) => {
       const stopNum = index + 1;
-      const isExact = stop.matchType === 'exact';
+      const isExact = stop.matchType === 'exact' || stop.isMatched;
       const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
 
       stopsHtml += `
-        <div class="p-2 bg-white rounded-xl border border-gray-200 flex items-start gap-2 text-xs">
-          <span class="w-5 h-5 rounded-full ${isExact ? 'bg-blue-600' : 'bg-amber-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+        <div class="p-2.5 rounded-xl border flex items-start gap-2 text-xs transition ${isExact ? 'slts-match-exact' : 'slts-match-none'}">
+          <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600' : 'bg-blue-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
             ${stopNum}
           </span>
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between gap-1 mb-0.5">
-              <span class="font-bold text-xs text-gray-900 truncate">${stop.caseNumber}</span>
+              <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : 'text-gray-900'} truncate">${stop.caseNumber}</span>
               <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
                 ${distText}
               </span>
             </div>
-            <p class="text-[11px] text-gray-600 truncate">${stop.locationText}</p>
+            <p class="text-[11px] opacity-80 truncate">${stop.locationText}</p>
+            ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5">✓ ตรงกับประวัติส่งหมาย</span>` : ''}
           </div>
           <div class="flex flex-col gap-0.5 flex-shrink-0">
             <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
@@ -8492,21 +8581,22 @@ window.renderMobileRouteList = function() {
   let stopsHtml = '';
   stops.forEach((stop, index) => {
     const stopNum = index + 1;
-    const isExact = stop.matchType === 'exact';
+    const isExact = stop.matchType === 'exact' || stop.isMatched;
     const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
     stopsHtml += `
-      <div class="p-2 bg-white rounded-xl border border-gray-200 flex items-start gap-2 text-xs">
-        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-blue-600' : 'bg-amber-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+      <div class="p-2.5 rounded-xl border flex items-start gap-2 text-xs transition ${isExact ? 'slts-match-exact' : 'slts-match-none'}">
+        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600' : 'bg-blue-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
           ${stopNum}
         </span>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between gap-1 mb-0.5">
-            <span class="font-bold text-xs text-gray-900 truncate">${stop.caseNumber}</span>
+            <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : 'text-gray-900'} truncate">${stop.caseNumber}</span>
             <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
               ${distText}
             </span>
           </div>
-          <p class="text-[11px] text-gray-600 truncate">${stop.locationText}</p>
+          <p class="text-[11px] opacity-80 truncate">${stop.locationText}</p>
+          ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5">✓ ตรงกับประวัติส่งหมาย</span>` : ''}
         </div>
         <div class="flex flex-col gap-0.5 flex-shrink-0">
           <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
