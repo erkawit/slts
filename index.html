@@ -46,8 +46,16 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+  <!-- PDF.js for Court PDF Dispatch Parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260901_13">
+  <link rel="stylesheet" href="css/style.css?v=20260901_14">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -653,17 +661,49 @@
 
         <!-- Right: Route Stops & Distance Matrix Sidebar (lg:col-span-4 or 3) -->
         <div class="lg:col-span-4 xl:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col h-[620px] lg:h-[720px] overflow-hidden">
+          
+          <!-- Header & Reorder Tool -->
           <div class="p-3.5 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between flex-shrink-0">
             <div>
               <h3 class="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                 <i class="fa-solid fa-list-ol text-blue-600"></i>
                 <span>ลำดับเส้นทางส่งหมาย</span>
               </h3>
-              <p class="text-[11px] text-gray-500">เรียงตามลำดับจุดใกล้เคียงที่เหมาะสม</p>
+              <p class="text-[10px] text-gray-500">คลิกซ้ายค้างเพื่อลากสลับลำดับได้</p>
             </div>
-            <button type="button" onclick="optimizeTripRoute()" class="px-2 py-1 bg-white hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-gray-200 shadow-2xs transition" title="คำนวณลำดับจุดส่งหมายที่ใกล้ที่สุดใหม่">
-              <i class="fa-solid fa-arrows-rotate mr-0.5"></i> จัดลำดับใหม่
+            <button type="button" onclick="optimizeTripRoute()" class="px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-gray-200 shadow-2xs transition" title="คำนวณลำดับจุดส่งหมายที่ใกล้ที่สุดใหม่">
+              <i class="fa-solid fa-arrows-rotate mr-0.5"></i> จัดลำดับใหม่อัตโนมัติ
             </button>
+          </div>
+
+          <!-- Start Point & Round-Trip Config Box -->
+          <div class="p-2.5 bg-blue-50/70 border-b border-blue-100/80 space-y-2 text-xs">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-gray-800 text-[11px] flex items-center gap-1">
+                <i class="fa-solid fa-flag-checkered text-blue-600"></i>
+                <span>จุดเริ่มต้นการเดินทาง:</span>
+              </label>
+              <button type="button" onclick="openStartPointConfigModal()" class="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline">
+                <i class="fa-solid fa-pen-to-square"></i> เปลี่ยนจุดเริ่ม
+              </button>
+            </div>
+
+            <div class="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-blue-200/80 text-[11px]">
+              <span id="routeStartPointNameBadge" class="truncate font-semibold text-gray-700" title="จุดเริ่มต้น">ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)</span>
+              <span id="routeStartPointCoordsBadge" class="text-[10px] font-mono text-gray-500 flex-shrink-0 ml-1">17.4138, 102.7872</span>
+            </div>
+
+            <!-- Round Trip Checkbox -->
+            <label class="flex items-center gap-2 cursor-pointer pt-0.5 select-none">
+              <input type="checkbox" id="chkRouteRoundTrip" onchange="handleRoundTripChange(this.checked)" class="w-3.5 h-3.5 text-blue-600 rounded focus:ring-blue-500">
+              <span class="text-[11px] font-bold text-gray-700">เดินทางวนกลับมาจุดเริ่มต้นเมื่อส่งเสร็จ (Round Trip)</span>
+            </label>
+          </div>
+
+          <!-- Distance Delta Banner -->
+          <div id="routeDistanceDeltaBanner" class="hidden px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800 font-semibold items-center justify-between">
+            <span id="routeDistanceDeltaText">ระยะทางเพิ่มขึ้น +0.0 กม.</span>
+            <button type="button" onclick="optimizeTripRoute()" class="text-[10px] underline font-bold text-amber-900">รีเซ็ตเส้นทางสั้นสุด</button>
           </div>
 
           <!-- Stops List Scroll Area -->
@@ -671,7 +711,7 @@
             <div class="p-8 text-center text-gray-400">
               <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
               <p class="text-xs font-semibold">ยังไม่มีรายการหมุดที่เลือก</p>
-              <p class="text-[10px] text-gray-400 mt-1">กด "ระบุพื้นที่ / ตัวกรอง" เพื่อแสดงหมุดบนแผนที่</p>
+              <p class="text-[10px] text-gray-400 mt-1">กด "ระบุพื้นที่ / ตัวกรอง" หรือ "อ่านข้อมูลบัญชีจ่ายหมาย" เพื่อแสดงหมุดบนแผนที่</p>
             </div>
           </div>
         </div>
@@ -998,17 +1038,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260901_13"></script>
-  <script src="js/compass.js?v=20260901_13"></script>
-  <script src="js/map.js?v=20260901_13"></script>
-  <script src="js/watermark.js?v=20260901_13"></script>
-  <script src="js/app.js?v=20260901_13"></script>
+  <script src="js/data.js?v=20260901_14"></script>
+  <script src="js/compass.js?v=20260901_14"></script>
+  <script src="js/map.js?v=20260901_14"></script>
+  <script src="js/watermark.js?v=20260901_14"></script>
+  <script src="js/app.js?v=20260901_14"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260901_13')
+        navigator.serviceWorker.register('./sw.js?v=20260901_14')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

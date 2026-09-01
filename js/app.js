@@ -4805,7 +4805,12 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
         <!-- Header -->
         <div class="slts-modal-header">
           <!-- ปุ่มค้นหาข้อมูลประวัติส่งหมาย ที่มุมซ้ายบนแทนสัญลักษณ์เดิม (Disabled เมื่อออฟไลน์) -->
-          ${searchBtnHtml}
+          <div class="flex items-center gap-1">
+            ${searchBtnHtml}
+            <button type="button" onclick="saveTempModalFormState(); showMobileRouteMapModal();" class="slts-header-search-icon-btn bg-rose-500/20 text-rose-200 border-rose-400/30 hover:bg-rose-500/30" title="เปิดแผนที่และเส้นทางส่งหมาย">
+              <i class="fa-solid fa-map-location-dot"></i>
+            </button>
+          </div>
           <div class="flex-1 ${isOnline ? 'cursor-pointer' : ''}" ${headerTitleAction}>
             <h2 class="slts-modal-title flex items-center gap-1.5">
               <span>${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</span>
@@ -7190,16 +7195,27 @@ function initSettings() {
 }
 
 // =========================================================================
-// 8. ระบบแผนที่และหมุดพิกัดส่งหมาย (Interactive Map & Route Planning Module)
-// เฉพาะหน้าจอความกว้างมากกว่า 768 pixel (Desktop > 768px)
+// 8. ระบบแผนที่ หมุดพิกัด และอ่านบัญชีจ่ายหมาย (Interactive Map & Route Planning Module)
+// รองรับทั้ง Desktop (> 768px) และ Mobile (< 768px)
 // =========================================================================
 
 state.interactiveLeafletMap = null;
 state.mapMarkerLayerGroup = null;
 state.mapRoutePolyline = null;
-state.currentMapFilter = null; // { province, district, subdistrict }
-state.currentRouteStops = [];  // Array of sorted stop objects
+state.startLocationMarker = null;
+state.currentMapFilter = null; // { province, district, subdistrict, isPdfDispatch }
+state.currentRouteStops = [];  // Array of stop objects
+state.initialOptimalDistanceKm = 0; // Baseline optimal distance
 state.showRouteLayer = true;
+state.isRoundTrip = false;
+state.parsedDispatchRecords = []; // Records extracted from PDF/Image
+
+state.routeStartLocation = {
+  name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)',
+  lat: 17.4138,
+  lng: 102.7872,
+  isCustom: false
+};
 
 /**
  * คำนวณระยะทางระหว่าง 2 พิกัดเป็นกิโลเมตร (Haversine Formula)
@@ -7238,7 +7254,7 @@ function optimizeStopsSequence(stops, startLat = null, startLng = null) {
       }
     }
     const [nextStop] = remaining.splice(nearestIdx, 1);
-    nextStop.legDistanceKm = (ordered.length === 0 && startLat === null) ? 0 : minDist;
+    nextStop.legDistanceKm = minDist;
     ordered.push(nextStop);
     currentLat = nextStop.lat;
     currentLng = nextStop.lng;
@@ -7248,11 +7264,216 @@ function optimizeStopsSequence(stops, startLat = null, startLng = null) {
 }
 
 /**
- * เปิด Pop Up ระบุพื้นที่ จังหวัด, อำเภอ, ตำบล เพื่อแสดงหมุดบนแผนที่
+ * ดึงพิกัดประมาณการตามตำบล/อำเภอ
+ */
+function getApproximateCoords(district, subdistrict) {
+  const baseLat = 17.4138;
+  const baseLng = 102.7872;
+  // เพิ่ม jitter เล็กน้อยตาม hash เพื่อไม่ให้หมุดซ้อนทับกันที่จุดเดียวกันเป๊ะ
+  const hash = ((district || '') + (subdistrict || '')).split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const jitterLat = ((hash % 100) - 50) * 0.0012;
+  const jitterLng = (((hash * 7) % 100) - 50) * 0.0012;
+
+  return {
+    lat: Number((baseLat + jitterLat).toFixed(6)),
+    lng: Number((baseLng + jitterLng).toFixed(6))
+  };
+}
+
+/**
+ * เปรียบเทียบข้อมูลที่อ่านได้กับประวัติส่งหมายในระบบ
+ */
+function matchRecordWithHistory(extracted) {
+  const allRows = state.allSheetRows || [];
+  const cleanTargetCase = (extracted.caseNumber || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+
+  // 1. ตรวจสอบจากเลขคดี (Primary Exact Match)
+  let matched = null;
+  if (cleanTargetCase) {
+    matched = allRows.find(r => {
+      const rowCase = (r['เลขคดี'] || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+      return rowCase && (rowCase === cleanTargetCase || rowCase.includes(cleanTargetCase) || cleanTargetCase.includes(rowCase));
+    });
+  }
+
+  // 2. หากไม่พบเลขคดี ให้ตรวจสอบจาก บ้านเลขที่ + หมู่ + ตำบล
+  if (!matched && extracted.subdistrict) {
+    matched = allRows.find(r => {
+      const rDist = (r['อำเภอ'] || '').trim();
+      const rSub = (r['ตำบล'] || '').trim();
+      const rHouse = (r['บ้านเลขที่'] || '').trim();
+      const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
+
+      const subMatch = rSub && (rSub.includes(extracted.subdistrict) || extracted.subdistrict.includes(rSub));
+      const houseMatch = extracted.houseNo && (rHouse === extracted.houseNo || rLoc.includes(extracted.houseNo));
+
+      return subMatch && houseMatch;
+    });
+  }
+
+  if (matched) {
+    const lat = parseFloat(matched['ละติจูด (Lat)'] || matched['ละติจูด'] || 0);
+    const lng = parseFloat(matched['ลองจิจูด (Lng)'] || matched['ลองจิจูด'] || 0);
+    if (lat > 0 && lng > 0) {
+      return {
+        matchedRow: matched,
+        lat: lat,
+        lng: lng,
+        matchType: 'exact',
+        locationText: matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || extracted.locationText,
+        imageUrl: matched['ลิงก์รูปภาพใน Google Drive'] || matched['ลิงก์รูปภาพ'] || '',
+        caseNumber: matched['เลขคดี'] || extracted.caseNumber
+      };
+    }
+  }
+
+  // 3. กรณีไม่พบในประวัติ ให้ใช้พิกัดประมาณการ
+  const approx = getApproximateCoords(extracted.district || 'เมืองอุดรธานี', extracted.subdistrict || '');
+  return {
+    matchedRow: null,
+    lat: approx.lat,
+    lng: approx.lng,
+    matchType: 'approx',
+    locationText: extracted.locationText || (extracted.subdistrict ? `ต.${extracted.subdistrict} อ.${extracted.district || ''}` : '-'),
+    imageUrl: '',
+    caseNumber: extracted.caseNumber
+  };
+}
+
+/**
+ * แยกแยะและสกัดข้อมูลจาก Text Lines ของบัญชีจ่ายหมาย
+ */
+function parseDispatchTextRows(textLines) {
+  const records = [];
+  const caseRegex = /([ตพดขฝผบมฟวยอEเส\.\s]{1,10}\d{1,6}\s*\/\s*\d{2,4})/i;
+
+  textLines.forEach((line, lineIdx) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.includes('บัญชีจ่ายหมาย') || trimmed.includes('ศาลจังหวัด') || trimmed.includes('เลขดำที่')) {
+      return;
+    }
+
+    const matchCase = trimmed.match(caseRegex);
+    if (matchCase) {
+      const caseNumber = matchCase[1].replace(/\s+/g, '').trim();
+
+      // สกัดที่อยู่, ตำบล, อำเภอ
+      let district = 'เมืองอุดรธานี';
+      if (trimmed.includes('เมืองอุดรธานี')) district = 'เมืองอุดรธานี';
+      else if (trimmed.includes('กุมภวาปี')) district = 'กุมภวาปี';
+      else if (trimmed.includes('หนองหาน')) district = 'หนองหาน';
+      else if (trimmed.includes('บ้านดุง')) district = 'บ้านดุง';
+      else if (trimmed.includes('เพ็ญ')) district = 'เพ็ญ';
+
+      let subdistrict = '';
+      const subMatch = trimmed.match(/(นาข่า|กุดสระ|หมากแข้ง|เชียงยืน|บ้านตาด|โนนสูง|บ้านจั่น|หนองบัว|หมูม่น|หนองนาคำ|สามพร้าว|หนองขอนกว้าง|นิคมสงเคราะห์|บ้านเลื่อม|เชียงผาง)/);
+      if (subMatch) {
+        subdistrict = subMatch[1];
+      }
+
+      // สกัดบ้านเลขที่ / หมู่
+      let locationText = '';
+      const addrMatch = trimmed.match(/(\d+(\/\d+)?\s*(ม\.|หมู่\s*)?\d*.*?(?=นาข่า|กุดสระ|หมากแข้ง|เชียงยืน|เมือง|$))/i);
+      if (addrMatch) {
+        locationText = addrMatch[1].trim();
+      } else {
+        locationText = `ต.${subdistrict || '-'} อ.${district}`;
+      }
+
+      let houseNo = '';
+      const hMatch = locationText.match(/^(\d+(\/\d+)?)/);
+      if (hMatch) houseNo = hMatch[1];
+
+      const extracted = {
+        rawLine: trimmed,
+        caseNumber: caseNumber,
+        locationText: locationText,
+        houseNo: houseNo,
+        subdistrict: subdistrict,
+        district: district
+      };
+
+      const matchRes = matchRecordWithHistory(extracted);
+
+      records.push({
+        no: records.length + 1,
+        caseNumber: matchRes.caseNumber || extracted.caseNumber,
+        locationText: matchRes.locationText || extracted.locationText,
+        subdistrict: extracted.subdistrict || matchRes.matchedRow?.['ตำบล'] || '',
+        district: extracted.district || matchRes.matchedRow?.['อำเภอ'] || 'เมืองอุดรธานี',
+        lat: matchRes.lat,
+        lng: matchRes.lng,
+        imageUrl: matchRes.imageUrl || '',
+        matchType: matchRes.matchType,
+        matchedRow: matchRes.matchedRow
+      });
+    }
+  });
+
+  return records;
+}
+
+/**
+ * อ่านไฟล์ PDF บัญชีจ่ายหมายผ่าน PDF.js
+ */
+async function parsePdfDispatchFile(file) {
+  if (typeof pdfjsLib === 'undefined') {
+    throw new Error('PDF.js library is not loaded');
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const numPages = pdf.numPages;
+  const allTextLines = [];
+
+  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const textContent = await page.getTextContent();
+    const items = textContent.items;
+    const rowMap = new Map();
+
+    items.forEach(item => {
+      const y = Math.round(item.transform[5] / 8) * 8;
+      if (!rowMap.has(y)) rowMap.set(y, []);
+      rowMap.get(y).push({
+        text: item.str.trim(),
+        x: item.transform[4]
+      });
+    });
+
+    const sortedY = Array.from(rowMap.keys()).sort((a, b) => b - a);
+    sortedY.forEach(y => {
+      const lineItems = rowMap.get(y).sort((a, b) => a.x - b.x);
+      const lineStr = lineItems.map(it => it.text).filter(t => t).join(' ');
+      if (lineStr.trim()) {
+        allTextLines.push(lineStr);
+      }
+    });
+  }
+
+  return parseDispatchTextRows(allTextLines);
+}
+
+/**
+ * อ่านไฟล์ภาพบัญชีจ่ายหมายผ่าน OCR (Tesseract.js)
+ */
+async function parseImageDispatchFile(file) {
+  if (typeof Tesseract === 'undefined') {
+    throw new Error('Tesseract OCR is not loaded');
+  }
+
+  const worker = await Tesseract.createWorker('tha+eng');
+  const ret = await worker.recognize(file);
+  await worker.terminate();
+
+  const lines = ret.data.text.split('\n');
+  return parseDispatchTextRows(lines);
+}
+
+/**
+ * เปิด Pop Up ระบุพื้นที่ หรืออ่านไฟล์บัญชีจ่ายหมาย (PDF/รูปภาพ)
  */
 window.openMapAreaSelectorModal = function() {
-  if (window.innerWidth <= 768) return;
-
   const currentProvince = state.currentMapFilter?.province || state.selectedProvince || 'อุดรธานี';
   const provinces = (typeof THAILAND_PROVINCES !== 'undefined') ? THAILAND_PROVINCES : [{ name: currentProvince }];
   const districts = getDistrictsByProvince(currentProvince);
@@ -7265,44 +7486,98 @@ window.openMapAreaSelectorModal = function() {
   const subOptionsHtml = `<option value="">-- ทุกตำบลในอำเภอ --</option>` + subdistricts.map(s => `<option value="${s}" ${s === currentSubdistrict ? 'selected' : ''}>${s}</option>`).join('');
 
   Swal.fire({
-    title: '<div class="flex items-center justify-center gap-2 text-base sm:text-lg font-bold text-gray-900"><i class="fa-solid fa-map-location-dot text-rose-500 text-xl"></i> ระบุพื้นที่เพื่อแสดงหมุดบนแผนที่</div>',
+    title: '<div class="flex items-center justify-center gap-2 text-base sm:text-lg font-bold text-gray-900"><i class="fa-solid fa-map-location-dot text-rose-500 text-xl"></i> ระบุพื้นที่ & จัดเส้นทางส่งหมาย</div>',
     html: `
-      <div class="text-left space-y-3.5 text-xs">
-        <p class="text-gray-600 leading-relaxed bg-blue-50 border border-blue-200 rounded-xl p-3">
-          <i class="fa-solid fa-circle-info text-blue-600 mr-1"></i>
-          โปรดระบุจังหวัด อำเภอ และตำบลที่ต้องการดูหมุด ระบบจะดึงพิกัดส่งหมายทั้งหมดมาปักหมุดบนแผนที่ พร้อมคำนวณระยะทางและจัดลำดับเส้นทางให้อัตโนมัติ
-        </p>
-
-        <!-- 1. จังหวัด -->
-        <div>
-          <label class="block font-bold text-gray-800 mb-1">1. จังหวัด (พิมพ์ค้นหาหรือเลือก) *</label>
-          <div class="relative mb-1">
-            <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-gray-400 text-xs"></i>
-            <input type="text" id="map_provSearch" placeholder="พิมพ์ชื่อจังหวัดเพื่อค้นหา..." value="${currentProvince}" class="w-full bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off">
-          </div>
-          <select id="map_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 focus:border-blue-500">
-            ${provOptionsHtml}
-          </select>
+      <div class="text-left text-xs space-y-3">
+        
+        <!-- Tabs Header -->
+        <div class="flex border-b border-gray-200 gap-2 mb-2">
+          <button type="button" id="tabBtnModalArea" onclick="switchModalTab('area')" class="px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-layer-group"></i>
+            <span>1. เลือกตามพื้นที่</span>
+          </button>
+          <button type="button" id="tabBtnModalPdf" onclick="switchModalTab('pdf')" class="px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5">
+            <i class="fa-solid fa-file-pdf text-red-500"></i>
+            <span>2. อ่านไฟล์บัญชีจ่ายหมาย (PDF / รูปภาพ)</span>
+          </button>
         </div>
 
-        <!-- 2. อำเภอ & 3. ตำบล -->
-        <div class="grid grid-cols-2 gap-2.5">
+        <!-- Tab 1: Area Filter Content -->
+        <div id="modalTabContentArea" class="space-y-3.5">
+          <p class="text-gray-600 leading-relaxed bg-blue-50 border border-blue-200 rounded-xl p-3">
+            <i class="fa-solid fa-circle-info text-blue-600 mr-1"></i>
+            เลือกจังหวัด อำเภอ และตำบลที่ต้องการดูหมุด ระบบจะดึงพิกัดส่งหมายทั้งหมดมาปักหมุดและวางแผนเส้นทางให้อัตโนมัติ
+          </p>
+
+          <!-- 1. จังหวัด -->
           <div>
-            <label class="block font-bold text-gray-800 mb-1">2. อำเภอ</label>
-            <select id="map_distSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
-              ${distOptionsHtml}
+            <label class="block font-bold text-gray-800 mb-1">จังหวัด (พิมพ์ค้นหาหรือเลือก) *</label>
+            <div class="relative mb-1">
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-gray-400 text-xs"></i>
+              <input type="text" id="map_provSearch" placeholder="พิมพ์ชื่อจังหวัดเพื่อค้นหา..." value="${currentProvince}" class="w-full bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off">
+            </div>
+            <select id="map_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 focus:border-blue-500">
+              ${provOptionsHtml}
             </select>
           </div>
-          <div>
-            <label class="block font-bold text-gray-800 mb-1">3. ตำบล</label>
-            <select id="map_subSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
-              ${subOptionsHtml}
-            </select>
+
+          <!-- 2. อำเภอ & 3. ตำบล -->
+          <div class="grid grid-cols-2 gap-2.5">
+            <div>
+              <label class="block font-bold text-gray-800 mb-1">อำเภอ</label>
+              <select id="map_distSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
+                ${distOptionsHtml}
+              </select>
+            </div>
+            <div>
+              <label class="block font-bold text-gray-800 mb-1">ตำบล</label>
+              <select id="map_subSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
+                ${subOptionsHtml}
+              </select>
+            </div>
           </div>
         </div>
+
+        <!-- Tab 2: PDF / Image Dispatch Parser Content -->
+        <div id="modalTabContentPdf" class="hidden space-y-3">
+          <p class="text-gray-600 leading-relaxed bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+            <i class="fa-solid fa-wand-magic-sparkles text-emerald-600 mr-1"></i>
+            แนบไฟล์ <strong>PDF บัญชีจ่ายหมาย</strong> หรือ <strong>ภาพถ่ายเอกสาร</strong> ระบบจะดึงเลขคดี ที่อยู่ ตำบล อำเภอ และเทียบพิกัดจากประวัติส่งหมายให้อัตโนมัติ
+          </p>
+
+          <!-- Upload Dropzone -->
+          <div class="border-2 border-dashed border-gray-300 hover:border-blue-500 rounded-2xl p-4 text-center bg-gray-50 cursor-pointer transition relative" onclick="document.getElementById('dispatchFileInput').click()">
+            <input type="file" id="dispatchFileInput" accept=".pdf,image/*" class="hidden" onchange="handleDispatchFileUpload(event)">
+            <i class="fa-solid fa-cloud-arrow-up text-3xl text-blue-600 mb-1.5"></i>
+            <p class="text-xs font-bold text-gray-800">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์ PDF/รูปภาพ มาวางที่นี่</p>
+            <p class="text-[10px] text-gray-500 mt-0.5">รองรับไฟล์ .PDF, .JPG, .PNG</p>
+          </div>
+
+          <!-- Loading Progress Indicator -->
+          <div id="dispatchParseLoading" class="hidden text-center py-3 text-blue-600 font-bold text-xs space-y-1">
+            <i class="fa-solid fa-spinner fa-spin text-xl"></i>
+            <p id="dispatchParseLoadingText">กำลังประมวลผลอ่านข้อมูลจากเอกสาร...</p>
+          </div>
+
+          <!-- Parsed Records Table Preview -->
+          <div id="dispatchParsedPreviewWrap" class="hidden space-y-2">
+            <div class="flex items-center justify-between text-[11px] font-bold text-gray-700">
+              <span>พบรายการทั้งหมด: <strong id="dispatchParsedCount" class="text-blue-700">0</strong> รายการ</span>
+              <div class="flex items-center gap-2 text-[10px]">
+                <span class="inline-flex items-center gap-1 text-emerald-700 font-semibold"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> ตรงกับประวัติ</span>
+                <span class="inline-flex items-center gap-1 text-amber-700 font-semibold"><span class="w-2 h-2 rounded-full bg-amber-500"></span> พิกัดประมาณการ</span>
+              </div>
+            </div>
+
+            <div class="max-h-48 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-100 bg-white" id="dispatchParsedListContainer">
+              <!-- Injected by JS -->
+            </div>
+          </div>
+        </div>
+
       </div>
     `,
-    width: '520px',
+    width: '620px',
     customClass: {
       popup: 'rounded-2xl p-4 sm:p-5'
     },
@@ -7313,6 +7588,83 @@ window.openMapAreaSelectorModal = function() {
     confirmButtonColor: '#2563eb',
     cancelButtonColor: '#6b7280',
     didOpen: () => {
+      // Tab switching
+      window.switchModalTab = function(tab) {
+        const tabAreaBtn = document.getElementById('tabBtnModalArea');
+        const tabPdfBtn = document.getElementById('tabBtnModalPdf');
+        const contentArea = document.getElementById('modalTabContentArea');
+        const contentPdf = document.getElementById('modalTabContentPdf');
+
+        if (tab === 'area') {
+          tabAreaBtn.className = 'px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5';
+          tabPdfBtn.className = 'px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5';
+          contentArea.classList.remove('hidden');
+          contentPdf.classList.add('hidden');
+        } else {
+          tabPdfBtn.className = 'px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5';
+          tabAreaBtn.className = 'px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5';
+          contentPdf.classList.remove('hidden');
+          contentArea.classList.add('hidden');
+        }
+      };
+
+      // File upload handler
+      window.handleDispatchFileUpload = async function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const loading = document.getElementById('dispatchParseLoading');
+        const loadingText = document.getElementById('dispatchParseLoadingText');
+        const previewWrap = document.getElementById('dispatchParsedPreviewWrap');
+        const listContainer = document.getElementById('dispatchParsedListContainer');
+        const countBadge = document.getElementById('dispatchParsedCount');
+
+        if (loading) loading.classList.remove('hidden');
+        if (previewWrap) previewWrap.classList.add('hidden');
+
+        try {
+          let records = [];
+          if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+            if (loadingText) loadingText.textContent = 'กำลังอ่านโครงสร้างตารางจากไฟล์ PDF...';
+            records = await parsePdfDispatchFile(file);
+          } else {
+            if (loadingText) loadingText.textContent = 'กำลังสแกนตัวอักษร OCR จากภาพ...';
+            records = await parseImageDispatchFile(file);
+          }
+
+          state.parsedDispatchRecords = records;
+
+          if (records.length === 0) {
+            Swal.showValidationMessage('ไม่พบรายการเลขคดีในไฟล์ที่แนบ กรุณาตรวจสอบความคมชัดหรือไฟล์ PDF อีกครั้ง');
+          } else {
+            if (countBadge) countBadge.textContent = records.length;
+            if (listContainer) {
+              listContainer.innerHTML = records.map((r, i) => `
+                <div class="p-2 flex items-center justify-between text-xs ${r.matchType === 'exact' ? 'slts-match-exact' : 'slts-match-approx'}">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="font-bold">${i + 1}. ${r.caseNumber}</span>
+                      <span class="text-[10px] px-1.5 py-0.2 rounded font-semibold ${r.matchType === 'exact' ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-800'}">
+                        ${r.matchType === 'exact' ? '✓ พบพิกัดประวัติ' : 'พิกัดประมาณการ'}
+                      </span>
+                    </div>
+                    <p class="text-[11px] opacity-80">${r.locationText || '-'}</p>
+                  </div>
+                  <span class="text-[10px] font-mono opacity-70">${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}</span>
+                </div>
+              `).join('');
+            }
+            if (previewWrap) previewWrap.classList.remove('hidden');
+          }
+        } catch (err) {
+          console.error('Parse error:', err);
+          Swal.showValidationMessage('เกิดข้อผิดพลาดในการอ่านไฟล์: ' + err.message);
+        } finally {
+          if (loading) loading.classList.add('hidden');
+        }
+      };
+
+      // Province search & select events
       const provSearch = document.getElementById('map_provSearch');
       const provSelect = document.getElementById('map_provSelect');
       const distSelect = document.getElementById('map_distSelect');
@@ -7353,29 +7705,170 @@ window.openMapAreaSelectorModal = function() {
       }
     },
     preConfirm: () => {
+      const contentPdf = document.getElementById('modalTabContentPdf');
+      const isPdfMode = contentPdf && !contentPdf.classList.contains('hidden');
+
+      if (isPdfMode) {
+        if (!state.parsedDispatchRecords || state.parsedDispatchRecords.length === 0) {
+          Swal.showValidationMessage('กรุณาแนบไฟล์บัญชีจ่ายหมาย และรอการประมวลผลก่อนกดยืนยัน');
+          return false;
+        }
+        return { isPdfDispatch: true, records: state.parsedDispatchRecords };
+      }
+
       const prov = document.getElementById('map_provSelect')?.value || currentProvince;
       const dist = document.getElementById('map_distSelect')?.value || '';
       const sub = document.getElementById('map_subSelect')?.value || '';
-      return { province: prov, district: dist, subdistrict: sub };
+      return { isPdfDispatch: false, province: prov, district: dist, subdistrict: sub };
     }
   }).then((res) => {
     if (res.isConfirmed && res.value) {
       state.currentMapFilter = res.value;
-      renderMapAndPins(res.value.province, res.value.district, res.value.subdistrict);
+      if (res.value.isPdfDispatch) {
+        renderMapAndPinsFromDispatch(res.value.records);
+      } else {
+        renderMapAndPins(res.value.province, res.value.district, res.value.subdistrict);
+      }
     }
   });
 };
 
 /**
- * เรนเดอร์หมุดและเส้นทางบน Leaflet Map
+ * เปิด Modal ตั้งค่าจุดเริ่มต้นการเดินทาง
+ */
+window.openStartPointConfigModal = function() {
+  const currentStart = state.routeStartLocation;
+
+  Swal.fire({
+    title: '<div class="flex items-center justify-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-flag-checkered text-blue-600"></i> กำหนดจุดเริ่มต้นการเดินทาง</div>',
+    html: `
+      <div class="text-left text-xs space-y-3.5">
+        <p class="text-gray-600">เลือกตำแหน่งที่ต้องการใช้เป็นจุดตั้งต้นในการคำนวณและนำทางส่งหมาย:</p>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" onclick="setPresetStartLocation('court')" class="p-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl font-bold text-blue-700 flex items-center justify-center gap-1.5 transition">
+            <i class="fa-solid fa-landmark"></i> ศาลจังหวัดอุดรธานี
+          </button>
+          <button type="button" onclick="setPresetStartLocation('gps')" class="p-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl font-bold text-emerald-700 flex items-center justify-center gap-1.5 transition">
+            <i class="fa-solid fa-location-crosshairs"></i> ดึงพิกัด GPS ปัจจุบัน
+          </button>
+        </div>
+
+        <div>
+          <label class="block font-bold text-gray-800 mb-1">ชื่อจุดเริ่มต้น:</label>
+          <input type="text" id="startLocNameInput" value="${currentStart.name}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="block font-bold text-gray-800 mb-1">ละติจูด (Lat):</label>
+            <input type="text" id="startLocLatInput" value="${currentStart.lat}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono">
+          </div>
+          <div>
+            <label class="block font-bold text-gray-800 mb-1">ลองจิจูด (Lng):</label>
+            <input type="text" id="startLocLngInput" value="${currentStart.lng}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono">
+          </div>
+        </div>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'บันทึกจุดเริ่มต้น',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#2563eb',
+    didOpen: () => {
+      window.setPresetStartLocation = function(type) {
+        const nameInput = document.getElementById('startLocNameInput');
+        const latInput = document.getElementById('startLocLatInput');
+        const lngInput = document.getElementById('startLocLngInput');
+
+        if (type === 'court') {
+          if (nameInput) nameInput.value = 'ศาลจังหวัดอุดรธานี';
+          if (latInput) latInput.value = '17.4138';
+          if (lngInput) lngInput.value = '102.7872';
+        } else if (type === 'gps') {
+          if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition((pos) => {
+              if (nameInput) nameInput.value = 'ตำแหน่งปัจจุบันของคุณ';
+              if (latInput) latInput.value = pos.coords.latitude.toFixed(6);
+              if (lngInput) lngInput.value = pos.coords.longitude.toFixed(6);
+            }, () => {
+              Swal.showValidationMessage('ไม่สามารถดึงพิกัด GPS ได้ กรุณาตรวจสอบการอนุญาต Location');
+            });
+          }
+        }
+      };
+    },
+    preConfirm: () => {
+      const name = document.getElementById('startLocNameInput')?.value || 'จุดเริ่มต้น';
+      const lat = parseFloat(document.getElementById('startLocLatInput')?.value);
+      const lng = parseFloat(document.getElementById('startLocLngInput')?.value);
+
+      if (isNaN(lat) || isNaN(lng) || lat <= 0 || lng <= 0) {
+        Swal.showValidationMessage('กรุณากรอกพิกัด Latitude, Longitude ให้ถูกต้อง');
+        return false;
+      }
+      return { name, lat, lng, isCustom: true };
+    }
+  }).then((res) => {
+    if (res.isConfirmed && res.value) {
+      state.routeStartLocation = res.value;
+      updateStartLocationUI();
+      recalculateRouteFromStops();
+    }
+  });
+};
+
+/**
+ * อัปเดต UI แถบจุดเริ่มต้น
+ */
+function updateStartLocationUI() {
+  const nameBadge = document.getElementById('routeStartPointNameBadge');
+  const coordsBadge = document.getElementById('routeStartPointCoordsBadge');
+  if (nameBadge) nameBadge.textContent = state.routeStartLocation.name;
+  if (coordsBadge) coordsBadge.textContent = `${state.routeStartLocation.lat.toFixed(4)}, ${state.routeStartLocation.lng.toFixed(4)}`;
+}
+
+/**
+ * จัดการเมื่อติ๊กเลือกเดินทางวนกลับจุดเริ่มต้น (Round Trip)
+ */
+window.handleRoundTripChange = function(checked) {
+  state.isRoundTrip = checked;
+  recalculateRouteFromStops();
+};
+
+/**
+ * เรนเดอร์หมุดจากข้อมูลบัญชีจ่ายหมาย PDF/Image
+ */
+window.renderMapAndPinsFromDispatch = function(records) {
+  const validStops = records.map((r, idx) => ({
+    no: idx + 1,
+    caseNumber: r.caseNumber,
+    dateTime: 'จากบัญชีจ่ายหมาย',
+    locationText: r.locationText,
+    district: r.district,
+    subdistrict: r.subdistrict,
+    imageUrl: r.imageUrl,
+    lat: r.lat,
+    lng: r.lng,
+    matchType: r.matchType
+  }));
+
+  const badgeEl = document.getElementById('mapAreaCurrentBadge');
+  if (badgeEl) badgeEl.textContent = `📋 จากบัญชีจ่ายหมาย (${validStops.length} คดี)`;
+
+  initLeafletMapInstance();
+
+  // จัดเรียงลำดับเริ่มต้น (Optimal Sequence)
+  const orderedStops = optimizeStopsSequence(validStops, state.routeStartLocation.lat, state.routeStartLocation.lng);
+  state.currentRouteStops = orderedStops;
+
+  recalculateRouteFromStops(true);
+};
+
+/**
+ * เรนเดอร์หมุดจากตัวกรองพื้นที่
  */
 window.renderMapAndPins = function(province, district, subdistrict) {
-  if (window.innerWidth <= 768) return;
-
-  const mapContainer = document.getElementById('sltsInteractiveMap');
-  if (!mapContainer) return;
-
-  // 1. อัปเดตข้อความ Badge หัวตาราง
   const badgeEl = document.getElementById('mapAreaCurrentBadge');
   if (badgeEl) {
     let txt = `จ.${province}`;
@@ -7386,30 +7879,23 @@ window.renderMapAndPins = function(province, district, subdistrict) {
     badgeEl.textContent = txt;
   }
 
-  // 2. ดึงข้อมูลรายการจาก state.allSheetRows
   const allRows = state.allSheetRows || [];
-  
-  // กรองตาม จังหวัด / อำเภอ / ตำบล
   const matchedRows = allRows.filter(r => {
     const rProv = getRowProvince(r);
     if (rProv !== province) return false;
-
     if (district) {
       const rDist = (r['อำเภอ'] || r['district'] || '').trim();
       if (rDist !== district) return false;
     }
-
     if (subdistrict) {
       const rSub = (r['ตำบล'] || r['subdistrict'] || '').trim();
       if (rSub !== subdistrict) return false;
     }
-
     return true;
   });
 
-  // กรองเฉพาะแถวที่มีพิกัด Lat, Lng ถูกต้อง
   const validStops = [];
-  matchedRows.forEach(r => {
+  matchedRows.forEach((r, idx) => {
     const rawLat = r['ละติจูด (Lat)'] || r['ละติจูด'] || '';
     const rawLng = r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || '';
     const lat = parseFloat(rawLat);
@@ -7417,6 +7903,7 @@ window.renderMapAndPins = function(province, district, subdistrict) {
 
     if (!isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0) {
       validStops.push({
+        no: idx + 1,
         raw: r,
         caseNumber: (r['เลขคดี'] || '-').trim(),
         dateTime: formatThaiDateDisplay(r['วัน-เวลาบันทึก'] || r['Timestamp'] || ''),
@@ -7425,16 +7912,31 @@ window.renderMapAndPins = function(province, district, subdistrict) {
         subdistrict: (r['ตำบล'] || '').trim(),
         imageUrl: r['ลิงก์รูปภาพใน Google Drive'] || r['ลิงก์รูปภาพ'] || '',
         lat: lat,
-        lng: lng
+        lng: lng,
+        matchType: 'exact'
       });
     }
   });
 
-  // 3. เริ่มต้น Leaflet Map หากยังไม่ได้สร้าง
+  initLeafletMapInstance();
+
+  const orderedStops = optimizeStopsSequence(validStops, state.routeStartLocation.lat, state.routeStartLocation.lng);
+  state.currentRouteStops = orderedStops;
+
+  recalculateRouteFromStops(true);
+};
+
+/**
+ * สร้าง Leaflet Map Instance
+ */
+function initLeafletMapInstance() {
+  const mapContainer = document.getElementById('sltsInteractiveMap');
+  if (!mapContainer) return;
+
   if (!state.interactiveLeafletMap && typeof L !== 'undefined') {
     state.interactiveLeafletMap = L.map('sltsInteractiveMap', {
       zoomControl: true
-    }).setView([17.4138, 102.7872], 12);
+    }).setView([state.routeStartLocation.lat, state.routeStartLocation.lng], 12);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -7447,35 +7949,71 @@ window.renderMapAndPins = function(province, district, subdistrict) {
   if (state.interactiveLeafletMap) {
     state.interactiveLeafletMap.invalidateSize();
   }
+}
 
-  // 4. จัดเรียงลำดับเส้นทางส่งหมาย (Optimize Trip Sequence)
-  const currentLat = state.lat || null;
-  const currentLng = state.lng || null;
-  const orderedStops = optimizeStopsSequence(validStops, currentLat, currentLng);
-  state.currentRouteStops = orderedStops;
+/**
+ * คำนวณและเรนเดอร์เส้นทางใหม่จากลำดับใน state.currentRouteStops
+ */
+function recalculateRouteFromStops(isResetToOptimal = false) {
+  if (!state.interactiveLeafletMap) return;
 
-  // 5. เรนเดอร์หมุดบนแผนที่
+  const stops = state.currentRouteStops;
+  const start = state.routeStartLocation;
+
   if (state.mapMarkerLayerGroup) {
     state.mapMarkerLayerGroup.clearLayers();
   }
-  if (state.mapRoutePolyline && state.interactiveLeafletMap) {
+  if (state.mapRoutePolyline) {
     state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
     state.mapRoutePolyline = null;
   }
 
-  const bounds = [];
-  const polylineCoords = [];
+  // 1. หมุดจุดเริ่มต้น (Start Location Hub Marker)
+  const startIcon = L.divIcon({
+    html: `
+      <div class="slts-map-pin-marker" title="จุดเริ่มต้น: ${start.name}">
+        <div class="slts-pin-badge start-hub-pin">
+          <span>🏛️</span>
+        </div>
+      </div>
+    `,
+    className: 'slts-custom-div-icon',
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
+    popupAnchor: [0, -28]
+  });
 
-  orderedStops.forEach((stop, index) => {
+  const startMarker = L.marker([start.lat, start.lng], { icon: startIcon })
+    .bindPopup(`<div class="p-2 font-bold text-xs text-emerald-800">🏛️ ${start.name}<p class="text-[10px] font-normal text-gray-500 font-mono">${start.lat.toFixed(4)}, ${start.lng.toFixed(4)}</p></div>`);
+
+  if (state.mapMarkerLayerGroup) {
+    state.mapMarkerLayerGroup.addLayer(startMarker);
+  }
+
+  const bounds = [[start.lat, start.lng]];
+  const polylineCoords = [[start.lat, start.lng]];
+
+  let totalDistanceKm = 0;
+  let prevLat = start.lat;
+  let prevLng = start.lng;
+
+  stops.forEach((stop, index) => {
     const stopNum = index + 1;
     bounds.push([stop.lat, stop.lng]);
     polylineCoords.push([stop.lat, stop.lng]);
 
-    // สร้าง Custom Numbered Pin
-    const isStart = stopNum === 1;
+    // คำนวณระยะทางจากจุดก่อนหน้า
+    const legDist = calculateHaversineDistance(prevLat, prevLng, stop.lat, stop.lng);
+    stop.legDistanceKm = legDist;
+    totalDistanceKm += legDist;
+    prevLat = stop.lat;
+    prevLng = stop.lng;
+
+    // Custom Marker
+    const isExact = stop.matchType === 'exact';
     const pinHtml = `
       <div class="slts-map-pin-marker" title="จุดที่ ${stopNum}: ${stop.caseNumber}">
-        <div class="slts-pin-badge ${isStart ? 'start-pin' : ''}">
+        <div class="slts-pin-badge ${isExact ? '' : 'bg-gradient-to-r from-amber-500 to-amber-700'}">
           <span>${stopNum}</span>
         </div>
       </div>
@@ -7494,28 +8032,25 @@ window.renderMapAndPins = function(province, district, subdistrict) {
     const safeDate = stop.dateTime.replace(/'/g, "\\'");
 
     const popupHtml = `
-      <div class="p-3.5 space-y-2 max-w-[280px] text-xs font-sans">
-        <div class="flex items-center justify-between border-b border-gray-100 pb-1.5 gap-2">
+      <div class="p-3 space-y-1.5 max-w-[280px] text-xs font-sans">
+        <div class="flex items-center justify-between border-b border-gray-100 pb-1 gap-2">
           <span class="font-bold text-sm text-blue-700">ลำดับที่ ${stopNum}: ${stop.caseNumber}</span>
-          <span class="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-semibold">📍 ${stop.lat.toFixed(4)}, ${stop.lng.toFixed(4)}</span>
+          <span class="text-[10px] ${isExact ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'} px-2 py-0.5 rounded-full font-semibold">
+            ${isExact ? '✓ พิกัดประวัติ' : 'พิกัดประมาณการ'}
+          </span>
         </div>
         
-        <p class="text-gray-700 text-xs leading-relaxed">
-          <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${stop.locationText}
-        </p>
-
-        <p class="text-[11px] text-gray-500">
-          <i class="fa-regular fa-clock text-gray-400 mr-1"></i>${stop.dateTime}
-        </p>
+        <p class="text-gray-700 text-xs leading-relaxed"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${stop.locationText}</p>
+        <p class="text-[10px] text-gray-500"><i class="fa-solid fa-route text-blue-500 mr-1"></i>+${legDist.toFixed(1)} กม. จากจุดก่อนหน้า</p>
 
         ${stop.imageUrl ? `
           <div class="pt-1">
-            <img src="${stop.imageUrl}" alt="ภาพถ่ายหมาย" class="w-full h-28 object-cover rounded-xl border border-gray-200 cursor-pointer hover:opacity-90 transition" onclick="viewPhotoModal('${stop.imageUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')">
+            <img src="${stop.imageUrl}" alt="ภาพถ่ายหมาย" class="w-full h-24 object-cover rounded-xl border border-gray-200 cursor-pointer" onclick="viewPhotoModal('${stop.imageUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')">
           </div>
         ` : ''}
 
-        <div class="flex items-center gap-1.5 pt-1.5">
-          <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="flex-1 text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition">
+        <div class="pt-1">
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="block w-full text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs">
             <i class="fa-solid fa-diamond-turn-right mr-1"></i> นำทางจุดนี้
           </a>
         </div>
@@ -7526,14 +8061,20 @@ window.renderMapAndPins = function(province, district, subdistrict) {
       .bindPopup(popupHtml, { className: 'slts-map-popup' });
 
     stop.leafletMarker = marker;
-
     if (state.mapMarkerLayerGroup) {
       state.mapMarkerLayerGroup.addLayer(marker);
     }
   });
 
-  // 6. วาดเส้นเชื่อมโยงเส้นทาง (Polyline)
-  if (polylineCoords.length > 1 && state.interactiveLeafletMap && state.showRouteLayer) {
+  // ถ้าเลือก Round Trip -> วนกลับมาจุดเริ่มต้น
+  if (state.isRoundTrip && stops.length > 0) {
+    polylineCoords.push([start.lat, start.lng]);
+    const returnDist = calculateHaversineDistance(prevLat, prevLng, start.lat, start.lng);
+    totalDistanceKm += returnDist;
+  }
+
+  // วาด Polyline
+  if (polylineCoords.length > 1 && state.showRouteLayer) {
     state.mapRoutePolyline = L.polyline(polylineCoords, {
       color: '#2563eb',
       weight: 3.5,
@@ -7543,20 +8084,39 @@ window.renderMapAndPins = function(province, district, subdistrict) {
     }).addTo(state.interactiveLeafletMap);
   }
 
-  // 7. คำนวณระยะทางรวมทั้งหมด
-  let totalDistanceKm = 0;
-  orderedStops.forEach(s => {
-    if (s.legDistanceKm) totalDistanceKm += s.legDistanceKm;
-  });
+  // บันทึก Optimal Baseline
+  if (isResetToOptimal) {
+    state.initialOptimalDistanceKm = totalDistanceKm;
+  }
 
-  // 8. อัปเดต Badges
+  // อัปเดต Distance Delta Banner
+  const deltaBanner = document.getElementById('routeDistanceDeltaBanner');
+  const deltaText = document.getElementById('routeDistanceDeltaText');
+  const distDelta = totalDistanceKm - state.initialOptimalDistanceKm;
+
+  if (deltaBanner && deltaText) {
+    if (!isResetToOptimal && Math.abs(distDelta) > 0.1) {
+      if (distDelta > 0) {
+        deltaText.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1 text-amber-600"></i> ระยะทางเพิ่มขึ้น <strong>+${distDelta.toFixed(1)} กม.</strong> จากเส้นทางแนะนำ`;
+        deltaBanner.className = 'px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800 font-semibold flex items-center justify-between';
+      } else {
+        deltaText.innerHTML = `<i class="fa-solid fa-circle-check mr-1 text-emerald-600"></i> ระยะทางสั้นลง <strong>${distDelta.toFixed(1)} กม.</strong>`;
+        deltaBanner.className = 'px-3 py-1.5 bg-emerald-50 border-b border-emerald-200 text-[11px] text-emerald-800 font-semibold flex items-center justify-between';
+      }
+      deltaBanner.classList.remove('hidden');
+    } else {
+      deltaBanner.classList.add('hidden');
+    }
+  }
+
+  // อัปเดต Badges
   const pinCountEl = document.getElementById('mapPinCountBadge');
-  if (pinCountEl) pinCountEl.textContent = orderedStops.length;
+  if (pinCountEl) pinCountEl.textContent = stops.length;
 
   const routeSummaryBadge = document.getElementById('mapRouteSummaryBadge');
   const totalDistEl = document.getElementById('mapTotalDistanceText');
   if (routeSummaryBadge && totalDistEl) {
-    if (orderedStops.length > 1) {
+    if (stops.length > 0) {
       totalDistEl.textContent = `${totalDistanceKm.toFixed(1)} กม.`;
       routeSummaryBadge.classList.remove('hidden');
       routeSummaryBadge.classList.add('flex');
@@ -7566,19 +8126,15 @@ window.renderMapAndPins = function(province, district, subdistrict) {
     }
   }
 
-  // 9. เรนเดอร์รายการ Stops บน Sidebar ด้านขวา
-  renderRouteSidebarList(orderedStops, totalDistanceKm);
+  renderRouteSidebarList(stops, totalDistanceKm);
 
-  // 10. Fit Bounds
-  if (bounds.length > 0 && state.interactiveLeafletMap) {
+  if (bounds.length > 1) {
     state.interactiveLeafletMap.fitBounds(bounds, { padding: [40, 40] });
-  } else if (state.interactiveLeafletMap) {
-    state.interactiveLeafletMap.setView([17.4138, 102.7872], 11);
   }
-};
+}
 
 /**
- * เรนเดอร์รายการลำดับจุดส่งหมายใน Sidebar ด้านขวา
+ * เรนเดอร์รายการ Stops บน Sidebar พร้อมฟังก์ชัน Drag & Drop
  */
 function renderRouteSidebarList(stops, totalDistKm) {
   const container = document.getElementById('mapRouteStopsList');
@@ -7589,7 +8145,7 @@ function renderRouteSidebarList(stops, totalDistKm) {
       <div class="p-8 text-center text-gray-400">
         <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
         <p class="text-xs font-semibold">ไม่พบหมุดพิกัดในพื้นที่นี้</p>
-        <p class="text-[10px] text-gray-400 mt-1">ลองเปลี่ยนขอบเขตอำเภอ หรือตำบลอื่น</p>
+        <p class="text-[10px] text-gray-400 mt-1">กด "ระบุพื้นที่ / ตัวกรอง" หรือ "อ่านไฟล์บัญชีจ่ายหมาย" เพื่อเลือกหมุด</p>
       </div>
     `;
     return;
@@ -7598,32 +8154,131 @@ function renderRouteSidebarList(stops, totalDistKm) {
   let html = '';
   stops.forEach((stop, index) => {
     const stopNum = index + 1;
-    const isStart = stopNum === 1;
-    const distText = isStart ? 'จุดเริ่มต้น' : `+ ${stop.legDistanceKm.toFixed(1)} กม. จากจุดก่อนหน้า`;
+    const isExact = stop.matchType === 'exact';
+    const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
 
     html += `
-      <div class="slts-route-stop-item p-2.5 rounded-xl border border-gray-200 cursor-pointer bg-white" onclick="focusMapOnStop(${index})" id="routeStopItem_${index}">
-        <div class="flex items-start justify-between gap-1.5 mb-1">
-          <div class="flex items-center gap-1.5">
-            <span class="w-5 h-5 rounded-full ${isStart ? 'bg-blue-600' : 'bg-rose-500'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0">
-              ${stopNum}
-            </span>
-            <span class="font-bold text-xs text-gray-900">${stop.caseNumber}</span>
-          </div>
-          <span class="text-[10px] font-semibold ${isStart ? 'text-blue-700 bg-blue-50' : 'text-emerald-700 bg-emerald-50'} px-1.5 py-0.5 rounded-md border border-gray-200">
-            ${distText}
-          </span>
+      <div class="slts-route-stop-item p-2.5 rounded-xl border border-gray-200 bg-white relative flex items-start gap-2" draggable="true" id="routeStopItem_${index}" data-index="${index}">
+        <!-- Drag Handle -->
+        <div class="slts-drag-handle text-gray-400 hover:text-gray-600 pt-1 cursor-grab" title="ลากเพื่อสลับตำแหน่ง">
+          <i class="fa-solid fa-grip-vertical text-xs"></i>
         </div>
 
-        <p class="text-[11px] text-gray-600 truncate pl-6" title="${stop.locationText}">
-          ${stop.locationText}
-        </p>
+        <!-- Stop Number Badge -->
+        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-blue-600' : 'bg-amber-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+          ${stopNum}
+        </span>
+
+        <!-- Info Content -->
+        <div class="flex-1 min-w-0 cursor-pointer" onclick="focusMapOnStop(${index})">
+          <div class="flex items-center justify-between gap-1 mb-0.5">
+            <span class="font-bold text-xs text-gray-900 truncate">${stop.caseNumber}</span>
+            <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
+              ${distText}
+            </span>
+          </div>
+          <p class="text-[11px] text-gray-600 truncate" title="${stop.locationText}">
+            ${stop.locationText}
+          </p>
+        </div>
+
+        <!-- Quick Reorder Buttons -->
+        <div class="flex flex-col gap-0.5 flex-shrink-0">
+          <button type="button" onclick="moveStopUp(${index}, event)" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="เลื่อนขึ้น">
+            <i class="fa-solid fa-chevron-up"></i>
+          </button>
+          <button type="button" onclick="moveStopDown(${index}, event)" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="เลื่อนลง">
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+        </div>
       </div>
     `;
   });
 
+  if (state.isRoundTrip && stops.length > 0) {
+    html += `
+      <div class="p-2 bg-emerald-50/80 rounded-xl border border-emerald-200 text-[11px] font-bold text-emerald-800 flex items-center justify-between">
+        <span>🏁 วนกลับ: ${state.routeStartLocation.name}</span>
+        <span class="text-[10px] font-mono text-emerald-700">จบทริป</span>
+      </div>
+    `;
+  }
+
   container.innerHTML = html;
+
+  // ผูก Drag & Drop Event Listeners
+  container.querySelectorAll('.slts-route-stop-item').forEach((el, idx) => {
+    initStopItemDragEvents(el, idx);
+  });
 }
+
+/**
+ * ผูก Event การลากวาง Drag & Drop บน Stop Item
+ */
+let draggedStopIndex = null;
+
+function initStopItemDragEvents(element, index) {
+  element.addEventListener('dragstart', (e) => {
+    draggedStopIndex = index;
+    element.classList.add('is-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index);
+  });
+
+  element.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = element.getBoundingClientRect();
+    const relY = e.clientY - rect.top;
+    if (relY < rect.height / 2) {
+      element.classList.add('drag-over-top');
+      element.classList.remove('drag-over-bottom');
+    } else {
+      element.classList.add('drag-over-bottom');
+      element.classList.remove('drag-over-top');
+    }
+  });
+
+  element.addEventListener('dragleave', () => {
+    element.classList.remove('drag-over-top', 'drag-over-bottom');
+  });
+
+  element.addEventListener('drop', (e) => {
+    e.preventDefault();
+    element.classList.remove('drag-over-top', 'drag-over-bottom');
+    const fromIdx = draggedStopIndex;
+    const toIdx = index;
+    if (fromIdx !== null && fromIdx !== toIdx) {
+      reorderStops(fromIdx, toIdx);
+    }
+  });
+
+  element.addEventListener('dragend', () => {
+    element.classList.remove('is-dragging', 'drag-over-top', 'drag-over-bottom');
+    draggedStopIndex = null;
+  });
+}
+
+/**
+ * สลับตำแหน่ง Stop
+ */
+window.reorderStops = function(fromIndex, toIndex) {
+  if (!state.currentRouteStops || fromIndex === toIndex) return;
+  const [movedItem] = state.currentRouteStops.splice(fromIndex, 1);
+  state.currentRouteStops.splice(toIndex, 0, movedItem);
+
+  recalculateRouteFromStops(false);
+};
+
+window.moveStopUp = function(index, e) {
+  if (e) e.stopPropagation();
+  if (index > 0) reorderStops(index, index - 1);
+};
+
+window.moveStopDown = function(index, e) {
+  if (e) e.stopPropagation();
+  if (index < state.currentRouteStops.length - 1) reorderStops(index, index + 1);
+};
 
 /**
  * โฟกัสแผนที่ไปยังหมุดที่เลือกจาก Sidebar
@@ -7632,7 +8287,6 @@ window.focusMapOnStop = function(index) {
   const stop = state.currentRouteStops[index];
   if (!stop || !state.interactiveLeafletMap) return;
 
-  // ไฮไลต์รายการใน sidebar
   document.querySelectorAll('.slts-route-stop-item').forEach(el => el.classList.remove('active'));
   const targetItem = document.getElementById(`routeStopItem_${index}`);
   if (targetItem) targetItem.classList.add('active');
@@ -7655,32 +8309,18 @@ window.toggleMapRouteLayer = function() {
     btnTxt.textContent = state.showRouteLayer ? 'ซ่อนเส้นทาง' : 'แสดงเส้นทาง';
   }
 
-  if (state.showRouteLayer) {
-    const coords = state.currentRouteStops.map(s => [s.lat, s.lng]);
-    if (coords.length > 1) {
-      if (state.mapRoutePolyline) state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
-      state.mapRoutePolyline = L.polyline(coords, {
-        color: '#2563eb',
-        weight: 3.5,
-        opacity: 0.85,
-        dashArray: '8, 8',
-        lineCap: 'round'
-      }).addTo(state.interactiveLeafletMap);
-    }
-  } else {
-    if (state.mapRoutePolyline) {
-      state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
-      state.mapRoutePolyline = null;
-    }
-  }
+  recalculateRouteFromStops(false);
 };
 
 /**
  * ปรับมุมมองแผนที่ให้เห็นครบทุกหมุด
  */
 window.fitMapToAllPins = function() {
-  if (!state.interactiveLeafletMap || !state.currentRouteStops || state.currentRouteStops.length === 0) return;
-  const bounds = state.currentRouteStops.map(s => [s.lat, s.lng]);
+  if (!state.interactiveLeafletMap) return;
+  const bounds = [[state.routeStartLocation.lat, state.routeStartLocation.lng]];
+  if (state.currentRouteStops) {
+    state.currentRouteStops.forEach(s => bounds.push([s.lat, s.lng]));
+  }
   state.interactiveLeafletMap.fitBounds(bounds, { padding: [40, 40] });
 };
 
@@ -7688,8 +8328,10 @@ window.fitMapToAllPins = function() {
  * คำนวณจัดลำดับเส้นทางใหม่
  */
 window.optimizeTripRoute = function() {
-  if (!state.currentMapFilter) return;
-  renderMapAndPins(state.currentMapFilter.province, state.currentMapFilter.district, state.currentMapFilter.subdistrict);
+  if (!state.currentRouteStops || state.currentRouteStops.length === 0) return;
+  const orderedStops = optimizeStopsSequence(state.currentRouteStops, state.routeStartLocation.lat, state.routeStartLocation.lng);
+  state.currentRouteStops = orderedStops;
+  recalculateRouteFromStops(true);
 };
 
 /**
@@ -7697,26 +8339,188 @@ window.optimizeTripRoute = function() {
  */
 window.openFullRouteInGoogleMaps = function() {
   const stops = state.currentRouteStops;
+  const start = state.routeStartLocation;
+
   if (!stops || stops.length === 0) {
-    Swal.fire('ไม่มีรายการหมุด', 'กรุณาระบุพื้นที่ที่มีหมุดพิกัดส่งหมายก่อนเปิดนำทาง', 'info');
+    Swal.fire('ไม่มีรายการหมุด', 'กรุณาระบุพื้นที่หรืออ่านไฟล์บัญชีจ่ายหมายก่อนเปิดนำทาง', 'info');
     return;
   }
 
-  if (stops.length === 1) {
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${stops[0].lat},${stops[0].lng}`, '_blank');
-    return;
-  }
+  const origin = `${start.lat},${start.lng}`;
+  let destination = '';
+  let waypoints = [];
 
-  // สร้าง URL เส้นทางแบบหลายจุดแวะ
-  const origin = `${stops[0].lat},${stops[0].lng}`;
-  const destination = `${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}`;
-  const waypoints = stops.slice(1, -1).map(s => `${s.lat},${s.lng}`).join('|');
+  if (state.isRoundTrip) {
+    destination = `${start.lat},${start.lng}`;
+    waypoints = stops.map(s => `${s.lat},${s.lng}`);
+  } else {
+    destination = `${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}`;
+    waypoints = stops.slice(0, -1).map(s => `${s.lat},${s.lng}`);
+  }
 
   let gmapUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
-  if (waypoints) {
-    gmapUrl += `&waypoints=${encodeURIComponent(waypoints)}`;
+  if (waypoints.length > 0) {
+    gmapUrl += `&waypoints=${encodeURIComponent(waypoints.join('|'))}`;
   }
 
   window.open(gmapUrl, '_blank');
 };
+
+/**
+ * เปิดหน้าต่างแผนที่และเส้นทางส่งหมายสำหรับหน้าจอมือถือ (< 768px)
+ */
+window.showMobileRouteMapModal = function() {
+  const stops = state.currentRouteStops || [];
+  const start = state.routeStartLocation;
+  const prov = state.selectedProvince || 'อุดรธานี';
+
+  let totalDistKm = 0;
+  stops.forEach(s => { if (s.legDistanceKm) totalDistKm += s.legDistanceKm; });
+
+  let stopsHtml = '';
+  if (stops.length === 0) {
+    stopsHtml = `
+      <div class="p-6 text-center text-gray-400">
+        <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
+        <p class="text-xs font-semibold">ยังไม่มีรายการหมุดที่เลือก</p>
+        <p class="text-[10px] text-gray-400 mt-1">กดปุ่ม "ตัวกรอง" เพื่อเลือกพื้นที่หรืออ่านไฟล์บัญชีจ่ายหมาย</p>
+      </div>
+    `;
+  } else {
+    stops.forEach((stop, index) => {
+      const stopNum = index + 1;
+      const isExact = stop.matchType === 'exact';
+      const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
+
+      stopsHtml += `
+        <div class="p-2 bg-white rounded-xl border border-gray-200 flex items-start gap-2 text-xs">
+          <span class="w-5 h-5 rounded-full ${isExact ? 'bg-blue-600' : 'bg-amber-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+            ${stopNum}
+          </span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-1 mb-0.5">
+              <span class="font-bold text-xs text-gray-900 truncate">${stop.caseNumber}</span>
+              <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
+                ${distText}
+              </span>
+            </div>
+            <p class="text-[11px] text-gray-600 truncate">${stop.locationText}</p>
+          </div>
+          <div class="flex flex-col gap-0.5 flex-shrink-0">
+            <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
+              <i class="fa-solid fa-chevron-up"></i>
+            </button>
+            <button type="button" onclick="moveStopDown(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
+              <i class="fa-solid fa-chevron-down"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  Swal.fire({
+    html: `
+      <div class="slts-province-modal flex flex-col h-[88dvh]">
+        <!-- Header -->
+        <div class="slts-modal-header flex-shrink-0">
+          <button type="button" onclick="showMobileSummonsFormModal(true)" class="slts-back-header-btn" title="กลับไปฟอร์ม">
+            <i class="fa-solid fa-arrow-left"></i>
+            <span>กลับ</span>
+          </button>
+          <div class="flex-1 text-center pr-2">
+            <h2 class="slts-modal-title">🗺️ แผนที่เส้นทางส่งหมาย</h2>
+            <p class="slts-modal-subtitle">${state.currentMapFilter?.isPdfDispatch ? '📋 บัญชีจ่ายหมาย' : `📍 จ.${prov}`} (${stops.length} คดี)</p>
+          </div>
+          <button type="button" onclick="openMapAreaSelectorModal()" class="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1">
+            <i class="fa-solid fa-layer-group"></i> ตัวกรอง
+          </button>
+        </div>
+
+        <!-- Mobile Leaflet Map -->
+        <div class="relative flex-1 min-h-[220px] max-h-[44dvh] w-full bg-slate-100 border-b border-gray-200">
+          <div id="sltsInteractiveMap" class="w-full h-full"></div>
+        </div>
+
+        <!-- Mobile Controls & Stops List -->
+        <div class="flex-1 flex flex-col min-h-0 bg-white">
+          <!-- Control Bar -->
+          <div class="p-2.5 bg-blue-50/70 border-b border-blue-100 flex items-center justify-between text-xs flex-shrink-0">
+            <div class="flex items-center gap-1.5 truncate">
+              <span class="font-bold text-gray-800 text-[11px]">🏁 ${start.name}</span>
+              ${totalDistKm > 0 ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">${totalDistKm.toFixed(1)} กม.</span>` : ''}
+            </div>
+            <button type="button" onclick="openFullRouteInGoogleMaps()" class="px-2.5 py-1 bg-emerald-600 active:scale-95 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 shadow-sm flex-shrink-0">
+              <i class="fa-solid fa-diamond-turn-right"></i> นำทาง Google Maps
+            </button>
+          </div>
+
+          <!-- Stops List -->
+          <div id="mobileMapRouteStopsList" class="flex-1 overflow-y-auto p-2 space-y-1.5 divide-y divide-gray-100 slts-swal-body-scroll">
+            ${stopsHtml}
+          </div>
+        </div>
+      </div>
+    `,
+    position: 'top',
+    showConfirmButton: false,
+    showCloseButton: false,
+    allowOutsideClick: false,
+    customClass: {
+      container: 'slts-swal-top-container',
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
+    },
+    didOpen: () => {
+      // Re-init map
+      setTimeout(() => {
+        if (state.currentRouteStops.length > 0) {
+          recalculateRouteFromStops(false);
+        } else if (state.currentMapFilter && !state.currentMapFilter.isPdfDispatch) {
+          renderMapAndPins(state.currentMapFilter.province, state.currentMapFilter.district, state.currentMapFilter.subdistrict);
+        } else {
+          renderMapAndPins(prov, '', '');
+        }
+      }, 150);
+    }
+  });
+};
+
+window.renderMobileRouteList = function() {
+  const container = document.getElementById('mobileMapRouteStopsList');
+  if (!container) return;
+  const stops = state.currentRouteStops || [];
+  let stopsHtml = '';
+  stops.forEach((stop, index) => {
+    const stopNum = index + 1;
+    const isExact = stop.matchType === 'exact';
+    const distText = `+ ${stop.legDistanceKm.toFixed(1)} กม.`;
+    stopsHtml += `
+      <div class="p-2 bg-white rounded-xl border border-gray-200 flex items-start gap-2 text-xs">
+        <span class="w-5 h-5 rounded-full ${isExact ? 'bg-blue-600' : 'bg-amber-600'} text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">
+          ${stopNum}
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-1 mb-0.5">
+            <span class="font-bold text-xs text-gray-900 truncate">${stop.caseNumber}</span>
+            <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 flex-shrink-0">
+              ${distText}
+            </span>
+          </div>
+          <p class="text-[11px] text-gray-600 truncate">${stop.locationText}</p>
+        </div>
+        <div class="flex flex-col gap-0.5 flex-shrink-0">
+          <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
+            <i class="fa-solid fa-chevron-up"></i>
+          </button>
+          <button type="button" onclick="moveStopDown(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  });
+  container.innerHTML = stopsHtml;
+};
+
+
 

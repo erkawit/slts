@@ -1219,6 +1219,7 @@ table.dataTable tbody td {
 
 .slts-route-stop-item {
   transition: all 0.15s ease;
+  user-select: none;
 }
 .slts-route-stop-item:hover {
   background-color: #f8fafc;
@@ -1227,6 +1228,46 @@ table.dataTable tbody td {
 .slts-route-stop-item.active {
   border-color: #3b82f6 !important;
   background-color: #eff6ff !important;
+}
+.slts-route-stop-item.is-dragging {
+  opacity: 0.4;
+  border: 2px dashed #3b82f6 !important;
+  background: #eff6ff !important;
+}
+.slts-route-stop-item.drag-over-top {
+  border-top: 3px solid #2563eb !important;
+}
+.slts-route-stop-item.drag-over-bottom {
+  border-bottom: 3px solid #2563eb !important;
+}
+.slts-drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+.slts-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Dispatch PDF Parser Highlight Styles */
+.slts-match-exact {
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+  color: #065f46 !important;
+}
+.slts-match-approx {
+  background-color: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #92400e !important;
+}
+.slts-match-none {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #64748b !important;
+}
+
+.slts-pin-badge.start-hub-pin {
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.45) !important;
 }
 
 
