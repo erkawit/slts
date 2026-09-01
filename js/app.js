@@ -1164,8 +1164,15 @@ window.switchTab = function(tabName) {
       elements.tabContentTable.classList.remove('hidden');
       elements.tabContentTable.classList.add('active');
     }
-    // โหลดข้อมูลแบบ Smart Cache 1 นาที
+    // โหลดข้อมูลแบบ Smart Cache 1 นาที (ดึงข้อมูลรอในเบื้องหลังทันที)
     loadGoogleSheetData(false);
+
+    // บนหน้าจอ Desktop (> 768px): แสดง Pop Up ค้นหาข้อมูลเจาะจงทันทีเมื่อเข้าหน้าตารางทุกครั้ง
+    if (window.innerWidth > 768) {
+      setTimeout(() => {
+        openTargetSearchModal();
+      }, 250);
+    }
   } else if (tabName === 'users') {
     closeCameraModal();
     if (elements.tabBtnUsers) elements.tabBtnUsers.classList.add('active');
@@ -1511,7 +1518,453 @@ function getRowProvince(row) {
   return state.selectedProvince || 'อุดรธานี';
 }
 
-function renderDataTable(rows) {
+/**
+ * นำเงื่อนไขการค้นหาแบบเจาะจงไปกรองข้อมูลและแสดงผลใน DataTables
+ */
+window.applyTargetedFilter = function(criteria) {
+  state.currentFilterCriteria = criteria;
+  const rows = state.allSheetRows || [];
+
+  if (criteria.type === 'province' || criteria.type === 'all') {
+    if (criteria.province) {
+      state.selectedProvince = criteria.province;
+      localStorage.setItem('slts_selected_province', criteria.province);
+      if (elements.floatingProvinceName) {
+        elements.floatingProvinceName.textContent = `จ.${criteria.province}`;
+      }
+    }
+  }
+
+  renderDataTable(rows, criteria);
+};
+
+/**
+ * เปิด Pop Up ค้นหาข้อมูลเจาะจงในหน้าตารางประวัติส่งหมาย (เฉพาะ Desktop > 768px)
+ */
+window.openTargetSearchModal = function() {
+  if (window.innerWidth <= 768) return;
+
+  const currentProvince = state.selectedProvince || 'อุดรธานี';
+  const provinces = (typeof THAILAND_PROVINCES !== 'undefined') ? THAILAND_PROVINCES : [{ name: currentProvince }];
+  const districts = getDistrictsByProvince(currentProvince);
+  const subdistricts = districts.length > 0 ? getSubdistrictsByDistrict(currentProvince, districts[0]) : [];
+
+  const provOptionsHtml = provinces.map(p => `<option value="${p.name}" ${p.name === currentProvince ? 'selected' : ''}>${p.name}</option>`).join('');
+  const distOptionsHtml = districts.map(d => `<option value="${d}">${d}</option>`).join('');
+  const subOptionsHtml = subdistricts.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  const instructions = {
+    all: "ตัวเลือก <b>'ทั้งหมด'</b> จะดึงข้อมูลประวัติการส่งหมายทุกรายการของจังหวัดที่เลือกมาแสดงผลทั้งหมดในตาราง เพื่อให้สามารถตรวจดูภาพรวมของจังหวัดได้อย่างครบถ้วน",
+    case: "ตัวเลือก <b>'เลขคดี'</b> ให้กรอกเลขคดีที่ต้องการค้นหา เช่น <b>'ต1641/2569'</b>, <b>'ผบ ส197/2569'</b> หรือ <b>'197'</b> ระบบจะค้นหาและแสดงเฉพาะรายการส่งหมายของเลขคดีดังกล่าว",
+    province: "ตัวเลือก <b>'จังหวัด'</b> ให้เลือกจังหวัดที่ต้องการค้นหาประวัติการส่งหมาย ระบบจะบันทึกการตั้งค่าจังหวัดและกรองเฉพาะข้อมูลของจังหวัดที่เลือกมาแสดงผล",
+    district: "ตัวเลือก <b>'อำเภอ'</b> ให้เลือกจังหวัดและอำเภอเป้าหมาย ระบบจะกรองประวัติการส่งหมายเฉพาะภายในเขตอำเภอที่ท่านระบุ",
+    subdistrict: "ตัวเลือก <b>'ตำบล'</b> ให้เลือกจังหวัด อำเภอ และตำบลเป้าหมาย เพื่อกรองประวัติการส่งหมายเฉพาะพื้นที่ตำบลนั้นอย่างเจาะจง",
+    location: "ตัวเลือก <b>'ที่ตั้งหมาย'</b> ให้เลือกประเภทสถานที่และระบุข้อมูลสถานที่ เช่น บ้านเลขที่, ชื่อ อบต./เทศบาล หรือชื่อสถานที่ เพื่อค้นหารายการส่งหมายเฉพาะสถานที่นั้น (ต้องระบุข้อความจึงจะกดตกลงได้)",
+    coords: "ตัวเลือก <b>'พิกัดหมาย'</b> ให้กรอกตัวเลขพิกัด ละติจูด (Latitude) และ ลองจิจูด (Longitude) โดยใส่เฉพาะตัวเลขและจุดทศนิยมเท่านั้น เช่น <b>17.3816</b> และ <b>102.7578</b> เพื่อค้นหาตำแหน่งส่งหมายที่ตรงกับพิกัด"
+  };
+
+  Swal.fire({
+    title: '<div class="flex items-center justify-center gap-2 text-base sm:text-lg font-bold text-gray-900"><i class="fa-solid fa-magnifying-glass-location text-blue-600 text-xl"></i> ค้นหาข้อมูลประวัติส่งหมายแบบเจาะจง</div>',
+    html: `
+      <div class="text-left space-y-4 text-xs">
+        
+        <!-- 1. เลือกหมวดหมู่การค้นหา (Search Category) -->
+        <div>
+          <label class="block font-bold text-gray-800 mb-1.5 flex items-center justify-between">
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-filter text-blue-600"></i> เลือกหมวดหมู่ที่ต้องการค้นหาเจาะจง *</span>
+            <span class="text-[11px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">7 หมวดหมู่</span>
+          </label>
+          <select id="ts_categorySelect" class="w-full bg-white border-2 border-blue-500 rounded-xl px-3.5 py-2.5 text-sm font-bold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-200 cursor-pointer">
+            <option value="all" selected>🌟 ทั้งหมด (แสดงภาพรวมทั้งหมดในจังหวัด)</option>
+            <option value="case">⚖️ เลขคดี (กรองเฉพาะเลขคดี)</option>
+            <option value="province">🏛️ จังหวัด (กรองเฉพาะจังหวัด)</option>
+            <option value="district">📍 อำเภอ (กรองตามจังหวัดและอำเภอ)</option>
+            <option value="subdistrict">🏠 ตำบล (กรองตามจังหวัด อำเภอ และตำบล)</option>
+            <option value="location">🏢 ที่ตั้งหมาย (ประเภทสถานที่ / บ้านเลขที่ / อบต.)</option>
+            <option value="coords">🛰️ พิกัดหมาย (ละติจูด และ ลองจิจูด)</option>
+          </select>
+        </div>
+
+        <!-- กล่องคำอธิบายขั้นตอนการปฏิบัติอย่างละเอียด -->
+        <div id="ts_instructionBox" class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-900 leading-relaxed shadow-sm transition">
+          <div class="font-bold flex items-center gap-1.5 mb-1 text-blue-800">
+            <i class="fa-solid fa-circle-info text-blue-600"></i>
+            <span>คำอธิบายขั้นตอนการปฏิบัติ:</span>
+          </div>
+          <p id="ts_instructionText" class="text-gray-700 leading-relaxed">
+            ${instructions.all}
+          </p>
+        </div>
+
+        <!-- 2. กล่องฟิลด์ค้นหาแบบ Dynamic ตามหมวดหมู่ที่เลือก -->
+        <div class="bg-gray-50/90 border border-gray-200 rounded-xl p-3.5 space-y-3">
+          
+          <!-- Case 1: ทั้งหมด (All) -->
+          <div id="ts_field_all" class="space-y-1.5">
+            <label class="block font-semibold text-gray-700">จังหวัดเป้าหมายปัจจุบัน:</label>
+            <div class="flex items-center gap-2">
+              <span class="flex-1 bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-bold text-gray-800" id="ts_all_provText">จังหวัด${currentProvince}</span>
+              <button type="button" id="ts_btnChangeAllProv" class="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl border border-blue-200 transition">เปลี่ยนจังหวัด</button>
+            </div>
+            <div id="ts_all_provSelectWrapper" class="hidden mt-2">
+              <label class="block text-[11px] font-semibold text-gray-600 mb-1">เลือกจังหวัดใหม่:</label>
+              <select id="ts_all_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
+                ${provOptionsHtml}
+              </select>
+            </div>
+          </div>
+
+          <!-- Case 2: เลขคดี (Case Number) -->
+          <div id="ts_field_case" class="hidden space-y-1.5">
+            <label class="block font-semibold text-gray-700">พิมพ์เลขคดีที่ต้องการค้นหา (เช่น ต1641/2569, ผบ ส197/2569 หรือ 197) *</label>
+            <div class="relative">
+              <input type="text" id="ts_caseInput" placeholder="พิมพ์เลขคดี เช่น ต1641/2569, ผบ ส197/2569, 197" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+            </div>
+          </div>
+
+          <!-- Case 3: จังหวัด (Province) -->
+          <div id="ts_field_province" class="hidden space-y-1.5">
+            <label class="block font-semibold text-gray-700">เลือกจังหวัดที่ต้องการค้นหา (77 จังหวัด) *</label>
+            <select id="ts_provinceSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-blue-500">
+              ${provOptionsHtml}
+            </select>
+          </div>
+
+          <!-- Case 4: อำเภอ (District) -->
+          <div id="ts_field_district" class="hidden space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block font-semibold text-gray-700 mb-1">จังหวัด *</label>
+                <select id="ts_dist_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800">
+                  ${provOptionsHtml}
+                </select>
+              </div>
+              <div>
+                <label class="block font-semibold text-gray-700 mb-1">อำเภอเป้าหมาย *</label>
+                <select id="ts_districtSelect" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800">
+                  ${distOptionsHtml}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Case 5: ตำบล (Subdistrict) -->
+          <div id="ts_field_subdistrict" class="hidden space-y-2">
+            <div>
+              <label class="block font-semibold text-gray-700 mb-1">จังหวัด *</label>
+              <select id="ts_sub_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
+                ${provOptionsHtml}
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block font-semibold text-gray-700 mb-1">อำเภอ *</label>
+                <select id="ts_sub_distSelect" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800">
+                  ${distOptionsHtml}
+                </select>
+              </div>
+              <div>
+                <label class="block font-semibold text-gray-700 mb-1">ตำบลเป้าหมาย *</label>
+                <select id="ts_subdistrictSelect" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800">
+                  ${subOptionsHtml}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Case 6: ที่ตั้งหมาย (Location Type) -->
+          <div id="ts_field_location" class="hidden space-y-2.5">
+            <div>
+              <label class="block font-semibold text-gray-700 mb-1">ประเภทสถานที่ *</label>
+              <select id="ts_locTypeSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
+                <option value="หมายบ้าน" selected>หมายบ้าน (บ้านเลขที่ / หมู่)</option>
+                <option value="ที่ทำการปกครองส่วนท้องถิ่น">ที่ทำการปกครองส่วนท้องถิ่น (อบต. / เทศบาล)</option>
+                <option value="อื่นๆ">อื่นๆ (ชื่อสถานที่เฉพาะ)</option>
+              </select>
+            </div>
+
+            <!-- บ้านเลขที่ / หมู่ -->
+            <div id="ts_loc_houseGroup" class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">บ้านเลขที่ *</label>
+                <input type="text" id="ts_loc_houseNo" placeholder="เช่น 2/18 หรือ 154/2" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">หมู่ที่ (ตัวเลข)</label>
+                <input type="text" id="ts_loc_moo" placeholder="เช่น 3 (ไม่บังคับ)" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+              </div>
+            </div>
+
+            <!-- อบต. / เทศบาล -->
+            <div id="ts_loc_adminGroup" class="hidden">
+              <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">ชื่อ อบต. / เทศบาล *</label>
+              <input type="text" id="ts_loc_adminName" placeholder="เช่น อบต.กุดสระ หรือ เทศบาลนครอุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+            </div>
+
+            <!-- อื่นๆ -->
+            <div id="ts_loc_otherGroup" class="hidden">
+              <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">ชื่อสถานที่ส่งหมาย *</label>
+              <input type="text" id="ts_loc_otherName" placeholder="เช่น โรงเรียนบ้านนาดี หรือ วัดโพธิสมภรณ์" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+            </div>
+          </div>
+
+          <!-- Case 7: พิกัดหมาย (Coordinates) -->
+          <div id="ts_field_coords" class="hidden space-y-2">
+            <p class="text-[11px] text-gray-500 font-medium">กรอกตัวเลขละติจูด และ ลองจิจูด (ตัวเลขและจุดทศนิยมเท่านั้น เช่น 17.3816 และ 102.7578)</p>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block font-semibold text-gray-700 mb-1">ละติจูด (Latitude) *</label>
+                <input type="text" id="ts_latInput" placeholder="เช่น 17.3816" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-800 text-center">
+              </div>
+              <div>
+                <label class="block font-semibold text-gray-700 mb-1">ลองจิจูด (Longitude) *</label>
+                <input type="text" id="ts_lngInput" placeholder="เช่น 102.7578" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-800 text-center">
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    `,
+    width: '620px',
+    customClass: {
+      popup: 'rounded-2xl p-4 sm:p-5'
+    },
+    showCloseButton: true,
+    showCancelButton: true,
+    allowOutsideClick: false,
+    confirmButtonText: '<i class="fa-solid fa-magnifying-glass mr-1.5"></i> ตกลง (ค้นหาข้อมูล)',
+    cancelButtonText: 'ปิด',
+    confirmButtonColor: '#2563eb',
+    cancelButtonColor: '#6b7280',
+    didOpen: () => {
+      const categorySelect = document.getElementById('ts_categorySelect');
+      const instructionText = document.getElementById('ts_instructionText');
+
+      const fieldAll = document.getElementById('ts_field_all');
+      const fieldCase = document.getElementById('ts_field_case');
+      const fieldProvince = document.getElementById('ts_field_province');
+      const fieldDistrict = document.getElementById('ts_field_district');
+      const fieldSubdistrict = document.getElementById('ts_field_subdistrict');
+      const fieldLocation = document.getElementById('ts_field_location');
+      const fieldCoords = document.getElementById('ts_field_coords');
+
+      const allFields = [fieldAll, fieldCase, fieldProvince, fieldDistrict, fieldSubdistrict, fieldLocation, fieldCoords];
+
+      categorySelect.addEventListener('change', (e) => {
+        const cat = e.target.value;
+        allFields.forEach(f => f && f.classList.add('hidden'));
+
+        if (cat === 'all' && fieldAll) fieldAll.classList.remove('hidden');
+        else if (cat === 'case' && fieldCase) {
+          fieldCase.classList.remove('hidden');
+          const inp = document.getElementById('ts_caseInput');
+          if (inp) inp.focus();
+        }
+        else if (cat === 'province' && fieldProvince) fieldProvince.classList.remove('hidden');
+        else if (cat === 'district' && fieldDistrict) fieldDistrict.classList.remove('hidden');
+        else if (cat === 'subdistrict' && fieldSubdistrict) fieldSubdistrict.classList.remove('hidden');
+        else if (cat === 'location' && fieldLocation) fieldLocation.classList.remove('hidden');
+        else if (cat === 'coords' && fieldCoords) {
+          fieldCoords.classList.remove('hidden');
+          const latInp = document.getElementById('ts_latInput');
+          if (latInp) latInp.focus();
+        }
+
+        if (instructionText && instructions[cat]) {
+          instructionText.innerHTML = instructions[cat];
+        }
+      });
+
+      // 1. หมวด All: ปุ่มเปลี่ยนจังหวัด
+      const btnChangeAllProv = document.getElementById('ts_btnChangeAllProv');
+      const allProvSelectWrapper = document.getElementById('ts_all_provSelectWrapper');
+      const allProvSelect = document.getElementById('ts_all_provSelect');
+      const allProvText = document.getElementById('ts_all_provText');
+      if (btnChangeAllProv && allProvSelectWrapper) {
+        btnChangeAllProv.addEventListener('click', () => {
+          allProvSelectWrapper.classList.toggle('hidden');
+        });
+      }
+      if (allProvSelect && allProvText) {
+        allProvSelect.addEventListener('change', (e) => {
+          allProvText.textContent = `จังหวัด${e.target.value}`;
+        });
+      }
+
+      // 4. หมวด District: เมื่อเปลี่ยนจังหวัด
+      const distProvSelect = document.getElementById('ts_dist_provSelect');
+      const districtSelect = document.getElementById('ts_districtSelect');
+      if (distProvSelect && districtSelect) {
+        distProvSelect.addEventListener('change', (e) => {
+          const prov = e.target.value;
+          const dists = getDistrictsByProvince(prov);
+          districtSelect.innerHTML = dists.map(d => `<option value="${d}">${d}</option>`).join('');
+        });
+      }
+
+      // 5. หมวด Subdistrict: เมื่อเปลี่ยนจังหวัด และเมื่อเปลี่ยนอำเภอ
+      const subProvSelect = document.getElementById('ts_sub_provSelect');
+      const subDistSelect = document.getElementById('ts_sub_distSelect');
+      const subdistrictSelect = document.getElementById('ts_subdistrictSelect');
+
+      if (subProvSelect && subDistSelect && subdistrictSelect) {
+        subProvSelect.addEventListener('change', (e) => {
+          const prov = e.target.value;
+          const dists = getDistrictsByProvince(prov);
+          subDistSelect.innerHTML = dists.map(d => `<option value="${d}">${d}</option>`).join('');
+          const firstDist = dists[0] || '';
+          const subs = firstDist ? getSubdistrictsByDistrict(prov, firstDist) : [];
+          subdistrictSelect.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('');
+        });
+
+        subDistSelect.addEventListener('change', (e) => {
+          const prov = subProvSelect.value;
+          const dist = e.target.value;
+          const subs = getSubdistrictsByDistrict(prov, dist);
+          subdistrictSelect.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('');
+        });
+      }
+
+      // 6. หมวด Location Type: สลับฟิลด์ตามประเภทสถานที่
+      const locTypeSelect = document.getElementById('ts_locTypeSelect');
+      const locHouseGroup = document.getElementById('ts_loc_houseGroup');
+      const locAdminGroup = document.getElementById('ts_loc_adminGroup');
+      const locOtherGroup = document.getElementById('ts_loc_otherGroup');
+
+      if (locTypeSelect) {
+        locTypeSelect.addEventListener('change', (e) => {
+          const val = e.target.value;
+          if (val === 'หมายบ้าน') {
+            if (locHouseGroup) locHouseGroup.classList.remove('hidden');
+            if (locAdminGroup) locAdminGroup.classList.add('hidden');
+            if (locOtherGroup) locOtherGroup.classList.add('hidden');
+            const inp = document.getElementById('ts_loc_houseNo');
+            if (inp) inp.focus();
+          } else if (val === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+            if (locHouseGroup) locHouseGroup.classList.add('hidden');
+            if (locAdminGroup) locAdminGroup.classList.remove('hidden');
+            if (locOtherGroup) locOtherGroup.classList.add('hidden');
+            const inp = document.getElementById('ts_loc_adminName');
+            if (inp) inp.focus();
+          } else if (val === 'อื่นๆ') {
+            if (locHouseGroup) locHouseGroup.classList.add('hidden');
+            if (locAdminGroup) locAdminGroup.classList.add('hidden');
+            if (locOtherGroup) locOtherGroup.classList.remove('hidden');
+            const inp = document.getElementById('ts_loc_otherName');
+            if (inp) inp.focus();
+          }
+        });
+      }
+
+      // 7. หมวด Coordinates: Sanitize ให้กรอกเฉพาะตัวเลขและจุดทศนิยมเท่านั้น
+      const latInp = document.getElementById('ts_latInput');
+      const lngInp = document.getElementById('ts_lngInput');
+
+      const sanitizeCoordInput = (el) => {
+        if (!el) return;
+        el.addEventListener('input', (e) => {
+          let val = e.target.value.replace(/[^0-9.]/g, '');
+          const parts = val.split('.');
+          if (parts.length > 2) {
+            val = parts[0] + '.' + parts.slice(1).join('');
+          }
+          e.target.value = val;
+        });
+      };
+
+      sanitizeCoordInput(latInp);
+      sanitizeCoordInput(lngInp);
+    },
+    preConfirm: () => {
+      const cat = document.getElementById('ts_categorySelect').value;
+
+      if (cat === 'all') {
+        const allProvSelectWrapper = document.getElementById('ts_all_provSelectWrapper');
+        let prov = currentProvince;
+        if (allProvSelectWrapper && !allProvSelectWrapper.classList.contains('hidden')) {
+          prov = document.getElementById('ts_all_provSelect').value;
+        }
+        return { type: 'all', province: prov };
+      } else if (cat === 'case') {
+        const caseNo = (document.getElementById('ts_caseInput')?.value || '').trim();
+        if (!caseNo) {
+          Swal.showValidationMessage('กรุณากรอกเลขคดีที่ต้องการค้นหา');
+          return false;
+        }
+        return { type: 'case', caseNo };
+      } else if (cat === 'province') {
+        const prov = document.getElementById('ts_provinceSelect').value;
+        return { type: 'province', province: prov };
+      } else if (cat === 'district') {
+        const prov = document.getElementById('ts_dist_provSelect').value;
+        const dist = document.getElementById('ts_districtSelect').value;
+        if (!dist) {
+          Swal.showValidationMessage('กรุณาเลือกอำเภอเป้าหมาย');
+          return false;
+        }
+        return { type: 'district', province: prov, district: dist };
+      } else if (cat === 'subdistrict') {
+        const prov = document.getElementById('ts_sub_provSelect').value;
+        const dist = document.getElementById('ts_sub_distSelect').value;
+        const sub = document.getElementById('ts_subdistrictSelect').value;
+        if (!sub) {
+          Swal.showValidationMessage('กรุณาเลือกตำบลเป้าหมาย');
+          return false;
+        }
+        return { type: 'subdistrict', province: prov, district: dist, subdistrict: sub };
+      } else if (cat === 'location') {
+        const locType = document.getElementById('ts_locTypeSelect').value;
+        let query = '';
+        if (locType === 'หมายบ้าน') {
+          const houseNo = (document.getElementById('ts_loc_houseNo')?.value || '').trim();
+          const moo = (document.getElementById('ts_loc_moo')?.value || '').trim();
+          if (!houseNo) {
+            Swal.showValidationMessage('กรุณากรอกบ้านเลขที่');
+            return false;
+          }
+          query = houseNo + (moo ? ` ม.${moo}` : '');
+        } else if (locType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+          const adminName = (document.getElementById('ts_loc_adminName')?.value || '').trim();
+          if (!adminName) {
+            Swal.showValidationMessage('กรุณากรอกชื่อ อบต. หรือ เทศบาล');
+            return false;
+          }
+          query = adminName;
+        } else if (locType === 'อื่นๆ') {
+          const otherName = (document.getElementById('ts_loc_otherName')?.value || '').trim();
+          if (!otherName) {
+            Swal.showValidationMessage('กรุณากรอกชื่อสถานที่');
+            return false;
+          }
+          query = otherName;
+        }
+        return { type: 'location', locationType: locType, query };
+      } else if (cat === 'coords') {
+        const latStr = (document.getElementById('ts_latInput')?.value || '').trim();
+        const lngStr = (document.getElementById('ts_lngInput')?.value || '').trim();
+        if (!latStr || !lngStr) {
+          Swal.showValidationMessage('กรุณากรอกทั้งละติจูด (Latitude) และลองจิจูด (Longitude) ให้ครบถ้วน');
+          return false;
+        }
+        const lat = parseFloat(latStr);
+        const lng = parseFloat(lngStr);
+        if (isNaN(lat) || isNaN(lng) || lat <= 0 || lng <= 0) {
+          Swal.showValidationMessage('กรุณากรอกพิกัดตัวเลขละติจูดและลองจิจูดให้ถูกต้อง');
+          return false;
+        }
+        return { type: 'coords', lat, lng };
+      }
+    }
+  }).then((res) => {
+    if (res.isConfirmed && res.value) {
+      applyTargetedFilter(res.value);
+    }
+  });
+};
+
+function renderDataTable(rows, filterCriteria = null) {
   state.allSheetRows = rows;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isDesktop = window.innerWidth > 768;
@@ -1527,17 +1980,88 @@ function renderDataTable(rows) {
   const tableBody = document.getElementById('dataTableBody');
   tableBody.innerHTML = '';
 
-  // 2. กรองข้อมูลเฉพาะจังหวัดที่เลือกใช้งาน (state.selectedProvince)
-  const currentProv = state.selectedProvince || 'อุดรธานี';
-  const filteredRows = rows.filter(row => {
-    const prov = getRowProvince(row);
-    row._resolvedProvince = prov;
-    return prov === currentProv;
-  });
+  // 2. กรองข้อมูลตามเงื่อนไขเจาะจง (Filter Criteria) หรือตามจังหวัดปัจจุบัน (Default)
+  let filteredRows = rows;
+  let filterBadgeHtml = '';
+
+  const activeCriteria = filterCriteria || state.currentFilterCriteria;
+
+  if (!activeCriteria || activeCriteria.type === 'all') {
+    const currentProv = activeCriteria?.province || state.selectedProvince || 'อุดรธานี';
+    filteredRows = rows.filter(row => {
+      const prov = getRowProvince(row);
+      row._resolvedProvince = prov;
+      return prov === currentProv;
+    });
+    filterBadgeHtml = `📍 แสดง: จ.${currentProv} (${filteredRows.length} รายการ)`;
+  } else if (activeCriteria.type === 'case') {
+    const searchCase = (activeCriteria.caseNo || '').trim().toLowerCase();
+    filteredRows = rows.filter(row => {
+      const caseNo = (row['เลขคดี'] || '').trim().toLowerCase();
+      row._resolvedProvince = getRowProvince(row);
+      return caseNo.includes(searchCase);
+    });
+    filterBadgeHtml = `⚖️ กรองเลขคดี: <b class="text-blue-800 font-bold">"${activeCriteria.caseNo}"</b> (${filteredRows.length} รายการ)`;
+  } else if (activeCriteria.type === 'province') {
+    const provTarget = activeCriteria.province;
+    filteredRows = rows.filter(row => {
+      const prov = getRowProvince(row);
+      row._resolvedProvince = prov;
+      return prov === provTarget;
+    });
+    filterBadgeHtml = `🏛️ กรองจังหวัด: <b class="text-emerald-800 font-bold">จ.${provTarget}</b> (${filteredRows.length} รายการ)`;
+  } else if (activeCriteria.type === 'district') {
+    const provTarget = activeCriteria.province;
+    const distTarget = activeCriteria.district;
+    filteredRows = rows.filter(row => {
+      const prov = getRowProvince(row);
+      row._resolvedProvince = prov;
+      const dist = (row['อำเภอ'] || '').trim();
+      return prov === provTarget && (dist === distTarget || dist.includes(distTarget) || distTarget.includes(dist));
+    });
+    filterBadgeHtml = `📍 กรองอำเภอ: <b class="text-blue-800 font-bold">อ.${distTarget}</b> จ.${provTarget} (${filteredRows.length} รายการ)`;
+  } else if (activeCriteria.type === 'subdistrict') {
+    const provTarget = activeCriteria.province;
+    const distTarget = activeCriteria.district;
+    const subdistTarget = activeCriteria.subdistrict;
+    filteredRows = rows.filter(row => {
+      const prov = getRowProvince(row);
+      row._resolvedProvince = prov;
+      const dist = (row['อำเภอ'] || '').trim();
+      const sub = (row['ตำบล'] || '').trim();
+      const provMatch = prov === provTarget;
+      const distMatch = !distTarget || dist === distTarget || dist.includes(distTarget) || distTarget.includes(dist);
+      const subMatch = sub === subdistTarget || sub.includes(subdistTarget) || subdistTarget.includes(sub);
+      return provMatch && distMatch && subMatch;
+    });
+    filterBadgeHtml = `🏠 กรองตำบล: <b class="text-indigo-800 font-bold">ต.${subdistTarget}</b> อ.${distTarget} จ.${provTarget} (${filteredRows.length} รายการ)`;
+  } else if (activeCriteria.type === 'location') {
+    const locType = activeCriteria.locationType;
+    const query = (activeCriteria.query || '').trim().toLowerCase();
+    filteredRows = rows.filter(row => {
+      row._resolvedProvince = getRowProvince(row);
+      const locFull = (row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'] || '').toLowerCase();
+      return locFull.includes(query);
+    });
+    filterBadgeHtml = `🏢 กรองที่ตั้ง (${locType}): <b class="text-purple-800 font-bold">"${activeCriteria.query}"</b> (${filteredRows.length} รายการ)`;
+  } else if (activeCriteria.type === 'coords') {
+    const targetLat = parseFloat(activeCriteria.lat);
+    const targetLng = parseFloat(activeCriteria.lng);
+    filteredRows = rows.filter(row => {
+      row._resolvedProvince = getRowProvince(row);
+      const rLat = parseFloat(row['ละติจูด (Lat)'] || row['ละติจูด'] || 0);
+      const rLng = parseFloat(row['ลองจิจูด (Lng)'] || row['ลองจิจูด'] || 0);
+      if (!rLat || !rLng) return false;
+      const latDiff = Math.abs(rLat - targetLat);
+      const lngDiff = Math.abs(rLng - targetLng);
+      return (latDiff < 0.005 && lngDiff < 0.005) || (rLat.toFixed(3) === targetLat.toFixed(3) && rLng.toFixed(3) === targetLng.toFixed(3));
+    });
+    filterBadgeHtml = `🛰️ กรองพิกัด: <b class="text-teal-800 font-bold">${targetLat.toFixed(4)}, ${targetLng.toFixed(4)}</b> (${filteredRows.length} รายการ)`;
+  }
 
   const tableProvFilterBadge = document.getElementById('tableProvFilterBadge');
   if (tableProvFilterBadge) {
-    tableProvFilterBadge.textContent = `📍 แสดง: จ.${currentProv} (${filteredRows.length} รายการ)`;
+    tableProvFilterBadge.innerHTML = filterBadgeHtml;
   }
 
   // 3. จัดกลุ่มข้อมูลเลขคดีที่ซ้ำกัน และแสดงเฉพาะรายการล่าสุดในตารางหลัก
@@ -1556,8 +2080,9 @@ function renderDataTable(rows) {
     const latest = recordList[0];
     const rawTimestamp = latest['วัน-เวลาบันทึก'] || latest['Timestamp'] || '';
     const formattedTimestamp = formatThaiDateDisplay(rawTimestamp);
+    const currentProv = latest._resolvedProvince || getRowProvince(latest);
     const courtType = latest['ประเภทศาล'] || 'ศาลจังหวัด' + currentProv;
-    const rowProvince = latest._resolvedProvince || getRowProvince(latest);
+    const rowProvince = currentProv;
     const district = latest['อำเภอ'] || '';
     const subdistrict = latest['ตำบล'] || '';
     const locationFull = latest['ที่ตั้งส่งหมาย (เต็ม)'] || latest['ที่ตั้งส่งหมาย'] || '';
@@ -1632,7 +2157,7 @@ function renderDataTable(rows) {
       search: "ค้นหาข้อมูล:",
       lengthMenu: "แสดง _MENU_ แถวต่อหน้า",
       info: "แสดง _START_ ถึง _END_ จากทั้งหมด _TOTAL_ รายการ",
-      infoEmpty: "ไม่มีข้อมูลในจังหวัดนี้",
+      infoEmpty: "ไม่มีข้อมูลในเงื่อนไขนี้",
       infoFiltered: "(กรองจากทั้งหมด _MAX_ รายการ)",
       paginate: {
         first: "แรกสุด",
@@ -1640,7 +2165,7 @@ function renderDataTable(rows) {
         next: "ถัดไป",
         previous: "ก่อนหน้า"
       },
-      zeroRecords: `ไม่พบข้อมูลที่ตรงกับการค้นหาใน จ.${currentProv}`
+      zeroRecords: `ไม่พบข้อมูลที่ตรงกับเงื่อนไขการค้นหา`
     }
   });
 }

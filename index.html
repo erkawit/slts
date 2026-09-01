@@ -43,7 +43,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260901_05">
+  <link rel="stylesheet" href="css/style.css?v=20260901_06">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -545,6 +545,10 @@
           </div>
 
           <div class="flex items-center gap-2.5 w-full sm:w-auto flex-wrap">
+            <button id="btnOpenTargetSearchModal" type="button" onclick="openTargetSearchModal()" class="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-xl text-xs sm:text-sm transition flex items-center gap-2 shadow-sm shadow-blue-500/20 active:scale-95" title="ค้นหาข้อมูลแบบเจาะจง">
+              <i class="fa-solid fa-magnifying-glass-location text-sm"></i>
+              <span>ค้นหาแบบเจาะจง</span>
+            </button>
             <button id="btnManualUploadPhoto" type="button" onclick="openManualUploadModal()" class="flex px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs sm:text-sm transition items-center gap-2 shadow-sm" title="อัปโหลดภาพส่งหมายพร้อมบันทึกข้อมูล">
               <i class="fa-solid fa-cloud-arrow-up"></i>
               <span>อัปโหลดภาพหมาย</span>
@@ -904,17 +908,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260901_05"></script>
-  <script src="js/compass.js?v=20260901_05"></script>
-  <script src="js/map.js?v=20260901_05"></script>
-  <script src="js/watermark.js?v=20260901_05"></script>
-  <script src="js/app.js?v=20260901_05"></script>
+  <script src="js/data.js?v=20260901_06"></script>
+  <script src="js/compass.js?v=20260901_06"></script>
+  <script src="js/map.js?v=20260901_06"></script>
+  <script src="js/watermark.js?v=20260901_06"></script>
+  <script src="js/app.js?v=20260901_06"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260901_05')
+        navigator.serviceWorker.register('./sw.js?v=20260901_06')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
