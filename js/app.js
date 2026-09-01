@@ -5837,7 +5837,58 @@ function initDesktopUploadEvents() {
 
         // ตรวจสอบและดึงพิกัด GPS จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
         if (window.innerWidth > 768) {
-          await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
+          const gpsResult = await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
+          if (gpsResult && typeof gpsResult.lat === 'number' && typeof gpsResult.lng === 'number') {
+            state.desktopPhotoHadGps = true;
+            state.desktopBaselineLocation = null;
+          } else {
+            // ไม่พบพิกัดในภาพถ่าย
+            state.desktopPhotoHadGps = false;
+
+            // ดึงข้อมูลพิกัดจากจุดที่อัปโหลดเป็นค่าพื้นฐาน
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  const baseLat = Number(pos.coords.latitude.toFixed(6));
+                  const baseLng = Number(pos.coords.longitude.toFixed(6));
+                  state.desktopBaselineLocation = { lat: baseLat, lng: baseLng };
+                  state.lat = baseLat;
+                  state.lng = baseLng;
+                  if (elements.coordinatesInput) {
+                    elements.coordinatesInput.value = `${baseLat.toFixed(6)}, ${baseLng.toFixed(6)}`;
+                    elements.coordinatesInput.classList.add('ring-2', 'ring-amber-400', 'bg-amber-50');
+                    setTimeout(() => {
+                      elements.coordinatesInput.classList.remove('ring-2', 'ring-amber-400', 'bg-amber-50');
+                    }, 3500);
+                  }
+                  if (elements.locationStatus) {
+                    elements.locationStatus.innerHTML = `<span class="text-amber-700 font-semibold"><i class="fa-solid fa-location-dot mr-1"></i>พิกัดตำแหน่งปัจจุบันของคุณ (${baseLat.toFixed(4)}, ${baseLng.toFixed(4)}) - กรุณาตรวจสอบหรือพิมพ์แก้ไข</span>`;
+                  }
+                },
+                (err) => {
+                  console.warn('Cannot fetch baseline coords:', err);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+              );
+            }
+
+            Swal.fire({
+              icon: 'info',
+              title: 'ไม่พบพิกัดในภาพถ่าย',
+              html: `
+                <div class="text-left text-xs space-y-2 text-gray-700 leading-relaxed">
+                  <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 font-medium">
+                    <i class="fa-solid fa-triangle-exclamation mr-1 text-amber-600"></i>
+                    ภาพที่คุณแนบไม่มีลักษณะอ้างอิงพิกัดจากภาพได้
+                  </div>
+                  <p>ระบบจะทำการดึงข้อมูลพิกัดจากจุดที่คุณอัปโหลดเป็นค่าพื้นฐาน</p>
+                  <p class="font-bold text-blue-700">กรุณากรอกพิกัดที่ตำแหน่ง <u>"พิกัด GPS (สามารถพิมพ์แก้ไขพิกัดได้)"</u> ด้วย</p>
+                </div>
+              `,
+              confirmButtonText: '<i class="fa-solid fa-check mr-1.5"></i> รับทราบและตรวจสอบพิกัด',
+              confirmButtonColor: '#2563eb'
+            });
+          }
         }
       };
       reader.readAsDataURL(file);
@@ -5903,8 +5954,79 @@ async function handleDesktopUpload() {
     return;
   }
 
-  // 2. ตรวจสอบความครบถ้วนของข้อมูลในแบบฟอร์มที่บังคับกรอก
+  // 2. ตรวจสอบความครบถ้วนและความถูกต้องของข้อมูลในแบบฟอร์มที่บังคับกรอก
   if (!validateForm()) return;
+
+  // 3. ตรวจสอบกรณีภาพที่แนบไม่มีพิกัดในตัวภาพ (เฉพาะ Desktop > 768px)
+  if (window.innerWidth > 768 && state.desktopPhotoHadGps === false) {
+    const currentLat = state.lat;
+    const currentLng = state.lng;
+    const baseline = state.desktopBaselineLocation;
+
+    const isSameAsBaseline = baseline && (Math.abs(currentLat - baseline.lat) < 0.00001 && Math.abs(currentLng - baseline.lng) < 0.00001);
+
+    if (isSameAsBaseline) {
+      // ถามย้ำอีกครั้งว่าตรวจสอบพิกัดแล้วใช่หรือไม่ และแสดงพิกัดให้เห็นว่าเป็นพิกัดที่ได้จากการดึงข้อมูลที่ตั้งปัจจุบัน
+      const confirmCheck = await Swal.fire({
+        icon: 'question',
+        title: 'คุณตรวจสอบพิกัดแล้วใช่หรือไม่?',
+        html: `
+          <div class="text-left text-xs space-y-2 text-gray-700 leading-relaxed">
+            <p>เนื่องจากภาพถ่ายที่แนบไม่มีข้อมูลพิกัดในตัวภาพ ระบบจึงใช้พิกัดที่ดึงได้จากที่ตั้งปัจจุบันของคุณ:</p>
+            <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl text-center">
+              <span class="text-xs text-blue-600 block font-semibold mb-1">พิกัดที่ดึงจากที่ตั้งปัจจุบัน:</span>
+              <span class="text-sm font-mono font-bold text-blue-900">📍 ${currentLat.toFixed(6)}, ${currentLng.toFixed(6)}</span>
+            </div>
+            <p class="text-gray-600 text-[11px]">* หากจุดส่งหมายจริงไม่ใช่ตำแหน่งนี้ กรุณากดยกเลิก แล้วพิมพ์แก้ไขพิกัดที่ถูกต้องในช่อง "พิกัด GPS"</p>
+          </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fa-solid fa-check mr-1.5"></i> ยืนยันพิกัดถูกต้องแล้ว อัปโหลดต่อ',
+        cancelButtonText: '<i class="fa-solid fa-pen-to-square mr-1.5"></i> ยกเลิก เพื่อกลับไปแก้ไขพิกัด',
+        confirmButtonColor: '#2563eb',
+        cancelButtonColor: '#6b7280',
+        allowOutsideClick: false
+      });
+
+      if (!confirmCheck.isConfirmed) {
+        if (elements.coordinatesInput) {
+          elements.coordinatesInput.focus();
+          elements.coordinatesInput.select();
+        }
+        return;
+      }
+    } else if (baseline) {
+      // ข้อมูลที่แก้ไขใหม่เป็นคนละข้อมูลกับที่ดึงได้จากพิกัดที่ตั้งอยู่
+      const diffLat = Math.abs(currentLat - baseline.lat);
+      const diffLng = Math.abs(currentLng - baseline.lng);
+      if (diffLat > 1.0 || diffLng > 1.0) {
+        const confirmDiff = await Swal.fire({
+          icon: 'warning',
+          title: 'พิกัดที่ระบุต่างจากตำแหน่งปัจจุบัน',
+          html: `
+            <div class="text-left text-xs space-y-2 text-gray-700 leading-relaxed">
+              <p>พิกัดที่คุณกรอกแก้ไข (<b>${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}</b>) มีความแตกต่างจากตำแหน่งปัจจุบันที่ระบบตรวจจับได้ (<b>${baseline.lat.toFixed(4)}, ${baseline.lng.toFixed(4)}</b>) มากกว่า 1 หน่วย</p>
+              <div class="p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-center font-mono font-bold text-gray-800 text-xs">
+                พิกัดที่จะใช้บันทึก: ${currentLat.toFixed(6)}, ${currentLng.toFixed(6)}
+              </div>
+              <p class="font-semibold text-gray-800">คุณต้องการยืนยันใช้อัปโหลดด้วยพิกัดนี้ใช่หรือไม่?</p>
+            </div>
+          `,
+          showCancelButton: true,
+          confirmButtonText: 'ยืนยันใช้พิกัดนี้',
+          cancelButtonText: 'กลับไปตรวจสอบพิกัด',
+          confirmButtonColor: '#2563eb',
+          cancelButtonColor: '#6b7280',
+          allowOutsideClick: false
+        });
+
+        if (!confirmDiff.isConfirmed) {
+          if (elements.coordinatesInput) elements.coordinatesInput.focus();
+          return;
+        }
+      }
+    }
+  }
 
   try {
     const caseNumber = getFormattedCaseNumber();
@@ -6190,26 +6312,89 @@ function validateForm() {
     }
   }
 
-  // 6. ตรวจสอบและดึงพิกัดจากช่องกรอกพิกัด (หากผู้ใช้พิมพ์หรือแก้ไขเอง)
+  // 6. ตรวจสอบและดึงพิกัดจากช่องกรอกพิกัด (ตรวจสอบรูปแบบและขอบเขตพิกัดอย่างละเอียด)
   const coordsRaw = (elements.coordinatesInput ? elements.coordinatesInput.value : '').trim();
-  if (coordsRaw) {
-    const parts = coordsRaw.split(/[,;\s]+/).map(p => parseFloat(p.trim())).filter(p => !isNaN(p));
-    if (parts.length >= 2) {
-      state.lat = parts[0];
-      state.lng = parts[1];
-    }
-  }
-
-  if (!state.lat || !state.lng) {
+  if (!coordsRaw) {
     Swal.fire({
       icon: 'warning',
-      title: 'ยังไม่ได้รับพิกัด GPS',
-      text: 'ระบบกำลังค้นหาพิกัด กรุณารอสักครู่ พิมพ์ระบุพิกัด หรือกด "เช็คพิกัดใหม่"',
+      title: 'กรุณาระบุพิกัด GPS',
+      text: 'โปรดกรอกพิกัด ละติจูด, ลองจิจูด เช่น 17.381600, 102.757800 หรือกด "เช็คพิกัดใหม่"',
       confirmButtonColor: '#2563eb'
     });
     if (elements.coordinatesInput) elements.coordinatesInput.focus();
     return false;
   }
+
+  const coordParts = coordsRaw.split(/[,;\s]+/).map(p => p.trim()).filter(p => p.length > 0);
+  if (coordParts.length < 2) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'รูปแบบพิกัดไม่ถูกต้อง',
+      text: 'กรุณากรอกทั้ง ละติจูด และ ลองจิจูด คั่นด้วยเครื่องหมายจุลภาค (,) เช่น 17.381600, 102.757800',
+      confirmButtonColor: '#2563eb'
+    });
+    if (elements.coordinatesInput) elements.coordinatesInput.focus();
+    return false;
+  }
+
+  const latStr = coordParts[0];
+  const lngStr = coordParts[1];
+
+  // ตรวจสอบรูปแบบ: ตัวเลขไม่เกิน 3 หลัก มีจุดทศนิยม และหลังทศนิยมไม่เกิน 6 หลัก
+  const latRegex = /^\d{1,3}(\.\d{1,6})?$/;
+  const lngRegex = /^\d{1,3}(\.\d{1,6})?$/;
+
+  if (!latRegex.test(latStr)) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'รูปแบบละติจูด (Latitude) ไม่ถูกต้อง',
+      text: 'ละติจูดต้องเป็นตัวเลขไม่เกิน 3 หลัก และจุดทศนิยมไม่เกิน 6 หลัก (เช่น 17.381600)',
+      confirmButtonColor: '#2563eb'
+    });
+    if (elements.coordinatesInput) elements.coordinatesInput.focus();
+    return false;
+  }
+
+  if (!lngRegex.test(lngStr)) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'รูปแบบลองจิจูด (Longitude) ไม่ถูกต้อง',
+      text: 'ลองจิจูดต้องเป็นตัวเลขไม่เกิน 3 หลัก และจุดทศนิยมไม่เกิน 6 หลัก (เช่น 102.757800)',
+      confirmButtonColor: '#2563eb'
+    });
+    if (elements.coordinatesInput) elements.coordinatesInput.focus();
+    return false;
+  }
+
+  const latNum = parseFloat(latStr);
+  const lngNum = parseFloat(lngStr);
+
+  // ตรวจสอบค่าหน้าจุดทศนิยมของละติจูดในประเทศไทย (ต้องไม่เกิน 20 และไม่น้อยกว่า 5)
+  if (latNum <= 0 || latNum > 20.999999) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ค่าละติจูดไม่อยู่ในขอบเขตประเทศไทย',
+      text: 'ค่าละติจูด (Latitude) ในประเทศไทย ต้องมีค่าหน้าจุดทศนิยมไม่เกิน 20 (เช่น 17.xxxxxx)',
+      confirmButtonColor: '#2563eb'
+    });
+    if (elements.coordinatesInput) elements.coordinatesInput.focus();
+    return false;
+  }
+
+  // ตรวจสอบขอบเขตลองจิจูดในประเทศไทย (โดยทั่วไปอยู่ระหว่าง 97 - 106)
+  if (lngNum < 95 || lngNum > 107) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ค่าลองจิจูดไม่อยู่ในขอบเขตประเทศไทย',
+      text: 'ค่าลองจิจูด (Longitude) ในประเทศไทย ต้องอยู่ระหว่าง 97 - 106 (เช่น 102.xxxxxx)',
+      confirmButtonColor: '#2563eb'
+    });
+    if (elements.coordinatesInput) elements.coordinatesInput.focus();
+    return false;
+  }
+
+  state.lat = Number(latNum.toFixed(6));
+  state.lng = Number(lngNum.toFixed(6));
 
   return true;
 }
