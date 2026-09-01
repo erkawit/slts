@@ -4317,9 +4317,10 @@ window.autofillModalFormFromRecord = function(caseNumber, district, subdistrict,
 };
 
 // -------------------------------------------------------------------------
-// SweetAlert Popup ค้นหาประวัติส่งหมายบน Mobile
 // -------------------------------------------------------------------------
-window.showMobileHistorySearchModal = function() {
+// SweetAlert Popup ค้นหาประวัติส่งหมายบน Mobile (< 768px)
+// -------------------------------------------------------------------------
+window.showMobileHistorySearchModal = async function() {
   if (!navigator.onLine) {
     Swal.fire({
       icon: 'info',
@@ -4333,6 +4334,7 @@ window.showMobileHistorySearchModal = function() {
 
   const prov = state.selectedProvince || 'อุดรธานี';
 
+  // หากยังไม่มีข้อมูล ให้ตรวจสอบจาก LocalStorage หรือดึงจาก Google Sheet ทันที
   if (!state.allSheetRows || state.allSheetRows.length === 0) {
     const cachedStr = localStorage.getItem(CACHE_KEY_SHEET_DATA);
     if (cachedStr) {
@@ -4340,6 +4342,16 @@ window.showMobileHistorySearchModal = function() {
         state.allSheetRows = JSON.parse(cachedStr);
       } catch (e) {}
     }
+  }
+
+  if (!state.allSheetRows || state.allSheetRows.length === 0) {
+    showCustomLoading('กำลังดึงข้อมูลประวัติส่งหมาย...', 'กรุณารอสักครู่ ระบบกำลังเชื่อมต่อ Google Sheet');
+    try {
+      await loadGoogleSheetData(false);
+    } catch (err) {
+      console.warn('Failed to load sheet data for search modal:', err);
+    }
+    hideCustomLoading();
   }
 
   const allRows = state.allSheetRows || [];
@@ -4392,10 +4404,12 @@ window.showMobileHistorySearchModal = function() {
       const safeAdmin = adminName.replace(/'/g, "\\'");
       const safeOther = otherLoc.replace(/'/g, "\\'");
 
+      const searchTerms = `${caseNum} ${district} ${subdistrict} ${locText} ${houseNo} ${moo} ${adminName} ${otherLoc}`.toLowerCase();
+
       // กรณีมีมากกว่า 1 รายการส่งหมาย
       if (records.length > 1) {
         cardsHtml += `
-          <div class="slts-history-card border-indigo-200 hover:border-indigo-400" data-search="${caseNum.toLowerCase()} ${district.toLowerCase()} ${subdistrict.toLowerCase()} ${locText.toLowerCase()}">
+          <div class="slts-history-card border-indigo-200 hover:border-indigo-400" data-search="${searchTerms}">
             <div class="flex items-start justify-between gap-2 mb-1.5">
               <div>
                 <span class="slts-history-caseno">${caseNum}</span>
@@ -4422,7 +4436,7 @@ window.showMobileHistorySearchModal = function() {
       } else {
         // กรณีมีรายการเดียว
         cardsHtml += `
-          <div class="slts-history-card" data-search="${caseNum.toLowerCase()} ${district.toLowerCase()} ${subdistrict.toLowerCase()} ${locText.toLowerCase()}">
+          <div class="slts-history-card" data-search="${searchTerms}">
             <div class="flex items-start justify-between gap-2 mb-1.5">
               <div>
                 <span class="slts-history-caseno">${caseNum}</span>
@@ -4460,13 +4474,16 @@ window.showMobileHistorySearchModal = function() {
           </button>
           <div class="flex-1 text-center pr-8">
             <h2 class="slts-modal-title">ค้นหาประวัติการส่งหมาย</h2>
-            <p class="slts-modal-subtitle">📍 จังหวัด${prov} (${caseGroups.size} คดี)</p>
+            <p id="swalHistorySubtitle" class="slts-modal-subtitle">📍 จังหวัด${prov} (${caseGroups.size} คดี)</p>
           </div>
         </div>
         <!-- Search -->
-        <div class="slts-search-wrap">
+        <div class="slts-search-wrap relative flex items-center">
           <i class="fa-solid fa-magnifying-glass slts-search-icon"></i>
-          <input type="text" id="swalHistorySearchInput" placeholder="พิมพ์เลขคดี, อำเภอ, ตำบล หรือสถานที่..." class="slts-search-input" oninput="filterMobileHistoryList(this.value)" autocomplete="off">
+          <input type="text" id="swalHistorySearchInput" placeholder="พิมพ์เลขคดี, อำเภอ, ตำบล หรือสถานที่..." class="slts-search-input pr-8" autocomplete="off">
+          <button type="button" id="swalHistoryClearSearchBtn" class="hidden absolute right-5 text-gray-400 hover:text-gray-600 p-1 text-xs" title="ล้างข้อความค้นหา">
+            <i class="fa-solid fa-circle-xmark"></i>
+          </button>
         </div>
         <!-- Cards List -->
         <div id="swalHistoryCardsWrap" class="p-3 space-y-2.5 overflow-y-auto max-h-[calc(86dvh-120px)] slts-swal-body-scroll">
@@ -4485,8 +4502,29 @@ window.showMobileHistorySearchModal = function() {
     },
     didOpen: () => {
       const searchInput = document.getElementById('swalHistorySearchInput');
+      const clearBtn = document.getElementById('swalHistoryClearSearchBtn');
+
       if (searchInput) {
-        setTimeout(() => searchInput.focus(), 150);
+        searchInput.addEventListener('input', (e) => {
+          const val = e.target.value;
+          if (clearBtn) {
+            clearBtn.classList.toggle('hidden', !val);
+          }
+          window.filterMobileHistoryList(val);
+        });
+
+        if (clearBtn) {
+          clearBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            clearBtn.classList.add('hidden');
+            searchInput.focus();
+            window.filterMobileHistoryList('');
+          });
+        }
+
+        setTimeout(() => {
+          searchInput.focus();
+        }, 200);
       }
     }
   });
@@ -4495,12 +4533,56 @@ window.showMobileHistorySearchModal = function() {
 window.filterMobileHistoryList = function(query) {
   const wrap = document.getElementById('swalHistoryCardsWrap');
   if (!wrap) return;
-  const q = (query || '').trim().toLowerCase();
+
+  const rawQ = (query || '').trim().toLowerCase();
+  const cleanQ = rawQ.replace(/[\s\.\/\-\_]/g, '');
+  const terms = rawQ.split(/\s+/).filter(t => t.length > 0);
+
   const cards = wrap.querySelectorAll('.slts-history-card');
+  let matchCount = 0;
+
   cards.forEach(card => {
-    const s = card.getAttribute('data-search') || '';
-    card.style.display = s.includes(q) ? '' : 'none';
+    const s = (card.getAttribute('data-search') || '').toLowerCase();
+    const cleanS = s.replace(/[\s\.\/\-\_]/g, '');
+
+    const isMatch = (rawQ === '') ||
+      s.includes(rawQ) ||
+      cleanS.includes(cleanQ) ||
+      terms.every(t => s.includes(t) || cleanS.includes(t.replace(/[\s\.\/\-\_]/g, '')));
+
+    card.style.display = isMatch ? '' : 'none';
+    if (isMatch) matchCount++;
   });
+
+  // อัปเดต Subtitle
+  const subtitle = document.getElementById('swalHistorySubtitle');
+  const prov = state.selectedProvince || 'อุดรธานี';
+  if (subtitle) {
+    if (rawQ) {
+      subtitle.textContent = `📍 จังหวัด${prov} (พบ ${matchCount} จาก ${cards.length} คดี)`;
+    } else {
+      subtitle.textContent = `📍 จังหวัด${prov} (${cards.length} คดี)`;
+    }
+  }
+
+  // จัดการกล่องแสดงเมื่อไม่พบรายการ
+  let noResultEl = document.getElementById('swalHistoryNoResult');
+  if (matchCount === 0 && cards.length > 0) {
+    if (!noResultEl) {
+      noResultEl = document.createElement('div');
+      noResultEl.id = 'swalHistoryNoResult';
+      noResultEl.className = 'p-8 text-center text-gray-400';
+      noResultEl.innerHTML = `
+        <i class="fa-solid fa-magnifying-glass text-3xl mb-2 text-gray-300"></i>
+        <p class="text-xs font-semibold text-gray-600">ไม่พบประวัติส่งหมายที่ตรงกับคำค้นหา</p>
+        <p class="text-[11px] text-gray-400 mt-1">ลองพิมพ์เฉพาะเลขคดี, ชื่ออำเภอ, ตำบล หรือชื่อสถานที่</p>
+      `;
+      wrap.appendChild(noResultEl);
+    }
+    noResultEl.style.display = '';
+  } else if (noResultEl) {
+    noResultEl.style.display = 'none';
+  }
 };
 
 // -------------------------------------------------------------------------
