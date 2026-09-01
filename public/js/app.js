@@ -7288,6 +7288,56 @@ function getApproximateCoords(district, subdistrict) {
 }
 
 /**
+ * แปลงลิงก์รูปภาพใน Google Drive ให้เป็น Direct Thumbnail URL ที่เบราว์เซอร์แสดงผลได้ทันที
+ */
+function getDirectDriveImageUrl(rawUrl, size = 800) {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('data:image') || trimmed.startsWith('blob:')) return trimmed;
+
+  const match = trimmed.match(/id=([a-zA-Z0-9_-]+)/) ||
+                trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+                trimmed.match(/id%3D([a-zA-Z0-9_-]+)/);
+
+  if (match && match[1]) {
+    return `https://lh3.googleusercontent.com/d/${match[1]}=w${size}`;
+  }
+
+  // หากเป็น Drive file ID โดยตรง (25-45 ตัวอักษร)
+  if (/^[a-zA-Z0-9_-]{25,45}$/.test(trimmed)) {
+    return `https://lh3.googleusercontent.com/d/${trimmed}=w${size}`;
+  }
+
+  return trimmed;
+}
+
+/**
+ * ลิงก์สำรอง (Fallback) กรณี lh3 ไม่โหลด
+ */
+function getDriveFallbackThumbnailUrl(rawUrl, size = 800) {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  const match = trimmed.match(/id=([a-zA-Z0-9_-]+)/) ||
+                trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
+                trimmed.match(/id%3D([a-zA-Z0-9_-]+)/);
+  const fileId = match ? match[1] : (/^[a-zA-Z0-9_-]{25,45}$/.test(trimmed) ? trimmed : '');
+  if (fileId) {
+    return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${size}`;
+  }
+  return trimmed;
+}
+
+/**
+ * ดึงลิงก์รูปภาพจากแถวข้อมูล Google Sheets
+ */
+function extractRowImageUrl(r) {
+  if (!r) return '';
+  const raw = r['ลิงก์รูปภาพใน Google Drive'] || r['ลิงก์รูปภาพ'] || r['Drive File ID'] || r['รูปภาพ'] || r['Image'] || r['photo'] || '';
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+/**
  * ตรวจสอบเปรียบเทียบข้อมูลหมายกับประวัติส่งหมายในระบบ
  * 1. ตรงกับประวัติแบบสมบูรณ์ (Exact Match): เลขคดีตรงกัน หรือ บ้านเลขที่+หมู่+ตำบล+อำเภอ ตรงกัน -> มีพิกัด Lat, Lng จริง และภาพถ่าย
  * 2. หมุดใกล้เคียง (Near Match): หากไม่ตรง แต่พบข้อมูลในหมู่ที่เดียวกัน หรือตำบล/อำเภอเดียวกัน -> ดึงพิกัดหมุดที่ใกล้เคียงมาแสดง
@@ -7394,7 +7444,7 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
         matchType: matchType,
         matchNote: matchNote,
         locationText: locationText || matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || '-',
-        imageUrl: matched['ลิงก์รูปภาพใน Google Drive'] || matched['ลิงก์รูปภาพ'] || '',
+        imageUrl: extractRowImageUrl(matched),
         dateTime: formatThaiDateDisplay(matched['วัน-เวลาบันทึก'] || matched['Timestamp'] || ''),
         subdistrict: matched['ตำบล'] || subdistrict,
         district: matched['อำเภอ'] || district,
@@ -7471,12 +7521,12 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
     yearOptions += `<option value="${yr}" ${isSelected ? 'selected' : ''}>${yr}</option>`;
   }
 
-  const courtType = initialData.courtType || 'ศาลจังหวัดอุดรธานี';
-  const isUdonCourt = (courtType === 'ศาลจังหวัดอุดรธานี');
+  const courtType = initialData.courtType || `ศาลจังหวัด${currentProvince}`;
+  const isOtherCourt = (courtType === 'หมายศาลอื่น' || courtType.includes('หมายศาลอื่น'));
   const locType = initialData.locationType || 'หมายบ้าน';
 
   return `
-    <div class="space-y-3.5 text-xs text-left">
+    <div class="relative space-y-3.5 text-xs text-left" id="${prefix}formRoot">
       
       <!-- 1. จังหวัด อำเภอ ตำบล -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-gray-50/80 p-2.5 rounded-xl border border-gray-200">
@@ -7512,7 +7562,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
           <label class="block font-bold text-gray-800">
             <i class="fa-solid fa-gavel text-blue-600 mr-1"></i>ข้อมูลเลขคดี <span class="text-red-500">*</span>
           </label>
-          <button type="button" onclick="openScheduleCourtTypeModal('${prefix}')" class="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
+          <button type="button" onclick="openScheduleCourtTypeModal('${prefix}')" class="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 cursor-pointer">
             <i class="fa-solid fa-pen-to-square"></i>
             <span>เปลี่ยนประเภทศาล</span>
           </button>
@@ -7531,15 +7581,15 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
           <button 
             type="button" 
             onclick="openScheduleCourtTypeModal('${prefix}')" 
-            class="px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-r-xl border border-blue-600 transition flex items-center gap-1 shrink-0"
+            class="px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-r-xl border border-blue-600 transition flex items-center gap-1 shrink-0 cursor-pointer"
           >
             <i class="fa-solid fa-building-columns"></i>
             <span>เลือกประเภทศาล</span>
           </button>
         </div>
 
-        <!-- กรณี: ศาลจังหวัดอุดรธานี (อักษร + เลขคดี + / + ปี พ.ศ.) -->
-        <div id="${prefix}udonCaseField" class="${isUdonCourt ? 'flex' : 'hidden'} items-stretch">
+        <!-- กรณี: ศาลประจำจังหวัด/ศาลแขวง/ศาลเยาวชน (อักษร + เลขคดี + / + ปี พ.ศ.) -->
+        <div id="${prefix}udonCaseField" class="${!isOtherCourt ? 'flex' : 'hidden'} items-stretch">
           <div class="relative w-28 sm:w-36 flex-shrink-0">
             <input 
               type="text" 
@@ -7590,7 +7640,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
         </div>
 
         <!-- กรณี: หมายศาลอื่น (ต + เลขคดี + / + ปี พ.ศ.) -->
-        <div id="${prefix}otherCourtCaseField" class="${!isUdonCourt ? 'flex' : 'hidden'} items-stretch">
+        <div id="${prefix}otherCourtCaseField" class="${isOtherCourt ? 'flex' : 'hidden'} items-stretch">
           <span class="inline-flex items-center px-3.5 bg-blue-50 border border-r-0 border-gray-300 rounded-l-xl text-blue-700 font-bold text-xs select-none">
             ต
           </span>
@@ -7693,6 +7743,28 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
         </div>
       </div>
 
+      <!-- 4. Inline Court Picker Overlay (ไม่ปิด Modal หลัก ไม่เด้งออก) -->
+      <div id="${prefix}courtPickerOverlay" class="hidden absolute inset-0 bg-white/95 backdrop-blur-xs z-50 rounded-2xl p-4 flex flex-col shadow-2xl border-2 border-blue-500 transition-all">
+        <div class="flex items-center justify-between pb-2.5 border-b border-gray-200 mb-2 flex-shrink-0">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold">
+              <i class="fa-solid fa-gavel"></i>
+            </div>
+            <div>
+              <h4 class="font-bold text-sm text-gray-900">เลือกประเภทศาล</h4>
+              <p class="text-[10px] text-gray-500">เลือกเพื่อปรับรูปแบบช่องกรอกเลขคดีตามประเภทศาล</p>
+            </div>
+          </div>
+          <button type="button" onclick="closeScheduleCourtOverlay('${prefix}')" class="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-sm font-bold transition cursor-pointer" title="ปิด">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        
+        <div id="${prefix}courtOptionsList" class="flex-1 overflow-y-auto space-y-2 py-1 pr-1 slts-swal-body-scroll">
+          <!-- Populated dynamically by openScheduleCourtTypeModal -->
+        </div>
+      </div>
+
     </div>
   `;
 }
@@ -7754,41 +7826,62 @@ function bindScheduleFormEvents(prefix = 'modal_') {
 }
 
 /**
- * เปิด Modal เลือกประเภทศาลสำหรับแบบฟอร์มจัดตาราง
+ * เปิด Inline Overlay เลือกประเภทศาลสำหรับแบบฟอร์มจัดตาราง (ไม่เรียก Swal.fire เพื่อไม่ให้ Modal เด้งออก)
  */
 window.openScheduleCourtTypeModal = function(prefix = 'modal_') {
   const prov = document.getElementById(`${prefix}province`)?.value || 'อุดรธานี';
-  const courtOptions = [
-    { title: `ศาลจังหวัด${prov}`, category: 'ศาลจังหวัด', desc: `ศาลชั้นต้นประจำจังหวัด${prov}`, icon: 'fa-landmark', badge: 'ประจำจังหวัด' },
-    { title: `ศาลแขวง${prov}`, category: 'ศาลแขวง', desc: `คดีมโนสาเร่ / คดีแขวง ประจำ${prov}`, icon: 'fa-scale-balanced', badge: 'ศาลแขวง' },
-    { title: `ศาลเยาวชนและครอบครัวจังหวัด${prov}`, category: 'ศาลเยาวชนและครอบครัว', desc: `คดีเยาวชนและครอบครัวจังหวัด${prov}`, icon: 'fa-children', badge: 'คดีครอบครัว' },
-    { title: 'หมายศาลอื่น (ศาลที่ไม่สังกัดภาค / หมายข้ามเขต)', category: 'หมายศาลอื่น', desc: 'ศาลแพ่ง, ศาลอาญา, ศาลล้มละลาย หรือหมายส่งข้ามเขต', icon: 'fa-building-columns', badge: 'หมายศาลอื่น' }
-  ];
-
+  const overlay = document.getElementById(`${prefix}courtPickerOverlay`);
+  const listContainer = document.getElementById(`${prefix}courtOptionsList`);
   const currentCourt = document.getElementById(`${prefix}courtType`)?.value || `ศาลจังหวัด${prov}`;
 
-  const listHtml = courtOptions.map(opt => `
-    <button type="button" onclick="selectScheduleCourtChoice('${prefix}', '${opt.category}', '${opt.title}')" class="w-full text-left p-3 rounded-xl border border-gray-200 hover:border-blue-500 hover:bg-blue-50/50 transition flex items-center justify-between gap-2.5 group">
-      <div class="flex items-center gap-2.5">
-        <div class="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-sm">
-          <i class="fa-solid ${opt.icon}"></i>
-        </div>
-        <div>
-          <p class="font-bold text-xs text-gray-900">${opt.title}</p>
-          <p class="text-[10px] text-gray-500">${opt.desc}</p>
-        </div>
-      </div>
-      ${opt.title === currentCourt ? '<i class="fa-solid fa-circle-check text-blue-600 text-sm"></i>' : '<i class="fa-solid fa-chevron-right text-gray-400 text-xs"></i>'}
-    </button>
-  `).join('');
+  const courtOptions = [
+    { title: `ศาลจังหวัด${prov}`, category: 'ศาลจังหวัด', desc: `ศาลชั้นต้นประจำจังหวัด${prov} (คดี ผบE, พE, ผบ, พ, อ...)`, icon: 'fa-landmark', badge: 'ประจำจังหวัด', color: 'blue' },
+    { title: `ศาลแขวง${prov}`, category: 'ศาลแขวง', desc: `คดีมโนสาเร่ / คดีแขวง ประจำ${prov} (คดี ผบ, พ, ม, มย...)`, icon: 'fa-scale-balanced', badge: 'ศาลแขวง', color: 'indigo' },
+    { title: `ศาลเยาวชนและครอบครัวจังหวัด${prov}`, category: 'ศาลเยาวชนและครอบครัว', desc: `คดีเยาวชนและครอบครัวจังหวัด${prov} (คดี ย, ร, รส...)`, icon: 'fa-children', badge: 'คดีครอบครัว', color: 'purple' },
+    { title: 'หมายศาลอื่น (ศาลที่ไม่สังกัดภาค / หมายข้ามเขต)', category: 'หมายศาลอื่น', desc: 'ศาลแพ่ง, ศาลอาญา, ศาลล้มละลาย หรือหมายส่งข้ามเขต (คดี ต)', icon: 'fa-building-columns', badge: 'หมายศาลอื่น (ต)', color: 'emerald' }
+  ];
 
-  Swal.fire({
-    title: '<div class="flex items-center justify-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-gavel text-blue-600"></i> เลือกประเภทศาล</div>',
-    html: `<div class="space-y-2 py-1 text-left max-h-[60vh] overflow-y-auto">${listHtml}</div>`,
-    showConfirmButton: false,
-    showCloseButton: true,
-    customClass: { popup: 'rounded-2xl p-4' }
-  });
+  if (listContainer) {
+    listContainer.innerHTML = courtOptions.map(opt => {
+      const isSelected = (opt.title === currentCourt || (opt.category === 'หมายศาลอื่น' && currentCourt.includes('หมายศาลอื่น')));
+      return `
+        <button 
+          type="button" 
+          onclick="selectScheduleCourtChoice('${prefix}', '${opt.category}', '${opt.title}')" 
+          class="w-full text-left p-3 rounded-xl border transition flex items-center justify-between gap-3 cursor-pointer ${isSelected ? 'border-blue-500 bg-blue-50/80 ring-2 ring-blue-400/30' : 'border-gray-200 hover:border-blue-400 hover:bg-gray-50'}"
+        >
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-xl ${isSelected ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-700'} flex items-center justify-center text-sm flex-shrink-0 shadow-xs">
+              <i class="fa-solid ${opt.icon}"></i>
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span class="font-bold text-xs text-gray-900 truncate">${opt.title}</span>
+                <span class="text-[10px] px-1.5 py-0.2 rounded font-bold ${isSelected ? 'bg-blue-200 text-blue-900' : 'bg-gray-100 text-gray-600'} flex-shrink-0">
+                  ${opt.badge}
+                </span>
+              </div>
+              <p class="text-[10px] text-gray-500 truncate">${opt.desc}</p>
+            </div>
+          </div>
+          ${isSelected ? '<i class="fa-solid fa-circle-check text-blue-600 text-base flex-shrink-0"></i>' : '<i class="fa-solid fa-chevron-right text-gray-400 text-xs flex-shrink-0"></i>'}
+        </button>
+      `;
+    }).join('');
+  }
+
+  if (overlay) {
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+  }
+};
+
+window.closeScheduleCourtOverlay = function(prefix) {
+  const overlay = document.getElementById(`${prefix}courtPickerOverlay`);
+  if (overlay) {
+    overlay.classList.add('hidden');
+    overlay.classList.remove('flex');
+  }
 };
 
 window.selectScheduleCourtChoice = function(prefix, category, title) {
@@ -7800,22 +7893,26 @@ window.selectScheduleCourtChoice = function(prefix, category, title) {
   if (courtNameInput) courtNameInput.value = title;
   if (courtTypeInput) courtTypeInput.value = title;
 
-  const isUdon = (title === 'ศาลจังหวัดอุดรธานี');
+  const isOther = (category === 'หมายศาลอื่น' || title.includes('หมายศาลอื่น'));
   if (udonField && otherField) {
-    if (isUdon) {
-      udonField.classList.remove('hidden');
-      udonField.classList.add('flex');
-      otherField.classList.add('hidden');
-      otherField.classList.remove('flex');
-    } else {
+    if (isOther) {
       otherField.classList.remove('hidden');
       otherField.classList.add('flex');
       udonField.classList.add('hidden');
       udonField.classList.remove('flex');
+      const otherCaseNo = document.getElementById(`${prefix}otherCaseNo`);
+      if (otherCaseNo) otherCaseNo.focus();
+    } else {
+      udonField.classList.remove('hidden');
+      udonField.classList.add('flex');
+      otherField.classList.add('hidden');
+      otherField.classList.remove('flex');
+      const udonPrefix = document.getElementById(`${prefix}udonPrefix`);
+      if (udonPrefix) udonPrefix.focus();
     }
   }
 
-  Swal.close();
+  closeScheduleCourtOverlay(prefix);
 };
 
 /**
@@ -7825,21 +7922,21 @@ function extractSummonsFormData(prefix = 'modal_') {
   const province = document.getElementById(`${prefix}province`)?.value || 'อุดรธานี';
   const district = document.getElementById(`${prefix}district`)?.value || '';
   const subdistrict = document.getElementById(`${prefix}subdistrict`)?.value || '';
-  const courtType = document.getElementById(`${prefix}courtType`)?.value || 'ศาลจังหวัดอุดรธานี';
-  const isUdon = (courtType === 'ศาลจังหวัดอุดรธานี');
+  const courtType = document.getElementById(`${prefix}courtType`)?.value || `ศาลจังหวัด${province}`;
+  const isOther = (courtType === 'หมายศาลอื่น' || courtType.includes('หมายศาลอื่น'));
 
   let prefixStr = '';
   let caseNo = '';
   let caseYear = '';
 
-  if (isUdon) {
-    prefixStr = (document.getElementById(`${prefix}udonPrefix`)?.value || '').trim();
-    caseNo = (document.getElementById(`${prefix}udonCaseNo`)?.value || '').trim();
-    caseYear = (document.getElementById(`${prefix}udonCaseYear`)?.value || '').trim();
-  } else {
+  if (isOther) {
     prefixStr = 'ต';
     caseNo = (document.getElementById(`${prefix}otherCaseNo`)?.value || '').trim();
     caseYear = (document.getElementById(`${prefix}otherCaseYear`)?.value || '').trim();
+  } else {
+    prefixStr = (document.getElementById(`${prefix}udonPrefix`)?.value || '').trim();
+    caseNo = (document.getElementById(`${prefix}udonCaseNo`)?.value || '').trim();
+    caseYear = (document.getElementById(`${prefix}udonCaseYear`)?.value || '').trim();
   }
 
   const caseExtra = (document.getElementById(`${prefix}caseExtraInput`)?.value || '').trim();
@@ -7903,11 +8000,11 @@ window.openMapAreaSelectorModal = function() {
         
         <!-- Tabs Header -->
         <div class="flex border-b border-gray-200 gap-2 mb-2">
-          <button type="button" id="tabBtnModalArea" onclick="switchModalTab('area')" class="px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5">
+          <button type="button" id="tabBtnModalArea" onclick="switchModalTab('area')" class="px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5 cursor-pointer">
             <i class="fa-solid fa-layer-group"></i>
             <span>1. เลือกตามพื้นที่</span>
           </button>
-          <button type="button" id="tabBtnModalSchedule" onclick="switchModalTab('schedule')" class="px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5">
+          <button type="button" id="tabBtnModalSchedule" onclick="switchModalTab('schedule')" class="px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer">
             <i class="fa-solid fa-table-list text-emerald-600"></i>
             <span>2. จัดรายการตารางส่งหมาย</span>
           </button>
@@ -7962,7 +8059,7 @@ window.openMapAreaSelectorModal = function() {
               <span id="scheduleFormTitle" class="font-bold text-xs text-blue-700 flex items-center gap-1.5">
                 <i class="fa-solid fa-file-circle-plus"></i> เพิ่มรายการส่งหมายใหม่
               </span>
-              <button type="button" id="btnResetScheduleForm" onclick="resetScheduleModalForm()" class="text-[11px] text-gray-500 hover:text-red-600">
+              <button type="button" id="btnResetScheduleForm" onclick="resetScheduleModalForm()" class="text-[11px] text-gray-500 hover:text-red-600 cursor-pointer">
                 <i class="fa-solid fa-rotate-left mr-0.5"></i> ล้างฟอร์ม
               </button>
             </div>
@@ -7974,10 +8071,10 @@ window.openMapAreaSelectorModal = function() {
 
             <!-- Form Submit Buttons -->
             <div class="pt-1 flex gap-2">
-              <button type="button" id="btnAddScheduleItem" onclick="handleAddOrUpdateScheduleItem()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm text-xs">
+              <button type="button" id="btnAddScheduleItem" onclick="handleAddOrUpdateScheduleItem()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm text-xs cursor-pointer">
                 <i class="fa-solid fa-plus"></i> <span id="txtBtnAddScheduleItem">เพิ่มรายการลงตาราง</span>
               </button>
-              <button type="button" id="btnCancelEditScheduleItem" onclick="cancelEditScheduleItem()" class="hidden bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-3 rounded-xl transition text-xs">
+              <button type="button" id="btnCancelEditScheduleItem" onclick="cancelEditScheduleItem()" class="hidden bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-3 rounded-xl transition text-xs cursor-pointer">
                 ยกเลิกแก้ไข
               </button>
             </div>
@@ -8020,13 +8117,13 @@ window.openMapAreaSelectorModal = function() {
         const contentSched = document.getElementById('modalTabContentSchedule');
 
         if (tab === 'area') {
-          tabAreaBtn.className = 'px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5';
-          tabSchedBtn.className = 'px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5';
+          tabAreaBtn.className = 'px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5 cursor-pointer';
+          tabSchedBtn.className = 'px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer';
           contentArea.classList.remove('hidden');
           contentSched.classList.add('hidden');
         } else {
-          tabSchedBtn.className = 'px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5';
-          tabAreaBtn.className = 'px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5';
+          tabSchedBtn.className = 'px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5 cursor-pointer';
+          tabAreaBtn.className = 'px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer';
           contentSched.classList.remove('hidden');
           contentArea.classList.add('hidden');
           renderStagedScheduleList();
@@ -8079,16 +8176,16 @@ window.openMapAreaSelectorModal = function() {
 
               <!-- Actions -->
               <div class="flex items-center gap-1 flex-shrink-0">
-                <button type="button" onclick="editStagedScheduleItem(${idx})" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs" title="แก้ไขรายการนี้">
+                <button type="button" onclick="editStagedScheduleItem(${idx})" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs cursor-pointer" title="แก้ไขรายการนี้">
                   <i class="fa-solid fa-pen-to-square"></i>
                 </button>
-                <button type="button" onclick="deleteStagedScheduleItem(${idx})" class="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs" title="ลบรายการนี้">
+                <button type="button" onclick="deleteStagedScheduleItem(${idx})" class="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs cursor-pointer" title="ลบรายการนี้">
                   <i class="fa-solid fa-trash-can"></i>
                 </button>
-                <button type="button" onclick="moveStagedScheduleItem(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} class="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30" title="เลื่อนขึ้น">
+                <button type="button" onclick="moveStagedScheduleItem(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} class="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer" title="เลื่อนขึ้น">
                   <i class="fa-solid fa-chevron-up text-[10px]"></i>
                 </button>
-                <button type="button" onclick="moveStagedScheduleItem(${idx}, 1)" ${idx === stops.length - 1 ? 'disabled' : ''} class="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30" title="เลื่อนลง">
+                <button type="button" onclick="moveStagedScheduleItem(${idx}, 1)" ${idx === stops.length - 1 ? 'disabled' : ''} class="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer" title="เลื่อนลง">
                   <i class="fa-solid fa-chevron-down text-[10px]"></i>
                 </button>
               </div>
@@ -8401,10 +8498,10 @@ window.openStartPointConfigModal = function() {
         <p class="text-gray-600">เลือกตำแหน่งที่ต้องการใช้เป็นจุดตั้งต้นในการคำนวณและนำทางส่งหมาย:</p>
 
         <div class="grid grid-cols-2 gap-2">
-          <button type="button" onclick="setPresetStartLocation('court')" class="p-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl font-bold text-blue-700 flex items-center justify-center gap-1.5 transition">
+          <button type="button" onclick="setPresetStartLocation('court')" class="p-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl font-bold text-blue-700 flex items-center justify-center gap-1.5 transition cursor-pointer">
             <i class="fa-solid fa-landmark"></i> ศาลจังหวัดอุดรธานี
           </button>
-          <button type="button" onclick="setPresetStartLocation('gps')" class="p-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl font-bold text-emerald-700 flex items-center justify-center gap-1.5 transition">
+          <button type="button" onclick="setPresetStartLocation('gps')" class="p-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl font-bold text-emerald-700 flex items-center justify-center gap-1.5 transition cursor-pointer">
             <i class="fa-solid fa-location-crosshairs"></i> ดึงพิกัด GPS ปัจจุบัน
           </button>
         </div>
@@ -8538,7 +8635,7 @@ window.renderMapAndPins = function(province, district, subdistrict) {
         district: (r['อำเภอ'] || '').trim(),
         subdistrict: (r['ตำบล'] || '').trim(),
         province: getRowProvince(r) || province,
-        imageUrl: r['ลิงก์รูปภาพใน Google Drive'] || r['ลิงก์รูปภาพ'] || '',
+        imageUrl: extractRowImageUrl(r),
         lat: lat,
         lng: lng,
         matchType: 'exact',
@@ -8616,7 +8713,7 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
   });
 
   const startMarker = L.marker([start.lat, start.lng], { icon: startIcon })
-    .bindPopup(`<div class="p-2 font-bold text-xs text-emerald-800">🏛️ ${start.name}<p class="text-[10px] font-normal text-gray-500 font-mono">${start.lat.toFixed(4)}, ${start.lng.toFixed(4)}</p></div>`);
+    .bindPopup(`<div class="p-3 font-bold text-xs text-emerald-800">🏛️ ${start.name}<p class="text-[10px] font-normal text-gray-500 font-mono mt-0.5">${start.lat.toFixed(4)}, ${start.lng.toFixed(4)}</p></div>`, { className: 'slts-map-popup' });
 
   startMarker.on('mouseover', function () { this.openPopup(); });
 
@@ -8674,11 +8771,14 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
       const safeCase = (stop.caseNumber || '').replace(/'/g, "\\'");
       const safeLoc = (stop.locationText || '').replace(/'/g, "\\'");
       const safeDate = (stop.dateTime || '').replace(/'/g, "\\'");
+      const rawImgUrl = (stop.imageUrl || '').replace(/'/g, "\\'");
+      const directThumbUrl = getDirectDriveImageUrl(stop.imageUrl, 800);
+      const fallbackThumbUrl = getDriveFallbackThumbnailUrl(stop.imageUrl, 800);
 
       const popupHtml = `
-        <div class="p-3 space-y-1.5 max-w-[280px] text-xs font-sans">
-          <div class="flex items-center justify-between border-b border-gray-100 pb-1 gap-2">
-            <span class="font-bold text-sm text-blue-700">หมุดที่ ${pinCounter}: ${stop.caseNumber}</span>
+        <div class="p-3 space-y-2 text-xs font-sans">
+          <div class="flex items-center justify-between border-b border-gray-100 pb-1.5 gap-2">
+            <span class="font-bold text-sm text-blue-700 truncate">หมุดที่ ${pinCounter}: ${stop.caseNumber}</span>
             ${statusBadge}
           </div>
           
@@ -8689,15 +8789,29 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
             <p class="text-[10px] text-emerald-700 font-semibold"><i class="fa-solid fa-calendar-check mr-1"></i>ประวัติส่งเมื่อ: ${stop.dateTime}</p>
           ` : ''}
 
-          ${stop.imageUrl ? `
-            <div class="pt-1">
-              <img src="${stop.imageUrl}" alt="ภาพถ่ายหมายที่เคยส่ง" class="w-full h-24 object-cover rounded-xl border border-gray-200 cursor-pointer hover:opacity-90 transition" onclick="viewPhotoModal('${stop.imageUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')" title="คลิกเพื่อดูภาพขนาดเต็ม">
+          ${directThumbUrl ? `
+            <div class="pt-0.5">
+              <div class="relative w-full h-32 bg-gray-100 rounded-xl overflow-hidden border border-gray-200 group cursor-pointer shadow-xs" onclick="viewPhotoModal('${rawImgUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')" title="คลิกเพื่อดูภาพขนาดเต็ม">
+                <img src="${directThumbUrl}" 
+                     alt="ภาพถ่ายหมาย: ${safeCase}" 
+                     class="w-full h-full object-cover transition duration-200 group-hover:scale-105" 
+                     loading="lazy" 
+                     onerror="if (this.src !== '${fallbackThumbUrl}') { this.src='${fallbackThumbUrl}'; } else { this.parentElement.style.display='none'; }"
+                >
+                <div class="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[11px] font-bold gap-1">
+                  <i class="fa-solid fa-magnifying-glass-plus"></i>
+                  <span>คลิกดูภาพเต็ม</span>
+                </div>
+                <div class="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded font-mono">
+                  📷 ภาพส่งหมาย
+                </div>
+              </div>
             </div>
           ` : ''}
 
           <div class="pt-1">
-            <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="block w-full text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shadow-xs">
-              <i class="fa-solid fa-diamond-turn-right mr-1"></i> นำทางจุดนี้
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="block w-full text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-lg text-[11px] font-bold shadow-xs transition">
+              <i class="fa-solid fa-diamond-turn-right mr-1"></i> นำทางจุดนี้ด้วย Google Maps
             </a>
           </div>
         </div>
@@ -8855,17 +8969,17 @@ function renderRouteSidebarList(stops, totalDistKm) {
 
         <!-- Quick Action Buttons (Edit, Delete, Up, Down) -->
         <div class="flex items-center gap-0.5 flex-shrink-0">
-          <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1 text-blue-600 hover:bg-blue-50 rounded" title="แก้ไขข้อมูลหมายนี้">
+          <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer" title="แก้ไขข้อมูลหมายนี้">
             <i class="fa-solid fa-pen-to-square text-xs"></i>
           </button>
-          <button type="button" onclick="deleteRouteStop(${index}, event)" class="p-1 text-red-600 hover:bg-red-50 rounded" title="ลบรายการนี้">
+          <button type="button" onclick="deleteRouteStop(${index}, event)" class="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer" title="ลบรายการนี้">
             <i class="fa-solid fa-trash-can text-xs"></i>
           </button>
           <div class="flex flex-col gap-0.5 ml-0.5">
-            <button type="button" onclick="moveStopUp(${index}, event)" class="p-0.5 text-[9px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="เลื่อนขึ้น">
+            <button type="button" onclick="moveStopUp(${index}, event)" class="p-0.5 text-[9px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded cursor-pointer" title="เลื่อนขึ้น">
               <i class="fa-solid fa-chevron-up"></i>
             </button>
-            <button type="button" onclick="moveStopDown(${index}, event)" class="p-0.5 text-[9px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="เลื่อนลง">
+            <button type="button" onclick="moveStopDown(${index}, event)" class="p-0.5 text-[9px] text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded cursor-pointer" title="เลื่อนลง">
               <i class="fa-solid fa-chevron-down"></i>
             </button>
           </div>
@@ -9099,17 +9213,17 @@ window.showMobileRouteMapModal = function() {
             ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติ (มีหมุดเส้นทาง)</span>` : (isNear ? `<span class="text-[9px] text-amber-800 font-bold inline-block mt-0.5"><i class="fa-solid fa-location-dot text-[8px] mr-1"></i>${stop.matchNote || 'หมุดใกล้เคียง'}</span>` : `<span class="text-[9px] text-gray-400 font-normal inline-block mt-0.5">ไม่มีข้อมูลในฐานข้อมูล (ไม่มีหมุด)</span>`)}
           </div>
           <div class="flex items-center gap-1 flex-shrink-0">
-            <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1 text-blue-600 hover:bg-blue-50 rounded">
+            <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer">
               <i class="fa-solid fa-pen-to-square text-xs"></i>
             </button>
-            <button type="button" onclick="deleteRouteStop(${index}, event)" class="p-1 text-red-600 hover:bg-red-50 rounded">
+            <button type="button" onclick="deleteRouteStop(${index}, event)" class="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer">
               <i class="fa-solid fa-trash-can text-xs"></i>
             </button>
             <div class="flex flex-col gap-0.5">
-              <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
+              <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 cursor-pointer">
                 <i class="fa-solid fa-chevron-up"></i>
               </button>
-              <button type="button" onclick="moveStopDown(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
+              <button type="button" onclick="moveStopDown(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 cursor-pointer">
                 <i class="fa-solid fa-chevron-down"></i>
               </button>
             </div>
@@ -9133,10 +9247,10 @@ window.showMobileRouteMapModal = function() {
             <p class="slts-modal-subtitle">📍 จ.${prov} (${stops.length} คดี)</p>
           </div>
           <div class="flex items-center gap-1">
-            <button type="button" onclick="openAddRouteStopModal()" class="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1">
+            <button type="button" onclick="openAddRouteStopModal()" class="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer">
               <i class="fa-solid fa-plus"></i> เพิ่ม
             </button>
-            <button type="button" onclick="openMapAreaSelectorModal()" class="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1">
+            <button type="button" onclick="openMapAreaSelectorModal()" class="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer">
               <i class="fa-solid fa-layer-group"></i> ตัวกรอง
             </button>
           </div>
@@ -9155,7 +9269,7 @@ window.showMobileRouteMapModal = function() {
               <span class="font-bold text-gray-800 text-[11px]">🏁 ${start.name}</span>
               ${totalDistKm > 0 ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">${totalDistKm.toFixed(1)} กม.</span>` : ''}
             </div>
-            <button type="button" onclick="openFullRouteInGoogleMaps()" class="px-2.5 py-1 bg-emerald-600 active:scale-95 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 shadow-sm flex-shrink-0">
+            <button type="button" onclick="openFullRouteInGoogleMaps()" class="px-2.5 py-1 bg-emerald-600 active:scale-95 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer">
               <i class="fa-solid fa-diamond-turn-right"></i> นำทาง Google Maps
             </button>
           </div>
@@ -9219,17 +9333,17 @@ window.renderMobileRouteList = function() {
           ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติ (มีหมุดเส้นทาง)</span>` : (isNear ? `<span class="text-[9px] text-amber-800 font-bold inline-block mt-0.5"><i class="fa-solid fa-location-dot text-[8px] mr-1"></i>${stop.matchNote || 'หมุดใกล้เคียง'}</span>` : `<span class="text-[9px] text-gray-400 font-normal inline-block mt-0.5">ไม่มีข้อมูลในฐานข้อมูล (ไม่มีหมุด)</span>`)}
         </div>
         <div class="flex items-center gap-1 flex-shrink-0">
-          <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1 text-blue-600 hover:bg-blue-50 rounded">
+          <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer">
             <i class="fa-solid fa-pen-to-square text-xs"></i>
           </button>
-          <button type="button" onclick="deleteRouteStop(${index}, event)" class="p-1 text-red-600 hover:bg-red-50 rounded">
+          <button type="button" onclick="deleteRouteStop(${index}, event)" class="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer">
             <i class="fa-solid fa-trash-can text-xs"></i>
           </button>
           <div class="flex flex-col gap-0.5">
-            <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
+            <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 cursor-pointer">
               <i class="fa-solid fa-chevron-up"></i>
             </button>
-            <button type="button" onclick="moveStopDown(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600">
+            <button type="button" onclick="moveStopDown(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 cursor-pointer">
               <i class="fa-solid fa-chevron-down"></i>
             </button>
           </div>
