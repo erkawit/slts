@@ -2067,13 +2067,24 @@ window.openManualUploadModal = function() {
         }
 
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = async (ev) => {
           selectedImageDataUrl = ev.target.result;
           window._manualTempDataUrl = selectedImageDataUrl;
           previewImg.src = selectedImageDataUrl;
           previewContainer.classList.remove('hidden');
           const sizeKb = Math.round(file.size / 1024);
           fileInfoText.textContent = `ไฟล์: ${file.name} (${sizeKb} KB)`;
+
+          // บนหน้าจอ Desktop (> 768px): สแกนหาพิกัด GPS จากภาพอัตโนมัติ
+          if (window.innerWidth > 768) {
+            const gpsFound = await extractGpsFromImage(file, selectedImageDataUrl, false);
+            if (gpsFound && typeof gpsFound.lat === 'number' && typeof gpsFound.lng === 'number') {
+              const latInput = document.getElementById('mUp_lat');
+              const lngInput = document.getElementById('mUp_lng');
+              if (latInput) latInput.value = Number(gpsFound.lat).toFixed(6);
+              if (lngInput) lngInput.value = Number(gpsFound.lng).toFixed(6);
+            }
+          }
         };
         reader.readAsDataURL(file);
       });
@@ -5041,6 +5052,170 @@ function initCameraEvents() {
 }
 
 /**
+ * สกัดหาพิกัด GPS (Latitude, Longitude) จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
+ * 1. ตรวจสอบ EXIF GPS Metadata จากไฟล์ภาพต้นฉบับ (เร็ว 0.01 วินาที)
+ * 2. หากไม่พบ EXIF ให้ใช้ OCR สแกนข้อความบนภาพ (เน้นโซนล่างและลายน้ำ)
+ */
+async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
+  if (window.innerWidth <= 768) return null;
+
+  const scanningNotice = document.getElementById('desktopGpsScanningNotice');
+  const detectNotice = document.getElementById('desktopGpsDetectNotice');
+  const detectedGpsTxt = document.getElementById('desktopDetectedGpsText');
+
+  if (detectNotice) detectNotice.classList.add('hidden');
+  if (scanningNotice) scanningNotice.classList.remove('hidden');
+
+  let result = null;
+
+  // 1. ระดับที่ 1: ตรวจจับจาก EXIF GPS Metadata (รวดเร็ว 0.01 วินาที)
+  if (typeof exifr !== 'undefined' && file) {
+    try {
+      const gps = await exifr.gps(file);
+      if (gps && typeof gps.latitude === 'number' && typeof gps.longitude === 'number') {
+        result = {
+          lat: gps.latitude,
+          lng: gps.longitude,
+          source: 'exif'
+        };
+        console.log('[GPS Detection] Found GPS via EXIF:', result);
+      }
+    } catch (err) {
+      console.warn('[GPS Detection] EXIF error:', err);
+    }
+  }
+
+  // 2. ระดับที่ 2: ตรวจจับจากตัวอักษรบนภาพ (OCR) หากไม่มี EXIF
+  if (!result && typeof Tesseract !== 'undefined' && dataUrl) {
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = reject;
+        i.src = dataUrl;
+      });
+
+      // ครอบตัดโซนล่าง 45% (ตำแหน่งมาตรฐานของลายน้ำพิกัด) เพื่อให้ OCR ทำงานเร็วและแม่นยำ
+      const canvas = document.createElement('canvas');
+      const cropHeight = Math.round(img.height * 0.45);
+      const cropY = img.height - cropHeight;
+      canvas.width = img.width;
+      canvas.height = cropHeight;
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, cropY, img.width, cropHeight, 0, 0, img.width, cropHeight);
+
+      const ocrResult = await Tesseract.recognize(canvas, 'eng+tha', {
+        logger: () => {}
+      });
+
+      const fullText = (ocrResult && ocrResult.data && ocrResult.data.text) ? ocrResult.data.text : '';
+      console.log('[GPS Detection] OCR Text:', fullText);
+
+      const parsedGps = parseCoordinatesFromText(fullText);
+      if (parsedGps) {
+        result = {
+          lat: parsedGps.lat,
+          lng: parsedGps.lng,
+          source: 'ocr'
+        };
+        console.log('[GPS Detection] Found GPS via OCR:', result);
+      }
+    } catch (err) {
+      console.warn('[GPS Detection] OCR error:', err);
+    }
+  }
+
+  if (scanningNotice) scanningNotice.classList.add('hidden');
+
+  if (result && typeof result.lat === 'number' && typeof result.lng === 'number') {
+    const latNum = Number(result.lat);
+    const lngNum = Number(result.lng);
+    const latFormatted = latNum.toFixed(6);
+    const lngFormatted = lngNum.toFixed(6);
+
+    if (updateFormFields) {
+      const coordInput = document.getElementById('coordinates');
+      if (coordInput) {
+        coordInput.value = `${latFormatted}, ${lngFormatted}`;
+        coordInput.classList.add('bg-emerald-50', 'border-emerald-500');
+        setTimeout(() => {
+          coordInput.classList.remove('bg-emerald-50', 'border-emerald-500');
+        }, 2500);
+      }
+
+      state.currentLocation = {
+        lat: latNum,
+        lng: lngNum,
+        accuracy: 10
+      };
+
+      const locStatus = document.getElementById('locationStatus');
+      if (locStatus) {
+        locStatus.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>ดึงพิกัดจากภาพถ่ายสำเร็จ (${latNum.toFixed(4)}, ${lngNum.toFixed(4)})</span>`;
+      }
+
+      if (detectNotice && detectedGpsTxt) {
+        detectedGpsTxt.textContent = `${latNum.toFixed(4)}, ${lngNum.toFixed(4)}`;
+        detectNotice.classList.remove('hidden');
+      }
+    }
+
+    return result;
+  }
+
+  return null;
+}
+
+/**
+ * แยกสกัดพิกัด ละติจูด / ลองจิจูด จากข้อความ OCR
+ */
+function parseCoordinatesFromText(text) {
+  if (!text) return null;
+
+  // 1. รูปแบบตัวอย่าง: 17.3891N 102.8138E หรือ 17.3891°N 102.8138°E
+  const matchDir = text.match(/(1[0-9]\.\d{3,8})\s*°?\s*([NS])\s*(10[0-6]\.\d{3,8})\s*°?\s*([EW])/i);
+  if (matchDir) {
+    let lat = parseFloat(matchDir[1]);
+    let lng = parseFloat(matchDir[3]);
+    if (matchDir[2].toUpperCase() === 'S') lat = -lat;
+    if (matchDir[4].toUpperCase() === 'W') lng = -lng;
+    return { lat, lng };
+  }
+
+  // 2. รูปแบบทศนิยม: 17.3891, 102.8138 หรือ 17.389100 102.813800
+  const matchDec = text.match(/(1[0-9]\.\d{3,8})\s*[,|\s]\s*(10[0-6]\.\d{3,8})/i);
+  if (matchDec) {
+    return {
+      lat: parseFloat(matchDec[1]),
+      lng: parseFloat(matchDec[2])
+    };
+  }
+
+  // 3. รูปแบบสากลทั่วไป: (\d{1,2}\.\d{3,8}) N/S (\d{2,3}\.\d{3,8}) E/W
+  const matchGeneral = text.match(/([0-8]?\d\.\d{3,8})\s*°?\s*([NS])\s*([0-1]?\d{1,2}\.\d{3,8})\s*°?\s*([EW])/i);
+  if (matchGeneral) {
+    let lat = parseFloat(matchGeneral[1]);
+    let lng = parseFloat(matchGeneral[3]);
+    if (matchGeneral[2].toUpperCase() === 'S') lat = -lat;
+    if (matchGeneral[4].toUpperCase() === 'W') lng = -lng;
+    return { lat, lng };
+  }
+
+  // 4. DMS (องศา ลิปดา พิลิปดา): 17°23'20"N 102°48'50"E
+  const matchDms = text.match(/(\d{1,2})[°\s]+(\d{1,2})['\s]+(\d{1,2}(?:\.\d+)?)["\s]*([NS])\s*(\d{2,3})[°\s]+(\d{1,2})['\s]+(\d{1,2}(?:\.\d+)?)["\s]*([EW])/i);
+  if (matchDms) {
+    let lat = parseInt(matchDms[1]) + (parseInt(matchDms[2]) / 60) + (parseFloat(matchDms[3]) / 3600);
+    let lng = parseInt(matchDms[5]) + (parseInt(matchDms[6]) / 60) + (parseFloat(matchDms[7]) / 3600);
+    if (matchDms[4].toUpperCase() === 'S') lat = -lat;
+    if (matchDms[8].toUpperCase() === 'W') lng = -lng;
+    return { lat, lng };
+  }
+
+  return null;
+}
+
+/**
  * จัดการระบบอัปโหลดไฟล์รูปภาพบนหน้าจอคอมพิวเตอร์ (> 768px)
  */
 function initDesktopUploadEvents() {
@@ -5056,7 +5231,7 @@ function initDesktopUploadEvents() {
       }
 
       const reader = new FileReader();
-      reader.onload = (ev) => {
+      reader.onload = async (ev) => {
         state.selectedDesktopImageDataUrl = ev.target.result;
         if (elements.desktopPreviewImg) {
           elements.desktopPreviewImg.src = state.selectedDesktopImageDataUrl;
@@ -5067,6 +5242,11 @@ function initDesktopUploadEvents() {
         if (elements.desktopImageSizeBadge) {
           const sizeKb = Math.round(file.size / 1024);
           elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB)`;
+        }
+
+        // ดึงพิกัด GPS อัตโนมัติจากภาพถ่าย (เฉพาะหน้าจอคอมพิวเตอร์ > 768px)
+        if (window.innerWidth > 768) {
+          await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
         }
       };
       reader.readAsDataURL(file);

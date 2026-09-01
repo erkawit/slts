@@ -67,13 +67,13 @@ class CompassManager {
     // 1. วงกลมพื้นหลังโปร่งแสง
     ctx.beginPath();
     ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
     ctx.fill();
     ctx.lineWidth = 2.5;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.stroke();
 
-    // 2. ขีดบอกทิศย่อยรอบวงกลม
+    // 2. ขีดบอกทิศย่อยและตัวอักษร N E S W
     const headingRad = (this.heading * Math.PI) / 180;
     
     // หมุนตาม heading เพื่อให้ N ชี้ไปทิศเหนือจริง
@@ -83,34 +83,33 @@ class CompassManager {
     for (let i = 0; i < 360; i += 30) {
       const rad = (i * Math.PI) / 180;
       const isMajor = i % 90 === 0;
-      const tickLen = isMajor ? radius * 0.22 : radius * 0.12;
+      const tickLen = isMajor ? radius * 0.18 : radius * 0.1;
       
-      const x1 = (radius - 5) * Math.sin(rad);
-      const y1 = -(radius - 5) * Math.cos(rad);
-      const x2 = (radius - 5 - tickLen) * Math.sin(rad);
-      const y2 = -(radius - 5 - tickLen) * Math.cos(rad);
+      const x1 = (radius - 4) * Math.sin(rad);
+      const y1 = -(radius - 4) * Math.cos(rad);
+      const x2 = (radius - 4 - tickLen) * Math.sin(rad);
+      const y2 = -(radius - 4 - tickLen) * Math.cos(rad);
 
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
-      ctx.strokeStyle = isMajor ? '#ffffff' : 'rgba(255, 255, 255, 0.6)';
+      ctx.strokeStyle = isMajor ? '#ffffff' : 'rgba(255, 255, 255, 0.5)';
       ctx.lineWidth = isMajor ? 2 : 1;
       ctx.stroke();
 
       // ตัวอักษรทิศ N E S W
       if (isMajor) {
         let label = '';
-        let color = '#ffffff';
-        if (i === 0) { label = 'N'; color = '#ff4d4f'; } // ทิศเหนือสีแดง
+        if (i === 0) { label = 'N'; }
         else if (i === 90) { label = 'E'; }
         else if (i === 180) { label = 'S'; }
         else if (i === 270) { label = 'W'; }
 
         ctx.save();
-        ctx.translate((radius - 22) * Math.sin(rad), -(radius - 22) * Math.cos(rad));
+        ctx.translate((radius - 18) * Math.sin(rad), -(radius - 18) * Math.cos(rad));
         ctx.rotate(rad);
         ctx.font = 'bold 12px sans-serif';
-        ctx.fillStyle = color;
+        ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(label, 0, 0);
@@ -118,41 +117,35 @@ class CompassManager {
       }
     }
 
-    // 3. เข็มทิศสีแดง (ชี้เหนือ) และสีขาว (ชี้ใต้)
-    // หัวเข็มสีแดง (ชี้ N)
+    // 3. เข็มทิศสามเหลี่ยมทรงแหลมสีฟ้าสดใส (Cyan Pointer) ชี้บอกทิศเหนือ (N)
     ctx.beginPath();
-    ctx.moveTo(0, -(radius - 12));
-    ctx.lineTo(5, -6);
-    ctx.lineTo(-5, -6);
+    ctx.moveTo(0, -(radius - 10)); // ยอดเข็ม
+    ctx.lineTo(radius * 0.16, radius * 0.35); // ปีกขวา
+    ctx.lineTo(0, radius * 0.22); // เว้ากลาง
+    ctx.lineTo(-radius * 0.16, radius * 0.35); // ปีกซ้าย
     ctx.closePath();
-    ctx.fillStyle = '#ff3333';
+    
+    // ไล่เฉดสีฟ้า Cyan ถึง ฟ้าเข้ม
+    const needleGrad = ctx.createLinearGradient(-radius * 0.16, 0, radius * 0.16, 0);
+    needleGrad.addColorStop(0, '#00d4ff');
+    needleGrad.addColorStop(0.5, '#00b4d8');
+    needleGrad.addColorStop(1, '#0077b6');
+    ctx.fillStyle = needleGrad;
     ctx.fill();
-
-    // ท้ายเข็มสีขาว (ชี้ S)
-    ctx.beginPath();
-    ctx.moveTo(0, (radius - 12));
-    ctx.lineTo(5, 6);
-    ctx.lineTo(-5, 6);
-    ctx.closePath();
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
 
     ctx.restore(); // restore rotation
 
-    // 4. จุดกึ่งกลาง
+    // 4. จุดกึ่งกลางสีขาวขอบเงิน
     ctx.beginPath();
-    ctx.arc(0, 0, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffcc00';
+    ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
     ctx.fill();
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.lineWidth = 1;
     ctx.stroke();
-
-    // 5. แสดงข้อความองศาใต้เข็มทิศ
-    ctx.font = 'bold 11px sans-serif';
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.fillText(`${this.heading}° ${this.getDirectionText()}`, 0, radius + 14);
 
     ctx.restore();
   }

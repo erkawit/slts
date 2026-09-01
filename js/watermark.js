@@ -177,40 +177,44 @@ class WatermarkEngine {
   }
 
   /**
-   * วาดกล่องข้อความมุมขวาล่าง (สีดำสนิท + ตัวหนังสือและสัญลักษณ์สีขาวทั้งหมด + ขยายขนาด 100%)
+   * วาดกล่องข้อความมุมขวาล่าง (สีดำสนิท + ตัวหนังสือสีขาวล้วน จัดชิดขวาตามแบบตัวอย่างภาพ)
    */
   static async drawInfoBadge(ctx, canvasWidth, canvasHeight, scale, data) {
-    const padding = 24 * scale;
-    const fontSize = Math.round(28 * scale);
-    const fontTitleSize = Math.round(30 * scale);
-    const lineHeight = fontSize * 1.55;
+    const padding = 20 * scale;
+    const fontSize = Math.round(26 * scale);
+    const fontTitleSize = Math.round(29 * scale);
+    const lineHeight = fontSize * 1.45;
 
     ctx.save();
-    ctx.font = `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`;
 
-    // วันที่และเวลาปัจจุบัน (พ.ศ.)
+    // 1. วันที่และเวลาปัจจุบัน (พ.ศ.)
     const dateStr = data.dateTime || this.formatThaiDateTime(new Date());
 
-    // พิกัด Lat/Lng และทิศองศา
-    const latFormatted = data.lat ? `${Math.abs(data.lat).toFixed(4)}°${data.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
-    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}°${data.lng >= 0 ? 'E' : 'W'}` : '102.7882°E';
+    // 2. พิกัดในรูปแบบ: 17.3891N 102.8138E
+    const latFormatted = data.lat ? `${Math.abs(data.lat).toFixed(4)}${data.lat >= 0 ? 'N' : 'S'}` : '17.4144N';
+    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}${data.lng >= 0 ? 'E' : 'W'}` : '102.7882E';
+    const coordStr = `${latFormatted} ${lngFormatted}`;
+
+    // 3. องศาทิศ: 19° N
     const headingDeg = (data.heading !== undefined && data.heading !== null) ? data.heading : (window.compassManager ? window.compassManager.getHeading() : 0);
     const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
-    const coordStr = `${latFormatted}  ${lngFormatted}   ${headingDeg}° ${dirText}`;
+    const headingStr = `${headingDeg}° ${dirText}`;
 
-    // ที่ตั้ง
+    // 4. ที่ตั้ง (อำเภอ / ตำบล)
     const locationStr = data.locationText || 'อำเภอเมืองอุดรธานี';
-    // เลขคดี
-    const caseStr = `เลขคดี: ${data.caseNumber || '-'}`;
+
+    // 5. เลขคดี (เช่น ต1664/2569)
+    const caseStr = data.caseNumber ? String(data.caseNumber) : '-';
 
     const lines = [
-      { text: `📅  ${dateStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif` },
-      { text: `📍  ${coordStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif` },
-      { text: `🏠  ${locationStr}`, font: `600 ${fontSize}px 'Sarabun', 'Prompt', sans-serif` },
-      { text: `⚖️  ${caseStr}`, font: `bold ${fontTitleSize}px 'Sarabun', 'Prompt', sans-serif` }
+      { text: dateStr, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
+      { text: coordStr, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
+      { text: headingStr, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
+      { text: locationStr, font: `600 ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
+      { text: caseStr, font: `bold ${fontTitleSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' }
     ];
 
-    // คำนวณความกว้างที่ต้องการ
+    // คำนวณความกว้างสูงสุดของข้อความ
     let maxTextWidth = 0;
     lines.forEach(line => {
       ctx.font = line.font;
@@ -220,11 +224,11 @@ class WatermarkEngine {
 
     const boxWidth = maxTextWidth + (padding * 2.2);
     const boxHeight = (lines.length * lineHeight) + (padding * 1.5);
-    const boxX = canvasWidth - boxWidth - (28 * scale);
-    const boxY = canvasHeight - boxHeight - (28 * scale);
+    const boxX = canvasWidth - boxWidth - (24 * scale);
+    const boxY = canvasHeight - boxHeight - (24 * scale);
 
-    // วาดพื้นหลังกล่องดำสนิท 100% (Solid Black)
-    const radius = 14 * scale;
+    // วาดพื้นหลังกล่องดำสนิท (Solid Black)
+    const radius = 8 * scale;
     ctx.beginPath();
     ctx.moveTo(boxX + radius, boxY);
     ctx.lineTo(boxX + boxWidth - radius, boxY);
@@ -240,18 +244,20 @@ class WatermarkEngine {
     ctx.fillStyle = '#000000';
     ctx.fill();
 
-    // กรอบขอบสีขาวคมชัด
-    ctx.lineWidth = 2 * scale;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    // กรอบขอบสีขาวบางคมชัด
+    ctx.lineWidth = 1.5 * scale;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
     ctx.stroke();
 
-    // วาดข้อความและสัญลักษณ์สีขาวทั้งหมด (#ffffff)
+    // วาดข้อความสีขาวล้วน จัดชิดขวา (Right-Aligned) ตามตัวอย่างภาพ
+    const textRightX = boxX + boxWidth - padding;
     let currentY = boxY + padding + (fontSize * 0.85);
+
     lines.forEach(line => {
       ctx.font = line.font;
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'left';
-      ctx.fillText(line.text, boxX + padding, currentY);
+      ctx.fillStyle = line.color;
+      ctx.textAlign = 'right';
+      ctx.fillText(line.text, textRightX, currentY);
       currentY += lineHeight;
     });
 
