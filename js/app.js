@@ -595,18 +595,6 @@ function updateAuthUI() {
     if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
   }
 
-  // ปุ่มอัปโหลดภาพหมาย (แสดงบนหน้าจอกว้าง > 768px)
-  const btnManualUpload = document.getElementById('btnManualUploadPhoto');
-  if (btnManualUpload) {
-    if (isDesktop) {
-      btnManualUpload.classList.remove('hidden');
-      btnManualUpload.classList.add('inline-flex');
-    } else {
-      btnManualUpload.classList.add('hidden');
-      btnManualUpload.classList.remove('inline-flex');
-    }
-  }
-
   // Tab 3: จัดการผู้ใช้งาน (แสดงเฉพาะ Admin บน Desktop)
   if (isAdmin && isDesktop) {
     elements.tabBtnUsers.classList.remove('hidden');
@@ -1623,9 +1611,15 @@ window.openTargetSearchModal = function() {
           </div>
 
           <!-- Case 3: จังหวัด (Province) -->
-          <div id="ts_field_province" class="hidden space-y-1.5">
-            <label class="block font-semibold text-gray-700">เลือกจังหวัดที่ต้องการค้นหา (77 จังหวัด) *</label>
-            <select id="ts_provinceSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-blue-500">
+          <div id="ts_field_province" class="hidden space-y-2">
+            <label class="block font-semibold text-gray-700">พิมพ์ค้นหาหรือเลือกจังหวัด (77 จังหวัด) *</label>
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <i class="fa-solid fa-magnifying-glass text-xs"></i>
+              </div>
+              <input type="text" id="ts_provSearchInput" placeholder="พิมพ์ชื่อจังหวัดเพื่อค้นหา เช่น เชียงใหม่, อุดรธานี, กรุงเทพ..." class="w-full bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-2 text-xs sm:text-sm font-semibold text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" autocomplete="off" value="${currentProvince}">
+            </div>
+            <select id="ts_provinceSelect" size="5" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs sm:text-sm font-medium text-gray-800 focus:border-blue-500 overflow-y-auto cursor-pointer">
               ${provOptionsHtml}
             </select>
           </div>
@@ -1634,13 +1628,15 @@ window.openTargetSearchModal = function() {
           <div id="ts_field_district" class="hidden space-y-2">
             <div class="grid grid-cols-2 gap-2">
               <div>
-                <label class="block font-semibold text-gray-700 mb-1">จังหวัด *</label>
+                <label class="block font-semibold text-gray-700 mb-1">พิมพ์/เลือกจังหวัด *</label>
+                <input type="text" id="ts_dist_provSearch" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full mb-1 bg-white border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off" value="${currentProvince}">
                 <select id="ts_dist_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800">
                   ${provOptionsHtml}
                 </select>
               </div>
               <div>
                 <label class="block font-semibold text-gray-700 mb-1">อำเภอเป้าหมาย *</label>
+                <div class="h-[27px] hidden sm:block"></div>
                 <select id="ts_districtSelect" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800">
                   ${distOptionsHtml}
                 </select>
@@ -1651,7 +1647,8 @@ window.openTargetSearchModal = function() {
           <!-- Case 5: ตำบล (Subdistrict) -->
           <div id="ts_field_subdistrict" class="hidden space-y-2">
             <div>
-              <label class="block font-semibold text-gray-700 mb-1">จังหวัด *</label>
+              <label class="block font-semibold text-gray-700 mb-1">พิมพ์/เลือกจังหวัด *</label>
+              <input type="text" id="ts_sub_provSearch" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full mb-1 bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off" value="${currentProvince}">
               <select id="ts_sub_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
                 ${provOptionsHtml}
               </select>
@@ -1762,7 +1759,11 @@ window.openTargetSearchModal = function() {
           const inp = document.getElementById('ts_caseInput');
           if (inp) inp.focus();
         }
-        else if (cat === 'province' && fieldProvince) fieldProvince.classList.remove('hidden');
+        else if (cat === 'province' && fieldProvince) {
+          fieldProvince.classList.remove('hidden');
+          const pInp = document.getElementById('ts_provSearchInput');
+          if (pInp) { pInp.focus(); pInp.select(); }
+        }
         else if (cat === 'district' && fieldDistrict) fieldDistrict.classList.remove('hidden');
         else if (cat === 'subdistrict' && fieldSubdistrict) fieldSubdistrict.classList.remove('hidden');
         else if (cat === 'location' && fieldLocation) fieldLocation.classList.remove('hidden');
@@ -1793,25 +1794,70 @@ window.openTargetSearchModal = function() {
         });
       }
 
-      // 4. หมวด District: เมื่อเปลี่ยนจังหวัด
+      // 3. หมวด Province: ค้นหาจังหวัดแบบ Live Filter As-You-Type
+      const provSearchInput = document.getElementById('ts_provSearchInput');
+      const provinceSelect = document.getElementById('ts_provinceSelect');
+      if (provSearchInput && provinceSelect) {
+        provSearchInput.addEventListener('input', (e) => {
+          const q = e.target.value.trim().toLowerCase();
+          const matched = provinces.filter(p => p.name.toLowerCase().includes(q));
+          if (matched.length > 0) {
+            provinceSelect.innerHTML = matched.map((p, idx) => `<option value="${p.name}" ${idx === 0 ? 'selected' : ''}>${p.name}</option>`).join('');
+          } else {
+            provinceSelect.innerHTML = `<option value="" disabled>-- ไม่พบจังหวัดที่ค้นหา --</option>`;
+          }
+        });
+        provinceSelect.addEventListener('change', (e) => {
+          provSearchInput.value = e.target.value;
+        });
+      }
+
+      // 4. หมวด District: ค้นหาและเปลี่ยนจังหวัด
+      const distProvSearch = document.getElementById('ts_dist_provSearch');
       const distProvSelect = document.getElementById('ts_dist_provSelect');
       const districtSelect = document.getElementById('ts_districtSelect');
+
+      if (distProvSearch && distProvSelect) {
+        distProvSearch.addEventListener('input', (e) => {
+          const q = e.target.value.trim().toLowerCase();
+          const matched = provinces.filter(p => p.name.toLowerCase().includes(q));
+          if (matched.length > 0) {
+            distProvSelect.innerHTML = matched.map((p, idx) => `<option value="${p.name}" ${idx === 0 ? 'selected' : ''}>${p.name}</option>`).join('');
+            distProvSelect.dispatchEvent(new Event('change'));
+          }
+        });
+      }
+
       if (distProvSelect && districtSelect) {
         distProvSelect.addEventListener('change', (e) => {
           const prov = e.target.value;
+          if (distProvSearch) distProvSearch.value = prov;
           const dists = getDistrictsByProvince(prov);
           districtSelect.innerHTML = dists.map(d => `<option value="${d}">${d}</option>`).join('');
         });
       }
 
-      // 5. หมวด Subdistrict: เมื่อเปลี่ยนจังหวัด และเมื่อเปลี่ยนอำเภอ
+      // 5. หมวด Subdistrict: ค้นหาและเปลี่ยนจังหวัด และเมื่อเปลี่ยนอำเภอ
+      const subProvSearch = document.getElementById('ts_sub_provSearch');
       const subProvSelect = document.getElementById('ts_sub_provSelect');
       const subDistSelect = document.getElementById('ts_sub_distSelect');
       const subdistrictSelect = document.getElementById('ts_subdistrictSelect');
 
+      if (subProvSearch && subProvSelect) {
+        subProvSearch.addEventListener('input', (e) => {
+          const q = e.target.value.trim().toLowerCase();
+          const matched = provinces.filter(p => p.name.toLowerCase().includes(q));
+          if (matched.length > 0) {
+            subProvSelect.innerHTML = matched.map((p, idx) => `<option value="${p.name}" ${idx === 0 ? 'selected' : ''}>${p.name}</option>`).join('');
+            subProvSelect.dispatchEvent(new Event('change'));
+          }
+        });
+      }
+
       if (subProvSelect && subDistSelect && subdistrictSelect) {
         subProvSelect.addEventListener('change', (e) => {
           const prov = e.target.value;
+          if (subProvSearch) subProvSearch.value = prov;
           const dists = getDistrictsByProvince(prov);
           subDistSelect.innerHTML = dists.map(d => `<option value="${d}">${d}</option>`).join('');
           const firstDist = dists[0] || '';
@@ -1895,7 +1941,20 @@ window.openTargetSearchModal = function() {
         }
         return { type: 'case', caseNo };
       } else if (cat === 'province') {
-        const prov = document.getElementById('ts_provinceSelect').value;
+        let prov = document.getElementById('ts_provinceSelect')?.value;
+        const typedProv = (document.getElementById('ts_provSearchInput')?.value || '').trim();
+        if (typedProv) {
+          const exact = provinces.find(p => p.name === typedProv || p.name.toLowerCase() === typedProv.toLowerCase());
+          if (exact) prov = exact.name;
+          else {
+            const partial = provinces.find(p => p.name.includes(typedProv));
+            if (partial) prov = partial.name;
+          }
+        }
+        if (!prov) {
+          Swal.showValidationMessage('กรุณาเลือกหรือพิมพ์ชื่อจังหวัดที่ต้องการค้นหา');
+          return false;
+        }
         return { type: 'province', province: prov };
       } else if (cat === 'district') {
         const prov = document.getElementById('ts_dist_provSelect').value;
