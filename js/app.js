@@ -5890,18 +5890,21 @@ window.viewDesktopFullPreview = function() {
 };
 
 async function handleDesktopUpload() {
-  if (!validateForm()) return;
-
-  if (!state.selectedDesktopImageDataUrl) {
+  // 1. ตรวจสอบการแนบไฟล์รูปภาพก่อนเป็นอันดับแรก (เฉพาะ Desktop > 768px)
+  const hasFile = state.selectedDesktopImageDataUrl || (elements.desktopImageFileInput && elements.desktopImageFileInput.files && elements.desktopImageFileInput.files.length > 0);
+  if (!hasFile) {
     Swal.fire({
       icon: 'warning',
-      title: 'กรุณาเลือกไฟล์รูปภาพ',
-      text: 'โปรดเลือกไฟล์รูปภาพจากเครื่องคอมพิวเตอร์ก่อนกดอัปโหลด',
+      title: 'กรุณาแนบไฟล์รูปภาพ',
+      text: 'โปรดเลือกและแนบไฟล์รูปภาพส่งหมายจากเครื่องคอมพิวเตอร์ก่อนกด "ยืนยันอัพโหลดภาพส่งหมาย"',
       confirmButtonColor: '#2563eb'
     });
     if (elements.desktopImageFileInput) elements.desktopImageFileInput.focus();
     return;
   }
+
+  // 2. ตรวจสอบความครบถ้วนของข้อมูลในแบบฟอร์มที่บังคับกรอก
+  if (!validateForm()) return;
 
   try {
     const caseNumber = getFormattedCaseNumber();
@@ -6061,9 +6064,8 @@ function setCaptureOrientation(mode) {
 
 function validateForm() {
   const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || (document.getElementById('courtType') ? document.getElementById('courtType').value : '');
-  const caseNumber = getFormattedCaseNumber();
 
-  // ตรวจสอบชื่อศาลกรณีเลือกศาลที่ไม่สังกัดภาค
+  // 1. ตรวจสอบชื่อศาลกรณีเลือกศาลที่ไม่สังกัดภาค
   if (state.desktopCourtCategory === 'ศาลที่ไม่สังกัดภาค') {
     const customCourtName = (elements.courtNameInput ? elements.courtNameInput.value : '').trim();
     if (!customCourtName) {
@@ -6078,6 +6080,7 @@ function validateForm() {
     }
   }
 
+  // 2. ตรวจสอบข้อมูลเลขคดี
   const isOther = courtType === 'ศาลอื่น' || courtType === 'หมายศาลอื่น';
   if (!isOther) {
     const prefix = (elements.udonPrefixInput ? elements.udonPrefixInput.value : '').trim();
@@ -6087,7 +6090,7 @@ function validateForm() {
       Swal.fire({
         icon: 'warning',
         title: 'กรุณาระบุอักษรนำหน้าเลขคดี',
-        text: 'โปรดเลือกหรือพิมพ์อักษรนำหน้า เช่น ผบE, อ, ย, พ',
+        text: 'โปรดเลือกหรือพิมพ์อักษรนำหน้า เช่น ผบE, อ, ย, พ, ผบ.',
         confirmButtonColor: '#2563eb'
       });
       if (elements.udonPrefixInput) elements.udonPrefixInput.focus();
@@ -6122,20 +6125,47 @@ function validateForm() {
     }
   }
 
+  // 3. ตรวจสอบอำเภอ
+  const districtVal = elements.districtSelect ? elements.districtSelect.value.trim() : '';
+  if (!districtVal || districtVal.startsWith('--') || districtVal === '') {
+    Swal.fire({
+      icon: 'warning',
+      title: 'กรุณาเลือกอำเภอ',
+      text: 'โปรดเลือกอำเภอที่ส่งหมายให้ครบถ้วน',
+      confirmButtonColor: '#2563eb'
+    });
+    if (elements.districtSelect) elements.districtSelect.focus();
+    return false;
+  }
+
+  // 4. ตรวจสอบตำบล
+  const subdistrictVal = elements.subdistrictSelect ? elements.subdistrictSelect.value.trim() : '';
+  if (!subdistrictVal || subdistrictVal.startsWith('--') || subdistrictVal === '') {
+    Swal.fire({
+      icon: 'warning',
+      title: 'กรุณาเลือกตำบล',
+      text: 'โปรดเลือกตำบลที่ส่งหมายให้ครบถ้วน',
+      confirmButtonColor: '#2563eb'
+    });
+    if (elements.subdistrictSelect) elements.subdistrictSelect.focus();
+    return false;
+  }
+
+  // 5. ตรวจสอบประเภทสถานที่และข้อมูลสถานที่
   if (elements.locationTypeSelect.value === 'หมายบ้าน') {
-    const houseNo = elements.houseNoInput.value.trim();
+    const houseNo = elements.houseNoInput ? elements.houseNoInput.value.trim() : '';
     if (!houseNo) {
       Swal.fire({
         icon: 'warning',
         title: 'กรุณากรอกบ้านเลขที่',
-        text: 'สำหรับหมายบ้าน บังคับต้องระบุบ้านเลขที่ เช่น 154/2',
+        text: 'สำหรับหมายบ้าน บังคับต้องระบุบ้านเลขที่ เช่น 154/2 หรือ 2/18',
         confirmButtonColor: '#2563eb'
       });
-      elements.houseNoInput.focus();
+      if (elements.houseNoInput) elements.houseNoInput.focus();
       return false;
     }
   } else if (elements.locationTypeSelect.value === 'ที่ทำการปกครองส่วนท้องถิ่น') {
-    const adminText = elements.localAdminNameInput.value.trim();
+    const adminText = elements.localAdminNameInput ? elements.localAdminNameInput.value.trim() : '';
     if (!adminText) {
       Swal.fire({
         icon: 'warning',
@@ -6143,7 +6173,7 @@ function validateForm() {
         text: 'โปรดระบุชื่อหน่วยงาน เช่น ที่ทำการปกครองส่วนท้องถิ่น หรือ อบต....',
         confirmButtonColor: '#2563eb'
       });
-      elements.localAdminNameInput.focus();
+      if (elements.localAdminNameInput) elements.localAdminNameInput.focus();
       return false;
     }
   } else if (elements.locationTypeSelect.value === 'อื่นๆ') {
@@ -6160,7 +6190,7 @@ function validateForm() {
     }
   }
 
-  // ตรวจสอบและดึงพิกัดจากช่องกรอกพิกัด (หากผู้ใช้พิมพ์หรือแก้ไขเอง)
+  // 6. ตรวจสอบและดึงพิกัดจากช่องกรอกพิกัด (หากผู้ใช้พิมพ์หรือแก้ไขเอง)
   const coordsRaw = (elements.coordinatesInput ? elements.coordinatesInput.value : '').trim();
   if (coordsRaw) {
     const parts = coordsRaw.split(/[,;\s]+/).map(p => parseFloat(p.trim())).filter(p => !isNaN(p));
