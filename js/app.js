@@ -7437,6 +7437,13 @@ async function parsePdfDispatchFile(file) {
 
       if (allCases.length === 0) return;
 
+      // ตรวจสอบหากมีเลขคดีที่เป็นเลข "ต" (หมายศาลอื่น) ให้ใช้เฉพาะเลข "ต" และตัดเลขคดีอื่นที่อยู่ด้านล่างออก
+      let casesToProcess = allCases;
+      const tCases = allCases.filter(c => /^ต[\.\s]?\d+/i.test(c.trim()));
+      if (tCases.length > 0) {
+        casesToProcess = tCases;
+      }
+
       // 2. สกัดอำเภอ
       let district = 'เมืองอุดรธานี';
       if (fullRowText.includes('เมืองอุดรธานี')) district = 'เมืองอุดรธานี';
@@ -7469,7 +7476,7 @@ async function parsePdfDispatchFile(file) {
       if (hMatch) houseNo = hMatch[1];
 
       // 5. แยกเลขคดีแต่ละคดีเป็น 1 รายการอิสระ และเทียบกับประวัติส่งหมาย
-      allCases.forEach(caseNo => {
+      casesToProcess.forEach(caseNo => {
         const matchRes = matchSingleCaseWithHistory(caseNo, houseNo, subdistrict, district, locationText);
 
         allParsedRows.push({
@@ -7522,6 +7529,13 @@ async function parseImageDispatchFile(file) {
     }
 
     if (allCases.length > 0) {
+      // ตรวจสอบหากมีเลขคดีที่เป็นเลข "ต" (หมายศาลอื่น) ให้ใช้เฉพาะเลข "ต"
+      let casesToProcess = allCases;
+      const tCases = allCases.filter(c => /^ต[\.\s]?\d+/i.test(c.trim()));
+      if (tCases.length > 0) {
+        casesToProcess = tCases;
+      }
+
       let district = 'เมืองอุดรธานี';
       if (trimmed.includes('กุมภวาปี')) district = 'กุมภวาปี';
       else if (trimmed.includes('หนองหาน')) district = 'หนองหาน';
@@ -7538,7 +7552,7 @@ async function parseImageDispatchFile(file) {
       const hMatch = locationText.match(/^(\d+(\/\d+)?)/);
       if (hMatch) houseNo = hMatch[1];
 
-      allCases.forEach(caseNo => {
+      casesToProcess.forEach(caseNo => {
         const matchRes = matchSingleCaseWithHistory(caseNo, houseNo, subdistrict, district, locationText);
 
         allParsedRows.push({
