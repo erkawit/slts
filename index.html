@@ -43,7 +43,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260901_03">
+  <link rel="stylesheet" href="css/style.css?v=20260901_04">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -457,18 +457,23 @@
                     <input type="file" id="desktopImageFileInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border border-gray-300 rounded-xl p-1 bg-white">
                   </div>
 
-                  <!-- Dynamic Notice: GPS Extraction Status (Desktop only) -->
-                  <div id="desktopGpsScanningNotice" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-xs text-blue-700 flex items-center gap-2">
-                    <i class="fa-solid fa-circle-notch fa-spin text-blue-600"></i>
-                    <span>กำลังวิเคราะห์และค้นหาพิกัด GPS จากภาพถ่าย...</span>
+                  <!-- Dynamic Notice: AI / OCR Smart Detection Status (Desktop only) -->
+                  <div id="desktopGpsScanningNotice" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700 flex items-center gap-2.5 shadow-sm">
+                    <i class="fa-solid fa-wand-magic-sparkles fa-spin text-blue-600 text-sm"></i>
+                    <span>กำลังวิเคราะห์พิกัด, เลขคดี, ที่ตั้ง และบ้านเลขที่จากภาพถ่าย...</span>
                   </div>
 
-                  <div id="desktopGpsDetectNotice" class="hidden bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-xs text-emerald-800 flex items-center justify-between transition-all">
-                    <div class="flex items-center gap-2">
-                      <i class="fa-solid fa-satellite-dish text-emerald-600 text-sm animate-pulse"></i>
-                      <span>ตรวจพบพิกัดจากภาพ: <b id="desktopDetectedGpsText" class="font-mono text-emerald-700 font-bold">17.389100, 102.813800</b></span>
+                  <div id="desktopGpsDetectNotice" class="hidden bg-emerald-50/90 border border-emerald-300 rounded-xl p-3 text-xs text-emerald-900 shadow-sm space-y-1.5 transition-all">
+                    <div class="flex items-center justify-between font-bold text-emerald-800 pb-1 border-b border-emerald-200/80">
+                      <span class="flex items-center gap-1.5">
+                        <i class="fa-solid fa-wand-magic-sparkles text-emerald-600"></i>
+                        <span>AI ตรวจพบข้อมูลและกรอกฟอร์มสำเร็จ</span>
+                      </span>
+                      <span class="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-2 py-0.5 rounded-full">กรอกลงฟอร์มแล้ว</span>
                     </div>
-                    <span class="text-[10px] bg-emerald-200/90 text-emerald-900 font-bold px-2 py-0.5 rounded-full whitespace-nowrap">กรอกลงฟอร์มแล้ว</span>
+                    <div id="desktopDetectDetailsList" class="grid grid-cols-1 gap-1 text-[11px] text-emerald-800">
+                      <!-- Injected dynamically -->
+                    </div>
                   </div>
 
                   <!-- ตัวเลือก: ภาพถ่ายมีพิกัดบนภาพแล้ว -->
@@ -904,17 +909,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260901_03"></script>
-  <script src="js/compass.js?v=20260901_03"></script>
-  <script src="js/map.js?v=20260901_03"></script>
-  <script src="js/watermark.js?v=20260901_03"></script>
-  <script src="js/app.js?v=20260901_03"></script>
+  <script src="js/data.js?v=20260901_04"></script>
+  <script src="js/compass.js?v=20260901_04"></script>
+  <script src="js/map.js?v=20260901_04"></script>
+  <script src="js/watermark.js?v=20260901_04"></script>
+  <script src="js/app.js?v=20260901_04"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260901_03')
+        navigator.serviceWorker.register('./sw.js?v=20260901_04')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

@@ -5059,41 +5059,105 @@ function initCameraEvents() {
 }
 
 /**
- * สกัดหาพิกัด GPS (Latitude, Longitude) จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
- * 1. ตรวจสอบ EXIF GPS Metadata จากไฟล์ภาพต้นฉบับ (เร็ว 0.01 วินาที)
- * 2. หากไม่พบ EXIF ให้ใช้ OCR สแกนข้อความบนภาพ (เน้นโซนล่างและลายน้ำ)
+ * ค้นหาข้อมูล จังหวัด, อำเภอ, ตำบล จากพิกัด Lat, Lng ด้วย Reverse Geocoding
  */
-async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
+async function reverseGeocodeLatLng(lat, lng) {
+  if (!lat || !lng) return null;
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14&addressdetails=1&accept-language=th`;
+    const res = await fetch(url, {
+      headers: {
+        'Accept': 'application/json'
+      }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || !data.address) return null;
+
+    const addr = data.address;
+    
+    // ดึงชื่อจังหวัด
+    let rawProvince = addr.province || addr.state || addr.city || '';
+    rawProvince = rawProvince.replace(/^จ\.\s*/, '').replace(/^จังหวัด/, '').trim();
+
+    // ดึงชื่ออำเภอ
+    let rawDistrict = addr.district || addr.county || addr.city_district || addr.suburb || '';
+    rawDistrict = rawDistrict.replace(/^อ\.\s*/, '').replace(/^อำเภอ/, '').replace(/^เขต/, '').trim();
+
+    // ดึงชื่อตำบล
+    let rawSubdistrict = addr.subdistrict || addr.neighbourhood || addr.village || addr.quarter || addr.town || '';
+    rawSubdistrict = rawSubdistrict.replace(/^ต\.\s*/, '').replace(/^ตำบล/, '').replace(/^แขวง/, '').trim();
+
+    return {
+      province: rawProvince,
+      district: rawDistrict,
+      subdistrict: rawSubdistrict
+    };
+  } catch (err) {
+    console.warn('[Reverse Geocode] Error:', err);
+    return null;
+  }
+}
+
+/**
+ * เอฟเฟกต์ไฮไลต์ช่องกรอกข้อมูลชั่วคราวเพื่อให้ผู้ใช้ตรวจสอบได้ง่าย
+ */
+function highlightField(el) {
+  if (!el) return;
+  el.classList.add('bg-emerald-50', 'border-emerald-500', 'ring-2', 'ring-emerald-200');
+  setTimeout(() => {
+    el.classList.remove('bg-emerald-50', 'border-emerald-500', 'ring-2', 'ring-emerald-200');
+  }, 4000);
+}
+
+/**
+ * วิเคราะห์ภาพถ่ายด้วย AI / OCR และสกัดข้อมูลทั้งหมด (พิกัด, เลขคดี, ที่ตั้ง, บ้านเลขที่)
+ * ทำงานเฉพาะบนหน้าจอ Desktop (> 768px) เท่านั้น
+ */
+async function extractGpsAndDataFromImage(file, dataUrl) {
   if (window.innerWidth <= 768) return null;
 
   const scanningNotice = document.getElementById('desktopGpsScanningNotice');
   const detectNotice = document.getElementById('desktopGpsDetectNotice');
-  const detectedGpsTxt = document.getElementById('desktopDetectedGpsText');
+  const detailsList = document.getElementById('desktopDetectDetailsList');
 
   if (detectNotice) detectNotice.classList.add('hidden');
   if (scanningNotice) scanningNotice.classList.remove('hidden');
 
-  let result = null;
+  const detectedData = {
+    gps: null,
+    courtType: null,
+    caseNo: null,
+    casePrefix: null,
+    caseYear: null,
+    houseNo: null,
+    moo: null,
+    locationType: null,
+    province: null,
+    district: null,
+    subdistrict: null
+  };
 
-  // 1. ระดับที่ 1: ตรวจจับจาก EXIF GPS Metadata (รวดเร็ว 0.01 วินาที)
+  // 1. ระดับที่ 1: ตรวจจับจาก EXIF GPS Metadata
   if (typeof exifr !== 'undefined' && file) {
     try {
       const gps = await exifr.gps(file);
       if (gps && typeof gps.latitude === 'number' && typeof gps.longitude === 'number') {
-        result = {
+        detectedData.gps = {
           lat: gps.latitude,
           lng: gps.longitude,
           source: 'exif'
         };
-        console.log('[GPS Detection] Found GPS via EXIF:', result);
+        console.log('[AI Auto-Fill] Found GPS via EXIF:', detectedData.gps);
       }
     } catch (err) {
-      console.warn('[GPS Detection] EXIF error:', err);
+      console.warn('[AI Auto-Fill] EXIF error:', err);
     }
   }
 
-  // 2. ระดับที่ 2: ตรวจจับจากตัวอักษรบนภาพ (OCR) หากไม่มี EXIF
-  if (!result && typeof Tesseract !== 'undefined' && dataUrl) {
+  // 2. ระดับที่ 2: ตรวจจับจาก OCR Text บนภาพ
+  let fullOcrText = '';
+  if (typeof Tesseract !== 'undefined' && dataUrl) {
     try {
       const img = await new Promise((resolve, reject) => {
         const i = new Image();
@@ -5102,76 +5166,241 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
         i.src = dataUrl;
       });
 
-      // ครอบตัดโซนล่าง 45% (ตำแหน่งมาตรฐานของลายน้ำพิกัด) เพื่อให้ OCR ทำงานเร็วและแม่นยำ
-      const canvas = document.createElement('canvas');
-      const cropHeight = Math.round(img.height * 0.45);
+      // สแกนโซนด้านล่าง 50% (ตำแหน่งของลายน้ำพิกัด, เลขคดี, อำเภอ)
+      const canvasBottom = document.createElement('canvas');
+      const cropHeight = Math.round(img.height * 0.5);
       const cropY = img.height - cropHeight;
-      canvas.width = img.width;
-      canvas.height = cropHeight;
+      canvasBottom.width = img.width;
+      canvasBottom.height = cropHeight;
+      const ctxBottom = canvasBottom.getContext('2d');
+      ctxBottom.drawImage(img, 0, cropY, img.width, cropHeight, 0, 0, img.width, cropHeight);
 
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, cropY, img.width, cropHeight, 0, 0, img.width, cropHeight);
+      const ocrBottom = await Tesseract.recognize(canvasBottom, 'eng+tha', { logger: () => {} });
+      const textBottom = (ocrBottom && ocrBottom.data && ocrBottom.data.text) ? ocrBottom.data.text : '';
 
-      const ocrResult = await Tesseract.recognize(canvas, 'eng+tha', {
-        logger: () => {}
-      });
+      // สแกนภาพรวมเพื่อตรวจหาป้ายบ้านเลขที่ เช่น บ้านเลขที่ 2/18 หรือ 87/106
+      const canvasFull = document.createElement('canvas');
+      const scale = Math.min(1, 1200 / img.width);
+      canvasFull.width = Math.round(img.width * scale);
+      canvasFull.height = Math.round(img.height * scale);
+      const ctxFull = canvasFull.getContext('2d');
+      ctxFull.drawImage(img, 0, 0, canvasFull.width, canvasFull.height);
 
-      const fullText = (ocrResult && ocrResult.data && ocrResult.data.text) ? ocrResult.data.text : '';
-      console.log('[GPS Detection] OCR Text:', fullText);
+      const ocrFull = await Tesseract.recognize(canvasFull, 'eng+tha', { logger: () => {} });
+      const textFull = (ocrFull && ocrFull.data && ocrFull.data.text) ? ocrFull.data.text : '';
 
-      const parsedGps = parseCoordinatesFromText(fullText);
-      if (parsedGps) {
-        result = {
-          lat: parsedGps.lat,
-          lng: parsedGps.lng,
-          source: 'ocr'
-        };
-        console.log('[GPS Detection] Found GPS via OCR:', result);
+      fullOcrText = `${textBottom}\n${textFull}`;
+      console.log('[AI Auto-Fill] Combined OCR Text:\n', fullOcrText);
+
+      // 2.1 สกัดพิกัด GPS จาก OCR (หากไม่มี EXIF)
+      if (!detectedData.gps) {
+        const parsedGps = parseCoordinatesFromText(fullOcrText);
+        if (parsedGps) {
+          detectedData.gps = {
+            lat: parsedGps.lat,
+            lng: parsedGps.lng,
+            source: 'ocr'
+          };
+          console.log('[AI Auto-Fill] Found GPS via OCR:', detectedData.gps);
+        }
       }
+
+      // 2.2 สกัดประเภทศาลและเลขคดี
+      // กรณี A: หมายศาลอื่น (ขึ้นต้นด้วย 'ต') เช่น ต1641/2569, ต 1641/2569, ต1641 2569, ต16412569
+      const otherCourtMatch = fullOcrText.match(/(?:^|[^\wก-๙])ต\.?\s*(\d{1,6})\s*(?:[\/\-\s]|(?=25\d{2}))\s*(25\d{2}|\d{2})?/i) 
+                           || fullOcrText.match(/(?:^|[^\wก-๙])ต\.?\s*(\d{1,6})/i);
+
+      if (otherCourtMatch) {
+        detectedData.courtType = 'ศาลอื่น';
+        detectedData.caseNo = otherCourtMatch[1];
+        if (otherCourtMatch[2]) {
+          detectedData.caseYear = otherCourtMatch[2].length === 2 ? `25${otherCourtMatch[2]}` : otherCourtMatch[2];
+        } else {
+          detectedData.caseYear = String(new Date().getFullYear() + 543);
+        }
+      } else {
+        // กรณี B: หมายศาลจังหวัด (ไม่ขึ้นต้นด้วย 'ต') เช่น ผบ ส197/2569, ผบE2100/2569, พ123/2569
+        const provCourtMatch = fullOcrText.match(/(?:^|[^\wก-๙])([ก-ฮa-zA-Z\.\s]{1,10}?)\s*(\d{1,6})\s*[\/\-\s]\s*(25\d{2})/i)
+                            || fullOcrText.match(/(?:^|[^\wก-๙])([ก-ฮa-zA-Z\.\s]{1,10}?)\s*(\d{1,6})(25\d{2})/i);
+        if (provCourtMatch) {
+          detectedData.courtType = 'ศาลจังหวัดอุดรธานี';
+          detectedData.casePrefix = provCourtMatch[1].trim();
+          detectedData.caseNo = provCourtMatch[2];
+          detectedData.caseYear = provCourtMatch[3];
+        }
+      }
+
+      // 2.3 สกัดบ้านเลขที่ และ หมู่ที่
+      const houseNoMatch = fullOcrText.match(/บ้านเลขที่\s*([0-9\/\-]+)/i)
+                        || fullOcrText.match(/(?:^|[^\wก-๙])(\d{1,4}\/\d{1,4})(?:[^\wก-๙]|$)/i);
+      if (houseNoMatch) {
+        detectedData.houseNo = houseNoMatch[1];
+        detectedData.locationType = 'หมายบ้าน';
+      }
+
+      const mooMatch = fullOcrText.match(/(?:หมู่ที่|หมู่|ม\.)\s*(\d{1,3})/i);
+      if (mooMatch) {
+        detectedData.moo = mooMatch[1];
+        detectedData.locationType = 'หมายบ้าน';
+      }
+
+      // 2.4 สกัดชื่ออำเภอ/จังหวัดจากข้อความบนภาพ
+      const districtMatch = fullOcrText.match(/(?:อำเภอ|อ\.)\s*([ก-๙]+)/i);
+      if (districtMatch) {
+        detectedData.district = districtMatch[1].trim();
+      }
+
     } catch (err) {
-      console.warn('[GPS Detection] OCR error:', err);
+      console.warn('[AI Auto-Fill] OCR processing error:', err);
+    }
+  }
+
+  // 3. ทำ Reverse Geocoding จากพิกัด GPS เพื่อค้นหา จังหวัด/อำเภอ/ตำบล
+  if (detectedData.gps) {
+    try {
+      const geoResult = await reverseGeocodeLatLng(detectedData.gps.lat, detectedData.gps.lng);
+      if (geoResult) {
+        if (geoResult.province) detectedData.province = geoResult.province;
+        if (geoResult.district) detectedData.district = geoResult.district;
+        if (geoResult.subdistrict) detectedData.subdistrict = geoResult.subdistrict;
+      }
+    } catch (geoErr) {
+      console.warn('[AI Auto-Fill] Geocoding lookup error:', geoErr);
     }
   }
 
   if (scanningNotice) scanningNotice.classList.add('hidden');
 
-  if (result && typeof result.lat === 'number' && typeof result.lng === 'number') {
-    const latNum = Number(result.lat);
-    const lngNum = Number(result.lng);
+  // 4. นำข้อมูลทั้งหมดมากรอกลงแบบฟอร์มบน Desktop View
+  const filledItems = [];
+
+  // 4.1 กรอกพิกัด GPS
+  if (detectedData.gps) {
+    const latNum = Number(detectedData.gps.lat);
+    const lngNum = Number(detectedData.gps.lng);
     const latFormatted = latNum.toFixed(6);
     const lngFormatted = lngNum.toFixed(6);
 
-    if (updateFormFields) {
-      const coordInput = document.getElementById('coordinates');
-      if (coordInput) {
-        coordInput.value = `${latFormatted}, ${lngFormatted}`;
-        coordInput.classList.add('bg-emerald-50', 'border-emerald-500');
-        setTimeout(() => {
-          coordInput.classList.remove('bg-emerald-50', 'border-emerald-500');
-        }, 2500);
-      }
+    const coordInput = document.getElementById('coordinates');
+    if (coordInput) {
+      coordInput.value = `${latFormatted}, ${lngFormatted}`;
+      highlightField(coordInput);
+    }
 
-      state.currentLocation = {
-        lat: latNum,
-        lng: lngNum,
-        accuracy: 10
-      };
+    state.currentLocation = {
+      lat: latNum,
+      lng: lngNum,
+      accuracy: 10
+    };
 
-      const locStatus = document.getElementById('locationStatus');
-      if (locStatus) {
-        locStatus.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>ดึงพิกัดจากภาพถ่ายสำเร็จ (${latNum.toFixed(4)}, ${lngNum.toFixed(4)})</span>`;
-      }
+    const locStatus = document.getElementById('locationStatus');
+    if (locStatus) {
+      locStatus.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>พิกัดจากภาพ (${latNum.toFixed(4)}, ${lngNum.toFixed(4)})</span>`;
+    }
 
-      if (detectNotice && detectedGpsTxt) {
-        detectedGpsTxt.textContent = `${latNum.toFixed(4)}, ${lngNum.toFixed(4)}`;
-        detectNotice.classList.remove('hidden');
+    filledItems.push(`📍 <b>พิกัด:</b> ${latNum.toFixed(4)}, ${lngNum.toFixed(4)}`);
+  }
+
+  // 4.2 เลือก จังหวัด / อำเภอ / ตำบล
+  let provToSelect = detectedData.province || state.selectedProvince || 'อุดรธานี';
+  if (typeof THAILAND_ADDRESS_DATA !== 'undefined' && !THAILAND_ADDRESS_DATA[provToSelect]) {
+    const matchProv = Object.keys(THAILAND_ADDRESS_DATA).find(p => provToSelect.includes(p) || p.includes(provToSelect));
+    if (matchProv) provToSelect = matchProv;
+    else provToSelect = 'อุดรธานี';
+  }
+
+  if (provToSelect) {
+    state.selectedProvince = provToSelect;
+    if (elements.floatingProvinceName) {
+      elements.floatingProvinceName.textContent = `จ.${provToSelect}`;
+    }
+
+    // แมปอำเภอ
+    let distToSelect = detectedData.district;
+    if (distToSelect) {
+      const districtsList = getDistrictsByProvince(provToSelect);
+      const matchedDist = districtsList.find(d => d === distToSelect || d.includes(distToSelect) || distToSelect.includes(d));
+      if (matchedDist) distToSelect = matchedDist;
+    }
+
+    updateDistricts(provToSelect, distToSelect);
+
+    // แมปตำบล
+    let subdistToSelect = detectedData.subdistrict;
+    if (distToSelect && subdistToSelect) {
+      const subdistList = getSubdistrictsByDistrict(provToSelect, distToSelect);
+      const matchedSub = subdistList.find(s => s === subdistToSelect || s.includes(subdistToSelect) || subdistToSelect.includes(s));
+      if (matchedSub) {
+        subdistToSelect = matchedSub;
+        updateSubdistricts(provToSelect, distToSelect, subdistToSelect);
       }
     }
 
-    return result;
+    if (elements.districtSelect) highlightField(elements.districtSelect);
+    if (elements.subdistrictSelect) highlightField(elements.subdistrictSelect);
+
+    filledItems.push(`🗺️ <b>ที่ตั้ง:</b> ${distToSelect ? 'อ.' + distToSelect : ''} ${subdistToSelect ? 'ต.' + subdistToSelect : ''} จ.${provToSelect}`);
   }
 
-  return null;
+  // 4.3 กรอกประเภทศาลและเลขคดี
+  if (detectedData.courtType === 'ศาลอื่น') {
+    if (elements.courtTypeSelect) {
+      elements.courtTypeSelect.value = 'ศาลอื่น';
+      elements.courtTypeSelect.dispatchEvent(new Event('change'));
+    }
+    if (elements.otherCaseNoInput && detectedData.caseNo) {
+      elements.otherCaseNoInput.value = detectedData.caseNo;
+      highlightField(elements.otherCaseNoInput);
+    }
+    if (elements.otherCaseYearSelect && detectedData.caseYear) {
+      elements.otherCaseYearSelect.value = detectedData.caseYear;
+      highlightField(elements.otherCaseYearSelect);
+    }
+    filledItems.push(`⚖️ <b>หมายศาลอื่น:</b> ต${detectedData.caseNo || ''}/${detectedData.caseYear || ''}`);
+  } else if (detectedData.courtType === 'ศาลจังหวัดอุดรธานี' || detectedData.caseNo) {
+    if (elements.courtTypeSelect) {
+      elements.courtTypeSelect.value = 'ศาลจังหวัดอุดรธานี';
+      elements.courtTypeSelect.dispatchEvent(new Event('change'));
+    }
+    if (elements.udonPrefixInput && detectedData.casePrefix) {
+      elements.udonPrefixInput.value = detectedData.casePrefix;
+      highlightField(elements.udonPrefixInput);
+    }
+    if (elements.udonCaseNoInput && detectedData.caseNo) {
+      elements.udonCaseNoInput.value = detectedData.caseNo;
+      highlightField(elements.udonCaseNoInput);
+    }
+    if (elements.udonCaseYearSelect && detectedData.caseYear) {
+      elements.udonCaseYearSelect.value = detectedData.caseYear;
+      highlightField(elements.udonCaseYearSelect);
+    }
+    filledItems.push(`⚖️ <b>หมายศาลจังหวัด:</b> ${detectedData.casePrefix || ''}${detectedData.caseNo || ''}/${detectedData.caseYear || ''}`);
+  }
+
+  // 4.4 กรอกบ้านเลขที่ และ หมู่
+  if (detectedData.houseNo || detectedData.moo) {
+    if (elements.locationTypeSelect) {
+      elements.locationTypeSelect.value = 'หมายบ้าน';
+      elements.locationTypeSelect.dispatchEvent(new Event('change'));
+    }
+    if (elements.houseNoInput && detectedData.houseNo) {
+      elements.houseNoInput.value = detectedData.houseNo;
+      highlightField(elements.houseNoInput);
+    }
+    if (elements.mooInput && detectedData.moo) {
+      elements.mooInput.value = detectedData.moo;
+      highlightField(elements.mooInput);
+    }
+    filledItems.push(`🏠 <b>หมายบ้าน:</b> เลขที่ ${detectedData.houseNo || '-'} ${detectedData.moo ? 'ม.' + detectedData.moo : ''}`);
+  }
+
+  // 5. แสดงผลสรุปใน UI Card
+  if (filledItems.length > 0 && detectNotice && detailsList) {
+    detailsList.innerHTML = filledItems.map(item => `<div>${item}</div>`).join('');
+    detectNotice.classList.remove('hidden');
+  }
+
+  return detectedData;
 }
 
 /**
@@ -5251,9 +5480,9 @@ function initDesktopUploadEvents() {
           elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB)`;
         }
 
-        // ตรวจสอบและดึงพิกัด GPS จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
+        // ตรวจสอบและดึงข้อมูลอัจฉริยะจากภาพถ่าย (พิกัด, เลขคดี, ที่ตั้ง, บ้านเลขที่)
         if (window.innerWidth > 768) {
-          await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
+          await extractGpsAndDataFromImage(file, state.selectedDesktopImageDataUrl);
         }
       };
       reader.readAsDataURL(file);
