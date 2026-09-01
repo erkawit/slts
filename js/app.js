@@ -4915,8 +4915,12 @@ function initLocationService() {
     if (window.compassManager) {
       window.compassManager.requestPermission();
     }
-    fetchCurrentLocation(false);
-    startLocationInterval();
+    // บนมือถือ (<= 768px): ดึงพิกัดและเริ่ม interval ตรวจจับพิกัดสด
+    // บน Desktop (> 768px): ไม่รัน interval อัปเดตพิกัดอัตโนมัติ เพื่อให้ผู้ใช้พิมพ์แก้ไขหรือรับพิกัดจากรูปภาพได้โดยไม่ถูกเขียนทับ
+    if (window.innerWidth <= 768) {
+      fetchCurrentLocation(false);
+      startLocationInterval();
+    }
   }
 }
 
@@ -4924,9 +4928,12 @@ function startLocationInterval() {
   if (state.locationIntervalId) {
     clearInterval(state.locationIntervalId);
   }
-  state.locationIntervalId = setInterval(() => {
-    fetchCurrentLocation(false);
-  }, 10000);
+  // รันเฉพาะบนอุปกรณ์หน้าจอขนาดเล็ก (Mobile <= 768px) เท่านั้น
+  if (window.innerWidth <= 768) {
+    state.locationIntervalId = setInterval(() => {
+      fetchCurrentLocation(false);
+    }, 10000);
+  }
 }
 
 function fetchCurrentLocation(isManual = false) {
@@ -4952,7 +4959,11 @@ function fetchCurrentLocation(isManual = false) {
         }
       }
 
-      if (!state.isManuallyEditedCoords || isManual) {
+      // บนหน้าจอ Desktop (> 768px): จะอัปเดตช่องพิกัดเฉพาะเมื่อผู้ใช้กดปุ่ม 'เช็คพิกัดใหม่' ด้วยตนเอง (isManual = true) เท่านั้น
+      // ไม่ทำการเขียนทับอัตโนมัติ เพื่อป้องกันการทับค่าที่ผู้ใช้พิมพ์แก้ไข หรือค่าที่ตรวจพบจากภาพถ่าย
+      const shouldUpdateForm = (window.innerWidth <= 768) ? (!state.isManuallyEditedCoords || isManual) : isManual;
+
+      if (shouldUpdateForm) {
         if (elements.coordinatesInput) {
           elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
         }
@@ -5227,7 +5238,7 @@ function initDesktopUploadEvents() {
       }
 
       const reader = new FileReader();
-      reader.onload = (ev) => {
+      reader.onload = async (ev) => {
         state.selectedDesktopImageDataUrl = ev.target.result;
         if (elements.desktopPreviewImg) {
           elements.desktopPreviewImg.src = state.selectedDesktopImageDataUrl;
@@ -5238,6 +5249,11 @@ function initDesktopUploadEvents() {
         if (elements.desktopImageSizeBadge) {
           const sizeKb = Math.round(file.size / 1024);
           elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB)`;
+        }
+
+        // ตรวจสอบและดึงพิกัด GPS จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
+        if (window.innerWidth > 768) {
+          await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
         }
       };
       reader.readAsDataURL(file);
