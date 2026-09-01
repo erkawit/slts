@@ -2605,7 +2605,7 @@ window.openManualUploadModal = function() {
       if (mUpPrefixInput) {
         mUpPrefixInput.addEventListener('input', (e) => {
           e.target.value = e.target.value
-            .replace(/[^a-zA-Zก-๙\s]/g, '')
+            .replace(/[^a-zA-Zก-๙\.\s]/g, '')
             .replace(/^\s+/, '')
             .replace(/\s{2,}/g, ' ');
         });
@@ -4954,7 +4954,7 @@ window.handleModalPrefixInput = function(val) {
   const input = document.getElementById('m_prefix');
   if (input && val) {
     const formatted = val
-      .replace(/[^a-zA-Zก-๙\s]/g, '')
+      .replace(/[^a-zA-Zก-๙\.\s]/g, '')
       .replace(/^\s+/, '')
       .replace(/\s{2,}/g, ' ');
     if (formatted !== val) {
@@ -5363,11 +5363,11 @@ function initFormEventListeners() {
     });
   }
 
-  // อักษรนำหน้า: ให้กรอกได้เฉพาะตัวอักษร (ไทย / อังกฤษ) และเคาะวรรคได้ 1 เคาะ
+  // อักษรนำหน้า: ให้กรอกได้เฉพาะตัวอักษร (ไทย / อังกฤษ) จุด(.) และเคาะวรรคได้ 1 เคาะ
   if (elements.udonPrefixInput) {
     elements.udonPrefixInput.addEventListener('input', (e) => {
       e.target.value = e.target.value
-        .replace(/[^a-zA-Zก-๙\s]/g, '')
+        .replace(/[^a-zA-Zก-๙\.\s]/g, '')
         .replace(/^\s+/, '')
         .replace(/\s{2,}/g, ' ');
       updateCaptureButtonState();
