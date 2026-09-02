@@ -10,6 +10,7 @@ const FOLDER_ID = "1ArsWIsoIIYeQY3o_dPrsTpBXy4pEXQuQ";
 const SPREADSHEET_ID = "1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo";
 const SHEET_NAME = "บันทึกการส่งหมาย";
 const USERS_SHEET_NAME = "users";
+const HANDOFF_SHEET_NAME = "device_handoff";
 
 /**
  * ฟังก์ชันสำหรับรับคำขอแบบ POST จากเว็บแอป
@@ -30,6 +31,115 @@ function doPost(e) {
 
     const folder = DriveApp.getFolderById(FOLDER_ID);
     const spreadsheet = getTargetSpreadsheetFile(folder);
+
+    // ==========================================
+    // ACTION: DEVICE_HANDOFF (การส่งข้อมูลพิกัดและเส้นทางข้ามอุปกรณ์ Cross-Device Handoff)
+    // ==========================================
+    if (data.action === "send_handoff") {
+      const handoffSheet = getHandoffSheet(spreadsheet);
+      const targetUserId = String(data.user_id || data.username || 'anonymous').trim();
+      const timestamp = Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss");
+      const hData = handoffSheet.getDataRange().getValues();
+
+      let foundRow = -1;
+      for (let i = 1; i < hData.length; i++) {
+        if (String(hData[i][0] || '').trim().toLowerCase() === targetUserId.toLowerCase()) {
+          foundRow = i + 1;
+          break;
+        }
+      }
+
+      const rowValues = [
+        targetUserId,
+        String(data.queryString || ''),
+        String(data.fullAddress || ''),
+        String(data.caseNumber || ''),
+        typeof data.stops === 'object' ? JSON.stringify(data.stops) : String(data.stops || '[]'),
+        String(data.lat || ''),
+        String(data.lng || ''),
+        "pending",
+        timestamp,
+        timestamp
+      ];
+
+      if (foundRow !== -1) {
+        handoffSheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
+      } else {
+        handoffSheet.appendRow(rowValues);
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Handoff payload sent to pending state",
+        user_id: targetUserId,
+        timestamp: timestamp
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "get_pending_handoff") {
+      const handoffSheet = getHandoffSheet(spreadsheet);
+      const targetUserId = String(data.user_id || data.username || '').trim();
+      const hData = handoffSheet.getDataRange().getValues();
+
+      let pendingItem = null;
+      for (let i = 1; i < hData.length; i++) {
+        const uId = String(hData[i][0] || '').trim().toLowerCase();
+        const status = String(hData[i][7] || '').trim().toLowerCase();
+        if (uId === targetUserId.toLowerCase() && status === "pending") {
+          let parsedStops = [];
+          try {
+            parsedStops = JSON.parse(hData[i][4] || '[]');
+          } catch (pe) {
+            parsedStops = [];
+          }
+
+          pendingItem = {
+            user_id: hData[i][0],
+            queryString: hData[i][1],
+            fullAddress: hData[i][2],
+            caseNumber: hData[i][3],
+            stops: parsedStops,
+            lat: hData[i][5] ? parseFloat(hData[i][5]) : null,
+            lng: hData[i][6] ? parseFloat(hData[i][6]) : null,
+            status: hData[i][7],
+            timestamp: hData[i][8],
+            updated_at: hData[i][9]
+          };
+          break;
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        hasPending: Boolean(pendingItem),
+        handoff: pendingItem
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "ack_handoff") {
+      const handoffSheet = getHandoffSheet(spreadsheet);
+      const targetUserId = String(data.user_id || data.username || '').trim();
+      const timestamp = Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss");
+      const hData = handoffSheet.getDataRange().getValues();
+
+      let updated = false;
+      for (let i = 1; i < hData.length; i++) {
+        const uId = String(hData[i][0] || '').trim().toLowerCase();
+        if (uId === targetUserId.toLowerCase()) {
+          handoffSheet.getRange(i + 1, 8).setValue("received");
+          handoffSheet.getRange(i + 1, 10).setValue(timestamp);
+          updated = true;
+          break;
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: updated ? "Handoff status updated to received" : "User record not found",
+        updated: updated,
+        timestamp: timestamp
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
 
     // ==========================================
     // ACTION: LOG_ACTIVITY (บันทึกประวัติการนำเข้าและใช้งานแผนที่ลงไฟล์ Log บน Google Drive)
@@ -467,6 +577,41 @@ function getUsersSheet(spreadsheet) {
   return sheet;
 }
 
+/**
+ * ดึงหรือสร้าง Sheet 'device_handoff' สำหรับเก็บข้อมูลพิกัดและเส้นทางส่งข้ามอุปกรณ์
+ */
+function getHandoffSheet(spreadsheet) {
+  let sheet = spreadsheet.getSheetByName(HANDOFF_SHEET_NAME);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(HANDOFF_SHEET_NAME);
+  }
+
+  if (sheet.getLastRow() === 0) {
+    const headers = [
+      "user_id",
+      "queryString",
+      "fullAddress",
+      "caseNumber",
+      "stopsJson",
+      "lat",
+      "lng",
+      "status",
+      "timestamp",
+      "updated_at"
+    ];
+    sheet.appendRow(headers);
+
+    const headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setBackground("#059669");
+    headerRange.setFontColor("#ffffff");
+    headerRange.setFontWeight("bold");
+    headerRange.setHorizontalAlignment("center");
+    sheet.setFrozenRows(1);
+  }
+
+  return sheet;
+}
+
 function getTargetSpreadsheet(folder) {
   const ss = getTargetSpreadsheetFile(folder);
   return getSummonsSheet(ss);
@@ -476,33 +621,84 @@ function getTargetSpreadsheet(folder) {
  * ฟังก์ชันทดสอบการทำงานผ่าน Browser (GET)
  */
 function doGet(e) {
-  if (e && e.parameter && (e.parameter.action === "get_users" || e.parameter.sheet === "users")) {
-    try {
-      const folder = DriveApp.getFolderById(FOLDER_ID);
-      const ss = getTargetSpreadsheetFile(folder);
-      const uSheet = getUsersSheet(ss);
-      const uData = uSheet.getDataRange().getValues();
-      const usersList = [];
-      for (let i = 1; i < uData.length; i++) {
-        if (uData[i][0]) {
-          usersList.push({
-            username: String(uData[i][0] || '').trim(),
-            password: String(uData[i][1] || '').trim(),
-            role: String(uData[i][2] || 'user').trim(),
-            name: String(uData[i][3] || uData[i][0]).trim(),
-            createdAt: String(uData[i][4] || '').trim()
-          });
+  if (e && e.parameter) {
+    if (e.parameter.action === "get_users" || e.parameter.sheet === "users") {
+      try {
+        const folder = DriveApp.getFolderById(FOLDER_ID);
+        const ss = getTargetSpreadsheetFile(folder);
+        const uSheet = getUsersSheet(ss);
+        const uData = uSheet.getDataRange().getValues();
+        const usersList = [];
+        for (let i = 1; i < uData.length; i++) {
+          if (uData[i][0]) {
+            usersList.push({
+              username: String(uData[i][0] || '').trim(),
+              password: String(uData[i][1] || '').trim(),
+              role: String(uData[i][2] || 'user').trim(),
+              name: String(uData[i][3] || uData[i][0]).trim(),
+              createdAt: String(uData[i][4] || '').trim()
+            });
+          }
         }
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          users: usersList
+        })).setMimeType(ContentService.MimeType.JSON);
+      } catch (err) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: err.toString()
+        })).setMimeType(ContentService.MimeType.JSON);
       }
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "success",
-        users: usersList
-      })).setMimeType(ContentService.MimeType.JSON);
-    } catch (err) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "error",
-        message: err.toString()
-      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (e.parameter.action === "get_pending_handoff") {
+      try {
+        const folder = DriveApp.getFolderById(FOLDER_ID);
+        const ss = getTargetSpreadsheetFile(folder);
+        const hSheet = getHandoffSheet(ss);
+        const targetUserId = String(e.parameter.user_id || e.parameter.username || '').trim();
+        const hData = hSheet.getDataRange().getValues();
+
+        let pendingItem = null;
+        for (let i = 1; i < hData.length; i++) {
+          const uId = String(hData[i][0] || '').trim().toLowerCase();
+          const status = String(hData[i][7] || '').trim().toLowerCase();
+          if (uId === targetUserId.toLowerCase() && status === "pending") {
+            let parsedStops = [];
+            try {
+              parsedStops = JSON.parse(hData[i][4] || '[]');
+            } catch (pe) {
+              parsedStops = [];
+            }
+
+            pendingItem = {
+              user_id: hData[i][0],
+              queryString: hData[i][1],
+              fullAddress: hData[i][2],
+              caseNumber: hData[i][3],
+              stops: parsedStops,
+              lat: hData[i][5] ? parseFloat(hData[i][5]) : null,
+              lng: hData[i][6] ? parseFloat(hData[i][6]) : null,
+              status: hData[i][7],
+              timestamp: hData[i][8],
+              updated_at: hData[i][9]
+            };
+            break;
+          }
+        }
+
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          hasPending: Boolean(pendingItem),
+          handoff: pendingItem
+        })).setMimeType(ContentService.MimeType.JSON);
+      } catch (err) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: err.toString()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
     }
   }
 
