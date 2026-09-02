@@ -1020,17 +1020,23 @@
         <span id="cameraStatus" class="hidden"></span>
       </div>
       
-      <div class="flex items-center gap-2 flex-nowrap">
+      <div class="flex items-center gap-1.5 flex-nowrap overflow-x-auto">
+        <!-- ปุ่มเปิดแผนที่และเส้นทางส่งหมายที่ส่งมาจากคอมพิวเตอร์ -->
+        <button id="btnCameraRouteMap" type="button" onclick="showMobileRouteMapModal()" class="px-2.5 py-1.5 bg-emerald-600/95 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-emerald-400/50 shadow-md whitespace-nowrap cursor-pointer" title="เปิดดูแผนที่และเส้นทางส่งหมาย">
+          <i class="fa-solid fa-map-location-dot text-xs"></i>
+          <span id="txtCameraRouteMapCount" class="whitespace-nowrap">แผนที่</span>
+        </button>
+
         <!-- ปุ่มเปิดฟอร์มกรอกข้อมูลส่งหมาย (Single-Line Compact) -->
-        <button id="btnEditMobileForm" type="button" onclick="showMobileSummonsFormModal(true)" class="px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap" title="คลิกเพื่อกรอก/แก้ไขข้อมูลส่งหมาย">
+        <button id="btnEditMobileForm" type="button" onclick="showMobileSummonsFormModal(true)" class="px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap cursor-pointer" title="คลิกเพื่อกรอก/แก้ไขข้อมูลส่งหมาย">
           <i class="fa-solid fa-file-pen text-xs"></i>
-          <span class="whitespace-nowrap">ฟอร์มข้อมูล</span>
+          <span class="whitespace-nowrap">ฟอร์ม</span>
         </button>
 
         <!-- ปุ่มสลับมุมมอง แนวนอน 4:3 / แนวตั้ง 3:4 (Single-Line Compact) -->
         <button id="btnToggleOrientation" type="button" class="px-2.5 py-1.5 bg-blue-600/95 hover:bg-blue-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-blue-400/50 shadow-md whitespace-nowrap" title="คลิกเพื่อสลับ แนวนอน 4:3 / แนวตั้ง 3:4">
           <i class="fa-solid fa-arrows-rotate text-xs"></i>
-          <span id="txtOrientationMode" class="whitespace-nowrap">แนวนอน 4:3</span>
+          <span id="txtOrientationMode" class="whitespace-nowrap">4:3</span>
         </button>
 
         <!-- ปุ่มเข้าสู่ระบบ / ออกจากระบบ (สลับตามสถานะการล็อกอิน) -->
@@ -1038,6 +1044,24 @@
           <i class="fa-solid fa-right-to-bracket text-xs"></i>
           <span id="txtCameraAuthBtn" class="whitespace-nowrap">เข้าสู่ระบบ</span>
         </button>
+      </div>
+    </div>
+
+    <!-- Floating Top Handoff Notification Pill Banner on Camera -->
+    <div id="mobileHandoffPillBanner" class="hidden absolute top-14 left-3 right-3 z-40 animate-bounce">
+      <div onclick="showMobileRouteMapModal()" class="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-2.5 rounded-2xl shadow-2xl border border-emerald-300 flex items-center justify-between gap-2 cursor-pointer active:scale-98 transition">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 text-white text-xs">
+            <i class="fa-solid fa-mobile-screen"></i>
+          </span>
+          <div class="min-w-0">
+            <p id="mobileHandoffPillTitle" class="text-xs font-bold truncate">📲 ได้รับพิกัดส่งหมายจากคอมพิวเตอร์!</p>
+            <p id="mobileHandoffPillSub" class="text-[10px] text-emerald-100 truncate">แตะที่นี่เพื่อเปิดแผนที่และนำทาง</p>
+          </div>
+        </div>
+        <span class="px-2.5 py-1 bg-white text-emerald-800 text-[11px] font-bold rounded-xl flex-shrink-0 shadow-xs">
+          เปิดดู <i class="fa-solid fa-arrow-right text-[9px] ml-0.5"></i>
+        </span>
       </div>
     </div>
 

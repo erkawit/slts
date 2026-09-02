@@ -763,12 +763,12 @@ function handleLogin(e) {
   const p = document.getElementById('loginPassword').value.trim();
 
   const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
-  const matched = users.find(user => user.username === u && user.password === p);
+  const matched = users.find(user => (user.username || '').toLowerCase() === u.toLowerCase() && user.password === p);
 
   if (matched) {
     const deviceMode = window.innerWidth < 768 ? 'mobile' : 'desktop';
     state.currentUser = {
-      username: matched.username,
+      username: matched.username.toLowerCase(),
       name: matched.name || matched.username,
       role: matched.role
     };
@@ -12249,6 +12249,10 @@ window.sendSingleStopToMobileHandoff = function(index) {
 /**
  * Realtime Listener สำหรับรับข้อมูลข้ามอุปกรณ์ (Receiver - สำหรับหน้าจอ < 768px)
  */
+/**
+ * Realtime Listener สำหรับรับข้อมูลข้ามอุปกรณ์ (Receiver - สำหรับหน้าจอ < 768px)
+ * ตรวจสอบพิกัดและเส้นทางที่ส่งมาจากคอมพิวเตอร์ตาม User ที่ล็อกอินทันที
+ */
 let handoffPollInterval = null;
 let lastReceivedHandoffTime = null;
 
@@ -12257,44 +12261,65 @@ window.initMobileHandoffReceiver = function() {
 
   // ตรวจสอบข้อมูลเมื่อมี Storage Event ข้ามแท็บ/เบราว์เซอร์
   window.addEventListener('storage', (e) => {
-    if (window.innerWidth < 768 && e.key && (e.key.startsWith('slts_device_handoff_') || e.key === 'slts_handoff_event')) {
+    if (window.innerWidth < 768 && e.key && (e.key.startsWith('slts_device_handoff_') || e.key === 'slts_handoff_event' || e.key === 'slts_latest_handoff')) {
       checkLocalHandoffData();
     }
   });
 
-  // Polling ตรวจสอบจาก Database หรือ LocalStorage ทุก 4 วินาที
+  // ตรวจสอบทันทีเมื่อเริ่มต้นระบบ
+  if (window.innerWidth < 768) {
+    checkHandoffForCurrentUser();
+    // ตรวจสอบและอัปเดต Badge รายการเดิมถ้ามี
+    const cachedStops = localStorage.getItem('slts_shared_route_stops');
+    if (cachedStops) {
+      try {
+        const parsed = JSON.parse(cachedStops);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          state.currentRouteStops = parsed;
+          updateMobileRouteMapButtonBadge(parsed.length);
+        }
+      } catch (e) {}
+    }
+  }
+
+  // Polling ตรวจสอบจาก Database หรือ LocalStorage ทุก 3 วินาที
   handoffPollInterval = setInterval(() => {
     if (window.innerWidth < 768) {
       checkHandoffForCurrentUser();
     }
-  }, 4000);
+  }, 3000);
 };
 
 function checkLocalHandoffData() {
-  const userId = state.currentUser?.username;
-  if (!userId) return;
-
+  const userId = (state.currentUser?.username || '').trim().toLowerCase();
+  
   try {
-    const raw = localStorage.getItem('slts_device_handoff_' + userId);
+    let raw = userId ? localStorage.getItem('slts_device_handoff_' + userId) : null;
+    if (!raw) {
+      raw = localStorage.getItem('slts_latest_handoff');
+    }
     if (!raw) return;
+
     const handoff = JSON.parse(raw);
     if (handoff && handoff.status === 'pending' && handoff.timestamp !== lastReceivedHandoffTime) {
       applyReceivedHandoff(handoff);
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('checkLocalHandoffData error:', e);
+  }
 }
 
 async function checkHandoffForCurrentUser() {
   const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
   if (!isUserLoggedIn) return;
 
-  const userId = (state.currentUser.username || '').trim();
+  const userId = (state.currentUser.username || '').trim().toLowerCase();
   if (!userId) return;
 
-  // ตรวจสอบ Local ก่อนเพื่อความรวดเร็ว
+  // 1. ตรวจสอบ Local ก่อนเพื่อความรวดเร็ว
   checkLocalHandoffData();
 
-  // ตรวจสอบจาก Database (Google Apps Script API)
+  // 2. ตรวจสอบจาก Database (Google Apps Script API)
   if (!state.appsScriptUrl || !navigator.onLine) return;
 
   try {
@@ -12302,19 +12327,19 @@ async function checkHandoffForCurrentUser() {
     const res = await fetch(checkUrl, { cache: 'no-store' });
     const data = await res.json();
 
-    if (data && data.status === 'success' && data.hasPending && data.handoff) {
+    if (data && data.status === 'success' && (data.hasPending || data.hasData) && data.handoff) {
       if (data.handoff.timestamp !== lastReceivedHandoffTime) {
         applyReceivedHandoff(data.handoff);
       }
     }
   } catch (err) {
-    // Silent check
+    // Silent background poll check
   }
 }
 
 function applyReceivedHandoff(handoff) {
   lastReceivedHandoffTime = handoff.timestamp;
-  const userId = (state.currentUser?.username || 'user').trim();
+  const userId = (state.currentUser?.username || 'user').trim().toLowerCase();
 
   // 1. อัปเดตสถานะใน Database เป็น "received"
   if (state.appsScriptUrl && navigator.onLine) {
@@ -12331,22 +12356,44 @@ function applyReceivedHandoff(handoff) {
     }).catch(() => {});
   }
 
-  // อัปเดต Local Storage
+  // 2. อัปเดต Local Storage และ State
   handoff.status = 'received';
   try {
     localStorage.setItem('slts_device_handoff_' + userId, JSON.stringify(handoff));
+    localStorage.setItem('slts_latest_handoff', JSON.stringify(handoff));
     if (handoff.stops && handoff.stops.length > 0) {
       state.currentRouteStops = handoff.stops;
       localStorage.setItem('slts_shared_route_stops', JSON.stringify(handoff.stops));
     }
   } catch (e) {}
 
-  logServerActivity('MAP_CROSS_DEVICE_HANDOFF_RECEIVED', `มือถือได้รับข้อมูลตำแหน่งจากคอมพิวเตอร์: ${handoff.queryString} (คดี: ${handoff.caseNumber || '-'})`, {
+  // 3. ปรับปรุงข้อมูลในฟอร์มและ GPS ของมือถือให้ตรงกับหมายแรกที่ได้รับ
+  if (handoff.stops && handoff.stops.length > 0) {
+    const firstStop = handoff.stops[0];
+    if (firstStop.district && elements.districtSelect) elements.districtSelect.value = firstStop.district;
+    if (firstStop.subdistrict && elements.subdistrictSelect) elements.subdistrictSelect.value = firstStop.subdistrict;
+    if (firstStop.houseNo && elements.houseNoInput) elements.houseNoInput.value = firstStop.houseNo;
+    if (firstStop.moo && elements.mooInput) elements.mooInput.value = firstStop.moo;
+    if (firstStop.caseNo && elements.udonCaseNoInput) elements.udonCaseNoInput.value = firstStop.caseNo;
+    if (firstStop.caseYear && elements.udonCaseYearSelect) elements.udonCaseYearSelect.value = firstStop.caseYear;
+    if (firstStop.prefix && elements.udonPrefixInput) elements.udonPrefixInput.value = firstStop.prefix;
+    if (firstStop.lat && firstStop.lng) {
+      state.lat = parseFloat(firstStop.lat);
+      state.lng = parseFloat(firstStop.lng);
+      if (elements.coordinatesInput) elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+    }
+  }
+
+  // 4. อัปเดต UI Badge และ Floating Pill Banner บนหน้าจอกล้อง
+  updateMobileRouteMapButtonBadge(handoff.stops ? handoff.stops.length : 0);
+
+  logServerActivity('MAP_CROSS_DEVICE_HANDOFF_RECEIVED', `มือถือได้รับข้อมูลตำแหน่งจากคอมพิวเตอร์: ${handoff.queryString} (คดี: ${handoff.caseNumber || '-'}, ผู้รับ: @${userId})`, {
     user_id: userId,
-    queryString: handoff.queryString
+    queryString: handoff.queryString,
+    stopsCount: handoff.stops ? handoff.stops.length : 0
   });
 
-  // 2. แสดงผลแจ้งเตือนบนหน้าจอมือถือ
+  // 5. แสดงผลแจ้งเตือนบนหน้าจอมือถือ
   const isMapModalOpen = Boolean(document.querySelector('.slts-province-modal'));
   
   if (isMapModalOpen) {
@@ -12354,7 +12401,6 @@ function applyReceivedHandoff(handoff) {
     recalculateRouteFromStops(true);
     renderMobileRouteList();
     
-    // แสดง Toast เล็กๆ
     const Toast = Swal.mixin({
       toast: true,
       position: 'top',
@@ -12372,17 +12418,24 @@ function applyReceivedHandoff(handoff) {
       icon: 'info',
       title: '📲 ได้รับพิกัดส่งหมายจากคอมพิวเตอร์!',
       html: `
-        <div class="text-left text-xs space-y-1.5 bg-blue-50 p-3.5 rounded-2xl border border-blue-200 mt-2">
-          <p><strong>เลขคดี:</strong> <span class="font-bold text-blue-800">${handoff.caseNumber || '-'}</span></p>
-          <p><strong>ศูนย์กลางค้นหา:</strong> <span class="text-gray-900 font-semibold">${handoff.queryString}</span></p>
+        <div class="text-left text-xs space-y-2 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-2xl border border-blue-200 mt-2 select-none shadow-inner">
+          <div class="flex items-center justify-between pb-1.5 border-b border-blue-200">
+            <span class="font-bold text-gray-700">ผู้รับ: <strong class="text-blue-700">@${userId}</strong></span>
+            <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">${handoff.stops ? handoff.stops.length : 1} จุดหมาย</span>
+          </div>
+          <p><strong>เลขคดีหลัก:</strong> <span class="font-bold text-blue-900">${handoff.caseNumber || '-'}</span></p>
+          <p><strong>ศูนย์กลางค้นหา:</strong> <span class="text-gray-900 font-semibold">${handoff.queryString || '-'}</span></p>
           ${handoff.fullAddress ? `<p class="text-gray-600 truncate"><strong>ที่อยู่:</strong> ${handoff.fullAddress}</p>` : ''}
-          ${handoff.stops && handoff.stops.length > 0 ? `<p class="text-emerald-700 font-bold">รวม ${handoff.stops.length} จุดหมาย</p>` : ''}
+          <p class="text-[10px] text-gray-500 pt-1 border-t border-blue-100 flex items-center gap-1">
+            <i class="fa-solid fa-circle-info text-blue-600"></i> ระบบดึงพิกัดและเส้นทางเข้าสู่เครื่องมือถือนี้เรียบร้อยแล้ว
+          </p>
         </div>
       `,
-      confirmButtonText: '<i class="fa-solid fa-map-location-dot mr-1"></i> เปิดดูแผนที่ทันที',
+      confirmButtonText: '<i class="fa-solid fa-map-location-dot mr-1.5"></i> เปิดดูแผนที่และนำทางทันที',
       showCancelButton: true,
-      cancelButtonText: 'ไว้ภายหลัง',
-      confirmButtonColor: '#2563eb'
+      cancelButtonText: 'รับทราบ (ไว้ดูภายหลัง)',
+      confirmButtonColor: '#2563eb',
+      cancelButtonColor: '#6b7280'
     }).then((res) => {
       if (res.isConfirmed) {
         showMobileRouteMapModal();
@@ -12390,6 +12443,42 @@ function applyReceivedHandoff(handoff) {
     });
   }
 }
+
+/**
+ * อัปเดตสถานะและจำนวนจุดส่งหมายบนปุ่มแผนที่หน้าจอมือถือ
+ */
+window.updateMobileRouteMapButtonBadge = function(count) {
+  const stopsCount = count !== undefined ? count : (state.currentRouteStops ? state.currentRouteStops.length : 0);
+  const btn = document.getElementById('btnCameraRouteMap');
+  const txt = document.getElementById('txtCameraRouteMapCount');
+  const pill = document.getElementById('mobileHandoffPillBanner');
+  const pillTitle = document.getElementById('mobileHandoffPillTitle');
+  const pillSub = document.getElementById('mobileHandoffPillSub');
+
+  if (txt) {
+    txt.textContent = stopsCount > 0 ? `แผนที่ (${stopsCount})` : 'แผนที่';
+  }
+
+  if (stopsCount > 0) {
+    if (btn) {
+      btn.classList.add('animate-pulse');
+    }
+    if (pill) {
+      pill.classList.remove('hidden');
+      if (pillTitle) pillTitle.textContent = `📲 มีเส้นทางส่งหมาย ${stopsCount} จุดหมาย`;
+      if (pillSub && state.currentRouteStops && state.currentRouteStops[0]) {
+        pillSub.textContent = `คดี: ${state.currentRouteStops[0].caseNumber || '-'} • แตะเพื่อเปิดดูแผนที่`;
+      }
+    }
+  } else {
+    if (btn) {
+      btn.classList.remove('animate-pulse');
+    }
+    if (pill) {
+      pill.classList.add('hidden');
+    }
+  }
+};
 
 /**
  * เปิดหน้าต่างแผนที่และเส้นทางส่งหมายสำหรับหน้าจอมือถือ (< 768px)

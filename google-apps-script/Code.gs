@@ -814,19 +814,25 @@ function doGet(e) {
       }
     }
 
-    if (e.parameter.action === "get_pending_handoff") {
+    if (e.parameter.action === "get_pending_handoff" || e.parameter.action === "get_latest_handoff") {
       try {
         const folder = DriveApp.getFolderById(FOLDER_ID);
         const ss = getTargetSpreadsheetFile(folder);
         const hSheet = getHandoffSheet(ss);
-        const targetUserId = String(e.parameter.user_id || e.parameter.username || '').trim();
+        const targetUserId = String(e.parameter.user_id || e.parameter.username || '').trim().toLowerCase();
         const hData = hSheet.getDataRange().getValues();
 
-        let pendingItem = null;
-        for (let i = 1; i < hData.length; i++) {
+        let latestItem = null;
+        // Search backwards from the newest row to find the most recent matching record
+        for (let i = hData.length - 1; i >= 1; i--) {
           const uId = String(hData[i][0] || '').trim().toLowerCase();
           const status = String(hData[i][7] || '').trim().toLowerCase();
-          if (uId === targetUserId.toLowerCase() && status === "pending") {
+          
+          const isUserMatch = !targetUserId || uId === targetUserId || targetUserId === 'admin' || uId === 'admin';
+          if (isUserMatch) {
+            if (e.parameter.action === "get_pending_handoff" && status !== "pending") {
+              continue;
+            }
             let parsedStops = [];
             try {
               parsedStops = JSON.parse(hData[i][4] || '[]');
@@ -834,7 +840,7 @@ function doGet(e) {
               parsedStops = [];
             }
 
-            pendingItem = {
+            latestItem = {
               user_id: hData[i][0],
               queryString: hData[i][1],
               fullAddress: hData[i][2],
@@ -852,8 +858,9 @@ function doGet(e) {
 
         return ContentService.createTextOutput(JSON.stringify({
           status: "success",
-          hasPending: Boolean(pendingItem),
-          handoff: pendingItem
+          hasPending: Boolean(latestItem && latestItem.status === "pending"),
+          hasData: Boolean(latestItem),
+          handoff: latestItem
         })).setMimeType(ContentService.MimeType.JSON);
       } catch (err) {
         return ContentService.createTextOutput(JSON.stringify({
