@@ -4140,14 +4140,6 @@ window.selectCourtTypeChoice = function(category, provinceName, isReturnToForm =
         applyCourtTypeSettings('ศาลที่ไม่สังกัดภาค', res.value, provinceName);
         if (!isDesktop) {
           showMobileSummonsFormModal(isReturnToForm);
-        } else {
-          Swal.fire({
-            icon: 'success',
-            title: 'ตั้งค่าประเภทศาลเรียบร้อย',
-            text: `เลือก: ${res.value}`,
-            timer: 1200,
-            showConfirmButton: false
-          });
         }
       }
     });
@@ -4155,25 +4147,25 @@ window.selectCourtTypeChoice = function(category, provinceName, isReturnToForm =
     applyCourtTypeSettings(category, '', provinceName);
     Swal.close();
     
-    let displayName = '';
-    if (category === 'ศาลจังหวัด') displayName = `ศาลจังหวัด${provinceName}`;
-    else if (category === 'ศาลแขวง') displayName = `ศาลแขวง${provinceName}`;
-    else if (category === 'ศาลเยาวชนและครอบครัว') displayName = `ศาลเยาวชนและครอบครัวจังหวัด${provinceName}`;
-    else displayName = 'หมายศาลอื่น (หมาย ต.)';
-
-    const Toast = Swal.mixin({
-      toast: true,
-      position: 'top-end',
-      showConfirmButton: false,
-      timer: 1000,
-      timerProgressBar: true
-    });
-    Toast.fire({
-      icon: 'success',
-      title: `เลือก: ${displayName}`
-    });
-
     if (!isDesktop) {
+      let displayName = '';
+      if (category === 'ศาลจังหวัด') displayName = `ศาลจังหวัด${provinceName}`;
+      else if (category === 'ศาลแขวง') displayName = `ศาลแขวง${provinceName}`;
+      else if (category === 'ศาลเยาวชนและครอบครัว') displayName = `ศาลเยาวชนและครอบครัวจังหวัด${provinceName}`;
+      else displayName = 'หมายศาลอื่น (หมาย ต.)';
+
+      const Toast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 1000,
+        timerProgressBar: true
+      });
+      Toast.fire({
+        icon: 'success',
+        title: `เลือก: ${displayName}`
+      });
+
       setTimeout(() => {
         showMobileSummonsFormModal(isReturnToForm);
       }, 150);
