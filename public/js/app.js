@@ -27,7 +27,15 @@ const state = {
   isUploading: false,
   currentUser: null,
   dataTableInstance: null,
-  selectedProvince: localStorage.getItem('slts_selected_province') || null
+  selectedProvince: localStorage.getItem('slts_selected_province') || null,
+  stagedScheduleStops: [],
+  lastScheduleFormData: (function() {
+    try {
+      return JSON.parse(localStorage.getItem('slts_last_schedule_form') || 'null');
+    } catch (e) {
+      return null;
+    }
+  })()
 };
 
 // Cache Constants
@@ -597,7 +605,14 @@ function updateAuthUI() {
     if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
   }
 
-  // Tab 3: จัดการผู้ใช้งาน (แสดงเฉพาะ Admin บน Desktop)
+  // Tab แผนที่และหมุด (แสดงเฉพาะผู้ใช้งานที่ล็อกอินแล้วเท่านั้น บน Desktop)
+  if (isLoggedIn && isDesktop) {
+    if (elements.tabBtnMap) elements.tabBtnMap.classList.remove('hidden');
+  } else {
+    if (elements.tabBtnMap) elements.tabBtnMap.classList.add('hidden');
+  }
+
+  // Tab จัดการผู้ใช้งาน (แสดงเฉพาะ Admin บน Desktop)
   if (isAdmin && isDesktop) {
     elements.tabBtnUsers.classList.remove('hidden');
   } else {
@@ -1165,6 +1180,27 @@ window.switchTab = function(tabName) {
     }
   } else if (tabName === 'map') {
     if (window.innerWidth <= 768) return;
+
+    // ตรวจสอบการเข้าสู่ระบบก่อนเข้าใช้งานแผนที่และหมุด
+    if (!state.currentUser) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'จำเป็นต้องเข้าสู่ระบบ',
+        text: 'ระบบ "แผนที่และหมุด" สงวนสิทธิ์สำหรับเจ้าหน้าที่ผู้ใช้งานที่เข้าสู่ระบบแล้วเท่านั้น',
+        confirmButtonText: '<i class="fa-solid fa-right-to-bracket mr-1"></i> เข้าสู่ระบบทันที',
+        showCancelButton: true,
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#2563eb',
+        cancelButtonColor: '#6b7280',
+        customClass: { popup: 'rounded-2xl' }
+      }).then((result) => {
+        if (result.isConfirmed) {
+          openLoginModal();
+        }
+      });
+      return;
+    }
+
     closeCameraModal();
     if (elements.tabBtnMap) elements.tabBtnMap.classList.add('active');
     if (elements.tabContentMap) {
@@ -7218,6 +7254,40 @@ state.routeStartLocation = {
 };
 
 /**
+ * ส่งประวัติการทำรายการในหน้าแผนที่และหมุดไปบันทึกเป็นไฟล์ Log ใน Server (Google Apps Script / Drive)
+ * @param {string} actionType - ประเภทกิจกรรม
+ * @param {string} details - รายละเอียดกิจกรรม
+ * @param {Object} [extraData] - ข้อมูลเพิ่มเติม
+ */
+async function logServerActivity(actionType, details, extraData = null) {
+  const user = state.currentUser || { username: 'anonymous', name: 'ไม่ได้ระบุผู้ใช้', role: 'guest' };
+  const payload = {
+    action: 'log_activity',
+    actionType: actionType,
+    details: details,
+    user: {
+      username: user.username || 'anonymous',
+      name: user.name || user.username || 'anonymous',
+      role: user.role || 'user'
+    },
+    extra: extraData,
+    clientTimestamp: new Date().toISOString()
+  };
+
+  try {
+    if (state.appsScriptUrl && navigator.onLine) {
+      fetch(state.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      }).catch(err => console.warn('Server logging silent warning:', err));
+    }
+  } catch (e) {
+    console.warn('logServerActivity error:', e);
+  }
+}
+
+/**
  * คำนวณระยะทางระหว่าง 2 พิกัดเป็นกิโลเมตร (Haversine Formula)
  */
 function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
@@ -7501,12 +7571,17 @@ function buildFullLocationText(locationType, houseNo, moo, localAdminName, custo
  * สร้าง HTML สำหรับแบบฟอร์มกรอกข้อมูลหมาย (อ้างอิงตามบันทึกส่งหมาย ภาพที่ 1 และ 2)
  */
 function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
-  const currentProvince = initialData.province || state.currentMapFilter?.province || state.selectedProvince || 'อุดรธานี';
+  let lastSaved = null;
+  try {
+    lastSaved = state.lastScheduleFormData || JSON.parse(localStorage.getItem('slts_last_schedule_form') || 'null');
+  } catch (e) {}
+
+  const currentProvince = initialData.province || (lastSaved && lastSaved.province) || state.currentMapFilter?.province || state.selectedProvince || 'อุดรธานี';
   const provinces = (typeof THAILAND_PROVINCES !== 'undefined') ? THAILAND_PROVINCES : [{ name: currentProvince }];
   const districts = getDistrictsByProvince(currentProvince);
-  const currentDistrict = initialData.district || state.currentMapFilter?.district || districts[0] || '';
+  const currentDistrict = initialData.district || (lastSaved && lastSaved.district) || state.currentMapFilter?.district || districts[0] || '';
   const subdistricts = currentDistrict ? getSubdistrictsByDistrict(currentProvince, currentDistrict) : [];
-  const currentSubdistrict = initialData.subdistrict || state.currentMapFilter?.subdistrict || subdistricts[0] || '';
+  const currentSubdistrict = initialData.subdistrict || (lastSaved && lastSaved.subdistrict) || state.currentMapFilter?.subdistrict || subdistricts[0] || '';
 
   const provOptions = provinces.map(p => `<option value="${p.name}" ${p.name === currentProvince ? 'selected' : ''}>${p.name}</option>`).join('');
   const distOptions = districts.map(d => `<option value="${d}" ${d === currentDistrict ? 'selected' : ''}>${d}</option>`).join('');
@@ -7514,16 +7589,24 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
 
   // ปี พ.ศ. (ย้อนหลัง 20 ปี)
   const currentYearBE = new Date().getFullYear() + 543;
+  const targetYear = (initialData.caseYear !== undefined && initialData.caseYear !== '') 
+    ? parseInt(initialData.caseYear, 10) 
+    : ((lastSaved && lastSaved.caseYear) ? parseInt(lastSaved.caseYear, 10) : currentYearBE);
+
   let yearOptions = '';
   for (let i = 0; i <= 20; i++) {
     const yr = currentYearBE - i;
-    const isSelected = initialData.caseYear ? (parseInt(initialData.caseYear, 10) === yr) : (i === 0);
+    const isSelected = (yr === targetYear);
     yearOptions += `<option value="${yr}" ${isSelected ? 'selected' : ''}>${yr}</option>`;
   }
 
-  const courtType = initialData.courtType || `ศาลจังหวัด${currentProvince}`;
+  const courtType = initialData.courtType || (lastSaved && lastSaved.courtType) || `ศาลจังหวัด${currentProvince}`;
   const isOtherCourt = (courtType === 'หมายศาลอื่น' || courtType.includes('หมายศาลอื่น'));
-  const locType = initialData.locationType || 'หมายบ้าน';
+  const locType = initialData.locationType || (lastSaved && lastSaved.locationType) || 'หมายบ้าน';
+  const prefixVal = (initialData.prefix !== undefined) ? initialData.prefix : ((lastSaved && lastSaved.prefix) || '');
+  const mooVal = (initialData.moo !== undefined) ? initialData.moo : ((lastSaved && lastSaved.moo) || '');
+  const localAdminNameVal = initialData.localAdminName || (lastSaved && lastSaved.localAdminName) || 'ที่ทำการปกครองส่วนท้องถิ่น';
+  const customOtherLocationNameVal = initialData.customOtherLocationName || (lastSaved && lastSaved.customOtherLocationName) || '';
 
   return `
     <div class="relative space-y-3.5 text-xs text-left" id="${prefix}formRoot">
@@ -7596,7 +7679,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
               id="${prefix}udonPrefix" 
               list="${prefix}udonPrefixList" 
               placeholder="อักษร เช่น ผบE" 
-              value="${initialData.prefix || ''}"
+              value="${prefixVal}"
               class="w-full h-full bg-white border border-r-0 border-gray-300 focus:border-blue-500 rounded-l-xl px-2.5 py-2 text-xs font-bold text-gray-800"
               autocomplete="off"
             >
@@ -7714,7 +7797,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
               id="${prefix}moo" 
               placeholder="หมู่ (ตัวเลขเท่านั้น)" 
               inputmode="numeric" 
-              value="${initialData.moo || ''}"
+              value="${mooVal}"
               class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs text-gray-800 focus:border-blue-500"
             >
           </div>
@@ -7725,7 +7808,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
           <input 
             type="text" 
             id="${prefix}localAdminName" 
-            value="${initialData.localAdminName || 'ที่ทำการปกครองส่วนท้องถิ่น'}" 
+            value="${localAdminNameVal}" 
             placeholder="ที่ทำการปกครองส่วนท้องถิ่น เช่น อบต.โนนสูง" 
             class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs text-gray-800 focus:border-blue-500"
           >
@@ -7736,7 +7819,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
           <input 
             type="text" 
             id="${prefix}customOtherLocationName" 
-            value="${initialData.customOtherLocationName || ''}"
+            value="${customOtherLocationNameVal}" 
             placeholder="ระบุสถานที่อื่นๆ เช่น โรงเรียน, วัด, โรงพยาบาล..." 
             class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs text-gray-800 focus:border-blue-500"
           >
@@ -7975,15 +8058,326 @@ function extractSummonsFormData(prefix = 'modal_') {
 }
 
 /**
+ * สกัดข้อมูลตารางบัญชีจ่ายหมายจากไฟล์ PDF (PDF.js Coordinate & Column-based Extraction)
+ * @param {File} file - ไฟล์ PDF
+ * @returns {Promise<Array>} รายการหมายที่สกัดได้
+ */
+async function parsePdfDispatchFile(file) {
+  if (!window.pdfjsLib) throw new Error('ไม่พบไลบรารี pdf.js กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const allRecords = [];
+
+  // Case Regex: รองรับทั้ง ต, ผบ, พ, ด, ข, ฝ, ม, ฟ, ว, ย, อ, ผบE, พE, ผบ ส ฯลฯ
+  const caseRegex = /([ตพดขฝผบมฟวยอเสEะ\.\s]{1,12}\d{1,6}\s*\/\s*\d{2,4})/gi;
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const textContent = await page.getTextContent();
+    const items = textContent.items || [];
+    if (items.length === 0) continue;
+
+    // จัดกลุ่มตามพิกัด Y (Row grouping)
+    const rowMap = new Map();
+    items.forEach(item => {
+      const text = (item.str || '').trim();
+      if (!text) return;
+      const y = Math.round(item.transform[5]);
+      const x = Math.round(item.transform[4]);
+      
+      let foundKey = null;
+      for (const key of rowMap.keys()) {
+        if (Math.abs(key - y) <= 7) {
+          foundKey = key;
+          break;
+        }
+      }
+      const rowKey = foundKey !== null ? foundKey : y;
+      if (!rowMap.has(rowKey)) rowMap.set(rowKey, []);
+      rowMap.get(rowKey).push({ x, text, width: item.width || 0 });
+    });
+
+    // เรียงบรรทัดจากบนลงล่าง (PDF Y เริ่มจากล่างขึ้นบน จึงต้อง sort descending)
+    const sortedRows = Array.from(rowMap.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(entry => entry[1].sort((a, b) => a.x - b.x));
+
+    for (const row of sortedRows) {
+      const rowText = row.map(r => r.text).join(' ');
+
+      // ข้ามหัวตาราง / ส่วนหัวกระดาษ
+      if (
+        rowText.includes('บัญชีจ่ายหมาย') ||
+        rowText.includes('ศาลจังหวัด') ||
+        rowText.includes('พนักงานศาลนี้ส่ง') ||
+        rowText.includes('ตั้งแต่วันที่') ||
+        rowText.includes('เลขดำที่') ||
+        rowText.includes('ชื่อผู้รับ') ||
+        rowText.includes('หน้าที่') ||
+        rowText.includes('รวมจ่ายหมาย')
+      ) {
+        continue;
+      }
+
+      // ตรวจสอบว่ามีเลขคดีหรือไม่
+      const matches = rowText.match(caseRegex);
+      if (!matches || matches.length === 0) continue;
+
+      // กฎคัดกรองเลขคดี "ต":
+      // หากในแถวมีเลขคดีมากกว่า 1 ชุด และพบเลขที่ขึ้นต้นด้วย "ต" ให้เลือกเฉพาะเลข "ต" เท่านั้น
+      const rawCases = matches.map(c => c.trim().replace(/\s+/g, ' '));
+      const tCases = rawCases.filter(c => /^ต/i.test(c.replace(/\s+/g, '')));
+      const finalCases = (tCases.length > 0) ? tCases : rawCases;
+      const primaryCase = finalCases[0];
+
+      // สกัดที่อยู่, ตำบล, อำเภอ
+      let houseNo = '';
+      let moo = '';
+      let subdistrict = '';
+      let district = '';
+      let isCentralReg = rowText.includes('ทะเบียนบ้านกลาง');
+      let centralRegText = '';
+
+      if (isCentralReg) {
+        const cMatch = rowText.match(/ทะเบียนบ้านกลาง\s*(\d*)/);
+        centralRegText = cMatch ? `ทะเบียนบ้านกลาง ${cMatch[1]}`.trim() : 'ทะเบียนบ้านกลาง';
+      } else {
+        // หาบ้านเลขที่ และ หมู่
+        const hMatch = rowText.match(/(\d+(?:\/\d+)?)\s*ม\.?\s*(\d+|-)/);
+        if (hMatch) {
+          houseNo = hMatch[1];
+          moo = (hMatch[2] !== '-') ? hMatch[2] : '';
+        } else {
+          // ค้นหาเฉพาะบ้านเลขที่
+          const hOnly = rowText.match(/(\d+(?:\/\d+)?)/);
+          if (hOnly) houseNo = hOnly[1];
+          const mOnly = rowText.match(/ม\.?\s*(\d+)/);
+          if (mOnly) moo = mOnly[1];
+        }
+      }
+
+      // สกัดตำบล และ อำเภอ จากข้อความท้ายบรรทัด หรือ พิกัดคอลัมน์
+      // โดยทั่วไปคอลัมน์ตำบล/อำเภอจะอยู่ 2-3 ช่องสุดท้ายของแถว
+      const words = row.map(r => r.text.trim()).filter(w => w && w !== '-' && !/^\d+$/.test(w));
+      
+      // ค้นหาคำที่อาจเป็นตำบล/อำเภอ
+      for (let i = 0; i < row.length; i++) {
+        const txt = row[i].text.trim();
+        if (txt.startsWith('ต.') || txt.startsWith('ตำบล')) {
+          subdistrict = txt.replace(/^(ต\.|ตำบล)\s*/, '').trim();
+        } else if (txt.startsWith('อ.') || txt.startsWith('อำเภอ')) {
+          district = txt.replace(/^(อ\.|อำเภอ)\s*/, '').trim();
+        }
+      }
+
+      // ถ้ายังไม่เจอ ให้ตรวจจาก 2 ช่องข้อความสุดท้ายของแถว (ก่อนคอลัมน์หมายเหตุ)
+      if (!subdistrict || !district) {
+        const textCols = row.filter(r => r.text.trim() && r.text.trim() !== '-' && !/^\d+$/.test(r.text.trim()) && !r.text.includes('/'));
+        if (textCols.length >= 2) {
+          // ช่องก่อนสุดท้ายมักเป็นตำบล และช่องสุดท้ายมักเป็นอำเภอ
+          const last1 = textCols[textCols.length - 1].text.trim();
+          const last2 = textCols[textCols.length - 2].text.trim();
+          if (!district && (last1.includes('เมือง') || last1.length >= 3)) district = last1;
+          if (!subdistrict && last2.length >= 2 && last2 !== district) subdistrict = last2;
+        }
+      }
+
+      allRecords.push({
+        caseNumber: primaryCase,
+        allCases: finalCases,
+        houseNo: isCentralReg ? '' : houseNo,
+        moo: isCentralReg ? '' : moo,
+        isCentralReg,
+        centralRegText,
+        subdistrict: subdistrict || 'นาข่า',
+        district: district || 'เมืองอุดรธานี',
+        rawText: rowText
+      });
+    }
+  }
+
+  return allRecords;
+}
+
+/**
+ * สกัดข้อมูลตารางบัญชีจ่ายหมายจากไฟล์ภาพ (Tesseract.js OCR)
+ * @param {FileList|File[]} files - รายการไฟล์ภาพ
+ * @param {Function} onProgress - Callback รายงาน % ความคืบหน้า
+ * @returns {Promise<Array>} รายการหมายที่สกัดได้
+ */
+async function parseImageDispatchFiles(files, onProgress) {
+  if (!window.Tesseract) throw new Error('ไม่พบไลบรารี Tesseract.js กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+
+  const allRecords = [];
+  const total = files.length;
+  const caseRegex = /([ตพดขฝผบมฟวยอเสEะ\.\s]{1,12}\d{1,6}\s*\/\s*\d{2,4})/gi;
+
+  for (let idx = 0; idx < total; idx++) {
+    const file = files[idx];
+    if (onProgress) onProgress(Math.round((idx / total) * 100), `กำลังอ่านภาพ ${idx + 1}/${total}: ${file.name}`);
+
+    const worker = await Tesseract.createWorker('tha+eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text' && onProgress) {
+          const filePct = Math.round((idx / total) * 100 + (m.progress / total) * 100);
+          onProgress(filePct, `กำลัง OCR ตัวอักษรภาพ ${idx + 1}/${total}: ${Math.round(m.progress * 100)}%`);
+        }
+      }
+    });
+
+    const ret = await worker.recognize(file);
+    await worker.terminate();
+
+    const text = ret.data.text || '';
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+    for (const line of lines) {
+      if (
+        line.includes('บัญชีจ่ายหมาย') ||
+        line.includes('ศาลจังหวัด') ||
+        line.includes('พนักงานศาลนี้ส่ง') ||
+        line.includes('เลขดำที่') ||
+        line.includes('ชื่อผู้รับ')
+      ) {
+        continue;
+      }
+
+      const matches = line.match(caseRegex);
+      if (!matches || matches.length === 0) continue;
+
+      const rawCases = matches.map(c => c.trim().replace(/\s+/g, ' '));
+      const tCases = rawCases.filter(c => /^ต/i.test(c.replace(/\s+/g, '')));
+      const finalCases = (tCases.length > 0) ? tCases : rawCases;
+      const primaryCase = finalCases[0];
+
+      // สกัดที่อยู่
+      let houseNo = '';
+      let moo = '';
+      let isCentralReg = line.includes('ทะเบียนบ้านกลาง');
+      let centralRegText = '';
+
+      if (isCentralReg) {
+        const cMatch = line.match(/ทะเบียนบ้านกลาง\s*(\d*)/);
+        centralRegText = cMatch ? `ทะเบียนบ้านกลาง ${cMatch[1]}`.trim() : 'ทะเบียนบ้านกลาง';
+      } else {
+        const hMatch = line.match(/(\d+(?:\/\d+)?)\s*ม\.?\s*(\d+|-)/);
+        if (hMatch) {
+          houseNo = hMatch[1];
+          moo = (hMatch[2] !== '-') ? hMatch[2] : '';
+        } else {
+          const hOnly = line.match(/(\d+(?:\/\d+)?)/);
+          if (hOnly) houseNo = hOnly[1];
+          const mOnly = line.match(/ม\.?\s*(\d+)/);
+          if (mOnly) moo = mOnly[1];
+        }
+      }
+
+      let subdistrict = '';
+      let district = '';
+
+      const subMatch = line.match(/(?:ต\.?|ตำบล)\s*([ก-๙]+)/);
+      if (subMatch) subdistrict = subMatch[1];
+
+      const distMatch = line.match(/(?:อ\.?|อำเภอ)\s*([ก-๙]+)/);
+      if (distMatch) district = distMatch[1];
+
+      // ป้องกันแถวซ้ำ
+      if (!allRecords.some(r => r.caseNumber === primaryCase && r.houseNo === houseNo)) {
+        allRecords.push({
+          caseNumber: primaryCase,
+          allCases: finalCases,
+          houseNo: isCentralReg ? '' : houseNo,
+          moo: isCentralReg ? '' : moo,
+          isCentralReg,
+          centralRegText,
+          subdistrict: subdistrict || 'นาข่า',
+          district: district || 'เมืองอุดรธานี',
+          rawText: line
+        });
+      }
+    }
+  }
+
+  return allRecords;
+}
+
+/**
+ * แปลงข้อมูลจาก PDF/Image Record ให้เป็น Stop Items พร้อมจับคู่พิกัดประวัติ
+ */
+function convertParsedRecordsToStops(records, province = 'อุดรธานี') {
+  return records.map((rec, idx) => {
+    const locationType = rec.isCentralReg ? 'สถานที่อื่นๆ' : 'หมายบ้าน';
+    const houseNoDisplay = rec.isCentralReg ? '' : rec.houseNo;
+    const customOther = rec.isCentralReg ? (rec.centralRegText || 'ทะเบียนบ้านกลาง') : '';
+
+    const matchRes = matchSingleCaseWithHistory(
+      rec.caseNumber,
+      houseNoDisplay,
+      rec.subdistrict,
+      rec.district,
+      customOther || '',
+      rec.moo,
+      province
+    );
+
+    const locationText = buildFullLocationText(
+      locationType,
+      houseNoDisplay,
+      rec.moo,
+      '',
+      customOther,
+      rec.subdistrict || matchRes.subdistrict,
+      rec.district || matchRes.district,
+      province || matchRes.province
+    );
+
+    return {
+      id: 'stop_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2, 6),
+      caseNumber: rec.caseNumber,
+      courtType: '',
+      prefix: '',
+      caseNo: '',
+      caseYear: '',
+      caseExtra: '',
+      locationType,
+      houseNo: houseNoDisplay,
+      moo: rec.moo || '',
+      localAdminName: '',
+      customOtherLocationName: customOther,
+      locationText,
+      subdistrict: rec.subdistrict || matchRes.subdistrict || '',
+      district: rec.district || matchRes.district || '',
+      province: province || matchRes.province || '',
+      lat: matchRes.lat,
+      lng: matchRes.lng,
+      imageUrl: matchRes.imageUrl || '',
+      dateTime: matchRes.dateTime || '',
+      matchType: matchRes.matchType,
+      matchNote: matchRes.matchNote,
+      isMatched: matchRes.matchType === 'exact',
+      hasCoords: Boolean(matchRes.lat && matchRes.lng)
+    };
+  });
+}
+
+/**
  * เปิด Pop Up ระบุพื้นที่ หรือ จัดรายการตารางส่งหมาย (แทนที่ PDF)
  */
 window.openMapAreaSelectorModal = function() {
-  const currentProvince = state.currentMapFilter?.province || state.selectedProvince || 'อุดรธานี';
+  if (!state.lastScheduleFormData) {
+    try {
+      const saved = localStorage.getItem('slts_last_schedule_form');
+      if (saved) state.lastScheduleFormData = JSON.parse(saved);
+    } catch (e) {}
+  }
+  const lastSaved = state.lastScheduleFormData || {};
+  const currentProvince = state.currentMapFilter?.province || state.selectedProvince || lastSaved.province || 'อุดรธานี';
   const provinces = (typeof THAILAND_PROVINCES !== 'undefined') ? THAILAND_PROVINCES : [{ name: currentProvince }];
   const districts = getDistrictsByProvince(currentProvince);
-  const currentDistrict = state.currentMapFilter?.district || '';
+  const currentDistrict = state.currentMapFilter?.district || lastSaved.district || '';
   const subdistricts = currentDistrict ? getSubdistrictsByDistrict(currentProvince, currentDistrict) : (districts.length > 0 ? getSubdistrictsByDistrict(currentProvince, districts[0]) : []);
-  const currentSubdistrict = state.currentMapFilter?.subdistrict || '';
+  const currentSubdistrict = state.currentMapFilter?.subdistrict || lastSaved.subdistrict || '';
 
   const provOptionsHtml = provinces.map(p => `<option value="${p.name}" ${p.name === currentProvince ? 'selected' : ''}>${p.name}</option>`).join('');
   const distOptionsHtml = `<option value="">-- ทุกอำเภอในจังหวัด --</option>` + districts.map(d => `<option value="${d}" ${d === currentDistrict ? 'selected' : ''}>${d}</option>`).join('');
@@ -7999,14 +8393,18 @@ window.openMapAreaSelectorModal = function() {
       <div class="text-left text-xs space-y-3">
         
         <!-- Tabs Header -->
-        <div class="flex border-b border-gray-200 gap-2 mb-2">
-          <button type="button" id="tabBtnModalArea" onclick="switchModalTab('area')" class="px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5 cursor-pointer">
+        <div class="flex border-b border-gray-200 gap-1 sm:gap-2 mb-2 overflow-x-auto">
+          <button type="button" id="tabBtnModalArea" onclick="switchModalTab('area')" class="px-3 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5 cursor-pointer text-xs whitespace-nowrap">
             <i class="fa-solid fa-layer-group"></i>
             <span>1. เลือกตามพื้นที่</span>
           </button>
-          <button type="button" id="tabBtnModalSchedule" onclick="switchModalTab('schedule')" class="px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer">
+          <button type="button" id="tabBtnModalSchedule" onclick="switchModalTab('schedule')" class="px-3 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer text-xs whitespace-nowrap">
             <i class="fa-solid fa-table-list text-emerald-600"></i>
             <span>2. จัดรายการตารางส่งหมาย</span>
+          </button>
+          <button type="button" id="tabBtnModalUpload" onclick="switchModalTab('upload')" class="px-3 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer text-xs whitespace-nowrap">
+            <i class="fa-solid fa-file-arrow-up text-violet-600"></i>
+            <span>3. อัพโหลดบัญชีจ่ายหมาย</span>
           </button>
         </div>
 
@@ -8059,7 +8457,7 @@ window.openMapAreaSelectorModal = function() {
               <span id="scheduleFormTitle" class="font-bold text-xs text-blue-700 flex items-center gap-1.5">
                 <i class="fa-solid fa-file-circle-plus"></i> เพิ่มรายการส่งหมายใหม่
               </span>
-              <button type="button" id="btnResetScheduleForm" onclick="resetScheduleModalForm()" class="text-[11px] text-gray-500 hover:text-red-600 cursor-pointer">
+              <button type="button" id="btnResetScheduleForm" onclick="resetScheduleModalForm(true)" class="text-[11px] text-gray-500 hover:text-red-600 cursor-pointer">
                 <i class="fa-solid fa-rotate-left mr-0.5"></i> ล้างฟอร์ม
               </button>
             </div>
@@ -8098,6 +8496,61 @@ window.openMapAreaSelectorModal = function() {
 
         </div>
 
+        <!-- Tab 3: อัพโหลดบัญชีจ่ายหมาย (PDF / Multi-Image Upload & Parse) -->
+        <div id="modalTabContentUpload" class="hidden space-y-3.5">
+          <p class="text-gray-600 leading-relaxed bg-violet-50 border border-violet-200 rounded-xl p-3">
+            <i class="fa-solid fa-cloud-arrow-up text-violet-600 mr-1"></i>
+            อัพโหลดไฟล์ <strong>PDF</strong> หรือ <strong>ไฟล์ภาพ</strong> (รองรับภาพหลายไฟล์) ของบัญชีจ่ายหมาย ระบบจะดึงเลขดำที่ (คัดกรองเฉพาะเลข ต), ที่อยู่, ตำบล, อำเภอ และจับคู่พิกัดประวัติให้อัตโนมัติ
+          </p>
+
+          <!-- Upload Drop Zone -->
+          <div id="uploadDispatchDropZone" class="border-2 border-dashed border-violet-300 hover:border-violet-500 bg-violet-50/40 rounded-2xl p-5 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2 group" onclick="document.getElementById('uploadDispatchFileInput').click()">
+            <input type="file" id="uploadDispatchFileInput" class="hidden" accept=".pdf,image/*" multiple>
+            <div class="w-12 h-12 rounded-full bg-violet-100 text-violet-600 flex items-center justify-center text-xl group-hover:scale-110 transition shadow-sm">
+              <i class="fa-solid fa-file-arrow-up"></i>
+            </div>
+            <div>
+              <div class="font-bold text-xs text-gray-800">คลิกเพื่อเลือกไฟล์ หรือ ลากไฟล์มาวางที่นี่</div>
+              <div class="text-[11px] text-gray-500 mt-0.5">รองรับไฟล์ <strong>PDF</strong> (หลายหน้า) หรือ <strong>ภาพถ่าย/สแกน</strong> (เลือกได้มากกว่า 1 ภาพ)</div>
+            </div>
+          </div>
+
+          <!-- Parsing Progress / Status Box -->
+          <div id="uploadDispatchProgressBox" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+            <div class="flex items-center justify-between text-xs font-bold text-gray-800">
+              <span id="uploadDispatchStatusText" class="flex items-center gap-1.5 text-violet-700">
+                <i class="fa-solid fa-spinner fa-spin"></i> กำลังวิเคราะห์ข้อมูลตาราง...
+              </span>
+              <span id="uploadDispatchPercentText" class="text-violet-700">0%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+              <div id="uploadDispatchProgressBar" class="bg-violet-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <!-- Uploaded / Parsed List Container -->
+          <div id="uploadDispatchResultWrapper" class="hidden space-y-2">
+            <div class="flex items-center justify-between text-xs font-bold text-gray-800">
+              <span>รายการที่ตรวจพบจากเอกสาร (<strong id="uploadDispatchCountBadge" class="text-violet-700">0</strong> รายการ)</span>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="clearUploadedDispatchRecords()" class="text-[11px] text-gray-400 hover:text-red-600 transition cursor-pointer">
+                  <i class="fa-solid fa-trash-can mr-0.5"></i> ล้างรายการ
+                </button>
+              </div>
+            </div>
+
+            <div id="uploadDispatchListContainer" class="max-h-52 overflow-y-auto space-y-1.5 border border-gray-200 rounded-xl p-2 bg-white slts-swal-body-scroll">
+              <!-- Injected by JS -->
+            </div>
+
+            <!-- Action to merge/transfer to Schedule Table -->
+            <button type="button" id="btnApplyUploadToSchedule" onclick="applyUploadedRecordsToSchedule()" class="w-full bg-violet-600 hover:bg-violet-700 active:scale-95 text-white font-bold py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm text-xs cursor-pointer">
+              <i class="fa-solid fa-circle-check"></i> <span>นำเข้าสู่ตารางส่งหมาย & แสดงผล</span>
+            </button>
+          </div>
+
+        </div>
+
       </div>
     `,
     width: '680px',
@@ -8113,20 +8566,26 @@ window.openMapAreaSelectorModal = function() {
       window.switchModalTab = function(tab) {
         const tabAreaBtn = document.getElementById('tabBtnModalArea');
         const tabSchedBtn = document.getElementById('tabBtnModalSchedule');
+        const tabUploadBtn = document.getElementById('tabBtnModalUpload');
         const contentArea = document.getElementById('modalTabContentArea');
         const contentSched = document.getElementById('modalTabContentSchedule');
+        const contentUpload = document.getElementById('modalTabContentUpload');
 
-        if (tab === 'area') {
-          tabAreaBtn.className = 'px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5 cursor-pointer';
-          tabSchedBtn.className = 'px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer';
-          contentArea.classList.remove('hidden');
-          contentSched.classList.add('hidden');
-        } else {
-          tabSchedBtn.className = 'px-3.5 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5 cursor-pointer';
-          tabAreaBtn.className = 'px-3.5 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer';
-          contentSched.classList.remove('hidden');
-          contentArea.classList.add('hidden');
+        const activeClass = 'px-3 py-2 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center gap-1.5 cursor-pointer text-xs whitespace-nowrap';
+        const inactiveClass = 'px-3 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer text-xs whitespace-nowrap';
+
+        if (tabAreaBtn) tabAreaBtn.className = (tab === 'area') ? activeClass : inactiveClass;
+        if (tabSchedBtn) tabSchedBtn.className = (tab === 'schedule') ? activeClass : inactiveClass;
+        if (tabUploadBtn) tabUploadBtn.className = (tab === 'upload') ? activeClass : inactiveClass;
+
+        if (contentArea) contentArea.classList.toggle('hidden', tab !== 'area');
+        if (contentSched) contentSched.classList.toggle('hidden', tab !== 'schedule');
+        if (contentUpload) contentUpload.classList.toggle('hidden', tab !== 'upload');
+
+        if (tab === 'schedule') {
           renderStagedScheduleList();
+        } else if (tab === 'upload') {
+          renderUploadedDispatchList();
         }
       };
 
@@ -8145,7 +8604,7 @@ window.openMapAreaSelectorModal = function() {
           container.innerHTML = `
             <div class="py-6 text-center text-gray-400 text-xs">
               <i class="fa-solid fa-list-check text-2xl mb-1 text-gray-300"></i>
-              <p>ยังไม่มีรายการในตาราง กรุณากรอกแบบฟอร์มด้านบนแล้วกด "เพิ่มรายการลงตาราง"</p>
+              <p>ยังไม่มีรายการในตาราง กรุณากรอกแบบฟอร์มด้านบน หรืออัพโหลดไฟล์ในแท็บที่ 3</p>
             </div>
           `;
           return;
@@ -8246,8 +8705,32 @@ window.openMapAreaSelectorModal = function() {
           state.stagedScheduleStops.push(stopItem);
         }
 
-        resetScheduleModalForm();
+        // จำค่าล่าสุดที่มีการบันทึก
+        state.lastScheduleFormData = {
+          province: data.province,
+          district: data.district,
+          subdistrict: data.subdistrict,
+          courtType: data.courtType,
+          prefix: data.prefix,
+          caseYear: data.caseYear,
+          locationType: data.locationType,
+          moo: data.moo,
+          localAdminName: data.localAdminName,
+          customOtherLocationName: data.customOtherLocationName
+        };
+        try {
+          localStorage.setItem('slts_last_schedule_form', JSON.stringify(state.lastScheduleFormData));
+        } catch (e) {}
+
+        resetScheduleModalForm(false);
         renderStagedScheduleList();
+
+        // โฟกัสไปที่ช่องเลขคดีอัตโนมัติ เพื่อให้กรอกรายการถัดไปได้รวดเร็วต่อเนื่อง
+        setTimeout(() => {
+          const isOther = (data.courtType || '').includes('หมายศาลอื่น');
+          const targetInput = isOther ? document.getElementById('sched_otherCaseNo') : document.getElementById('sched_udonCaseNo');
+          if (targetInput) targetInput.focus();
+        }, 50);
       };
 
       window.editStagedScheduleItem = function(idx) {
@@ -8272,11 +8755,17 @@ window.openMapAreaSelectorModal = function() {
 
       window.cancelEditScheduleItem = function() {
         editingStagedIndex = null;
-        resetScheduleModalForm();
+        resetScheduleModalForm(false);
       };
 
-      window.resetScheduleModalForm = function() {
+      window.resetScheduleModalForm = function(clearAll = false) {
         editingStagedIndex = null;
+        if (clearAll) {
+          state.lastScheduleFormData = null;
+          try {
+            localStorage.removeItem('slts_last_schedule_form');
+          } catch (e) {}
+        }
         const formContainer = document.getElementById('scheduleFormContainer');
         if (formContainer) {
           formContainer.innerHTML = getSummonsFormHtml('sched_');
@@ -8303,6 +8792,192 @@ window.openMapAreaSelectorModal = function() {
         const [moved] = state.stagedScheduleStops.splice(idx, 1);
         state.stagedScheduleStops.splice(target, 0, moved);
         renderStagedScheduleList();
+      };
+
+      // ==========================================
+      // Tab 3: Upload Dispatch File Handlers
+      // ==========================================
+      const fileInputEl = document.getElementById('uploadDispatchFileInput');
+      const dropZoneEl = document.getElementById('uploadDispatchDropZone');
+
+      if (dropZoneEl) {
+        dropZoneEl.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          dropZoneEl.classList.add('border-violet-500', 'bg-violet-100/50');
+        });
+        dropZoneEl.addEventListener('dragleave', (e) => {
+          e.preventDefault();
+          dropZoneEl.classList.remove('border-violet-500', 'bg-violet-100/50');
+        });
+        dropZoneEl.addEventListener('drop', (e) => {
+          e.preventDefault();
+          dropZoneEl.classList.remove('border-violet-500', 'bg-violet-100/50');
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleDispatchFilesProcess(e.dataTransfer.files);
+          }
+        });
+      }
+
+      if (fileInputEl) {
+        fileInputEl.addEventListener('change', (e) => {
+          if (e.target.files && e.target.files.length > 0) {
+            handleDispatchFilesProcess(e.target.files);
+          }
+        });
+      }
+
+      window.handleDispatchFilesProcess = async function(files) {
+        const progressBox = document.getElementById('uploadDispatchProgressBox');
+        const progressBar = document.getElementById('uploadDispatchProgressBar');
+        const statusText = document.getElementById('uploadDispatchStatusText');
+        const percentText = document.getElementById('uploadDispatchPercentText');
+        const resultWrapper = document.getElementById('uploadDispatchResultWrapper');
+
+        if (progressBox) progressBox.classList.remove('hidden');
+        if (progressBar) progressBar.style.width = '10%';
+        if (percentText) percentText.textContent = '10%';
+        if (statusText) statusText.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังเตรียมวิเคราะห์ไฟล์...';
+
+        try {
+          const fileArr = Array.from(files);
+          const isPdf = fileArr.some(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+
+          let parsedRecords = [];
+
+          if (isPdf) {
+            const pdfFile = fileArr.find(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+            if (statusText) statusText.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังอ่านข้อมูล PDF จากตาราง...';
+            if (progressBar) progressBar.style.width = '45%';
+            if (percentText) percentText.textContent = '45%';
+            
+            parsedRecords = await parsePdfDispatchFile(pdfFile);
+
+            logServerActivity('MAP_UPLOAD_PDF', `อัพโหลดไฟล์ PDF "${pdfFile.name}" สกัดได้ ${parsedRecords.length} รายการ (เลขคดี: ${parsedRecords.map(r => r.caseNumber).slice(0, 7).join(', ')}${parsedRecords.length > 7 ? '...' : ''})`, {
+              fileName: pdfFile.name,
+              fileSize: pdfFile.size,
+              extractedCount: parsedRecords.length
+            });
+          } else {
+            // ไฟล์รูปภาพ (รองรับหลายไฟล์)
+            if (statusText) statusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> กำลังประมวลผล OCR รูปภาพ (ทั้งหมด ${fileArr.length} ไฟล์)...`;
+            parsedRecords = await parseImageDispatchFiles(fileArr, (pct, msg) => {
+              if (progressBar) progressBar.style.width = `${pct}%`;
+              if (percentText) percentText.textContent = `${pct}%`;
+              if (statusText) statusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${msg}`;
+            });
+
+            logServerActivity('MAP_UPLOAD_IMAGE', `อัพโหลดภาพถ่าย ${fileArr.length} ภาพ OCR สำเร็จพบ ${parsedRecords.length} รายการ (เลขคดี: ${parsedRecords.map(r => r.caseNumber).slice(0, 7).join(', ')}${parsedRecords.length > 7 ? '...' : ''})`, {
+              imageCount: fileArr.length,
+              extractedCount: parsedRecords.length
+            });
+          }
+
+          if (progressBar) progressBar.style.width = '100%';
+          if (percentText) percentText.textContent = '100%';
+          if (statusText) statusText.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i> วิเคราะห์เสร็จสิ้น (พบ ${parsedRecords.length} รายการ)`;
+
+          // แปลงเป็น Stop Items และจับคู่ประวัติ
+          const selectedProv = document.getElementById('map_provSelect')?.value || currentProvince || 'อุดรธานี';
+          const convertedStops = convertParsedRecordsToStops(parsedRecords, selectedProv);
+
+          state.parsedDispatchRecords = convertedStops;
+
+          setTimeout(() => {
+            if (progressBox) progressBox.classList.add('hidden');
+            if (resultWrapper) resultWrapper.classList.remove('hidden');
+            renderUploadedDispatchList();
+          }, 400);
+
+        } catch (err) {
+          console.error('Dispatch parse error:', err);
+          if (progressBox) progressBox.classList.add('hidden');
+          Swal.showValidationMessage(`เกิดข้อผิดพลาดในการวิเคราะห์ไฟล์: ${err.message || err}`);
+        }
+      };
+
+      window.renderUploadedDispatchList = function() {
+        const container = document.getElementById('uploadDispatchListContainer');
+        const countBadge = document.getElementById('uploadDispatchCountBadge');
+        const resultWrapper = document.getElementById('uploadDispatchResultWrapper');
+        const stops = state.parsedDispatchRecords || [];
+
+        if (countBadge) countBadge.textContent = stops.length;
+        if (resultWrapper && stops.length > 0) resultWrapper.classList.remove('hidden');
+        if (!container) return;
+
+        if (stops.length === 0) {
+          container.innerHTML = `
+            <div class="py-6 text-center text-gray-400 text-xs">
+              <i class="fa-solid fa-file-excel text-2xl mb-1 text-gray-300"></i>
+              <p>ยังไม่มีรายการที่วิเคราะห์ กรุณาเลือกไฟล์ PDF หรือภาพด้านบน</p>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = stops.map((s, idx) => {
+          const isExact = s.matchType === 'exact';
+          const isNear = s.matchType === 'near';
+          const badgeClass = isExact ? 'slts-match-exact' : (isNear ? 'slts-match-near' : 'slts-match-none');
+          const statusText = isExact ? '✓ ตรงกับประวัติ (พบพิกัดจริง)' : (isNear ? `📍 ${s.matchNote || 'หมุดใกล้เคียง'}` : '○ ไม่มีหมุดในระบบ');
+
+          return `
+            <div class="p-2 rounded-xl border flex items-center justify-between gap-2 text-xs transition ${badgeClass}">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600 text-white' : (isNear ? 'bg-amber-500 text-white' : 'bg-gray-300 text-gray-700')} text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                  ${idx + 1}
+                </span>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+                    <span class="font-bold text-gray-900">${s.caseNumber || '(ไม่มีเลขคดี)'}</span>
+                    <span class="text-[10px] px-1.5 py-0.2 rounded font-semibold ${isExact ? 'bg-emerald-100 text-emerald-800' : (isNear ? 'bg-amber-100 text-amber-800' : 'bg-gray-200 text-gray-600')}">
+                      ${statusText}
+                    </span>
+                  </div>
+                  <p class="text-[11px] opacity-90 truncate">${s.locationText}</p>
+                </div>
+              </div>
+
+              <!-- Action to delete from upload list -->
+              <div class="flex items-center gap-1 flex-shrink-0">
+                <button type="button" onclick="deleteUploadedDispatchItem(${idx})" class="p-1.5 text-red-500 hover:bg-red-50 rounded-lg text-xs cursor-pointer" title="ลบรายการนี้">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      };
+
+      window.deleteUploadedDispatchItem = function(idx) {
+        state.parsedDispatchRecords.splice(idx, 1);
+        renderUploadedDispatchList();
+      };
+
+      window.clearUploadedDispatchRecords = function() {
+        state.parsedDispatchRecords = [];
+        const resultWrapper = document.getElementById('uploadDispatchResultWrapper');
+        if (resultWrapper) resultWrapper.classList.add('hidden');
+        renderUploadedDispatchList();
+      };
+
+      window.applyUploadedRecordsToSchedule = function() {
+        const records = state.parsedDispatchRecords || [];
+        if (records.length === 0) {
+          Swal.showValidationMessage('ไม่พบรายการที่วิเคราะห์ กรุณาอัพโหลดไฟล์ก่อน');
+          return;
+        }
+
+        // นำเข้ารายการสู่ stagedScheduleStops
+        state.stagedScheduleStops = JSON.parse(JSON.stringify(records));
+        
+        logServerActivity('MAP_IMPORT_DISPATCH_TO_SCHEDULE', `นำเข้ารายการจากเอกสาร ${records.length} รายการ เข้าสู่ตารางจัดเส้นทางส่งหมาย`, {
+          count: records.length,
+          cases: records.map(r => r.caseNumber).slice(0, 10)
+        });
+
+        // สลับไปที่ Tab 2 เพื่อให้ผู้ใช้ตรวจทานและแก้ไขได้
+        switchModalTab('schedule');
       };
 
       // Province search & select events in Tab 1
@@ -8347,7 +9022,18 @@ window.openMapAreaSelectorModal = function() {
     },
     preConfirm: () => {
       const contentSched = document.getElementById('modalTabContentSchedule');
+      const contentUpload = document.getElementById('modalTabContentUpload');
       const isScheduleMode = contentSched && !contentSched.classList.contains('hidden');
+      const isUploadMode = contentUpload && !contentUpload.classList.contains('hidden');
+
+      if (isUploadMode) {
+        const records = state.parsedDispatchRecords || [];
+        if (records.length === 0) {
+          Swal.showValidationMessage('กรุณาอัพโหลดไฟล์บัญชีจ่ายหมาย หรือกด "นำเข้าสู่ตารางส่งหมาย" ก่อน');
+          return false;
+        }
+        return { isManualSchedule: true, stops: records };
+      }
 
       if (isScheduleMode) {
         if (!state.stagedScheduleStops || state.stagedScheduleStops.length === 0) {
@@ -8370,6 +9056,11 @@ window.openMapAreaSelectorModal = function() {
         if (badgeEl) badgeEl.textContent = `📋 ตารางส่งหมาย (${res.value.stops.length} รายการ)`;
         initLeafletMapInstance();
         recalculateRouteFromStops(true);
+
+        logServerActivity('MAP_SCHEDULE_CONFIRMED', `กำหนดรายการตารางส่งหมาย ${res.value.stops.length} รายการ (เลขคดี: ${res.value.stops.map(s => s.caseNumber).slice(0, 7).join(', ')}${res.value.stops.length > 7 ? '...' : ''})`, {
+          stopsCount: res.value.stops.length,
+          cases: res.value.stops.map(s => s.caseNumber)
+        });
       } else {
         state.currentMapFilter = res.value;
         renderMapAndPins(res.value.province, res.value.district, res.value.subdistrict);
@@ -8454,6 +9145,22 @@ window.openAddRouteStopModal = function(editIndex = null) {
       } else {
         state.currentRouteStops.push(stopItem);
       }
+
+      state.lastScheduleFormData = {
+        province: data.province,
+        district: data.district,
+        subdistrict: data.subdistrict,
+        courtType: data.courtType,
+        prefix: data.prefix,
+        caseYear: data.caseYear,
+        locationType: data.locationType,
+        moo: data.moo,
+        localAdminName: data.localAdminName,
+        customOtherLocationName: data.customOtherLocationName
+      };
+      try {
+        localStorage.setItem('slts_last_schedule_form', JSON.stringify(state.lastScheduleFormData));
+      } catch (e) {}
 
       initLeafletMapInstance();
       recalculateRouteFromStops(false);
@@ -8650,6 +9357,13 @@ window.renderMapAndPins = function(province, district, subdistrict) {
 
   const orderedStops = optimizeStopsSequence(validStops, state.routeStartLocation.lat, state.routeStartLocation.lng);
   state.currentRouteStops = orderedStops;
+
+  logServerActivity('MAP_FILTER_AREA', `กรองดูหมุดพื้นที่ จ.${province} > อ.${district || 'ทุกอำเภอ'} > ต.${subdistrict || 'ทุกตำบล'} (พบ ${validStops.length} หมุด)`, {
+    province,
+    district,
+    subdistrict,
+    pinsCount: validStops.length
+  });
 
   recalculateRouteFromStops(true);
 };
@@ -9133,6 +9847,12 @@ window.optimizeTripRoute = function() {
   if (!state.currentRouteStops || state.currentRouteStops.length === 0) return;
   const orderedStops = optimizeStopsSequence(state.currentRouteStops, state.routeStartLocation.lat, state.routeStartLocation.lng);
   state.currentRouteStops = orderedStops;
+  
+  logServerActivity('MAP_ROUTE_OPTIMIZE', `จัดลำดับเส้นทางส่งหมาย ${orderedStops.length} จุดหมาย (Nearest-Neighbor TSP)`, {
+    stopsCount: orderedStops.length,
+    cases: orderedStops.map(s => s.caseNumber).slice(0, 10)
+  });
+
   recalculateRouteFromStops(true);
 };
 
@@ -9164,6 +9884,12 @@ window.openFullRouteInGoogleMaps = function() {
   if (waypoints.length > 0) {
     gmapUrl += `&waypoints=${encodeURIComponent(waypoints.join('|'))}`;
   }
+
+  logServerActivity('MAP_NAVIGATE_GOOGLE_MAPS', `เปิดนำทาง Google Maps สำหรับ ${validStops.length} จุดหมาย (ไป-กลับ: ${state.isRoundTrip ? 'ใช่' : 'ไม่ใช่'})`, {
+    validStopsCount: validStops.length,
+    isRoundTrip: state.isRoundTrip,
+    cases: validStops.map(s => s.caseNumber).slice(0, 10)
+  });
 
   window.open(gmapUrl, '_blank');
 };

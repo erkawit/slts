@@ -32,6 +32,41 @@ function doPost(e) {
     const spreadsheet = getTargetSpreadsheetFile(folder);
 
     // ==========================================
+    // ACTION: LOG_ACTIVITY (บันทึกประวัติการนำเข้าและใช้งานแผนที่ลงไฟล์ Log บน Google Drive)
+    // ==========================================
+    if (data.action === "log_activity" || data.action === "log_map_action") {
+      const logFileName = "map_activity_logs.log";
+      const files = folder.getFilesByName(logFileName);
+      let logFile;
+      if (files.hasNext()) {
+        logFile = files.next();
+      } else {
+        logFile = folder.createFile(logFileName, "=== ระบบบันทึกประวัติการใช้งานแผนที่และหมุด (SLTS Audit Logs) ===\n\n");
+      }
+
+      const timestamp = Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss");
+      const user = data.user || {};
+      const username = user.username || data.username || "anonymous";
+      const name = user.name || data.name || username;
+      const role = user.role || data.role || "user";
+      const actionType = data.actionType || data.activity || "MAP_ACTION";
+      const details = data.details || data.message || "-";
+      const extra = data.extra ? ` | DATA: ${JSON.stringify(data.extra)}` : "";
+
+      const logEntry = `[${timestamp}] [USER: ${name} (@${username}) | ROLE: ${role}] [ACTION: ${actionType}] [DETAILS: ${details}]${extra}\n`;
+
+      // ต่อท้ายเนื้อหาไฟล์ Log
+      const existingContent = logFile.getBlob().getDataAsString();
+      logFile.setContent(existingContent + logEntry);
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "Logged successfully",
+        timestamp: timestamp
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ==========================================
     // ACTION: USER MANAGEMENT (จัดการผู้ใช้งานใน Sheet 'users')
     // ==========================================
     if (data.action === "get_users") {
