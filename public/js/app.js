@@ -2490,13 +2490,31 @@ function renderDataTable(rows, filterCriteria = null) {
       </button>
     `;
 
-    // คอลัมน์จัดการ (แสดงปุ่มแก้ไขสำหรับทุกผู้ใช้งาน และปุ่มลบสำหรับ Admin)
-    let actionBtn = `
-      <div class="flex items-center gap-1.5 whitespace-nowrap">
+    // คอลัมน์จัดการ (ตรวจสอบสิทธิ์: แก้ไขได้เฉพาะผู้ที่อัปโหลด/บันทึกไฟล์ หรือผู้ดูแลระบบ role => admin)
+    const currentUsername = (state.currentUser?.username || '').trim().toLowerCase();
+    const rowUploader = String(latest['ผู้บันทึก'] || latest['uploader'] || latest['uploadedBy'] || latest['user_id'] || '').trim().toLowerCase();
+    const canEdit = isAdmin || (currentUsername && (!rowUploader || rowUploader === currentUsername));
+
+    let editBtn = '';
+    if (canEdit) {
+      editBtn = `
         <button type="button" onclick="openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1 cursor-pointer" title="แก้ไขข้อมูลส่งหมาย">
           <i class="fa-solid fa-pen-to-square"></i>
           <span>แก้ไข</span>
         </button>
+      `;
+    } else {
+      editBtn = `
+        <span class="text-[11px] text-gray-400 bg-gray-100 border border-gray-200 px-2 py-1 rounded-lg italic cursor-not-allowed inline-flex items-center gap-1" title="แก้ไขได้เฉพาะผู้บันทึก (@${rowUploader || 'ผู้สร้าง'}) หรือ Admin">
+          <i class="fa-solid fa-lock text-[10px]"></i>
+          <span>แก้ไข</span>
+        </span>
+      `;
+    }
+
+    let actionBtn = `
+      <div class="flex items-center gap-1.5 whitespace-nowrap">
+        ${editBtn}
         ${(isAdmin && isDesktop) ? `
           <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${rawTimestamp}', '${caseNumber}', ${latest.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1 cursor-pointer" title="ลบข้อมูลในชีตและไฟล์ใน Drive">
             <i class="fa-solid fa-trash-can"></i>
@@ -2550,6 +2568,21 @@ function renderDataTable(rows, filterCriteria = null) {
 window.openEditSummonsModal = async function(caseNumber, specificRecord = null) {
   const records = (state.allSheetRows || []).filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim());
   const rec = specificRecord || records[0] || {};
+
+  // ตรวจสอบสิทธิ์การแก้ไข (อนุญาตเฉพาะ Admin หรือผู้ที่บันทึกข้อมูล)
+  const currentUsername = (state.currentUser?.username || '').trim().toLowerCase();
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const rowUploader = String(rec['ผู้บันทึก'] || rec['uploader'] || rec['uploadedBy'] || rec['user_id'] || '').trim().toLowerCase();
+  
+  if (!isAdmin && rowUploader && currentUsername && rowUploader !== currentUsername) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ไม่มีสิทธิ์แก้ไขข้อมูล',
+      text: `ข้อมูลรายการนี้ถูกบันทึกโดยผู้ใช้ @${rowUploader} (สิทธิ์การแก้ไขจำกัดเฉพาะผู้บันทึกหรือผู้ดูแลระบบ Admin เท่านั้น)`,
+      confirmButtonColor: '#2563eb'
+    });
+    return;
+  }
 
   const currentProv = rec._resolvedProvince || getRowProvince(rec) || state.selectedProvince || 'อุดรธานี';
   const courtType = rec['ประเภทศาล'] || 'ศาลจังหวัด' + currentProv;
@@ -2690,7 +2723,10 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
             <i class="fa-solid fa-image text-blue-600"></i>
             <span>รูปภาพการส่งหมาย</span>
           </label>
-          <span class="text-[10px] text-gray-500">${(directDisplayUrl || imgUrl) ? 'มีรูปภาพในระบบ' : 'ไม่มีรูปภาพ'}</span>
+          <div class="flex items-center gap-1.5 text-[10px] text-gray-500">
+            ${rowUploader ? `<span class="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded border border-gray-200">👤 @${rowUploader}</span>` : ''}
+            <span>${(directDisplayUrl || imgUrl) ? 'มีรูปภาพในระบบ' : 'ไม่มีรูปภาพ'}</span>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
@@ -2898,7 +2934,9 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
         imageBase64: compressedImgBase64,
         fileName: finalFileName,
         fileUrl: imgUrl,
-        fileId: fileId
+        fileId: fileId,
+        uploader: state.currentUser?.username || '',
+        role: state.currentUser?.role || 'user'
       };
 
       try {
@@ -2956,6 +2994,7 @@ window.openCaseHistoryModal = function(caseNumber) {
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isDesktop = window.innerWidth > 768;
   const showDeleteCol = isAdmin && isDesktop;
+  const currentUsername = (state.currentUser?.username || '').trim().toLowerCase();
 
   let rowsHtml = '';
   records.forEach((rec) => {
@@ -2967,6 +3006,8 @@ window.openCaseHistoryModal = function(caseNumber) {
     const fileId = rec['Drive File ID'] || '';
     const fileName = rec['ชื่อไฟล์รูปภาพ'] || '';
     const locationFull = rec['ที่ตั้งส่งหมาย (เต็ม)'] || rec['ที่ตั้งส่งหมาย'] || '';
+    const itemUploader = String(rec['ผู้บันทึก'] || rec['uploader'] || rec['uploadedBy'] || rec['user_id'] || '').trim().toLowerCase();
+    const canEditItem = isAdmin || (currentUsername && (!itemUploader || itemUploader === currentUsername));
 
     let coordDisplay = '-';
     if (lat && lng) {
@@ -3002,12 +3043,22 @@ window.openCaseHistoryModal = function(caseNumber) {
       `;
     }
 
-    let editBtn = `
-      <button type="button" onclick="Swal.close(); openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', state.allSheetRows ? state.allSheetRows[${rec.originalIndex}] : null)" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition inline-flex items-center gap-1 cursor-pointer" title="แก้ไขรายการนี้">
-        <i class="fa-solid fa-pen-to-square"></i>
-        <span>แก้ไข</span>
-      </button>
-    `;
+    let editBtn = '';
+    if (canEditItem) {
+      editBtn = `
+        <button type="button" onclick="Swal.close(); openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', state.allSheetRows ? state.allSheetRows[${rec.originalIndex}] : null)" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition inline-flex items-center gap-1 cursor-pointer" title="แก้ไขรายการนี้">
+          <i class="fa-solid fa-pen-to-square"></i>
+          <span>แก้ไข</span>
+        </button>
+      `;
+    } else {
+      editBtn = `
+        <span class="text-[11px] text-gray-400 bg-gray-100 border border-gray-200 px-2 py-1 rounded-lg italic cursor-not-allowed inline-flex items-center gap-1" title="แก้ไขได้เฉพาะผู้บันทึก (@${itemUploader || 'ผู้สร้าง'}) หรือ Admin">
+          <i class="fa-solid fa-lock text-[10px]"></i>
+          <span>แก้ไข</span>
+        </span>
+      `;
+    }
 
     let deleteBtn = '';
     if (showDeleteCol) {
@@ -3489,7 +3540,11 @@ window.openManualUploadModal = function() {
           lat: formData.lat,
           lng: formData.lng,
           heading: heading,
-          dateTime: WatermarkEngine.formatThaiDateTime(new Date())
+          dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+          uploader: state.currentUser?.username || '',
+          uploadedBy: state.currentUser?.username || '',
+          user_id: state.currentUser?.username || '',
+          uploaderRole: state.currentUser?.role || 'user'
         };
 
         // วาดลายน้ำลงบนรูปภาพ
@@ -7148,7 +7203,11 @@ async function handleDesktopUpload() {
       lat: state.lat,
       lng: state.lng,
       heading: heading,
-      dateTime: WatermarkEngine.formatThaiDateTime(new Date())
+      dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+      uploader: state.currentUser?.username || '',
+      uploadedBy: state.currentUser?.username || '',
+      user_id: state.currentUser?.username || '',
+      uploaderRole: state.currentUser?.role || 'user'
     };
 
     const hasWatermarkAlready = elements.chkDesktopHasWatermark ? elements.chkDesktopHasWatermark.checked : false;

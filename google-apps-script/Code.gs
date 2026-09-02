@@ -476,7 +476,20 @@ function doPost(e) {
         fileUrl = createdFile.getUrl();
       }
 
+      // ตรวจสอบสิทธิ์การแก้ไข (Permission Check):
+      // อนุญาตเฉพาะ Admin หรือผู้ที่บันทึกข้อมูลนั้นๆ เท่านั้น
+      const currentEditingUser = String(data.uploader || data.username || data.user_id || '').trim().toLowerCase();
+      const currentRole = String(data.role || data.uploaderRole || '').trim().toLowerCase();
+
       if (targetRowIndex > 1 && targetRowIndex <= sheetData.length) {
+        const rowUploader = String(sheetData[targetRowIndex - 1][14] || '').trim().toLowerCase();
+        if (currentRole !== 'admin' && rowUploader && currentEditingUser && rowUploader !== currentEditingUser) {
+          return ContentService.createTextOutput(JSON.stringify({
+            status: "error",
+            message: `ท่านไม่มีสิทธิ์แก้ไขข้อมูลนี้ (สามารถแก้ไขได้เฉพาะผู้บันทึก @${rowUploader} หรือผู้ดูแลระบบเท่านั้น)`
+          })).setMimeType(ContentService.MimeType.JSON);
+        }
+
         if (data.caseNumber) sheet.getRange(targetRowIndex, 2).setValue(data.caseNumber);
         if (data.courtType) sheet.getRange(targetRowIndex, 3).setValue(data.courtType);
         if (data.district) sheet.getRange(targetRowIndex, 4).setValue(data.district);
@@ -516,7 +529,8 @@ function doPost(e) {
           data.fileName || "",
           fileUrl || "",
           "",
-          fileId || ""
+          fileId || "",
+          data.uploader || data.username || data.uploadedBy || ""
         ]);
         return ContentService.createTextOutput(JSON.stringify({
           status: "success",
@@ -586,6 +600,7 @@ function doPost(e) {
         // 2. การเพิ่มข้อมูลใหม่ (New Row) -> appendRow โดยตรงทันที ไม่ต้องโหลดตารางเก่ามาวน Loop (เร็วสูงสุด)
         const timestamp = new Date();
         const thaiDateStr = data.dateTime || Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
+        const uploaderUser = data.uploader || data.username || data.uploadedBy || data.user_id || "";
 
         sheet.appendRow([
           thaiDateStr,
@@ -601,7 +616,8 @@ function doPost(e) {
           data.fileName || "",
           fileUrl || "",
           "",
-          fileId || ""
+          fileId || "",
+          uploaderUser
         ]);
       }
 
@@ -672,7 +688,8 @@ function getSummonsSheet(spreadsheet) {
       "ชื่อไฟล์รูปภาพ",
       "ลิงก์รูปภาพใน Google Drive",
       "ลิงก์ Text File ใน Google Drive",
-      "Drive File ID"
+      "Drive File ID",
+      "ผู้บันทึก"
     ];
 
     sheet.appendRow(headers);
@@ -683,6 +700,13 @@ function getSummonsSheet(spreadsheet) {
     headerRange.setFontWeight("bold");
     headerRange.setHorizontalAlignment("center");
     sheet.setFrozenRows(1);
+  } else {
+    // ถ้ามี Sheet อยู่แล้ว แต่ยังไม่มีคอลัมน์ผู้บันทึก (คอลัมน์ที่ 15) ให้เพิ่มหัวคอลัมน์
+    const lastCol = sheet.getLastColumn();
+    if (lastCol < 15) {
+      sheet.getRange(1, 15).setValue("ผู้บันทึก");
+      sheet.getRange(1, 15).setBackground("#2563eb").setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
+    }
   }
 
   return sheet;
