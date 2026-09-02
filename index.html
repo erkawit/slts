@@ -421,7 +421,11 @@
                   <div class="relative flex-1">
                     <input type="text" id="coordinates" placeholder="เช่น 17.4144, 102.7882" class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2.5 text-sm font-mono font-semibold text-gray-800 transition">
                   </div>
-                  <button type="button" id="btnRefreshLocation" class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium text-sm px-4 py-2.5 rounded-xl whitespace-nowrap shadow-sm shadow-blue-200 transition flex items-center gap-1.5" title="ดึงพิกัดปัจจุบัน">
+                  <button type="button" id="btnReverseGeocodeForm" onclick="triggerManualReverseGeocode()" class="bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 active:scale-95 font-semibold text-xs px-3 py-2.5 rounded-xl whitespace-nowrap transition flex items-center gap-1 cursor-pointer" title="อ้างอิง อำเภอ และ ตำบล จากพิกัดนี้">
+                    <i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i>
+                    <span>อ้างอิงตำบล/อำเภอ</span>
+                  </button>
+                  <button type="button" id="btnRefreshLocation" class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-medium text-sm px-4 py-2.5 rounded-xl whitespace-nowrap shadow-sm shadow-blue-200 transition flex items-center gap-1.5 cursor-pointer" title="ดึงพิกัดปัจจุบัน">
                     <i class="fa-solid fa-arrows-rotate"></i>
                     <span>เช็คพิกัดใหม่</span>
                   </button>
