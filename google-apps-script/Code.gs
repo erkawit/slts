@@ -29,7 +29,12 @@ function doPost(e) {
       throw new Error("No data received");
     }
 
-    const folder = DriveApp.getFolderById(FOLDER_ID);
+    let folder;
+    try {
+      folder = DriveApp.getFolderById(FOLDER_ID);
+    } catch (fe) {
+      folder = DriveApp.getRootFolder();
+    }
     const spreadsheet = getTargetSpreadsheetFile(folder);
 
     // ==========================================

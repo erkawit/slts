@@ -1489,6 +1489,22 @@ async function compressImageToMax1MB(dataUrl) {
  * อัปโหลดข้อมูลพร้อมแสดง Progress Bar และตัวเลข % ความคืบหน้า (ปิดไม่ได้จนกว่าจะเสร็จสิ้น)
  * ใช้ fetch กับ text/plain เพื่อป้องกันปัญหา CORS Preflight กับ Google Apps Script
  */
+/**
+ * อัปโหลดข้อมูลพร้อมแสดง Progress Bar และตัวเลข % ความคืบหน้า (ปิดไม่ได้จนกว่าจะเสร็จสิ้น)
+ * ใช้ fetch กับ text/plain เพื่อป้องกันปัญหา CORS Preflight กับ Google Apps Script
+ */
+window.getSanitizedAppsScriptUrl = function() {
+  let url = (state.appsScriptUrl || localStorage.getItem('slts_apps_script_url') || '').trim();
+  const defaultUrl = 'https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec';
+  if (!url) {
+    url = defaultUrl;
+  }
+  if (url.endsWith('/dev')) {
+    url = url.slice(0, -4) + '/exec';
+  }
+  return url;
+};
+
 async function uploadWithProgressBar(payload, title = 'กำลังอัปโหลดรูปภาพขึ้น Google Drive...') {
   Swal.fire({
     title: title,
@@ -1524,8 +1540,10 @@ async function uploadWithProgressBar(payload, title = 'กำลังอัป�
     }
   }, 250);
 
+  const targetUrl = getSanitizedAppsScriptUrl();
+
   try {
-    const response = await fetch(state.appsScriptUrl, {
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8'
@@ -1549,12 +1567,12 @@ async function uploadWithProgressBar(payload, title = 'กำลังอัป�
       console.error('GAS response raw text:', rawText);
       if (rawText.includes('<!DOCTYPE') || rawText.includes('<html')) {
         if (rawText.includes('accounts.google.com') || rawText.includes('Sign in') || rawText.includes('เข้าสู่ระบบ')) {
-          throw new Error('Google Apps Script แจ้งเตือนสิทธิ์การเข้าถึง: โปรดตรวจสอบการ Deploy Web App ใน Google Apps Script ว่าได้ตั้งค่า "ผู้มีสิทธิ์เข้าถึง (Who has access)" เป็น "ทุกคน (Anyone)" หรือยัง');
+          throw new Error('Google Apps Script แจ้งเตือนสิทธิ์การเข้าถึง (Access Denied): สิทธิ์ของ Web App ใน Google Apps Script ยังไม่ได้ตั้งเป็น "ทุกคน (Anyone)" กรุณาตั้งค่า Deploy ให้ Everyone/Anyone เข้าถึงได้');
         }
         if (rawText.includes('Service invoked too many times') || rawText.includes('Quota')) {
-          throw new Error('Google Apps Script ใช้งานเกินโควตาประจำวันของ Google');
+          throw new Error('Google Apps Script ใช้งานเกินโควตาประจำวันของบัญชี Google');
         }
-        throw new Error('Google Apps Script ส่งข้อมูลกลับมาเป็นหน้าเว็บ HTML (สาเหตุส่วนใหญ่เกิดจากการตั้งค่า Deploy Web App ใน Apps Script ที่ยังไม่ได้เลือก Anyone หรือ Web App URL ไม่ถูกต้อง)');
+        throw new Error('Google Apps Script ส่งข้อมูลกลับมาเป็นหน้าเว็บ HTML (สาเหตุเกิดจากการ Deploy Web App ที่ยังไม่ได้เลือกสิทธิ์ Who has access เป็น Anyone หรือ Web App URL ไม่ถูกต้อง)');
       }
       throw new Error('ไม่สามารถแปลงข้อมูลตอบกลับจาก Google Apps Script ได้ (Invalid JSON): ' + parseErr.message);
     }
@@ -1571,6 +1589,83 @@ async function uploadWithProgressBar(payload, title = 'กำลังอัป�
     throw err;
   }
 }
+
+/**
+ * แสดงหน้าต่างแนะนำการแก้ไขเมื่อเกิดข้อผิดพลาด Google Apps Script พร้อมบันทึกลง Offline Queue อัตโนมัติ
+ */
+window.showGasUploadErrorModal = function(err, payload, imageFilename, caseNumber) {
+  // บันทึกสำรองข้อมูลลงคิวออฟไลน์ทันทีเพื่อไม่ให้ข้อมูลและภาพสูญหาย
+  try {
+    if (payload) {
+      addToOfflineQueue({
+        payload: payload,
+        fileName: imageFilename || (caseNumber ? `${caseNumber.replace(/\//g, '-')}.jpg` : 'image.jpg'),
+        caseNumber: caseNumber || payload.caseNumber || '-'
+      });
+    }
+  } catch (qe) {
+    console.warn('Auto queue save error:', qe);
+  }
+
+  Swal.fire({
+    icon: 'warning',
+    title: 'การเชื่อมต่อ Apps Script ขัดข้อง',
+    html: `
+      <div class="text-left text-xs space-y-3 text-gray-700 leading-relaxed">
+        <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800">
+          <p class="font-bold flex items-center gap-1.5 mb-1">
+            <i class="fa-solid fa-triangle-exclamation text-rose-600"></i>
+            <span>ข้อความระบบ:</span>
+          </p>
+          <p class="text-[11px] leading-snug">${err.message || err}</p>
+        </div>
+
+        <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900">
+          <p class="font-bold flex items-center gap-1.5 mb-1">
+            <i class="fa-solid fa-shield-halved text-emerald-600"></i>
+            <span>ข้อมูลและภาพถ่ายของท่านปลอดภัย:</span>
+          </p>
+          <p class="text-[11px]">ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์ในเครื่อง</b> เรียบร้อยแล้ว ท่านสามารถกดซิงค์ข้อมูลได้ทันทีเมื่อแก้ไขสิทธิ์เรียบร้อย</p>
+        </div>
+
+        <div class="bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-1.5">
+          <p class="font-bold text-gray-900 text-xs">🛠️ วิธีแก้ไขการ Deploy ใน Google Apps Script:</p>
+          <ol class="list-decimal list-inside space-y-1 text-[11px] text-gray-600 pl-1">
+            <li>เปิดโปรเจกต์ใน <b>Google Apps Script</b></li>
+            <li>กดปุ่มสีน้ำเงิน <b>"Deploy" (การทำให้ใช้งานได้)</b> มุมขวาบน &rarr; เลือก <b>"Manage deployments" (จัดการการทำให้ใช้งานได้)</b></li>
+            <li>คลิกไอคอนรูปดินสอ <b>Edit (แก้ไข)</b> &rarr; ตรง Version เลือก <b>"New version" (เวอร์ชันใหม่)</b></li>
+            <li><b>จุดสำคัญ:</b> ในช่อง <b>"Who has access" (ผู้มีสิทธิ์เข้าถึง)</b> ให้เลือกเป็น <b>"Anyone" (ทุกคน)</b> เสมอ</li>
+            <li>กด <b>Deploy</b> แล้วคัดลอก Web App URL (ที่ลงท้ายด้วย <code>/exec</code>)</li>
+          </ol>
+        </div>
+
+        <div class="flex flex-col gap-2 pt-1">
+          <button type="button" onclick="resetDefaultGasUrlAndRetry()" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition shadow-sm flex items-center justify-center gap-1.5 cursor-pointer">
+            <i class="fa-solid fa-arrows-rotate"></i> รีเซ็ตเป็น URL เริ่มต้นของระบบ
+          </button>
+        </div>
+      </div>
+    `,
+    confirmButtonText: 'รับทราบ (บันทึกลงเครื่องแล้ว)',
+    confirmButtonColor: '#059669',
+    showCloseButton: true,
+    allowOutsideClick: false
+  });
+};
+
+window.resetDefaultGasUrlAndRetry = function() {
+  const defaultUrl = 'https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec';
+  localStorage.setItem('slts_apps_script_url', defaultUrl);
+  state.appsScriptUrl = defaultUrl;
+
+  Swal.fire({
+    icon: 'success',
+    title: 'รีเซ็ต URL สำเร็จ',
+    text: 'ระบบได้รีเซ็ต Web App URL กลับมาเป็น URL มาตรฐานเรียบร้อยแล้ว',
+    timer: 1500,
+    showConfirmButton: false
+  });
+};
 
 /**
  * แปลงรูปแบบวันเดือนปีให้อยู่ในรูปแบบไทยเสมอ เช่น "25 ส.ค. 2569 13:52:23" หรือ "25 ส.ค. 2569"
@@ -2989,14 +3084,7 @@ window.openManualUploadModal = function() {
       } catch (err) {
         console.error('Manual full upload error:', err);
         hideCustomLoading();
-        Swal.fire({
-          icon: 'error',
-          title: 'การอัปโหลดไม่สำเร็จ',
-          text: err.message,
-          showCloseButton: true,
-          allowOutsideClick: false,
-          confirmButtonColor: '#2563eb'
-        });
+        showGasUploadErrorModal(err, uploadPayload, imageFilename, formData.caseNumber);
       }
     }
   });
@@ -6625,14 +6713,7 @@ async function handleDesktopUpload() {
   } catch (err) {
     console.error('Desktop upload error:', err);
     hideCustomLoading();
-    Swal.fire({
-      icon: 'error',
-      title: 'การอัปโหลดไม่สำเร็จ',
-      text: err.message,
-      showCloseButton: true,
-      allowOutsideClick: false,
-      confirmButtonColor: '#2563eb'
-    });
+    showGasUploadErrorModal(err, uploadPayload, imageFilename, caseNumber);
   }
 }
 
@@ -7241,45 +7322,11 @@ async function captureAndProcessPhoto() {
     console.error('Capture/Upload error:', error);
     hideCustomLoading();
 
-    // บันทึกเข้า Offline Queue เผื่ออัปโหลดใหม่
-    try {
-      const caseNumber = getFormattedCaseNumber();
-      const baseFilename = caseNumber.replace(/\//g, '-');
-      const imageFilename = baseFilename + '.jpg';
-      addToOfflineQueue({
-        payload: {
-          caseNumber: caseNumber,
-          courtType: elements.courtTypeSelect.value,
-          province: state.selectedProvince || 'อุดรธานี',
-          district: elements.districtSelect.value,
-          subdistrict: elements.subdistrictSelect.value,
-          locationType: elements.locationTypeSelect.value,
-          locationText: getFullLocationText(),
-          lat: state.lat,
-          lng: state.lng,
-          heading: window.compassManager ? window.compassManager.getHeading() : 0,
-          dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
-          fileName: imageFilename
-        },
-        fileName: imageFilename,
-        caseNumber: caseNumber
-      });
-    } catch (e) {
-      console.warn('Queue fallback notice:', e);
-    }
-
-    Swal.fire({
-      icon: 'warning',
-      title: 'การอัปโหลดออนไลน์ขัดข้อง',
-      html: `<p class="text-sm text-gray-700 mb-2">บันทึกรูปภาพลงอุปกรณ์เรียบร้อยแล้ว แต่การอัปโหลดขึ้น Google Drive ขัดข้อง</p>
-             <p class="text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 mb-3"><i class="fa-solid fa-cloud-arrow-up mr-1"></i>ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์</b> ให้แล้ว โดยจะทำการซิงค์ให้อัตโนมัติเมื่อเชื่อมต่ออินเทอร์เน็ต</p>`,
-      confirmButtonText: 'ตกลง',
-      confirmButtonColor: '#2563eb',
-      showCloseButton: true,
-      allowOutsideClick: false
-    }).then(() => {
-      resetFormForNextCase();
-    });
+    const caseNumber = getFormattedCaseNumber();
+    const baseFilename = caseNumber.replace(/\//g, '-');
+    const imageFilename = baseFilename + '.jpg';
+    showGasUploadErrorModal(error, uploadPayload, imageFilename, caseNumber);
+    resetFormForNextCase();
   }
 }
 
