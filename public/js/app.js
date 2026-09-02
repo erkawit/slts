@@ -283,6 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSettings();
   initResponsiveUI();
   initMobileHandoffReceiver();
+  renderDesktopFormHistoryCard();
 
   // ตรวจสอบการเปิดผ่าน LINE: หากเป็น LINE In-App Browser ให้สลับไปเปิดในเบราว์เซอร์ภายนอก (Chrome/Safari) ทันที
   if (/Line/i.test(navigator.userAgent) && !window.location.search.includes('openExternalBrowser=1')) {
@@ -6736,6 +6737,30 @@ async function handleDesktopUpload() {
       loadGoogleSheetData(true);
     });
 
+    // บันทึกประวัติการกรอกข้อมูลลงในเครื่อง (Desktop Form History) เพื่อลดความผิดพลาดในการกรอกซ้ำ
+    saveDesktopFormHistory({
+      caseNumber: caseNumber,
+      courtType: payloadData.courtType,
+      courtCategory: state.desktopCourtCategory || state.selectedCourtCategory || 'ศาลจังหวัด',
+      customName: localStorage.getItem('slts_custom_court_name') || '',
+      province: payloadData.province,
+      district: payloadData.district,
+      subdistrict: payloadData.subdistrict,
+      locationType: payloadData.locationType,
+      houseNo: elements.houseNoInput ? elements.houseNoInput.value.trim() : '',
+      moo: elements.mooInput ? elements.mooInput.value.trim() : '',
+      localAdminName: elements.localAdminNameInput ? elements.localAdminNameInput.value.trim() : '',
+      customOtherLocationName: elements.customOtherLocationNameInput ? elements.customOtherLocationNameInput.value.trim() : '',
+      locationText: payloadData.locationText,
+      coordinates: elements.coordinatesInput ? elements.coordinatesInput.value.trim() : `${state.lat}, ${state.lng}`,
+      caseExtra: elements.caseExtraInput ? elements.caseExtraInput.value.trim() : '',
+      udonPrefix: elements.udonPrefixInput ? elements.udonPrefixInput.value.trim() : '',
+      udonCaseNo: elements.udonCaseNoInput ? elements.udonCaseNoInput.value.trim() : '',
+      udonCaseYear: elements.udonCaseYearSelect ? elements.udonCaseYearSelect.value : '',
+      otherCaseNo: elements.otherCaseNoInput ? elements.otherCaseNoInput.value.trim() : '',
+      otherCaseYear: elements.otherCaseYearSelect ? elements.otherCaseYearSelect.value : ''
+    });
+
   } catch (err) {
     console.error('Desktop upload error:', err);
     hideCustomLoading();
@@ -6750,6 +6775,253 @@ function resetDesktopForm() {
   if (elements.desktopImagePreviewContainer) elements.desktopImagePreviewContainer.classList.add('hidden');
   if (elements.desktopPreviewImg) elements.desktopPreviewImg.src = '';
 }
+
+// =========================================================================
+// DESKTOP FORM INPUT HISTORY & QUICK-FILL SYSTEM (ระบบบันทึกประวัติการกรอกข้อมูล)
+// =========================================================================
+const DESKTOP_FORM_HISTORY_KEY = 'slts_desktop_form_history';
+
+window.getDesktopFormHistory = function() {
+  try {
+    return JSON.parse(localStorage.getItem(DESKTOP_FORM_HISTORY_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+};
+
+window.saveDesktopFormHistory = function(entry) {
+  if (!entry || !entry.caseNumber) return;
+  try {
+    let list = getDesktopFormHistory();
+    // ลบรายการเดิมที่มีเลขคดีซ้ำออกก่อน เพื่อดันรายการล่าสุดขึ้นบน
+    list = list.filter(item => item.caseNumber !== entry.caseNumber);
+    list.unshift({
+      id: 'dfh_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      savedAt: WatermarkEngine.formatThaiDateTime(new Date()),
+      ...entry
+    });
+    // จำกัดสูงสุด 30 รายการล่าสุด
+    if (list.length > 30) list = list.slice(0, 30);
+    localStorage.setItem(DESKTOP_FORM_HISTORY_KEY, JSON.stringify(list));
+    renderDesktopFormHistoryCard();
+    updateDesktopHistoryBadges();
+  } catch (e) {
+    console.warn('saveDesktopFormHistory error:', e);
+  }
+};
+
+window.updateDesktopHistoryBadges = function() {
+  const count = getDesktopFormHistory().length;
+  const hBadge = document.getElementById('desktopHistoryHeaderBadge');
+  const cBadge = document.getElementById('desktopHistoryCardCountBadge');
+  if (hBadge) hBadge.textContent = count;
+  if (cBadge) cBadge.textContent = count;
+};
+
+window.renderDesktopFormHistoryCard = function(filterQuery = '') {
+  const container = document.getElementById('desktopFormHistoryListContainer');
+  if (!container) return;
+
+  const history = getDesktopFormHistory();
+  updateDesktopHistoryBadges();
+
+  const query = filterQuery.trim().toLowerCase();
+  const filtered = query
+    ? history.filter(item => {
+        const text = `${item.caseNumber || ''} ${item.locationText || ''} ${item.subdistrict || ''} ${item.district || ''} ${item.province || ''}`.toLowerCase();
+        return text.includes(query);
+      })
+    : history;
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="py-6 text-center text-gray-400">
+        <i class="fa-solid fa-clock-rotate-left text-2xl mb-1.5 text-gray-300"></i>
+        <p class="text-xs font-semibold text-gray-500">${query ? 'ไม่พบข้อมูลที่ตรงกับคำค้นหา' : 'ยังไม่มีประวัติการกรอกข้อมูล'}</p>
+        <p class="text-[10px] text-gray-400 mt-0.5">เมื่อท่านกรอกและยืนยันข้อมูล ระบบจะจัดเก็บประวัติให้อัตโนมัติ</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map((item, idx) => {
+    return `
+      <div class="p-2.5 rounded-xl border border-gray-200 hover:border-blue-300 bg-gray-50/60 hover:bg-blue-50/30 transition text-xs flex flex-col gap-1.5 group">
+        <div class="flex items-center justify-between gap-1">
+          <span class="font-bold text-gray-900 truncate">${item.caseNumber}</span>
+          <span class="text-[10px] text-gray-400 font-mono flex-shrink-0">${item.savedAt || ''}</span>
+        </div>
+        <p class="text-[11px] text-gray-600 truncate">${item.locationText || '-'}</p>
+        <div class="flex items-center justify-between pt-1 border-t border-gray-100 mt-0.5">
+          <span class="text-[10px] text-blue-700 font-mono font-medium">${item.coordinates ? `📍 ${item.coordinates}` : ''}</span>
+          <div class="flex items-center gap-1.5">
+            <button type="button" onclick="applyDesktopFormHistoryItem('${item.id}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-[11px] font-bold rounded-lg transition shadow-2xs flex items-center gap-1 cursor-pointer" title="นำข้อมูลชุดนี้ไปกรอกลงฟอร์มทันที">
+              <i class="fa-solid fa-arrow-turn-down-left"></i> <span>กรอกลงฟอร์ม</span>
+            </button>
+            <button type="button" onclick="deleteDesktopFormHistoryItem('${item.id}', event)" class="p-1 text-gray-400 hover:text-red-600 rounded cursor-pointer transition" title="ลบรายการนี้">
+              <i class="fa-solid fa-xmark text-xs"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+};
+
+window.filterDesktopFormHistory = function(query) {
+  renderDesktopFormHistoryCard(query);
+};
+
+window.deleteDesktopFormHistoryItem = function(id, e) {
+  if (e) e.stopPropagation();
+  let list = getDesktopFormHistory();
+  list = list.filter(item => item.id !== id);
+  localStorage.setItem(DESKTOP_FORM_HISTORY_KEY, JSON.stringify(list));
+  renderDesktopFormHistoryCard();
+};
+
+window.clearAllDesktopFormHistory = function() {
+  const history = getDesktopFormHistory();
+  if (history.length === 0) return;
+
+  Swal.fire({
+    title: 'ต้องการล้างประวัติการกรอก?',
+    text: 'ประวัติการกรอกข้อมูลที่บันทึกไว้ในเครื่องทั้งหมดจะถูกลบออก',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'ล้างประวัติ',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#dc2626',
+    cancelButtonColor: '#6b7280'
+  }).then((res) => {
+    if (res.isConfirmed) {
+      localStorage.removeItem(DESKTOP_FORM_HISTORY_KEY);
+      renderDesktopFormHistoryCard();
+      updateDesktopHistoryBadges();
+    }
+  });
+};
+
+window.applyDesktopFormHistoryItem = function(id) {
+  const history = getDesktopFormHistory();
+  const item = history.find(h => h.id === id);
+  if (!item) return;
+
+  // 1. จังหวัด อำเภอ ตำบล
+  const prov = item.province || state.selectedProvince || 'อุดรธานี';
+  if (elements.provinceSelect) elements.provinceSelect.value = prov;
+  state.selectedProvince = prov;
+  updateDistricts(prov, item.district);
+  if (item.district) {
+    updateSubdistricts(prov, item.district, item.subdistrict);
+  }
+
+  // 2. ประเภทศาล
+  const courtCategory = item.courtCategory || 'ศาลจังหวัด';
+  const customCourtName = item.customName || '';
+  if (window.setDesktopCourtType) {
+    window.setDesktopCourtType(courtCategory, customCourtName, prov);
+  }
+
+  // 3. ข้อมูลเลขคดี
+  const isOther = courtCategory === 'ศาลอื่น' || courtCategory === 'หมายศาลอื่น';
+  if (isOther) {
+    if (elements.otherCaseNoInput) elements.otherCaseNoInput.value = item.otherCaseNo || '';
+    if (elements.otherCaseYearSelect) elements.otherCaseYearSelect.value = item.otherCaseYear || new Date().getFullYear() + 543;
+  } else {
+    if (elements.udonPrefixInput) elements.udonPrefixInput.value = item.udonPrefix || '';
+    if (elements.udonCaseNoInput) elements.udonCaseNoInput.value = item.udonCaseNo || '';
+    if (elements.udonCaseYearSelect) elements.udonCaseYearSelect.value = item.udonCaseYear || new Date().getFullYear() + 543;
+  }
+  if (elements.caseExtraInput) elements.caseExtraInput.value = item.caseExtra || '';
+
+  // 4. ข้อมูลสถานที่
+  if (elements.locationTypeSelect) {
+    elements.locationTypeSelect.value = item.locationType || 'หมายบ้าน';
+    updateLocationFields();
+  }
+  if (elements.houseNoInput) elements.houseNoInput.value = item.houseNo || '';
+  if (elements.mooInput) elements.mooInput.value = item.moo || '';
+  if (elements.localAdminNameInput) elements.localAdminNameInput.value = item.localAdminName || '';
+  if (elements.customOtherLocationNameInput) elements.customOtherLocationNameInput.value = item.customOtherLocationName || '';
+
+  // 5. พิกัดทางภูมิศาสตร์
+  if (item.coordinates && elements.coordinatesInput) {
+    elements.coordinatesInput.value = item.coordinates;
+    const parts = item.coordinates.split(',').map(s => parseFloat(s.trim()));
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      state.lat = parts[0];
+      state.lng = parts[1];
+    }
+  }
+
+  updateCaptureButtonState();
+
+  // ไฮไลต์ฟอร์มให้ผู้ใช้เห็นว่าโหลดข้อมูลแล้ว
+  if (elements.form) {
+    elements.form.classList.add('ring-2', 'ring-blue-400', 'bg-blue-50/20');
+    setTimeout(() => {
+      elements.form.classList.remove('ring-2', 'ring-blue-400', 'bg-blue-50/20');
+    }, 800);
+  }
+
+  const Toast = Swal.mixin({
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 1500
+  });
+  Toast.fire({
+    icon: 'success',
+    title: `นำข้อมูลเลขคดี ${item.caseNumber} ลงฟอร์มเรียบร้อย`
+  });
+};
+
+window.showDesktopHistoryModal = function() {
+  const history = getDesktopFormHistory();
+  let listHtml = '';
+  if (history.length === 0) {
+    listHtml = `
+      <div class="py-10 text-center text-gray-400">
+        <i class="fa-solid fa-clock-rotate-left text-3xl mb-2 text-gray-300"></i>
+        <p class="text-sm font-bold text-gray-600">ยังไม่มีประวัติการกรอกข้อมูลในเครื่อง</p>
+        <p class="text-xs text-gray-400 mt-1">ประวัติจะถูกบันทึกอัตโนมัติเมื่อท่านทำการกรอกและยืนยันข้อมูล</p>
+      </div>
+    `;
+  } else {
+    listHtml = history.map((item, idx) => `
+      <div class="p-3 rounded-2xl border border-gray-200 hover:border-blue-400 bg-white hover:bg-blue-50/40 transition flex items-center justify-between gap-3 text-left">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0">${idx + 1}</span>
+            <span class="font-bold text-sm text-gray-900 truncate">${item.caseNumber}</span>
+            <span class="text-[10px] text-gray-400 font-mono">${item.savedAt || ''}</span>
+          </div>
+          <p class="text-xs text-gray-600 truncate pl-8">${item.locationText || '-'}</p>
+          ${item.coordinates ? `<p class="text-[10px] text-blue-700 font-mono pl-8 mt-0.5">📍 พิกัด: ${item.coordinates}</p>` : ''}
+        </div>
+        <button type="button" onclick="Swal.close(); applyDesktopFormHistoryItem('${item.id}')" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer">
+          <i class="fa-solid fa-arrow-turn-down-left"></i> <span>ใช้ข้อมูลนี้</span>
+        </button>
+      </div>
+    `).join('');
+  }
+
+  Swal.fire({
+    title: `<div class="flex items-center justify-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-clock-rotate-left text-blue-600"></i> ประวัติการกรอกข้อมูล (${history.length} รายการ)</div>`,
+    html: `
+      <div class="space-y-2 max-h-[60vh] overflow-y-auto slts-swal-body-scroll p-1">
+        ${listHtml}
+      </div>
+    `,
+    width: '600px',
+    showConfirmButton: false,
+    showCloseButton: true,
+    customClass: {
+      popup: 'rounded-3xl p-5'
+    }
+  });
+};
 
 /**
  * สลับมุมมองกล้องระหว่าง แนวนอน (4:3) และ แนวตั้ง (3:4)
