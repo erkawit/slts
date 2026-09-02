@@ -8742,6 +8742,13 @@ state.routeStartLocation = {
   isCustom: false
 };
 
+state.routeEndLocation = {
+  name: '',
+  lat: null,
+  lng: null,
+  enabled: false
+};
+
 /**
  * กรองและลบ Circular Structure (เช่น leafletMarker) ออกจาก Array ของ Stops ก่อนบันทึกหรือแปลงเป็น JSON
  */
@@ -8771,6 +8778,7 @@ window.saveCurrentRouteStopsHistory = function(stops) {
       savedAt: new Date().toISOString(),
       province: state.selectedProvince || 'อุดรธานี',
       startLocation: state.routeStartLocation,
+      endLocation: state.routeEndLocation,
       isRoundTrip: state.isRoundTrip
     };
     localStorage.setItem('slts_saved_route_stops', JSON.stringify(dataToSave));
@@ -8792,6 +8800,7 @@ window.loadSavedRouteStopsHistory = function() {
         state.currentRouteStops = parsed.stops;
         if (parsed.province) state.selectedProvince = parsed.province;
         if (parsed.startLocation) state.routeStartLocation = parsed.startLocation;
+        if (parsed.endLocation) state.routeEndLocation = parsed.endLocation;
         if (parsed.isRoundTrip !== undefined) state.isRoundTrip = parsed.isRoundTrip;
         return parsed.stops;
       }
@@ -10910,50 +10919,192 @@ window.deleteRouteStop = function(index, e) {
 /**
  * เปิด Modal ตั้งค่าจุดเริ่มต้นการเดินทาง
  */
+/**
+ * เปิด Modal ค้นหาจุดใน Google Map / แผนที่ และตั้งค่าจุดเริ่มต้น & จุดสิ้นสุดการเดินทาง
+ * รองรับทั้งการพิมพ์ค้นหาสถานที่, วางพิกัด, วางลิงก์ Google Maps และเลือกเป็นจุดเริ่มหรือจุดสิ้นสุดได้อิสระ
+ */
 window.openStartPointConfigModal = function() {
-  const currentStart = state.routeStartLocation;
+  const currentStart = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872 };
+  const currentEnd = state.routeEndLocation || { name: '', lat: null, lng: null, enabled: false };
 
-  Swal.fire({
-    title: '<div class="flex items-center justify-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-flag-checkered text-blue-600"></i> กำหนดจุดเริ่มต้นการเดินทาง</div>',
-    html: `
-      <div class="text-left text-xs space-y-3.5">
-        <p class="text-gray-600">เลือกตำแหน่งที่ต้องการใช้เป็นจุดตั้งต้นในการคำนวณและนำทางส่งหมาย:</p>
+  let activeConfigTab = 'start'; // 'start' | 'end'
+  let searchResultsCache = [];
 
-        <div class="grid grid-cols-2 gap-2">
-          <button type="button" onclick="setPresetStartLocation('court')" class="p-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl font-bold text-blue-700 flex items-center justify-center gap-1.5 transition cursor-pointer">
-            <i class="fa-solid fa-landmark"></i> ศาลจังหวัดอุดรธานี
-          </button>
-          <button type="button" onclick="setPresetStartLocation('gps')" class="p-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl font-bold text-emerald-700 flex items-center justify-center gap-1.5 transition cursor-pointer">
-            <i class="fa-solid fa-location-crosshairs"></i> ดึงพิกัด GPS ปัจจุบัน
+  const modalHtml = `
+    <div class="text-left text-xs space-y-3.5 select-none max-h-[68vh] overflow-y-auto pr-1 slts-swal-body-scroll">
+      
+      <!-- ส่วนค้นหาจุดใน Google Map / แผนที่ (Search Bar) -->
+      <div class="p-3.5 bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border border-blue-200 rounded-2xl space-y-2.5">
+        <label class="block font-bold text-gray-900 text-xs flex items-center justify-between">
+          <span class="flex items-center gap-1.5 text-blue-800">
+            <i class="fa-solid fa-magnifying-glass-location text-blue-600"></i>
+            <span>ค้นหาสถานที่ใน Google Map / แผนที่</span>
+          </span>
+          <span class="text-[10px] text-gray-500 font-normal">รองรับชื่อสถานที่, พิกัด หรือ ลิงก์ Google Maps</span>
+        </label>
+        
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1">
+            <input type="text" id="mapLocationSearchInput" placeholder="พิมพ์ชื่อสถานที่ เช่น ศาลแขวงอุดรธานี, พิกัด หรือวางลิงก์ Maps..." class="w-full bg-white border border-gray-300 focus:border-blue-500 rounded-xl pl-8 pr-3 py-2 text-xs text-gray-800 shadow-2xs font-medium">
+            <i class="fa-solid fa-location-dot absolute left-2.5 top-2.5 text-gray-400 text-xs"></i>
+          </div>
+          <button type="button" id="btnExecuteMapSearch" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-sm transition flex items-center gap-1.5 flex-shrink-0 cursor-pointer">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <span>ค้นหา</span>
           </button>
         </div>
 
+        <!-- Quick Presets -->
+        <div class="flex items-center gap-2 flex-wrap pt-0.5 text-[11px]">
+          <span class="text-[10px] font-bold text-gray-500">ทางลัด:</span>
+          <button type="button" onclick="applyPresetLocation('court', 'start')" class="px-2 py-1 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg font-semibold text-blue-700 transition flex items-center gap-1 cursor-pointer">
+            <i class="fa-solid fa-landmark text-blue-600"></i> ศาลจังหวัดอุดรธานี
+          </button>
+          <button type="button" onclick="applyPresetLocation('gps', 'start')" class="px-2 py-1 bg-white hover:bg-emerald-50 border border-emerald-200 rounded-lg font-semibold text-emerald-700 transition flex items-center gap-1 cursor-pointer">
+            <i class="fa-solid fa-location-crosshairs text-emerald-600"></i> ดึง GPS ปัจจุบัน
+          </button>
+        </div>
+
+        <!-- Search Results Box -->
+        <div id="mapSearchResultsContainer" class="hidden space-y-1.5 pt-1.5 border-t border-blue-200/70">
+          <div class="flex items-center justify-between text-[11px] font-bold text-gray-700">
+            <span>ผลการค้นหาสถานที่:</span>
+            <span id="mapSearchResultsCount" class="text-blue-600">0 รายการ</span>
+          </div>
+          <div id="mapSearchResultsList" class="space-y-1.5 max-h-40 overflow-y-auto slts-swal-body-scroll">
+            <!-- Results Injected Here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Switcher: กำหนดจุดเริ่มต้น VS จุดสิ้นสุด -->
+      <div class="flex border-b border-gray-200 text-xs">
+        <button type="button" id="tabBtnConfigStart" onclick="switchConfigModalTab('start')" class="flex-1 py-2.5 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center justify-center gap-1.5 cursor-pointer">
+          <i class="fa-solid fa-flag-checkered text-blue-600"></i>
+          <span>1. จุดเริ่มต้นการเดินทาง</span>
+        </button>
+        <button type="button" id="tabBtnConfigEnd" onclick="switchConfigModalTab('end')" class="flex-1 py-2.5 font-bold text-gray-500 hover:text-violet-700 border-b-2 border-transparent transition flex items-center justify-center gap-1.5 cursor-pointer">
+          <i class="fa-solid fa-flag text-violet-600"></i>
+          <span>2. จุดสิ้นสุดการเดินทาง (กำหนดเอง)</span>
+        </button>
+      </div>
+
+      <!-- Tab Content 1: จุดเริ่มต้น (Start Point) -->
+      <div id="configTabContentStart" class="space-y-3 p-1">
         <div>
-          <label class="block font-bold text-gray-800 mb-1">ชื่อจุดเริ่มต้น:</label>
-          <input type="text" id="startLocNameInput" value="${currentStart.name}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
+          <label class="block font-bold text-gray-800 mb-1">
+            <i class="fa-solid fa-map-pin text-blue-600 mr-1"></i> ชื่อจุดเริ่มต้น: <span class="text-red-500">*</span>
+          </label>
+          <input type="text" id="cfgStartName" value="${currentStart.name || 'ศาลจังหวัดอุดรธานี'}" class="w-full bg-white border border-gray-300 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
         </div>
 
         <div class="grid grid-cols-2 gap-2.5">
           <div>
-            <label class="block font-bold text-gray-800 mb-1">ละติจูด (Lat):</label>
-            <input type="text" id="startLocLatInput" value="${currentStart.lat}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono">
+            <label class="block font-bold text-gray-800 mb-1">ละติจูด (Lat): <span class="text-red-500">*</span></label>
+            <input type="text" id="cfgStartLat" value="${currentStart.lat || 17.4138}" class="w-full bg-white border border-gray-300 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-semibold">
           </div>
           <div>
-            <label class="block font-bold text-gray-800 mb-1">ลองจิจูด (Lng):</label>
-            <input type="text" id="startLocLngInput" value="${currentStart.lng}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono">
+            <label class="block font-bold text-gray-800 mb-1">ลองจิจูด (Lng): <span class="text-red-500">*</span></label>
+            <input type="text" id="cfgStartLng" value="${currentStart.lng || 102.7872}" class="w-full bg-white border border-gray-300 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono font-semibold">
           </div>
         </div>
       </div>
-    `,
+
+      <!-- Tab Content 2: จุดสิ้นสุด (End Point) -->
+      <div id="configTabContentEnd" class="hidden space-y-3 p-1">
+        <div class="p-3 bg-violet-50/80 border border-violet-200 rounded-xl flex items-center justify-between">
+          <div>
+            <span class="font-bold text-violet-900 block text-xs">เปิดใช้งานจุดสิ้นสุดเฉพาะ</span>
+            <span class="text-[10px] text-violet-700">คำนวณและลากเส้นทางไปยังจุดหมายปลายทางที่กำหนดนี้เมื่อส่งหมายครบทุกจุด</span>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="cfgEndEnabled" ${currentEnd.enabled ? 'checked' : ''} class="sr-only peer" onchange="toggleEndInputs(this.checked)">
+            <div class="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-600"></div>
+          </label>
+        </div>
+
+        <div id="endInputsWrapper" class="${currentEnd.enabled ? '' : 'opacity-50 pointer-events-none'} space-y-3 transition">
+          <div>
+            <label class="block font-bold text-gray-800 mb-1">
+              <i class="fa-solid fa-flag text-violet-600 mr-1"></i> ชื่อจุดสิ้นสุด (ปลายทาง):
+            </label>
+            <input type="text" id="cfgEndName" value="${currentEnd.name || ''}" placeholder="เช่น ศาลจังหวัดอุดรธานี หรือ ที่ว่าการอำเภอ..." class="w-full bg-white border border-gray-300 focus:border-violet-500 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
+          </div>
+
+          <div class="grid grid-cols-2 gap-2.5">
+            <div>
+              <label class="block font-bold text-gray-800 mb-1">ละติจูด (Lat):</label>
+              <input type="text" id="cfgEndLat" value="${currentEnd.lat || ''}" placeholder="เช่น 17.4138" class="w-full bg-white border border-gray-300 focus:border-violet-500 rounded-xl px-3 py-2 text-xs font-mono font-semibold">
+            </div>
+            <div>
+              <label class="block font-bold text-gray-800 mb-1">ลองจิจูด (Lng):</label>
+              <input type="text" id="cfgEndLng" value="${currentEnd.lng || ''}" placeholder="เช่น 102.7872" class="w-full bg-white border border-gray-300 focus:border-violet-500 rounded-xl px-3 py-2 text-xs font-mono font-semibold">
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  `;
+
+  Swal.fire({
+    title: '<div class="flex items-center justify-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-map-location-dot text-blue-600"></i> ค้นหาพิกัด & กำหนดจุดเริ่มต้น / จุดสิ้นสุด</div>',
+    html: modalHtml,
+    width: '740px',
+    customClass: {
+      popup: 'rounded-3xl p-5 max-w-[95vw] max-h-[90vh]'
+    },
     showCancelButton: true,
-    confirmButtonText: 'บันทึกจุดเริ่มต้น',
+    confirmButtonText: '<i class="fa-solid fa-floppy-disk mr-1"></i> บันทึกการตั้งค่า',
     cancelButtonText: 'ยกเลิก',
     confirmButtonColor: '#2563eb',
+    cancelButtonColor: '#6b7280',
     didOpen: () => {
-      window.setPresetStartLocation = function(type) {
-        const nameInput = document.getElementById('startLocNameInput');
-        const latInput = document.getElementById('startLocLatInput');
-        const lngInput = document.getElementById('startLocLngInput');
+      const searchInput = document.getElementById('mapLocationSearchInput');
+      const btnSearch = document.getElementById('btnExecuteMapSearch');
+      const resultsContainer = document.getElementById('mapSearchResultsContainer');
+      const resultsList = document.getElementById('mapSearchResultsList');
+      const countEl = document.getElementById('mapSearchResultsCount');
+
+      window.switchConfigModalTab = function(tab) {
+        activeConfigTab = tab;
+        const btnStart = document.getElementById('tabBtnConfigStart');
+        const btnEnd = document.getElementById('tabBtnConfigEnd');
+        const cntStart = document.getElementById('configTabContentStart');
+        const cntEnd = document.getElementById('configTabContentEnd');
+
+        const activeStartCls = 'flex-1 py-2.5 font-bold text-blue-700 border-b-2 border-blue-600 transition flex items-center justify-center gap-1.5 cursor-pointer';
+        const activeEndCls = 'flex-1 py-2.5 font-bold text-violet-700 border-b-2 border-violet-600 transition flex items-center justify-center gap-1.5 cursor-pointer';
+        const inactiveCls = 'flex-1 py-2.5 font-bold text-gray-500 hover:text-gray-700 border-b-2 border-transparent transition flex items-center justify-center gap-1.5 cursor-pointer';
+
+        if (tab === 'start') {
+          if (btnStart) btnStart.className = activeStartCls;
+          if (btnEnd) btnEnd.className = inactiveCls;
+          if (cntStart) cntStart.classList.remove('hidden');
+          if (cntEnd) cntEnd.classList.add('hidden');
+        } else {
+          if (btnStart) btnStart.className = inactiveCls;
+          if (btnEnd) btnEnd.className = activeEndCls;
+          if (cntStart) cntStart.classList.add('hidden');
+          if (cntEnd) cntEnd.classList.remove('hidden');
+        }
+      };
+
+      window.toggleEndInputs = function(enabled) {
+        const wrapper = document.getElementById('endInputsWrapper');
+        if (wrapper) {
+          if (enabled) {
+            wrapper.classList.remove('opacity-50', 'pointer-events-none');
+          } else {
+            wrapper.classList.add('opacity-50', 'pointer-events-none');
+          }
+        }
+      };
+
+      window.applyPresetLocation = function(type, target) {
+        const nameInput = target === 'start' ? document.getElementById('cfgStartName') : document.getElementById('cfgEndName');
+        const latInput = target === 'start' ? document.getElementById('cfgStartLat') : document.getElementById('cfgEndLat');
+        const lngInput = target === 'start' ? document.getElementById('cfgStartLng') : document.getElementById('cfgEndLng');
 
         if (type === 'court') {
           if (nameInput) nameInput.value = 'ศาลจังหวัดอุดรธานี';
@@ -10971,21 +11122,167 @@ window.openStartPointConfigModal = function() {
           }
         }
       };
+
+      window.selectSearchResult = function(idx, assignTarget) {
+        const item = searchResultsCache[idx];
+        if (!item) return;
+
+        if (assignTarget === 'start') {
+          const nameInput = document.getElementById('cfgStartName');
+          const latInput = document.getElementById('cfgStartLat');
+          const lngInput = document.getElementById('cfgStartLng');
+          if (nameInput) nameInput.value = item.name;
+          if (latInput) latInput.value = item.lat;
+          if (lngInput) lngInput.value = item.lng;
+          switchConfigModalTab('start');
+        } else {
+          const chkEnd = document.getElementById('cfgEndEnabled');
+          if (chkEnd) {
+            chkEnd.checked = true;
+            toggleEndInputs(true);
+          }
+          const nameInput = document.getElementById('cfgEndName');
+          const latInput = document.getElementById('cfgEndLat');
+          const lngInput = document.getElementById('cfgEndLng');
+          if (nameInput) nameInput.value = item.name;
+          if (latInput) latInput.value = item.lat;
+          if (lngInput) lngInput.value = item.lng;
+          switchConfigModalTab('end');
+        }
+      };
+
+      const executeSearch = async () => {
+        const q = (searchInput?.value || '').trim();
+        if (!q) return;
+
+        // ตรวจสอบพิกัดโดยตรงก่อน (e.g. 17.4138, 102.7872 or Google Maps Link)
+        const coordMatch = q.match(/(-?\d+\.\d+)[\s,]+(-?\d+\.\d+)/);
+        if (coordMatch) {
+          const lat = parseFloat(coordMatch[1]);
+          const lng = parseFloat(coordMatch[2]);
+          searchResultsCache = [{
+            name: `พิกัดระบุ: ${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+            subText: 'พิกัดที่กรอก / ถอดรหัสจากลิงก์',
+            lat: lat.toFixed(6),
+            lng: lng.toFixed(6)
+          }];
+          renderSearchResults();
+          return;
+        }
+
+        if (btnSearch) {
+          btnSearch.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+          btnSearch.disabled = true;
+        }
+
+        try {
+          const queryParam = encodeURIComponent(q);
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${queryParam}&countrycodes=th&limit=5`, {
+            headers: { 'User-Agent': 'SLTS-Location-Search/1.0' },
+            signal: AbortSignal.timeout(6000)
+          });
+          if (!res.ok) throw new Error('Search request failed');
+          const data = await res.json();
+          searchResultsCache = (data || []).map(item => {
+            const parts = (item.display_name || '').split(',').map(s => s.trim());
+            const shortName = parts[0] || q;
+            const sub = parts.slice(1, 4).join(', ');
+            return {
+              name: shortName,
+              subText: sub || item.display_name,
+              lat: parseFloat(item.lat).toFixed(6),
+              lng: parseFloat(item.lon).toFixed(6)
+            };
+          });
+
+          renderSearchResults();
+        } catch (err) {
+          console.warn('Location search error:', err);
+          if (resultsContainer) resultsContainer.classList.remove('hidden');
+          if (resultsList) {
+            resultsList.innerHTML = `<div class="p-2 text-center text-gray-400 text-xs">ไม่พบสถานที่ที่ค้นหา หรือการเชื่อมต่อขัดข้อง</div>`;
+          }
+        } finally {
+          if (btnSearch) {
+            btnSearch.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> <span>ค้นหา</span>';
+            btnSearch.disabled = false;
+          }
+        }
+      };
+
+      const renderSearchResults = () => {
+        if (!resultsContainer || !resultsList) return;
+        resultsContainer.classList.remove('hidden');
+        if (countEl) countEl.textContent = `${searchResultsCache.length} รายการ`;
+
+        if (searchResultsCache.length === 0) {
+          resultsList.innerHTML = `<div class="p-3 text-center text-gray-400 text-xs">ไม่พบสถานที่ที่ตรงกับคำค้นหา</div>`;
+          return;
+        }
+
+        resultsList.innerHTML = searchResultsCache.map((item, idx) => `
+          <div class="p-2 bg-white rounded-xl border border-gray-200 hover:border-blue-300 transition flex items-center justify-between gap-2 shadow-2xs">
+            <div class="min-w-0 flex-1 text-left">
+              <div class="font-bold text-gray-900 truncate text-[11px]">${item.name}</div>
+              <div class="text-[10px] text-gray-500 truncate">${item.subText}</div>
+              <div class="text-[9px] font-mono text-blue-600 font-semibold">${item.lat}, ${item.lng}</div>
+            </div>
+            <div class="flex items-center gap-1 flex-shrink-0">
+              <button type="button" onclick="selectSearchResult(${idx}, 'start')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-[10px] transition cursor-pointer" title="ตั้งเป็นจุดเริ่มต้น">
+                <i class="fa-solid fa-flag-checkered mr-0.5"></i> จุดเริ่ม
+              </button>
+              <button type="button" onclick="selectSearchResult(${idx}, 'end')" class="px-2 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 font-bold rounded-lg text-[10px] transition cursor-pointer" title="ตั้งเป็นจุดสิ้นสุด">
+                <i class="fa-solid fa-flag mr-0.5"></i> จุดสิ้นสุด
+              </button>
+            </div>
+          </div>
+        `).join('');
+      };
+
+      if (btnSearch) btnSearch.onclick = executeSearch;
+      if (searchInput) {
+        searchInput.onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            executeSearch();
+          }
+        };
+      }
     },
     preConfirm: () => {
-      const name = document.getElementById('startLocNameInput')?.value || 'จุดเริ่มต้น';
-      const lat = parseFloat(document.getElementById('startLocLatInput')?.value);
-      const lng = parseFloat(document.getElementById('startLocLngInput')?.value);
+      const startName = (document.getElementById('cfgStartName')?.value || 'จุดเริ่มต้น').trim();
+      const startLat = parseFloat(document.getElementById('cfgStartLat')?.value);
+      const startLng = parseFloat(document.getElementById('cfgStartLng')?.value);
 
-      if (isNaN(lat) || isNaN(lng) || lat <= 0 || lng <= 0) {
-        Swal.showValidationMessage('กรุณากรอกพิกัด Latitude, Longitude ให้ถูกต้อง');
+      if (isNaN(startLat) || isNaN(startLng) || startLat <= 0 || startLng <= 0) {
+        Swal.showValidationMessage('กรุณาระบุพิกัดจุดเริ่มต้นให้ถูกต้อง');
         return false;
       }
-      return { name, lat, lng, isCustom: true };
+
+      const endEnabled = document.getElementById('cfgEndEnabled')?.checked || false;
+      let endLocation = { name: '', lat: null, lng: null, enabled: false };
+
+      if (endEnabled) {
+        const endName = (document.getElementById('cfgEndName')?.value || 'จุดสิ้นสุด').trim();
+        const endLat = parseFloat(document.getElementById('cfgEndLat')?.value);
+        const endLng = parseFloat(document.getElementById('cfgEndLng')?.value);
+
+        if (isNaN(endLat) || isNaN(endLng) || endLat <= 0 || endLng <= 0) {
+          Swal.showValidationMessage('กรุณาระบุพิกัดจุดสิ้นสุดให้ถูกต้อง หรือปิดการใช้งานจุดสิ้นสุด');
+          return false;
+        }
+        endLocation = { name: endName, lat: endLat, lng: endLng, enabled: true };
+      }
+
+      return {
+        startLocation: { name: startName, lat: startLat, lng: startLng, isCustom: true },
+        endLocation: endLocation
+      };
     }
   }).then((res) => {
     if (res.isConfirmed && res.value) {
-      state.routeStartLocation = res.value;
+      state.routeStartLocation = res.value.startLocation;
+      state.routeEndLocation = res.value.endLocation;
       updateStartLocationUI();
       recalculateRouteFromStops();
     }
@@ -10993,14 +11290,38 @@ window.openStartPointConfigModal = function() {
 };
 
 /**
- * อัปเดต UI แถบจุดเริ่มต้น
+ * อัปเดต UI แถบจุดเริ่มต้นและจุดสิ้นสุดใน Sidebar
  */
 function updateStartLocationUI() {
   const nameBadge = document.getElementById('routeStartPointNameBadge');
   const coordsBadge = document.getElementById('routeStartPointCoordsBadge');
-  if (nameBadge) nameBadge.textContent = state.routeStartLocation.name;
-  if (coordsBadge) coordsBadge.textContent = `${state.routeStartLocation.lat.toFixed(4)}, ${state.routeStartLocation.lng.toFixed(4)}`;
+  if (nameBadge && state.routeStartLocation) nameBadge.textContent = state.routeStartLocation.name;
+  if (coordsBadge && state.routeStartLocation) coordsBadge.textContent = `${state.routeStartLocation.lat.toFixed(4)}, ${state.routeStartLocation.lng.toFixed(4)}`;
+
+  const endContainer = document.getElementById('routeCustomEndBadgeContainer');
+  const endNameBadge = document.getElementById('routeEndPointNameBadge');
+  const endCoordsBadge = document.getElementById('routeEndPointCoordsBadge');
+  const roundTripLabel = document.getElementById('chkRouteRoundTripLabel');
+
+  if (state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng) {
+    if (endContainer) endContainer.classList.remove('hidden');
+    if (endNameBadge) endNameBadge.textContent = state.routeEndLocation.name;
+    if (endCoordsBadge) endCoordsBadge.textContent = `${Number(state.routeEndLocation.lat).toFixed(4)}, ${Number(state.routeEndLocation.lng).toFixed(4)}`;
+    if (roundTripLabel) roundTripLabel.classList.add('opacity-50', 'pointer-events-none');
+  } else {
+    if (endContainer) endContainer.classList.add('hidden');
+    if (roundTripLabel) roundTripLabel.classList.remove('opacity-50', 'pointer-events-none');
+  }
 }
+
+/**
+ * ยกเลิกการใช้งานจุดสิ้นสุดเฉพาะ
+ */
+window.clearCustomEndLocation = function() {
+  state.routeEndLocation = { name: '', lat: null, lng: null, enabled: false };
+  updateStartLocationUI();
+  recalculateRouteFromStops();
+};
 
 /**
  * จัดการเมื่อติ๊กเลือกเดินทางวนกลับจุดเริ่มต้น (Round Trip)
@@ -11323,8 +11644,39 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
     }
   });
 
-  // ถ้าเลือก Round Trip -> วนกลับมาจุดเริ่มต้น (เฉพาะกรณีมีจุดหมุดอย่างน้อย 1 จุด)
-  if (state.isRoundTrip && polylineCoords.length > 1) {
+  // 3. จุดสิ้นสุดการเดินทาง (กำหนดเอง / Custom Destination หรือ วนกลับ Round Trip)
+  if (state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng) {
+    const end = state.routeEndLocation;
+    bounds.push([end.lat, end.lng]);
+    polylineCoords.push([end.lat, end.lng]);
+    const legDist = calculateHaversineDistance(prevLat, prevLng, end.lat, end.lng);
+    totalDistanceKm += legDist;
+    prevLat = end.lat;
+    prevLng = end.lng;
+
+    const endIcon = L.divIcon({
+      html: `
+        <div class="slts-map-pin-marker" title="จุดสิ้นสุด: ${end.name}">
+          <div class="slts-pin-badge end-dest-pin" style="background: linear-gradient(135deg, #7c3aed, #4f46e5); color: white; border: 2px solid #ffffff; box-shadow: 0 4px 10px rgba(99, 102, 241, 0.4);">
+            <span>🏁</span>
+          </div>
+        </div>
+      `,
+      className: 'slts-custom-div-icon',
+      iconSize: [28, 28],
+      iconAnchor: [14, 28],
+      popupAnchor: [0, -28]
+    });
+
+    const endMarker = L.marker([end.lat, end.lng], { icon: endIcon })
+      .bindPopup(`<div class="p-3 font-bold text-xs text-indigo-900">🏁 จุดสิ้นสุด (กำหนดเอง): ${end.name}<p class="text-[10px] font-normal text-gray-500 font-mono mt-0.5">${Number(end.lat).toFixed(4)}, ${Number(end.lng).toFixed(4)}</p></div>`, { className: 'slts-map-popup' });
+
+    endMarker.on('mouseover', function () { this.openPopup(); });
+
+    if (state.mapMarkerLayerGroup) {
+      state.mapMarkerLayerGroup.addLayer(endMarker);
+    }
+  } else if (state.isRoundTrip && polylineCoords.length > 1) {
     polylineCoords.push([start.lat, start.lng]);
     const returnDist = calculateHaversineDistance(prevLat, prevLng, start.lat, start.lng);
     totalDistanceKm += returnDist;
@@ -11504,7 +11856,19 @@ function renderRouteSidebarList(stops, totalDistKm) {
     `;
   });
 
-  if (state.isRoundTrip && stops.length > 0) {
+  if (state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng) {
+    html += `
+      <div class="p-2.5 bg-violet-50 rounded-xl border border-violet-200 text-[11px] font-bold text-violet-900 flex items-center justify-between shadow-2xs">
+        <div class="flex items-center gap-1.5 min-w-0">
+          <span class="w-5 h-5 rounded-full bg-violet-600 text-white flex items-center justify-center text-[10px] flex-shrink-0">🏁</span>
+          <span class="truncate">จุดสิ้นสุด: ${state.routeEndLocation.name}</span>
+        </div>
+        <button type="button" onclick="clearCustomEndLocation()" class="text-rose-500 hover:text-rose-700 p-1 flex-shrink-0 cursor-pointer" title="ยกเลิกจุดสิ้นสุดนี้">
+          <i class="fa-solid fa-xmark text-xs"></i>
+        </button>
+      </div>
+    `;
+  } else if (state.isRoundTrip && stops.length > 0) {
     html += `
       <div class="p-2 bg-emerald-50/80 rounded-xl border border-emerald-200 text-[11px] font-bold text-emerald-800 flex items-center justify-between">
         <span>🏁 วนกลับ: ${state.routeStartLocation.name}</span>
@@ -11724,7 +12088,10 @@ window.openFullRouteInGoogleMaps = function() {
   let destination = '';
   let waypoints = [];
 
-  if (state.isRoundTrip) {
+  if (state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng) {
+    destination = `${state.routeEndLocation.lat},${state.routeEndLocation.lng}`;
+    waypoints = validStops.map(s => `${s.lat},${s.lng}`);
+  } else if (state.isRoundTrip) {
     destination = `${start.lat},${start.lng}`;
     waypoints = validStops.map(s => `${s.lat},${s.lng}`);
   } else {

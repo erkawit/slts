@@ -740,25 +740,45 @@
             </div>
           </div>
 
-          <!-- Start Point & Round-Trip Config Box -->
+          <!-- Start & End Point Config Box -->
           <div class="p-2.5 bg-blue-50/70 border-b border-blue-100/80 space-y-2 text-xs flex-shrink-0">
-            <div class="flex items-center justify-between">
-              <label class="font-bold text-gray-800 text-[11px] flex items-center gap-1">
-                <i class="fa-solid fa-flag-checkered text-blue-600"></i>
-                <span>จุดเริ่มต้นการเดินทาง:</span>
-              </label>
-              <button type="button" onclick="openStartPointConfigModal()" class="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer">
-                <i class="fa-solid fa-pen-to-square"></i> เปลี่ยนจุดเริ่ม
-              </button>
+            <!-- Start Point -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-gray-800 text-[11px] flex items-center gap-1">
+                  <i class="fa-solid fa-flag-checkered text-blue-600"></i>
+                  <span>จุดเริ่มต้น:</span>
+                </label>
+                <button type="button" onclick="openStartPointConfigModal()" class="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer" title="ค้นหาจุดใน Google Map หรือเปลี่ยนจุดเริ่ม/จุดสิ้นสุด">
+                  <i class="fa-solid fa-magnifying-glass-location"></i> ค้นหา/ตั้งค่าจุดเริ่ม-สิ้นสุด
+                </button>
+              </div>
+
+              <div class="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-blue-200/80 text-[11px]">
+                <span id="routeStartPointNameBadge" class="truncate font-semibold text-gray-700" title="จุดเริ่มต้น">ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)</span>
+                <span id="routeStartPointCoordsBadge" class="text-[10px] font-mono text-gray-500 flex-shrink-0 ml-1">17.4138, 102.7872</span>
+              </div>
             </div>
 
-            <div class="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-blue-200/80 text-[11px]">
-              <span id="routeStartPointNameBadge" class="truncate font-semibold text-gray-700" title="จุดเริ่มต้น">ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)</span>
-              <span id="routeStartPointCoordsBadge" class="text-[10px] font-mono text-gray-500 flex-shrink-0 ml-1">17.4138, 102.7872</span>
+            <!-- Custom End Point (if set) -->
+            <div id="routeCustomEndBadgeContainer" class="hidden space-y-1 pt-1 border-t border-blue-100">
+              <div class="flex items-center justify-between">
+                <label class="font-bold text-violet-800 text-[11px] flex items-center gap-1">
+                  <i class="fa-solid fa-flag-checkered text-violet-600"></i>
+                  <span>จุดสิ้นสุด (กำหนดเอง):</span>
+                </label>
+                <button type="button" onclick="clearCustomEndLocation()" class="text-[10px] text-red-500 hover:text-red-700 font-semibold cursor-pointer">
+                  <i class="fa-solid fa-xmark"></i> ยกเลิกจุดสิ้นสุด
+                </button>
+              </div>
+              <div class="flex items-center justify-between bg-violet-50/80 px-2.5 py-1.5 rounded-lg border border-violet-200 text-[11px]">
+                <span id="routeEndPointNameBadge" class="truncate font-semibold text-violet-900" title="จุดสิ้นสุด">-</span>
+                <span id="routeEndPointCoordsBadge" class="text-[10px] font-mono text-violet-600 flex-shrink-0 ml-1">-</span>
+              </div>
             </div>
 
             <!-- Round Trip Checkbox -->
-            <label class="flex items-center gap-2 cursor-pointer pt-0.5 select-none">
+            <label id="chkRouteRoundTripLabel" class="flex items-center gap-2 cursor-pointer pt-0.5 select-none">
               <input type="checkbox" id="chkRouteRoundTrip" onchange="handleRoundTripChange(this.checked)" class="w-3.5 h-3.5 text-blue-600 rounded focus:ring-blue-500">
               <span class="text-[11px] font-bold text-gray-700">เดินทางวนกลับมาจุดเริ่มต้นเมื่อส่งเสร็จ (Round Trip)</span>
             </label>
