@@ -424,6 +424,110 @@ function doPost(e) {
     }
 
     // ==========================================
+    // ACTION: EDIT_RECORD / UPDATE_RECORD (แก้ไขข้อมูลส่งหมายใน Google Sheet และอัปเดตไฟล์ใน Google Drive)
+    // ==========================================
+    if (data.action === "edit_record" || data.action === "update_record") {
+      const sheet = getSummonsSheet(spreadsheet);
+      const sheetData = sheet.getDataRange().getValues();
+      let targetRowIndex = -1;
+
+      if (data.rowIndex && Number(data.rowIndex) > 1 && Number(data.rowIndex) <= sheetData.length) {
+        targetRowIndex = Number(data.rowIndex);
+      } else if (data.oldFileId) {
+        for (let i = sheetData.length - 1; i >= 1; i--) {
+          if (String(sheetData[i][13] || '').trim() === String(data.oldFileId).trim()) {
+            targetRowIndex = i + 1;
+            break;
+          }
+        }
+      } else if (data.caseNumber && data.timestamp) {
+        for (let i = sheetData.length - 1; i >= 1; i--) {
+          const rowTs = String(sheetData[i][0] || '').trim();
+          const rowCase = String(sheetData[i][1] || '').trim();
+          if (rowCase === String(data.caseNumber).trim() && rowTs === String(data.timestamp).trim()) {
+            targetRowIndex = i + 1;
+            break;
+          }
+        }
+      }
+
+      let fileUrl = data.fileUrl || "";
+      let fileId = data.fileId || "";
+
+      // หากมีการอัปโหลดรูปภาพใหม่เพื่อทับไฟล์เดิม
+      if (data.imageBase64 && data.fileName) {
+        if (data.oldFileId) {
+          try {
+            const oldFile = DriveApp.getFileById(data.oldFileId);
+            oldFile.setTrashed(true);
+          } catch (err) {
+            console.warn("Trash old file error on edit:", err);
+          }
+        }
+
+        let base64String = data.imageBase64;
+        if (base64String.indexOf("base64,") !== -1) {
+          base64String = base64String.split("base64,")[1];
+        }
+        const decodedBytes = Utilities.base64Decode(base64String);
+        const blob = Utilities.newBlob(decodedBytes, "image/jpeg", data.fileName);
+        const createdFile = folder.createFile(blob);
+        fileId = createdFile.getId();
+        fileUrl = createdFile.getUrl();
+      }
+
+      if (targetRowIndex > 1 && targetRowIndex <= sheetData.length) {
+        if (data.caseNumber) sheet.getRange(targetRowIndex, 2).setValue(data.caseNumber);
+        if (data.courtType) sheet.getRange(targetRowIndex, 3).setValue(data.courtType);
+        if (data.district) sheet.getRange(targetRowIndex, 4).setValue(data.district);
+        if (data.subdistrict) sheet.getRange(targetRowIndex, 5).setValue(data.subdistrict);
+        if (data.locationType) sheet.getRange(targetRowIndex, 6).setValue(data.locationType);
+        if (data.locationText) sheet.getRange(targetRowIndex, 7).setValue(data.locationText);
+        if (data.lat) sheet.getRange(targetRowIndex, 8).setValue(Number(data.lat));
+        if (data.lng) sheet.getRange(targetRowIndex, 9).setValue(Number(data.lng));
+        if (data.heading !== undefined) sheet.getRange(targetRowIndex, 10).setValue(data.heading);
+
+        if (fileUrl && fileId) {
+          sheet.getRange(targetRowIndex, 11).setValue(data.fileName || "");
+          sheet.getRange(targetRowIndex, 12).setValue(fileUrl);
+          sheet.getRange(targetRowIndex, 14).setValue(fileId);
+        }
+
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          message: `แก้ไขข้อมูลเลขคดี ${data.caseNumber} เรียบร้อยแล้ว`,
+          targetRowIndex: targetRowIndex,
+          fileUrl: fileUrl,
+          fileId: fileId
+        })).setMimeType(ContentService.MimeType.JSON);
+      } else {
+        // หากไม่พบแถวเดิม ให้ append เข้าไปใหม่
+        sheet.appendRow([
+          data.dateTime || Utilities.formatDate(new Date(), "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss"),
+          data.caseNumber || "",
+          data.courtType || "",
+          data.district || "",
+          data.subdistrict || "",
+          data.locationType || "",
+          data.locationText || "",
+          data.lat ? Number(data.lat) : "",
+          data.lng ? Number(data.lng) : "",
+          data.heading !== undefined ? data.heading : "",
+          data.fileName || "",
+          fileUrl || "",
+          "",
+          fileId || ""
+        ]);
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          message: `บันทึกข้อมูลแก้ไขเข้า Google Sheet สำเร็จ`,
+          fileUrl: fileUrl,
+          fileId: fileId
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    // ==========================================
     // ACTION 2: UPLOAD_IMAGE (อัปโหลดรูปภาพลง Google Drive และบันทึกข้อมูลเข้า Google Sheet ในขั้นตอนเดียว)
     // ==========================================
     if (data.action === "upload_image" || !data.action) {

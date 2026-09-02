@@ -307,6 +307,15 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
     switchTab('form');
+
+    // ตรวจสอบการเข้าสู่ระบบ: หากยังไม่ได้ล็อกอิน ให้แสดง Pop Up ล็อกอินขึ้นมาบังทันที เพื่อป้องกันบุคคลภายนอกเข้าใช้งานระบบ
+    const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest' && !!state.currentUser.username;
+    if (!isLoggedIn) {
+      setTimeout(() => {
+        openLoginModal(true);
+      }, 250);
+    }
+
     // ตรวจสอบและขออนุญาตเข้าถึงกล้องในระบบสำหรับหน้าจอคอมพิวเตอร์ (> 768px)
     setTimeout(() => {
       checkAndRequestCameraPermission(false);
@@ -716,16 +725,27 @@ window.handleGlobalClick = function(e) {
   }
 };
 
-function openLoginModal() {
+window.openLoginModal = function(isForced = false) {
+  if (!elements.loginModal) return;
   elements.loginModal.classList.remove('hidden');
   elements.loginModal.classList.add('flex');
-  document.getElementById('loginUsername').focus();
-}
+  const closeBtn = elements.loginModal.querySelector('button[onclick="closeLoginModal()"]');
+  if (closeBtn) {
+    if (isForced) {
+      closeBtn.classList.add('hidden');
+    } else {
+      closeBtn.classList.remove('hidden');
+    }
+  }
+  const uInput = document.getElementById('loginUsername');
+  if (uInput) uInput.focus();
+};
 
-function closeLoginModal() {
+window.closeLoginModal = function() {
+  if (!elements.loginModal) return;
   elements.loginModal.classList.add('hidden');
   elements.loginModal.classList.remove('flex');
-}
+};
 
 function handleLogin(e) {
   e.preventDefault();
@@ -2461,16 +2481,21 @@ function renderDataTable(rows, filterCriteria = null) {
       </button>
     `;
 
-    // คอลัมน์จัดการ (Admin และหน้าจอ > 768px เท่านั้น)
-    let actionBtn = `<span class="text-xs text-gray-400 italic">User Only</span>`;
-    if (isAdmin && isDesktop) {
-      actionBtn = `
-        <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${rawTimestamp}', '${caseNumber}', ${latest.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบข้อมูลในชีตและไฟล์ใน Drive">
-          <i class="fa-solid fa-trash-can"></i>
-          <span>ลบ</span>
+    // คอลัมน์จัดการ (แสดงปุ่มแก้ไขสำหรับทุกผู้ใช้งาน และปุ่มลบสำหรับ Admin)
+    let actionBtn = `
+      <div class="flex items-center gap-1.5 whitespace-nowrap">
+        <button type="button" onclick="openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1 cursor-pointer" title="แก้ไขข้อมูลส่งหมาย">
+          <i class="fa-solid fa-pen-to-square"></i>
+          <span>แก้ไข</span>
         </button>
-      `;
-    }
+        ${(isAdmin && isDesktop) ? `
+          <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${rawTimestamp}', '${caseNumber}', ${latest.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1 cursor-pointer" title="ลบข้อมูลในชีตและไฟล์ใน Drive">
+            <i class="fa-solid fa-trash-can"></i>
+            <span>ลบ</span>
+          </button>
+        ` : ''}
+      </div>
+    `;
 
     tr.innerHTML = `
       <td class="font-mono text-xs text-gray-600 whitespace-nowrap">${formattedTimestamp}</td>
@@ -2508,6 +2533,398 @@ function renderDataTable(rows, filterCriteria = null) {
     }
   });
 }
+
+/**
+ * แสดง SweetAlert แบบฟอร์ม "บันทึกการส่งหมาย" สำหรับแก้ไขข้อมูล
+ * พร้อมดึงข้อมูลเดิมขึ้นมาให้แก้ไข และแสดงผลรูปส่งหมาย พร้อมตัวเลือกอัปโหลดรูปภาพใหม่ทับไฟล์เดิม
+ */
+window.openEditSummonsModal = async function(caseNumber, specificRecord = null) {
+  const records = (state.allSheetRows || []).filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim());
+  const rec = specificRecord || records[0] || {};
+
+  const currentProv = rec._resolvedProvince || getRowProvince(rec) || state.selectedProvince || 'อุดรธานี';
+  const courtType = rec['ประเภทศาล'] || 'ศาลจังหวัด' + currentProv;
+  const district = rec['อำเภอ'] || '';
+  const subdistrict = rec['ตำบล'] || '';
+  const locationType = rec['ประเภทสถานที่'] || 'หมายบ้าน';
+  const locationFull = rec['ที่ตั้งส่งหมาย (เต็ม)'] || rec['ที่ตั้งส่งหมาย'] || '';
+  const lat = rec['ละติจูด (Lat)'] || rec['ละติจูด'] || '';
+  const lng = rec['ลองจิจูด (Lng)'] || rec['ลองจิจูด'] || '';
+  const imgUrl = rec['ลิงก์รูปภาพใน Google Drive'] || rec['ลิงก์รูปภาพ'] || '';
+  const fileId = rec['Drive File ID'] || '';
+  const fileName = rec['ชื่อไฟล์รูปภาพ'] || '';
+  const rawTimestamp = rec['วัน-เวลาบันทึก'] || rec['Timestamp'] || '';
+  const rowIndex = rec.originalIndex !== undefined ? rec.originalIndex + 2 : null;
+
+  // ดึงรายการจังหวัด
+  let provincesOptions = '';
+  if (typeof THAILAND_PROVINCES !== 'undefined') {
+    provincesOptions = THAILAND_PROVINCES.map(p => 
+      `<option value="${p.name}" ${p.name === currentProv ? 'selected' : ''}>${p.name}</option>`
+    ).join('');
+  } else {
+    provincesOptions = `<option value="${currentProv}" selected>${currentProv}</option>`;
+  }
+
+  // ดึงรายการอำเภอ
+  const districts = getDistrictsByProvince(currentProv);
+  const districtOptions = districts.map(d => 
+    `<option value="${d}" ${d === district ? 'selected' : ''}>${d}</option>`
+  ).join('');
+
+  // ดึงรายการตำบล
+  const subdistricts = getSubdistrictsByDistrict(currentProv, district || districts[0]);
+  const subdistrictOptions = subdistricts.map(s => 
+    `<option value="${s}" ${s === subdistrict ? 'selected' : ''}>${s}</option>`
+  ).join('');
+
+  const coordVal = (lat && lng) ? `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}` : '';
+
+  let newImageBase64 = null;
+  let newImageFileName = '';
+
+  const modalHtml = `
+    <div class="text-left space-y-3.5 p-1 select-none">
+      
+      <!-- ข้อมูลเลขคดี และ ประเภทศาล -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">
+            <i class="fa-solid fa-gavel text-blue-600 mr-1"></i> เลขคดี <span class="text-red-500">*</span>
+          </label>
+          <input type="text" id="swalEditCaseNumber" value="${caseNumber}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-bold text-gray-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-200">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">
+            <i class="fa-solid fa-building-columns text-blue-600 mr-1"></i> ประเภทศาล <span class="text-red-500">*</span>
+          </label>
+          <input type="text" id="swalEditCourtType" value="${courtType}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-sm font-medium text-gray-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-200">
+        </div>
+      </div>
+
+      <!-- จังหวัด อำเภอ ตำบล -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">
+            <i class="fa-solid fa-map-location-dot text-blue-600 mr-1"></i> จังหวัด
+          </label>
+          <select id="swalEditProvince" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
+            ${provincesOptions}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">
+            <i class="fa-solid fa-landmark text-blue-600 mr-1"></i> อำเภอ
+          </label>
+          <select id="swalEditDistrict" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
+            ${districtOptions}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">
+            <i class="fa-solid fa-location-dot text-blue-600 mr-1"></i> ตำบล
+          </label>
+          <select id="swalEditSubdistrict" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
+            ${subdistrictOptions}
+          </select>
+        </div>
+      </div>
+
+      <!-- ประเภทสถานที่ และ ที่ตั้งส่งหมาย -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">
+            <i class="fa-solid fa-house-user text-blue-600 mr-1"></i> ประเภทสถานที่
+          </label>
+          <select id="swalEditLocationType" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-medium text-gray-800 focus:border-blue-500">
+            <option value="หมายบ้าน" ${locationType === 'หมายบ้าน' ? 'selected' : ''}>หมายบ้าน</option>
+            <option value="ที่ทำการปกครองส่วนท้องถิ่น" ${locationType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'selected' : ''}>ที่ทำการปกครองส่วนท้องถิ่น</option>
+            <option value="อื่นๆ" ${locationType === 'อื่นๆ' ? 'selected' : ''}>อื่นๆ</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold text-gray-700 mb-1">
+            <i class="fa-solid fa-location-pin text-blue-600 mr-1"></i> ที่ตั้งส่งหมาย (เต็ม) <span class="text-red-500">*</span>
+          </label>
+          <input type="text" id="swalEditLocationText" value="${locationFull}" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs text-gray-800 focus:border-blue-500">
+        </div>
+      </div>
+
+      <!-- พิกัด GPS -->
+      <div>
+        <label class="block text-xs font-bold text-gray-700 mb-1 flex items-center justify-between">
+          <span><i class="fa-solid fa-crosshairs text-blue-600 mr-1"></i> พิกัด GPS (Lat, Lng)</span>
+          <button type="button" id="btnSwalEditCurrentGps" class="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer">
+            <i class="fa-solid fa-location-crosshairs mr-0.5"></i> ใช้พิกัดปัจจุบัน
+          </button>
+        </label>
+        <input type="text" id="swalEditCoordinates" value="${coordVal}" placeholder="เช่น 17.414400, 102.788200" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-gray-800 focus:border-blue-500">
+      </div>
+
+      <!-- ส่วนจัดการรูปภาพส่งหมาย (แสดงผลภาพเดิม + อัปโหลดทับไฟล์เดิม) -->
+      <div class="p-3.5 bg-gray-50 border border-gray-200 rounded-2xl space-y-2.5">
+        <div class="flex items-center justify-between">
+          <label class="block text-xs font-bold text-gray-800 flex items-center gap-1.5">
+            <i class="fa-solid fa-image text-blue-600"></i>
+            <span>รูปภาพการส่งหมาย</span>
+          </label>
+          <span class="text-[10px] text-gray-500">${imgUrl ? 'มีรูปภาพในระบบ' : 'ไม่มีรูปภาพ'}</span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+          <!-- รูปภาพปัจจุบัน -->
+          <div class="space-y-1">
+            <p class="text-[10px] font-bold text-gray-500">รูปภาพปัจจุบัน:</p>
+            ${imgUrl && String(imgUrl).startsWith('http') ? `
+              <div class="relative group rounded-xl overflow-hidden border border-gray-300 max-h-36 bg-gray-900 flex items-center justify-center cursor-pointer" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${rawTimestamp}', '${lat}', '${lng}')" title="คลิกเพื่อดูภาพขนาดเต็ม">
+                <img src="${imgUrl}" class="max-h-36 w-full object-contain rounded-lg">
+                <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px] font-bold gap-1">
+                  <i class="fa-solid fa-up-right-and-down-left-from-center"></i> ดูภาพเต็ม
+                </div>
+              </div>
+            ` : `
+              <div class="p-4 bg-white rounded-xl border border-dashed border-gray-300 text-center text-gray-400 text-xs">
+                <i class="fa-solid fa-image-slash text-xl mb-1"></i>
+                <p>ไม่มีรูปภาพเดิม</p>
+              </div>
+            `}
+          </div>
+
+          <!-- เลือกรูปใหม่เพื่อทับไฟล์เดิม -->
+          <div class="space-y-1.5">
+            <p class="text-[10px] font-bold text-gray-500">เลือกรูปใหม่เพื่ออัปโหลดทับ:</p>
+            <input type="file" id="swalEditNewPhotoInput" accept="image/*" class="block w-full text-[11px] text-gray-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[11px] file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border border-gray-300 rounded-xl p-1 bg-white">
+            
+            <div id="swalEditNewPhotoPreviewContainer" class="hidden relative rounded-xl overflow-hidden border border-emerald-400 max-h-36 bg-gray-900 flex items-center justify-center">
+              <img id="swalEditNewPhotoPreview" src="" class="max-h-36 w-full object-contain rounded-lg">
+              <span class="absolute top-1 right-1 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow">รูปใหม่</span>
+            </div>
+
+            <p class="text-[10px] text-gray-400 leading-tight">
+              💡 หากเลือกรูปใหม่ ระบบจะทำการประทับลายน้ำและอัปโหลดทับไฟล์เดิมใน Google Drive ให้โดยอัตโนมัติ
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  `;
+
+  Swal.fire({
+    title: `<div class="flex items-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-pen-to-square text-amber-500"></i> แก้ไขข้อมูลการส่งหมาย</div>`,
+    html: modalHtml,
+    width: '720px',
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-floppy-disk mr-1"></i> บันทึกการแก้ไข',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#2563eb',
+    cancelButtonColor: '#6b7280',
+    customClass: {
+      popup: 'rounded-3xl p-5'
+    },
+    didOpen: () => {
+      const provEl = document.getElementById('swalEditProvince');
+      const distEl = document.getElementById('swalEditDistrict');
+      const subEl = document.getElementById('swalEditSubdistrict');
+      const fileInput = document.getElementById('swalEditNewPhotoInput');
+      const previewContainer = document.getElementById('swalEditNewPhotoPreviewContainer');
+      const previewImg = document.getElementById('swalEditNewPhotoPreview');
+      const btnGps = document.getElementById('btnSwalEditCurrentGps');
+      const coordEl = document.getElementById('swalEditCoordinates');
+
+      if (provEl && distEl && subEl) {
+        provEl.onchange = () => {
+          const newDists = getDistrictsByProvince(provEl.value);
+          distEl.innerHTML = newDists.map(d => `<option value="${d}">${d}</option>`).join('');
+          const newSubs = getSubdistrictsByDistrict(provEl.value, newDists[0]);
+          subEl.innerHTML = newSubs.map(s => `<option value="${s}">${s}</option>`).join('');
+        };
+        distEl.onchange = () => {
+          const newSubs = getSubdistrictsByDistrict(provEl.value, distEl.value);
+          subEl.innerHTML = newSubs.map(s => `<option value="${s}">${s}</option>`).join('');
+        };
+      }
+
+      if (btnGps && coordEl) {
+        btnGps.onclick = () => {
+          if (state.lat && state.lng) {
+            coordEl.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+          } else {
+            navigator.geolocation?.getCurrentPosition(pos => {
+              state.lat = pos.coords.latitude;
+              state.lng = pos.coords.longitude;
+              coordEl.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+            });
+          }
+        };
+      }
+
+      if (fileInput) {
+        fileInput.onchange = (e) => {
+          const f = e.target.files[0];
+          if (f) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              newImageBase64 = ev.target.result;
+              newImageFileName = f.name;
+              if (previewImg && previewContainer) {
+                previewImg.src = newImageBase64;
+                previewContainer.classList.remove('hidden');
+              }
+            };
+            reader.readAsDataURL(f);
+          }
+        };
+      }
+    },
+    preConfirm: async () => {
+      const newCaseNumber = (document.getElementById('swalEditCaseNumber')?.value || '').trim();
+      const newCourtType = (document.getElementById('swalEditCourtType')?.value || '').trim();
+      const newProvince = document.getElementById('swalEditProvince')?.value || currentProv;
+      const newDistrict = document.getElementById('swalEditDistrict')?.value || '';
+      const newSubdistrict = document.getElementById('swalEditSubdistrict')?.value || '';
+      const newLocationType = document.getElementById('swalEditLocationType')?.value || 'หมายบ้าน';
+      const newLocationText = (document.getElementById('swalEditLocationText')?.value || '').trim();
+      const coordStr = (document.getElementById('swalEditCoordinates')?.value || '').trim();
+
+      if (!newCaseNumber) {
+        Swal.showValidationMessage('กรุณาระบุเลขคดี');
+        return false;
+      }
+      if (!newLocationText) {
+        Swal.showValidationMessage('กรุณาระบุที่ตั้งส่งหมาย');
+        return false;
+      }
+
+      let parsedLat = lat;
+      let parsedLng = lng;
+      if (coordStr) {
+        const parts = coordStr.split(',').map(s => parseFloat(s.trim()));
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          parsedLat = parts[0];
+          parsedLng = parts[1];
+        }
+      }
+
+      return {
+        newCaseNumber,
+        newCourtType,
+        newProvince,
+        newDistrict,
+        newSubdistrict,
+        newLocationType,
+        newLocationText,
+        parsedLat,
+        parsedLng
+      };
+    }
+  }).then(async (res) => {
+    if (res.isConfirmed && res.value) {
+      const val = res.value;
+      let compressedImgBase64 = null;
+      let finalFileName = fileName;
+
+      if (newImageBase64) {
+        showCustomLoading('กำลังประมวลผลรูปภาพใหม่...', 'กำลังสร้างลายน้ำและเตรียมอัปโหลด');
+        try {
+          const img = new Image();
+          img.src = newImageBase64;
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+          });
+
+          const watermarkData = {
+            caseNumber: val.newCaseNumber,
+            courtType: val.newCourtType,
+            province: val.newProvince,
+            district: val.newDistrict,
+            subdistrict: val.newSubdistrict,
+            locationType: val.newLocationType,
+            locationText: val.newLocationText,
+            lat: val.parsedLat,
+            lng: val.parsedLng,
+            dateTime: rawTimestamp || WatermarkEngine.formatThaiDateTime(new Date())
+          };
+
+          const wmResult = await WatermarkEngine.renderWatermark(img, watermarkData);
+          compressedImgBase64 = await compressImageToMax1MB(wmResult.dataUrl);
+          const baseName = val.newCaseNumber.replace(/\//g, '-');
+          finalFileName = baseName + '.jpg';
+        } catch (imgErr) {
+          console.warn('Image watermark error on edit:', imgErr);
+        } finally {
+          hideCustomLoading();
+        }
+      }
+
+      const updatePayload = {
+        action: 'edit_record',
+        rowIndex: rowIndex,
+        oldFileId: fileId,
+        timestamp: rawTimestamp,
+        caseNumber: val.newCaseNumber,
+        courtType: val.newCourtType,
+        province: val.newProvince,
+        district: val.newDistrict,
+        subdistrict: val.newSubdistrict,
+        locationType: val.newLocationType,
+        locationText: val.newLocationText,
+        lat: val.parsedLat,
+        lng: val.parsedLng,
+        dateTime: rawTimestamp || WatermarkEngine.formatThaiDateTime(new Date()),
+        imageBase64: compressedImgBase64,
+        fileName: finalFileName,
+        fileUrl: imgUrl,
+        fileId: fileId
+      };
+
+      try {
+        const resJson = await uploadWithProgressBar(updatePayload, `กำลังบันทึกการแก้ไขเลขคดี ${val.newCaseNumber}...`);
+
+        if (state.allSheetRows) {
+          const target = state.allSheetRows.find(r => {
+            return (r['เลขคดี'] || '').trim() === caseNumber.trim() &&
+                   (!rawTimestamp || (r['วัน-เวลาบันทึก'] || r['Timestamp'] || '') === rawTimestamp);
+          });
+          if (target) {
+            target['เลขคดี'] = val.newCaseNumber;
+            target['ประเภทศาล'] = val.newCourtType;
+            target['อำเภอ'] = val.newDistrict;
+            target['ตำบล'] = val.newSubdistrict;
+            target['ประเภทสถานที่'] = val.newLocationType;
+            target['ที่ตั้งส่งหมาย (เต็ม)'] = val.newLocationText;
+            target['ที่ตั้งส่งหมาย'] = val.newLocationText;
+            target['ละติจูด (Lat)'] = val.parsedLat;
+            target['ลองจิจูด (Lng)'] = val.parsedLng;
+            if (resJson && resJson.fileUrl) {
+              target['ลิงก์รูปภาพใน Google Drive'] = resJson.fileUrl;
+              target['ลิงก์รูปภาพ'] = resJson.fileUrl;
+              target['ชื่อไฟล์รูปภาพ'] = finalFileName;
+              target['Drive File ID'] = resJson.fileId || fileId;
+            }
+          }
+        }
+
+        localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+        localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
+        renderDataTable(state.allSheetRows);
+
+        Swal.fire({
+          icon: 'success',
+          title: 'บันทึกการแก้ไขสำเร็จ!',
+          text: `อัปเดตข้อมูลเลขคดี ${val.newCaseNumber} ใน Google Sheet & Drive เรียบร้อยแล้ว`,
+          confirmButtonColor: '#2563eb'
+        });
+
+      } catch (err) {
+        console.error('Edit summons error:', err);
+        showGasUploadErrorModal(err, updatePayload, finalFileName, val.newCaseNumber);
+      }
+    }
+  });
+};
 
 /**
  * แสดง Popup รายการประวัติการส่งหมายทั้งหมดของเลขคดีนั้นๆ
@@ -2556,18 +2973,25 @@ window.openCaseHistoryModal = function(caseNumber) {
     `;
     if (imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http')) {
       imgBtn = `
-        <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${formattedTimestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1">
+        <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${formattedTimestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1 cursor-pointer">
           <i class="fa-solid fa-image"></i>
           <span>ดูภาพ</span>
         </button>
       `;
     }
 
+    let editBtn = `
+      <button type="button" onclick="Swal.close(); openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', state.allSheetRows ? state.allSheetRows[${rec.originalIndex}] : null)" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition inline-flex items-center gap-1 cursor-pointer" title="แก้ไขรายการนี้">
+        <i class="fa-solid fa-pen-to-square"></i>
+        <span>แก้ไข</span>
+      </button>
+    `;
+
     let deleteBtn = '';
     if (showDeleteCol) {
       deleteBtn = `
         <td>
-          <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${rawTimestamp}', '${caseNumber}', ${rec.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1" title="ลบรายการนี้">
+          <button type="button" onclick="deleteRecord('${fileId}', '${fileName}', '${rawTimestamp}', '${caseNumber}', ${rec.originalIndex + 2})" class="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1 cursor-pointer" title="ลบรายการนี้">
             <i class="fa-solid fa-trash-can"></i>
             <span>ลบ</span>
           </button>
@@ -2580,6 +3004,7 @@ window.openCaseHistoryModal = function(caseNumber) {
         <td class="font-mono text-xs text-gray-700 whitespace-nowrap">${formattedTimestamp}</td>
         <td>${coordDisplay}</td>
         <td class="whitespace-nowrap">${imgBtn}</td>
+        <td class="whitespace-nowrap">${editBtn}</td>
         ${showDeleteCol ? deleteBtn : ''}
       </tr>
     `;
@@ -2598,6 +3023,7 @@ window.openCaseHistoryModal = function(caseNumber) {
               <th>วันเดือนปีและเวลา</th>
               <th>พิกัด</th>
               <th>รูปภาพ</th>
+              <th>แก้ไข</th>
               ${showDeleteCol ? '<th class="admin-only-col">ลบ</th>' : ''}
             </tr>
           </thead>
