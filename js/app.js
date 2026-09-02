@@ -3962,18 +3962,6 @@ window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = '
     if (locStatus) {
       locStatus.innerHTML = `<span class="text-emerald-700 font-semibold"><i class="fa-solid fa-wand-magic-sparkles mr-1 text-emerald-600"></i>อ้างอิงตำแหน่งสำเร็จ: <strong>${summaryText}</strong> (${sourceLabel})</span>`;
     }
-
-    const Toast = Swal.mixin({
-      toast: true,
-      position: 'top-end',
-      showConfirmButton: false,
-      timer: 3000,
-      timerProgressBar: true
-    });
-    Toast.fire({
-      icon: 'success',
-      title: `📍 อ้างอิงพื้นที่: ${summaryText}`
-    });
   }
 };
 
