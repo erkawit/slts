@@ -10357,6 +10357,68 @@ window.optimizeTripRoute = function() {
 };
 
 /**
+ * ล้างข้อมูลรายการส่งหมายและหมุดทั้งหมดในหน้าแผนที่
+ */
+window.clearAllRouteStops = function() {
+  const currentCount = (state.currentRouteStops || []).length;
+  if (currentCount === 0) {
+    Swal.fire({
+      icon: 'info',
+      title: 'ไม่มีรายการในตาราง',
+      text: 'ไม่มีรายการส่งหมายให้ล้างในขณะนี้',
+      timer: 1500,
+      showConfirmButton: false
+    });
+    return;
+  }
+
+  Swal.fire({
+    title: 'ยืนยันการล้างข้อมูล?',
+    html: `คุณต้องการล้างรายการส่งหมายทั้งหมดจำนวน <strong>${currentCount}</strong> รายการ ออกจากแผนที่ใช่หรือไม่?`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-trash-can mr-1"></i> ล้างข้อมูลทั้งหมด',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#e11d48',
+    cancelButtonColor: '#6b7280'
+  }).then((res) => {
+    if (res.isConfirmed) {
+      state.currentRouteStops = [];
+      state.stagedScheduleStops = [];
+      state.parsedDispatchRecords = [];
+      saveCurrentRouteStopsHistory([]);
+
+      if (state.mapMarkerLayerGroup) {
+        state.mapMarkerLayerGroup.clearLayers();
+      }
+      if (state.mapRoutePolyline) {
+        state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
+        state.mapRoutePolyline = null;
+      }
+
+      const badgeEl = document.getElementById('mapAreaCurrentBadge');
+      if (badgeEl) badgeEl.textContent = 'ยังไม่ได้ระบุพื้นที่';
+
+      recalculateRouteFromStops(true);
+
+      const Toast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 1500,
+        timerProgressBar: true
+      });
+      Toast.fire({
+        icon: 'success',
+        title: 'ล้างข้อมูลรายการส่งหมายเรียบร้อยแล้ว'
+      });
+
+      logServerActivity('MAP_CLEAR_ALL_STOPS', `ล้างข้อมูลรายการส่งหมาย ${currentCount} รายการ ออกจากหน้าแผนที่`);
+    }
+  });
+};
+
+/**
  * เปิดเส้นทางทั้งหมดใน Google Maps Directions (Multi-stop route)
  */
 window.openFullRouteInGoogleMaps = function() {

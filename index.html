@@ -681,11 +681,14 @@
               <p class="text-[10px] text-gray-500">คลิกซ้ายค้างเพื่อลากสลับลำดับได้</p>
             </div>
             <div class="flex items-center gap-1.5 flex-wrap justify-end">
-              <button type="button" onclick="openAddRouteStopModal()" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-[10px] font-bold rounded-lg shadow-sm transition flex items-center gap-1" title="เพิ่มรายการส่งหมาย">
+              <button type="button" onclick="openAddRouteStopModal()" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-[10px] font-bold rounded-lg shadow-sm transition flex items-center gap-1 cursor-pointer" title="เพิ่มรายการส่งหมาย">
                 <i class="fa-solid fa-plus"></i> <span>เพิ่มรายการ</span>
               </button>
-              <button type="button" onclick="optimizeTripRoute()" class="px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-gray-200 shadow-2xs transition" title="คำนวณลำดับจุดส่งหมายที่ใกล้ที่สุดใหม่">
+              <button type="button" onclick="optimizeTripRoute()" class="px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-gray-200 shadow-2xs transition flex items-center gap-1 cursor-pointer" title="คำนวณลำดับจุดส่งหมายที่ใกล้ที่สุดใหม่">
                 <i class="fa-solid fa-arrows-rotate mr-0.5"></i> <span>จัดลำดับอัตโนมัติ</span>
+              </button>
+              <button type="button" onclick="clearAllRouteStops()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 text-[10px] font-bold rounded-lg border border-rose-200 shadow-2xs transition flex items-center gap-1 cursor-pointer" title="ล้างรายการส่งหมายทั้งหมดในตาราง">
+                <i class="fa-solid fa-trash-can"></i> <span>ล้างข้อมูล</span>
               </button>
             </div>
           </div>
