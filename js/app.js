@@ -7374,11 +7374,11 @@ async function handleDesktopUpload() {
           </div>
           <div class="pt-2 text-[11px] text-gray-500 flex items-center justify-center gap-1.5">
             <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
-            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalUploadCountdown" class="text-blue-600 font-bold text-sm">3</b> วินาที</span>
+            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalUploadCountdown" class="text-blue-600 font-bold text-sm">2</b> วินาที</span>
           </div>
         </div>
       `,
-      timer: 3000,
+      timer: 2000,
       timerProgressBar: true,
       showConfirmButton: false,
       showCancelButton: false,
