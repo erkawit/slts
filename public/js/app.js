@@ -12169,7 +12169,8 @@ window.sendActiveRouteToMobileHandoff = function(targetStop = null) {
     return;
   }
 
-  const primaryStop = targetStop || stops[0] || {};
+  const cleanStops = cleanStopsForStorage(targetStop ? [targetStop] : stops);
+  const primaryStop = cleanStops[0] || {};
   const prov = primaryStop.province || state.selectedProvince || 'อุดรธานี';
   const queryString = buildVillageCenterSearchQuery(primaryStop.moo, primaryStop.subdistrict, primaryStop.district, prov);
   const userId = (state.currentUser.username || 'user').trim();
@@ -12184,7 +12185,7 @@ window.sendActiveRouteToMobileHandoff = function(targetStop = null) {
     caseNumber: primaryStop.caseNumber || '',
     lat: primaryStop.lat || null,
     lng: primaryStop.lng || null,
-    stops: targetStop ? [targetStop] : stops,
+    stops: cleanStops,
     status: 'pending',
     timestamp: new Date().toISOString()
   };
@@ -12192,10 +12193,12 @@ window.sendActiveRouteToMobileHandoff = function(targetStop = null) {
   // บันทึก Local Storage & Shared State
   try {
     localStorage.setItem('slts_device_handoff_' + userId, JSON.stringify(payload));
-    localStorage.setItem('slts_shared_route_stops', JSON.stringify(stops));
+    localStorage.setItem('slts_shared_route_stops', JSON.stringify(cleanStops));
     localStorage.setItem('slts_handoff_event', Date.now().toString());
     window.dispatchEvent(new Event('storage'));
-  } catch (e) {}
+  } catch (e) {
+    console.warn('Handoff local storage error:', e);
+  }
 
   // ส่งบันทึกไปยัง Database (Google Sheet 'device_handoff')
   if (state.appsScriptUrl && navigator.onLine) {
