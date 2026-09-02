@@ -640,7 +640,7 @@ function updateAuthUI() {
 }
 
 /**
- * จัดการการคลิกปุ่ม Auth ที่มุมขวาบนของหน้ากล้องมือถือ
+ * จัดการการคลิกปุ่ม Auth ที่มุมขวาบนของหน้ากล้องมือถือ (< 768px)
  */
 window.handleMobileCameraAuthAction = function() {
   const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
@@ -649,7 +649,7 @@ window.handleMobileCameraAuthAction = function() {
   } else {
     const displayName = state.currentUser.displayName || state.currentUser.name || state.currentUser.username || 'ผู้ใช้งาน';
     Swal.fire({
-      title: 'ข้อมูลผู้ใช้งานปัจจุบัน',
+      title: 'ต้องการออกจากระบบ?',
       html: `
         <div class="text-center space-y-2 py-2">
           <div class="w-14 h-14 mx-auto rounded-full bg-blue-600 text-white flex items-center justify-center text-2xl font-bold shadow-md">
@@ -657,18 +657,45 @@ window.handleMobileCameraAuthAction = function() {
           </div>
           <p class="font-bold text-gray-900 text-sm">${displayName}</p>
           <p class="text-xs text-gray-500 font-mono">@${state.currentUser.username} (${state.currentUser.role.toUpperCase()})</p>
+          <p class="text-[11px] text-gray-500 pt-1">เมื่อออกจากระบบแล้วจะกลับสู่โหมดกล้องปกติ</p>
         </div>
       `,
       showCancelButton: true,
-      confirmButtonText: '<i class="fa-solid fa-right-from-bracket mr-1"></i> ออกจากระบบ',
-      cancelButtonText: 'ปิดหน้าต่าง',
+      confirmButtonText: '<i class="fa-solid fa-right-from-bracket mr-1"></i> ยืนยันออกจากระบบ',
+      cancelButtonText: 'ยกเลิก',
       confirmButtonColor: '#e11d48',
       cancelButtonColor: '#6b7280'
     }).then((res) => {
       if (res.isConfirmed) {
-        handleLogout();
+        performDirectLogout('mobile');
       }
     });
+  }
+};
+
+/**
+ * ดำเนินการออกจากระบบในขั้นตอนเดียว พร้อมสลับหน้าจอตามขนาดอุปกรณ์ (Mobile vs Desktop)
+ * @param {'mobile'|'desktop'} sourceMode 
+ */
+window.performDirectLogout = function(sourceMode = (window.innerWidth < 768 ? 'mobile' : 'desktop')) {
+  // บันทึกประวัติการออกจากระบบและขนาดหน้าจอเพื่อแยกการแสดงผล
+  state.currentUser = null;
+  localStorage.removeItem('slts_current_user');
+  localStorage.setItem('slts_last_auth_action', 'logout');
+  localStorage.setItem('slts_last_auth_device_mode', sourceMode);
+
+  if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
+  updateAuthUI();
+
+  // ปิด SweetAlert ทันที
+  Swal.close();
+
+  if (sourceMode === 'mobile' || window.innerWidth < 768) {
+    // บนหน้าจอมือถือ (< 768px): กลับไปที่หน้าโหมดกล้องถ่ายภาพทันทีโดยไม่ต้องกดยืนยันซ้ำสอง
+    openCameraModal().catch(e => console.warn('Camera reopen error:', e));
+  } else {
+    // บนหน้าจอ Desktop (>= 768px): สลับไปที่หน้าแบบฟอร์ม
+    switchTab('form');
   }
 };
 
@@ -708,24 +735,23 @@ function handleLogin(e) {
   const matched = users.find(user => user.username === u && user.password === p);
 
   if (matched) {
+    const deviceMode = window.innerWidth < 768 ? 'mobile' : 'desktop';
     state.currentUser = {
       username: matched.username,
       name: matched.name || matched.username,
       role: matched.role
     };
     localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+    localStorage.setItem('slts_last_auth_action', 'login');
+    localStorage.setItem('slts_last_auth_device_mode', deviceMode);
 
     closeLoginModal();
     updateAuthUI();
     initMobileHandoffReceiver();
 
-    Swal.fire({
-      icon: 'success',
-      title: 'เข้าสู่ระบบสำเร็จ',
-      text: `ยินดีต้อนรับคุณ ${state.currentUser.name} (${state.currentUser.role.toUpperCase()})`,
-      timer: 1500,
-      showConfirmButton: false
-    });
+    if (deviceMode === 'mobile') {
+      openCameraModal().catch(e => console.warn('Camera open error:', e));
+    }
 
     if (state.dataTableInstance) {
       loadGoogleSheetData(false);
@@ -742,7 +768,8 @@ function handleLogin(e) {
 
 function handleLogout() {
   if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
-  
+  const isMobile = window.innerWidth < 768;
+
   Swal.fire({
     title: 'ต้องการออกจากระบบ?',
     text: 'คุณจะกลับสู่โหมดผู้ใช้งานทั่วไป',
@@ -754,16 +781,7 @@ function handleLogout() {
     cancelButtonColor: '#6b7280'
   }).then((res) => {
     if (res.isConfirmed) {
-      state.currentUser = null;
-      localStorage.removeItem('slts_current_user');
-      updateAuthUI();
-      switchTab('form');
-      Swal.fire({
-        icon: 'info',
-        title: 'ออกจากระบบแล้ว',
-        timer: 1200,
-        showConfirmButton: false
-      });
+      performDirectLogout(isMobile ? 'mobile' : 'desktop');
     }
   });
 }
