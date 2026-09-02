@@ -301,15 +301,24 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // กำหนดขั้นตอนเริ่มต้นตามขนาดหน้าจอ (Mobile vs Desktop)
+  const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest' && !!state.currentUser.username;
+
   if (window.innerWidth < 768) {
-    // จอมือถือ (< 768px): เปิดหน้ากล้องถ่ายภาพสดทันที
-    openCameraModal().catch(e => console.warn('Camera open error:', e));
+    // จอมือถือ (< 768px):
+    if (!isLoggedIn) {
+      // หากยังไม่ได้ล็อกอิน ให้เด้งหน้าต่างล็อกอินขึ้นมาบังทันทีเพื่อความปลอดภัย
+      setTimeout(() => {
+        openLoginModal(true);
+      }, 250);
+    } else {
+      // หากมีการล็อกอินอยู่แล้ว ให้เข้าใช้งานหน้ากล้องถ่ายภาพได้ทันที
+      openCameraModal().catch(e => console.warn('Camera open error:', e));
+    }
   } else {
     // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
     switchTab('form');
 
     // ตรวจสอบการเข้าสู่ระบบ: หากยังไม่ได้ล็อกอิน ให้แสดง Pop Up ล็อกอินขึ้นมาบังทันที เพื่อป้องกันบุคคลภายนอกเข้าใช้งานระบบ
-    const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest' && !!state.currentUser.username;
     if (!isLoggedIn) {
       setTimeout(() => {
         openLoginModal(true);
@@ -2556,6 +2565,19 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
   const rawTimestamp = rec['วัน-เวลาบันทึก'] || rec['Timestamp'] || '';
   const rowIndex = rec.originalIndex !== undefined ? rec.originalIndex + 2 : null;
 
+  // แปลงลิงก์ Google Drive ให้เป็น Direct Image URL / Thumbnail เพื่อให้แสดงผลใน <img> ได้ 100%
+  let resolvedFileId = fileId;
+  if (!resolvedFileId && imgUrl) {
+    const m = imgUrl.match(/id=([a-zA-Z0-9_-]+)/) || imgUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (m && m[1]) resolvedFileId = m[1];
+  }
+  let directDisplayUrl = '';
+  if (resolvedFileId) {
+    directDisplayUrl = `https://lh3.googleusercontent.com/d/${resolvedFileId}=w800`;
+  } else if (imgUrl && String(imgUrl).startsWith('http')) {
+    directDisplayUrl = imgUrl;
+  }
+
   // ดึงรายการจังหวัด
   let provincesOptions = '';
   if (typeof THAILAND_PROVINCES !== 'undefined') {
@@ -2668,24 +2690,24 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
             <i class="fa-solid fa-image text-blue-600"></i>
             <span>รูปภาพการส่งหมาย</span>
           </label>
-          <span class="text-[10px] text-gray-500">${imgUrl ? 'มีรูปภาพในระบบ' : 'ไม่มีรูปภาพ'}</span>
+          <span class="text-[10px] text-gray-500">${(directDisplayUrl || imgUrl) ? 'มีรูปภาพในระบบ' : 'ไม่มีรูปภาพ'}</span>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
           <!-- รูปภาพปัจจุบัน -->
           <div class="space-y-1">
             <p class="text-[10px] font-bold text-gray-500">รูปภาพปัจจุบัน:</p>
-            ${imgUrl && String(imgUrl).startsWith('http') ? `
-              <div class="relative group rounded-xl overflow-hidden border border-gray-300 max-h-36 bg-gray-900 flex items-center justify-center cursor-pointer" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${rawTimestamp}', '${lat}', '${lng}')" title="คลิกเพื่อดูภาพขนาดเต็ม">
-                <img src="${imgUrl}" class="max-h-36 w-full object-contain rounded-lg">
-                <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px] font-bold gap-1">
+            ${directDisplayUrl ? `
+              <div class="relative group rounded-xl overflow-hidden border border-gray-300 max-h-36 min-h-[100px] bg-gray-900 flex items-center justify-center cursor-pointer shadow-sm" onclick="viewPhotoModal('${imgUrl || directDisplayUrl}', '${caseNumber}', '${locationFull}', '${rawTimestamp}', '${lat}', '${lng}')" title="คลิกเพื่อดูภาพขนาดเต็ม">
+                <img src="${directDisplayUrl}" alt="รูปภาพปัจจุบัน" class="max-h-36 w-full object-contain rounded-lg" onerror="this.onerror=null; if('${resolvedFileId}') { this.src='https://drive.google.com/thumbnail?id=${resolvedFileId}&sz=w800'; }">
+                <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[11px] font-bold gap-1">
                   <i class="fa-solid fa-up-right-and-down-left-from-center"></i> ดูภาพเต็ม
                 </div>
               </div>
             ` : `
               <div class="p-4 bg-white rounded-xl border border-dashed border-gray-300 text-center text-gray-400 text-xs">
-                <i class="fa-solid fa-image-slash text-xl mb-1"></i>
-                <p>ไม่มีรูปภาพเดิม</p>
+                <i class="fa-solid fa-image-slash text-xl mb-1 text-gray-300"></i>
+                <p>ไม่มีรูปภาพเดิมในระบบ</p>
               </div>
             `}
           </div>
