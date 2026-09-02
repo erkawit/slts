@@ -700,6 +700,45 @@ function doGet(e) {
         })).setMimeType(ContentService.MimeType.JSON);
       }
     }
+
+    if (e.parameter.action === "get_data" || e.parameter.action === "get_summons") {
+      try {
+        const folder = DriveApp.getFolderById(FOLDER_ID);
+        const ss = getTargetSpreadsheetFile(folder);
+        const sheet = getSummonsSheet(ss);
+        const data = sheet.getDataRange().getValues();
+        if (data.length <= 1) {
+          return ContentService.createTextOutput(JSON.stringify({
+            status: "success",
+            data: []
+          })).setMimeType(ContentService.MimeType.JSON);
+        }
+        const headers = data[0];
+        const rows = [];
+        for (let i = 1; i < data.length; i++) {
+          if (!data[i][0] && !data[i][1]) continue;
+          const rowObj = {};
+          for (let j = 0; j < headers.length; j++) {
+            const h = String(headers[j] || '').trim();
+            let val = data[i][j];
+            if (val instanceof Date) {
+              val = Utilities.formatDate(val, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
+            }
+            rowObj[h] = val !== undefined && val !== null ? String(val) : '';
+          }
+          rows.push(rowObj);
+        }
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          data: rows
+        })).setMimeType(ContentService.MimeType.JSON);
+      } catch (err) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: err.toString()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
   }
 
   return ContentService.createTextOutput(JSON.stringify({

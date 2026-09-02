@@ -472,91 +472,67 @@ window.loadUsersData = async function(forceRefresh = false) {
     return;
   }
 
-  if (forceRefresh) {
-    showCustomLoading('กำลังดึงข้อมูลผู้ใช้งาน...', 'กำลังเชื่อมต่อ Google Sheet (Tab: users)');
+  const cachedUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  if (cachedUsers.length > 0 && !forceRefresh) {
+    renderUserList();
+    fetchUsersFromGasApi(false);
+    return;
   }
 
-  const now = Date.now();
-  const csvFetchUrl = `${state.usersGoogleSheetCsvUrl}&_t=${now}`;
+  if (forceRefresh) {
+    showCustomLoading('กำลังดึงข้อมูลผู้ใช้งาน...', 'กำลังเชื่อมต่อ Google Apps Script API (Tab: users)');
+  }
 
-  try {
-    Papa.parse(csvFetchUrl, {
-      download: true,
-      header: true,
-      skipEmptyLines: true,
-      complete: function(results) {
-        if (forceRefresh) hideCustomLoading();
-        let fetchedRows = results.data || [];
-        
-        let sheetUsers = fetchedRows
-          .filter(r => (r.username || r['ชื่อผู้ใช้'] || '').trim() !== '')
-          .map(r => ({
-            username: (r.username || r['ชื่อผู้ใช้'] || '').trim(),
-            password: (r.password || r['รหัสผ่าน'] || '123456').trim(),
-            role: (r.role || r['สิทธิ์'] || 'user').trim(),
-            name: (r.name || r['ชื่อ-นามสกุล'] || r.username || '').trim(),
-            createdAt: (r.createdAt || r['วันที่สร้าง'] || '').trim()
-          }));
-
-        // ตรวจสอบความปลอดภัย: ให้มี admin หลักเสมอ
-        if (!sheetUsers.some(u => u.username.toLowerCase() === 'admin')) {
-          sheetUsers.unshift({
-            username: 'admin',
-            password: 'caogikojt02',
-            role: 'admin',
-            name: 'ผู้ดูแลระบบ (Admin)',
-            createdAt: '25/08/2569'
-          });
-        }
-
-        if (sheetUsers.length > 0) {
-          localStorage.setItem('slts_users', JSON.stringify(sheetUsers));
-          renderUserList();
-        }
-
-        if (forceRefresh) {
-          Swal.fire({
-            icon: 'success',
-            title: 'รีเฟรชสำเร็จ',
-            text: `ดึงข้อมูลผู้ใช้งาน ${sheetUsers.length} รายการจาก Google Sheet เรียบร้อยแล้ว`,
-            timer: 1500,
-            showConfirmButton: false
-          });
-        }
-      },
-      error: function(err) {
-        console.warn('Users CSV fetch error, trying GAS API fallback:', err);
-        fetchUsersFromGasApi(forceRefresh);
-      }
-    });
-  } catch (e) {
-    if (forceRefresh) hideCustomLoading();
-    console.warn('loadUsersData error:', e);
+  const success = await fetchUsersFromGasApi(forceRefresh);
+  if (!success && (!cachedUsers || cachedUsers.length === 0)) {
     renderUserList();
   }
 };
 
 async function fetchUsersFromGasApi(showNotification = false) {
-  if (!state.appsScriptUrl) return;
+  if (!state.appsScriptUrl) return false;
   try {
-    const response = await fetch(state.appsScriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'get_users' })
-    });
-    const res = await response.json();
+    const url = `${state.appsScriptUrl}?action=get_users&_t=${Date.now()}`;
+    const response = await fetch(url, { cache: 'no-store' });
+    const data = await response.json();
+
     if (showNotification) hideCustomLoading();
-    if (res && res.status === 'success' && Array.isArray(res.users) && res.users.length > 0) {
-      localStorage.setItem('slts_users', JSON.stringify(res.users));
-      renderUserList();
-      if (showNotification) {
-        Swal.fire({ icon: 'success', title: 'รีเฟรชสำเร็จ', text: 'ดึงรายชื่อผู้ใช้จาก Google Sheet เรียบร้อยแล้ว', timer: 1500, showConfirmButton: false });
+
+    if (data && data.status === 'success' && Array.isArray(data.users)) {
+      let sheetUsers = data.users.filter(r => (r.username || '').trim() !== '');
+
+      // ตรวจสอบความปลอดภัย: ให้มี admin หลักเสมอ
+      if (!sheetUsers.some(u => u.username.toLowerCase() === 'admin')) {
+        sheetUsers.unshift({
+          username: 'admin',
+          password: 'caogikojt02',
+          role: 'admin',
+          name: 'ผู้ดูแลระบบ (Admin)',
+          createdAt: '25/08/2569'
+        });
       }
+
+      if (sheetUsers.length > 0) {
+        localStorage.setItem('slts_users', JSON.stringify(sheetUsers));
+        renderUserList();
+      }
+
+      if (showNotification) {
+        Swal.fire({
+          icon: 'success',
+          title: 'รีเฟรชสำเร็จ',
+          text: `ดึงข้อมูลผู้ใช้งาน ${sheetUsers.length} รายการเรียบร้อยแล้ว`,
+          timer: 1500,
+          showConfirmButton: false
+        });
+      }
+      return true;
     }
   } catch (err) {
-    if (showNotification) hideCustomLoading();
     console.warn('fetchUsersFromGasApi error:', err);
+    if (showNotification) hideCustomLoading();
   }
+  return false;
 }
 
 async function syncUserToGoogleSheet(action, payload) {
@@ -1267,7 +1243,7 @@ function initResponsiveUI() {
  * ดึงข้อมูล Google Sheet ด้วยระบบ Smart Cache 1 นาที
  * @param {boolean} forceRefresh - บังคับดึงข้อมูลสดจาก Google Sheet หรือไม่
  */
-window.loadGoogleSheetData = function(forceRefresh = false) {
+window.loadGoogleSheetData = async function(forceRefresh = false) {
   const cachedDataStr = localStorage.getItem(CACHE_KEY_SHEET_DATA);
   const lastFetchTime = Number(localStorage.getItem(CACHE_KEY_SHEET_TIME) || 0);
   const now = Date.now();
@@ -1287,19 +1263,19 @@ window.loadGoogleSheetData = function(forceRefresh = false) {
     }
   }
 
-  // 2. ถ้าไม่มี Cache, Cache หมดอายุ (เกิน 1 นาที), หรือผู้ใช้กดปุ่มรีเฟรช -> โหลดสดจาก Google Sheet
-  showCustomLoading('กำลังดึงข้อมูลประวัติการส่งหมาย...', 'กำลังเชื่อมต่อ Google Sheet');
+  // 2. โหลดสดจาก Google Apps Script Web App API (รองรับ Private/Restricted Sheet 100%)
+  showCustomLoading('กำลังดึงข้อมูลประวัติการส่งหมาย...', 'กำลังเชื่อมต่อ Google Apps Script');
 
-  const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${now}`;
+  try {
+    const apiUrl = `${state.appsScriptUrl}?action=get_data&_t=${now}`;
+    const response = await fetch(apiUrl, { cache: 'no-store' });
+    const jsonResult = await response.json();
 
-  Papa.parse(csvFetchUrl, {
-    download: true,
-    header: true,
-    skipEmptyLines: true,
-    complete: function(results) {
-      hideCustomLoading();
-      const rows = results.data || [];
-      
+    hideCustomLoading();
+
+    if (jsonResult && jsonResult.status === 'success' && Array.isArray(jsonResult.data)) {
+      const rows = jsonResult.data || [];
+
       // บันทึกลง localStorage
       try {
         localStorage.setItem(CACHE_KEY_SHEET_DATA, JSON.stringify(rows));
@@ -1311,38 +1287,32 @@ window.loadGoogleSheetData = function(forceRefresh = false) {
       const timeStr = new Date().toLocaleTimeString('th-TH');
       updateCacheBadgeUI(false, timeStr);
       renderDataTable(rows);
-    },
-    error: function(err) {
-      console.error('CSV fetch error:', err);
-      hideCustomLoading();
-
-      // หากดึงสดล้มเหลว แต่มีแคชเดิม ให้ใช้แคชเดิมแทน
-      if (cachedDataStr) {
-        try {
-          const cachedRows = JSON.parse(cachedDataStr);
-          renderDataTable(cachedRows);
-          Swal.fire({
-            icon: 'info',
-            title: 'แสดงข้อมูลจากแคชในเครื่อง',
-            text: 'ไม่สามารถเชื่อมต่ออินเทอร์เน็ตได้ ระบบจึงแสดงข้อมูลล่าสุดที่บันทึกไว้',
-            timer: 2000,
-            showConfirmButton: false
-          });
-          return;
-        } catch (e) {}
-      }
-
-      Swal.fire({
-        icon: 'warning',
-        title: 'ไม่สามารถดึงข้อมูลจาก Google Sheet ได้โดยตรง',
-        html: `
-          <p class="text-sm text-gray-600 mb-2">โปรดตรวจสอบว่า Google Sheet ได้ตั้งค่าสิทธิ์ให้ "ทุกคนที่มีลิงก์ดูได้" แล้วหรือยัง</p>
-          <a href="https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/edit?usp=sharing" target="_blank" class="text-blue-600 underline font-semibold text-sm">คลิกเปิดดูใน Google Sheet</a>
-        `,
-        confirmButtonColor: '#2563eb'
-      });
+      return;
+    } else {
+      throw new Error(jsonResult.message || 'รูปแบบข้อมูลไม่ถูกต้อง');
     }
-  });
+  } catch (apiErr) {
+    console.warn('GAS API get_data error:', apiErr);
+    hideCustomLoading();
+
+    // หากดึงสดล้มเหลว แต่มีแคชเดิม ให้ใช้แคชเดิมแทน
+    if (cachedDataStr) {
+      try {
+        const cachedRows = JSON.parse(cachedDataStr);
+        renderDataTable(cachedRows);
+        const timeStr = new Date(lastFetchTime).toLocaleTimeString('th-TH');
+        updateCacheBadgeUI(true, timeStr);
+        return;
+      } catch (e) {}
+    }
+
+    Swal.fire({
+      icon: 'warning',
+      title: 'ไม่สามารถดึงข้อมูลจากระบบได้',
+      text: 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต หรือสถานะการ Deploy ของ Google Apps Script',
+      confirmButtonColor: '#2563eb'
+    });
+  }
 };
 
 function updateCacheBadgeUI(isFromCache, timeStr) {
