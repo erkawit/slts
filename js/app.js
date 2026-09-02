@@ -1212,8 +1212,22 @@ window.switchTab = function(tabName) {
     // ดึงข้อมูลประวัติรอในเบื้องหลัง
     loadGoogleSheetData(false);
 
-    // หากยังไม่ได้ระบุพื้นที่ หรือเข้าครั้งแรก ให้แสดง Pop Up เลือกพื้นที่ทันที
-    if (!state.currentMapFilter) {
+    // โหลดประวัติลำดับเส้นทางล่าสุดที่บันทึกไว้เสมอ (ป้องกันหน้าจอว่างเปล่า)
+    if (!state.currentRouteStops || state.currentRouteStops.length === 0) {
+      loadSavedRouteStopsHistory();
+    }
+
+    if (state.currentRouteStops && state.currentRouteStops.length > 0) {
+      setTimeout(() => {
+        initLeafletMapInstance();
+        const badgeEl = document.getElementById('mapAreaCurrentBadge');
+        if (badgeEl) badgeEl.textContent = `📋 ตารางส่งหมาย (${state.currentRouteStops.length} รายการ)`;
+        recalculateRouteFromStops(true);
+        if (state.interactiveLeafletMap) {
+          state.interactiveLeafletMap.invalidateSize();
+        }
+      }, 150);
+    } else if (!state.currentMapFilter) {
       setTimeout(() => {
         openMapAreaSelectorModal();
       }, 200);
@@ -7256,6 +7270,59 @@ state.routeStartLocation = {
 };
 
 /**
+ * บันทึกประวัติลำดับเส้นทางการส่งหมายล่าสุดลง LocalStorage เสมอ (ป้องกันหน้าจอว่างเปล่า)
+ */
+window.saveCurrentRouteStopsHistory = function(stops) {
+  if (!stops) stops = state.currentRouteStops || [];
+  try {
+    const dataToSave = {
+      stops: stops,
+      savedAt: new Date().toISOString(),
+      province: state.selectedProvince || 'อุดรธานี',
+      startLocation: state.routeStartLocation,
+      isRoundTrip: state.isRoundTrip
+    };
+    localStorage.setItem('slts_saved_route_stops', JSON.stringify(dataToSave));
+    localStorage.setItem('slts_shared_route_stops', JSON.stringify(stops));
+  } catch (e) {
+    console.warn('Error saving route stops history:', e);
+  }
+};
+
+/**
+ * โหลดประวัติลำดับเส้นทางการส่งหมายล่าสุดจาก LocalStorage
+ */
+window.loadSavedRouteStopsHistory = function() {
+  try {
+    const saved = localStorage.getItem('slts_saved_route_stops');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && Array.isArray(parsed.stops) && parsed.stops.length > 0) {
+        state.currentRouteStops = parsed.stops;
+        if (parsed.province) state.selectedProvince = parsed.province;
+        if (parsed.startLocation) state.routeStartLocation = parsed.startLocation;
+        if (parsed.isRoundTrip !== undefined) state.isRoundTrip = parsed.isRoundTrip;
+        return parsed.stops;
+      }
+    }
+    const shared = localStorage.getItem('slts_shared_route_stops');
+    if (shared) {
+      const parsedStops = JSON.parse(shared);
+      if (Array.isArray(parsedStops) && parsedStops.length > 0) {
+        state.currentRouteStops = parsedStops;
+        return parsedStops;
+      }
+    }
+  } catch (e) {
+    console.warn('Error loading route stops history:', e);
+  }
+  return [];
+};
+
+// โหลดประวัติเส้นทางล่าสุดที่บันทึกไว้ทันที
+state.currentRouteStops = loadSavedRouteStopsHistory();
+
+/**
  * ส่งประวัติการทำรายการในหน้าแผนที่และหมุดไปบันทึกเป็นไฟล์ Log ใน Server (Google Apps Script / Drive)
  * @param {string} actionType - ประเภทกิจกรรม
  * @param {string} details - รายละเอียดกิจกรรม
@@ -9663,9 +9730,8 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
 
   renderRouteSidebarList(stops, totalDistanceKm);
 
-  try {
-    localStorage.setItem('slts_shared_route_stops', JSON.stringify(stops));
-  } catch (e) {}
+  // บันทึกลำดับเส้นทางล่าสุดเสมอเพื่อใช้แสดงผลเมื่อกลับมาใช้งาน
+  saveCurrentRouteStopsHistory(stops);
 
   if (bounds.length > 1) {
     state.interactiveLeafletMap.fitBounds(bounds, { padding: [40, 40] });
