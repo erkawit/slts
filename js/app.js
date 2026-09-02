@@ -8067,242 +8067,209 @@ function extractSummonsFormData(prefix = 'modal_') {
  * @returns {Promise<Array>} รายการหมายที่สกัดได้
  */
 /**
- * สกัดข้อมูลตารางบัญชีจ่ายหมายจากไฟล์ PDF (PDF.js Column & Row Bounding-Box Extraction)
- * @param {File} file - ไฟล์ PDF
- * @returns {Promise<Array>} รายการหมายที่สกัดได้
+ * ฟังก์ชันกลางสำหรับสกัดรายการหมายจากชุดข้อความ (แต่ละบรรทัด)
  */
-async function parsePdfDispatchFile(file) {
-  if (!window.pdfjsLib) throw new Error('ไม่พบไลบรารี pdf.js กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
-
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const allRecords = [];
-
-  // Case Regex: รองรับทั้ง ต, ผบ, พ, ด, ข, ฝ, ม, ฟ, ว, ย, อ, ผบE, พE, ผบ ส ฯลฯ
+function extractDispatchRecordsFromLines(lines) {
+  const records = [];
   const caseRegex = /([ตพดขฝผบมฟวยอเสEะ\.\s]{1,12}\d{1,6}\s*\/\s*\d{2,4})/gi;
 
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const textContent = await page.getTextContent();
-    const items = (textContent.items || []).map(item => ({
-      str: (item.str || '').trim(),
-      x: Math.round(item.transform[4]),
-      y: Math.round(item.transform[5]),
-      w: Math.round(item.width || 0),
-      h: Math.round(item.height || 0)
-    })).filter(item => item.str.length > 0);
+  for (let i = 0; i < lines.length; i++) {
+    const line = (lines[i] || '').trim();
+    if (!line) continue;
 
-    if (items.length === 0) continue;
-
-    // 1. ค้นหาตำแหน่ง Y ของหัวตาราง (Header Row)
-    let headerY = null;
-    let colHeaderX = {
-      seq: null,      // ที่ (Col 1)
-      blackCase: null, // เลขดำที่ (Col 2)
-      redCase: null,   // เลขแดงที่ (Col 3)
-      plaintiff: null, // โจทก์ (Col 4)
-      defendant: null, // จำเลย (Col 5)
-      recipient: null, // ส่งให้แก่ (Col 6)
-      status: null,    // ฐานะ (Col 7)
-      address: null,   // ที่อยู่ (Col 8)
-      subdistrict: null, // ตำบล (Col 9)
-      district: null,  // อำเภอ (Col 10)
-      note: null       // หมายเหตุ (Col 11)
-    };
-
-    for (const item of items) {
-      if (item.str.includes('เลขดำที่') || item.str.includes('เลขดำ')) {
-        headerY = item.y;
-        colHeaderX.blackCase = item.x;
-      } else if (item.str === 'ที่' || item.str === 'ลำดับ') {
-        colHeaderX.seq = item.x;
-      } else if (item.str.includes('เลขแดง')) {
-        colHeaderX.redCase = item.x;
-      } else if (item.str.includes('โจทก์')) {
-        colHeaderX.plaintiff = item.x;
-      } else if (item.str.includes('จำเลย')) {
-        colHeaderX.defendant = item.x;
-      } else if (item.str.includes('ส่งให้แก่') || item.str.includes('ชื่อผู้รับ')) {
-        colHeaderX.recipient = item.x;
-      } else if (item.str.includes('ฐานะ')) {
-        colHeaderX.status = item.x;
-      } else if (item.str.includes('ที่อยู่')) {
-        colHeaderX.address = item.x;
-      } else if (item.str === 'ตำบล' || item.str.includes('ตำบล')) {
-        colHeaderX.subdistrict = item.x;
-      } else if (item.str === 'อำเภอ' || item.str.includes('อำเภอ')) {
-        colHeaderX.district = item.x;
-      } else if (item.str.includes('หมายเหตุ')) {
-        colHeaderX.note = item.x;
-      }
+    // ข้ามบรรทัดหัวเอกสาร
+    if (
+      line.includes('บัญชีจ่ายหมาย') ||
+      line.includes('ศาลจังหวัด') ||
+      line.includes('พนักงานศาลนี้ส่ง') ||
+      line.includes('เลขดำที่') ||
+      line.includes('ชื่อผู้รับ') ||
+      line.includes('หน้าที่') ||
+      line.includes('รวมจ่ายหมาย')
+    ) {
+      continue;
     }
 
-    // กำหนดช่วงพิกัด X ของแต่ละคอลัมน์ (Column X-Ranges)
-    const xSeqMax = colHeaderX.blackCase ? (colHeaderX.blackCase - 10) : 65;
-    const xCaseMin = colHeaderX.blackCase ? (colHeaderX.blackCase - 25) : 50;
-    const xCaseMax = colHeaderX.redCase ? (colHeaderX.redCase + 15) : (colHeaderX.plaintiff ? colHeaderX.plaintiff - 10 : 220);
-    
-    const xAddrMin = colHeaderX.address ? (colHeaderX.address - 35) : 440;
-    const xAddrMax = colHeaderX.subdistrict ? (colHeaderX.subdistrict - 10) : 635;
-    const xSubMin = colHeaderX.subdistrict ? (colHeaderX.subdistrict - 15) : 630;
-    const xSubMax = colHeaderX.district ? (colHeaderX.district - 10) : 715;
-    const xDistMin = colHeaderX.district ? (colHeaderX.district - 15) : 710;
-    const xDistMax = colHeaderX.note ? (colHeaderX.note - 5) : 820;
+    const matches = line.match(caseRegex);
+    if (!matches || matches.length === 0) continue;
 
-    // 2. ค้นหาแถวของตาราง (Row Boundaries)
-    // ในตารางศาล คอลัมน์ 1 ("ที่") จะมีตัวเลขลำดับ 1, 2, 3, 4, 5, 6, 7, ... อยู่ทางซ้ายสุด
-    const tableTopY = headerY !== null ? (headerY - 8) : 550;
-    
-    // ค้นหา items ที่เป็นตัวเลขลำดับแถว (1, 2, 3, ...) ในคอลัมน์ซ้ายสุด
-    const seqItems = items.filter(it => {
-      return it.x <= xSeqMax && it.y < tableTopY && /^\d{1,3}$/.test(it.str);
-    });
+    // คัดกรองกฎ "ต": หากมีหลายเลขคดีและมีเลขที่ขึ้นต้นด้วย ต ให้ใช้เฉพาะเลข ต
+    const rawCases = matches.map(c => c.trim().replace(/\s+/g, ' '));
+    const tCases = rawCases.filter(c => /^ต/i.test(c.replace(/\s+/g, '')));
+    const finalCases = (tCases.length > 0) ? tCases : rawCases;
+    const primaryCase = finalCases[0];
 
-    // เรียงลำดับแถวตามตัวเลขลำดับ (1, 2, 3, ...)
-    seqItems.sort((a, b) => parseInt(a.str, 10) - parseInt(b.str, 10));
+    // สกัดที่อยู่
+    let houseNo = '';
+    let moo = '';
+    let isCentralReg = line.includes('ทะเบียนบ้านกลาง');
+    let centralRegText = '';
 
-    // กรองเอาเฉพาะตัวเลขที่เป็นลำดับต่อเนื่องกัน (1, 2, 3...)
-    const validSeqRows = [];
-    let expectedSeq = 1;
-    for (const sq of seqItems) {
-      const num = parseInt(sq.str, 10);
-      if (num === expectedSeq) {
-        validSeqRows.push({ no: num, y: sq.y });
-        expectedSeq++;
-      }
-    }
-
-    // สร้างช่วง Bounding Box (Y-Range) สำหรับแต่ละแถว
-    const rowRanges = [];
-    if (validSeqRows.length > 0) {
-      for (let i = 0; i < validSeqRows.length; i++) {
-        const cur = validSeqRows[i];
-        const prev = validSeqRows[i - 1];
-        const next = validSeqRows[i + 1];
-
-        const topY = (i === 0) ? (tableTopY + 5) : ((prev.y + cur.y) / 2);
-        const bottomY = (i === validSeqRows.length - 1) ? (cur.y - 35) : ((cur.y + next.y) / 2);
-
-        rowRanges.push({
-          rowNo: cur.no,
-          topY: topY,
-          bottomY: bottomY
-        });
-      }
+    if (isCentralReg) {
+      const cMatch = line.match(/ทะเบียนบ้านกลาง\s*(\d*)/);
+      centralRegText = cMatch && cMatch[1] ? `ทะเบียนบ้านกลาง ${cMatch[1]}`.trim() : 'ทะเบียนบ้านกลาง';
     } else {
-      // Fallback: หากไม่พบลำดับตัวเลข ให้จัดกลุ่มตาม Y ของเลขคดี
-      const caseItems = items.filter(it => it.x >= xCaseMin && it.x <= xCaseMax && it.y < tableTopY && caseRegex.test(it.str));
-      caseRegex.lastIndex = 0;
-      
-      const distinctY = [];
-      caseItems.forEach(ci => {
-        if (!distinctY.some(y => Math.abs(y - ci.y) <= 22)) {
-          distinctY.push(ci.y);
+      const hmMatch = line.match(/(\d+(?:\/\d+)?)\s*(?:ม\.?|หมู่)\s*(\d+|-)/);
+      if (hmMatch) {
+        houseNo = hmMatch[1];
+        moo = (hmMatch[2] !== '-') ? hmMatch[2] : '';
+      } else {
+        // หาบ้านเลขที่โดดๆ โดยไม่เอาเลขจากเลขคดี
+        const hOnly = line.match(/(\d+(?:\/\d+)?)/);
+        if (hOnly && hOnly[1] !== primaryCase.split('/')[0].replace(/\D/g, '')) {
+          houseNo = hOnly[1];
         }
-      });
-      distinctY.sort((a, b) => b - a); // Y มาก (บน) ไป Y น้อย (ล่าง)
-
-      for (let i = 0; i < distinctY.length; i++) {
-        const curY = distinctY[i];
-        const topY = (i === 0) ? (tableTopY + 5) : ((distinctY[i - 1] + curY) / 2);
-        const bottomY = (i === distinctY.length - 1) ? (curY - 35) : ((curY + distinctY[i + 1]) / 2);
-        rowRanges.push({
-          rowNo: i + 1,
-          topY: topY,
-          bottomY: bottomY
-        });
+        const mOnly = line.match(/(?:ม\.?|หมู่)\s*(\d+)/);
+        if (mOnly) moo = mOnly[1];
       }
     }
 
-    // 3. สกัดข้อมูลแต่ละแถวตาม Column Bounding Boxes
-    for (const rRange of rowRanges) {
-      // รวม items ทั้งหมดที่อยู่ในแถวนี้
-      const rowItems = items.filter(it => it.y <= rRange.topY && it.y > rRange.bottomY);
-      if (rowItems.length === 0) continue;
+    let subdistrict = '';
+    let district = '';
 
-      // --- 3.1 สกัดคอลัมน์ "เลขดำที่" ---
-      const caseColItems = rowItems.filter(it => it.x >= xCaseMin && it.x <= xCaseMax);
-      const caseColText = caseColItems.map(it => it.str).join(' ');
-      
-      const rawMatches = caseColText.match(/([ตพดขฝผบมฟวยอเสEะ\.\s]{1,12}\d{1,6}\s*\/\s*\d{2,4})/gi) || [];
-      const cleanCases = rawMatches.map(c => c.trim().replace(/\s+/g, ' '));
+    const subMatch = line.match(/(?:ต\.?|ตำบล)\s*([ก-๙]+)/);
+    if (subMatch) subdistrict = subMatch[1];
 
-      if (cleanCases.length === 0) {
-        // ลองหาใน rowText ทั้งหมดของแถว
-        const fullRowText = rowItems.map(it => it.str).join(' ');
-        const fallbackMatches = fullRowText.match(/([ตพดขฝผบมฟวยอเสEะ\.\s]{1,12}\d{1,6}\s*\/\s*\d{2,4})/gi) || [];
-        if (fallbackMatches.length > 0) {
-          cleanCases.push(...fallbackMatches.map(c => c.trim().replace(/\s+/g, ' ')));
-        }
-      }
+    const distMatch = line.match(/(?:อ\.?|อำเภอ)\s*([ก-๙]+)/);
+    if (distMatch) district = distMatch[1];
 
-      if (cleanCases.length === 0) continue;
-
-      // กฎคัดกรองเลขคดี "ต":
-      // หากในแถวมีเลขคดีมากกว่า 1 ชุด และพบเลขที่ขึ้นต้นด้วย "ต" ให้เลือกเฉพาะเลข "ต" เท่านั้น (ตัดเลขชุดอื่นในแถวทิ้ง)
-      const tCases = cleanCases.filter(c => /^ต/i.test(c.replace(/\s+/g, '')));
-      const finalCases = (tCases.length > 0) ? tCases : cleanCases;
-      const primaryCase = finalCases[0];
-
-      // --- 3.2 สกัดคอลัมน์ "ที่อยู่" ---
-      const addrColItems = rowItems.filter(it => it.x >= xAddrMin && it.x <= xAddrMax);
-      addrColItems.sort((a, b) => a.x - b.x);
-      const addrColText = addrColItems.map(it => it.str).join(' ').trim();
-
-      let houseNo = '';
-      let moo = '';
-      let isCentralReg = addrColText.includes('ทะเบียนบ้านกลาง');
-      let centralRegText = '';
-
-      if (isCentralReg) {
-        const cMatch = addrColText.match(/ทะเบียนบ้านกลาง\s*(\d*)/);
-        centralRegText = cMatch && cMatch[1] ? `ทะเบียนบ้านกลาง ${cMatch[1]}`.trim() : 'ทะเบียนบ้านกลาง';
-      } else {
-        // ค้นหาบ้านเลขที่ และ หมู่ เช่น "140 ม. 2" หรือ "10 ม. 8" หรือ "441 ม. 1"
-        const hmMatch = addrColText.match(/(\d+(?:\/\d+)?)\s*(?:ม\.?|หมู่)\s*(\d+|-)/);
-        if (hmMatch) {
-          houseNo = hmMatch[1];
-          moo = (hmMatch[2] !== '-') ? hmMatch[2] : '';
-        } else {
-          // หาบ้านเลขที่โดดๆ และหมู่โดดๆ
-          const hMatch = addrColText.match(/^(\d+(?:\/\d+)?)/) || addrColText.match(/(\d+(?:\/\d+)?)/);
-          if (hMatch) houseNo = hMatch[1];
-          const mMatch = addrColText.match(/(?:ม\.?|หมู่)\s*(\d+)/);
-          if (mMatch) moo = mMatch[1];
-        }
-      }
-
-      // --- 3.3 สกัดคอลัมน์ "ตำบล" ---
-      const subColItems = rowItems.filter(it => it.x >= xSubMin && it.x <= xSubMax);
-      let subdistrict = subColItems.map(it => it.str).join('').replace(/^(ต\.|ตำบล)\s*/, '').trim();
-      if (!subdistrict || subdistrict === '-') subdistrict = 'นาข่า';
-
-      // --- 3.4 สกัดคอลัมน์ "อำเภอ" ---
-      const distColItems = rowItems.filter(it => it.x >= xDistMin && it.x <= xDistMax);
-      let district = distColItems.map(it => it.str).join('').replace(/^(อ\.|อำเภอ)\s*/, '').trim();
-      if (!district || district === '-') district = 'เมืองอุดรธานี';
-
-      allRecords.push({
+    if (!records.some(r => r.caseNumber === primaryCase)) {
+      records.push({
         caseNumber: primaryCase,
         allCases: finalCases,
         houseNo: isCentralReg ? '' : houseNo,
         moo: isCentralReg ? '' : moo,
         isCentralReg,
         centralRegText,
-        subdistrict: subdistrict,
-        district: district,
-        rawText: `${primaryCase} | ${addrColText} | ${subdistrict} | ${district}`
+        subdistrict: subdistrict || 'นาข่า',
+        district: district || 'เมืองอุดรธานี',
+        rawText: line
       });
     }
   }
 
+  return records;
+}
+
+/**
+ * สกัดข้อมูลตารางบัญชีจ่ายหมายจากไฟล์ PDF (รองรับทั้ง Digital Text PDF และ Scanned Image PDF ทุกหน้า)
+ * @param {File} file - ไฟล์ PDF
+ * @param {Function} [onProgress] - Callback % ความคืบหน้า
+ * @returns {Promise<Array>} รายการหมายที่สกัดได้ทั้งหมด
+ */
+async function parsePdfDispatchFile(file, onProgress) {
+  if (!window.pdfjsLib) throw new Error('ไม่พบไลบรารี pdf.js กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const allRecords = [];
+  const numPages = pdf.numPages;
+
+  const caseRegex = /([ตพดขฝผบมฟวยอเสEะ\.\s]{1,12}\d{1,6}\s*\/\s*\d{2,4})/gi;
+
+  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    if (onProgress) onProgress(Math.round(((pageNum - 1) / numPages) * 100), `กำลังวิเคราะห์ PDF หน้า ${pageNum}/${numPages}...`);
+
+    const page = await pdf.getPage(pageNum);
+    const textContent = await page.getTextContent();
+    const rawItems = (textContent.items || []).filter(it => (it.str || '').trim().length > 0);
+
+    let pageRecords = [];
+
+    // กรณีที่ 1: ตรวจสอบ Text Layer ของ PDF
+    if (rawItems.length > 0) {
+      // รวมข้อความที่อยู่บนบรรทัดเดียวกัน (Line Grouping)
+      const lineMap = new Map();
+      rawItems.forEach(item => {
+        const text = (item.str || '').trim();
+        if (!text) return;
+        const y = Math.round(item.transform[5]);
+        const x = Math.round(item.transform[4]);
+        
+        let foundKey = null;
+        for (const key of lineMap.keys()) {
+          if (Math.abs(key - y) <= 4) {
+            foundKey = key;
+            break;
+          }
+        }
+        const lineKey = foundKey !== null ? foundKey : y;
+        if (!lineMap.has(lineKey)) lineMap.set(lineKey, []);
+        lineMap.get(lineKey).push({ x, text, width: item.width || 0 });
+      });
+
+      // เรียงบรรทัดจากบนลงล่าง
+      const sortedLines = Array.from(lineMap.entries())
+        .sort((a, b) => b[0] - a[0])
+        .map(entry => {
+          // เรียงคำในบรรทัดจากซ้ายไปขวา
+          const sortedWords = entry[1].sort((a, b) => a.x - b.x);
+          return sortedWords.map(w => w.text).join(' ');
+        });
+
+      // ลองสกัดข้อมูลจาก Text Lines
+      pageRecords = extractDispatchRecordsFromLines(sortedLines);
+    }
+
+    // กรณีที่ 2: หากหน้า PDF นี้ไม่มี Text Layer หรือเป็นภาพสแกน ให้ใช้ Canvas + Tesseract OCR
+    if (pageRecords.length === 0 && window.Tesseract) {
+      if (onProgress) onProgress(Math.round(((pageNum - 0.5) / numPages) * 100), `กำลัง OCR ตรวจสอบภาพสแกน หน้า ${pageNum}/${numPages}...`);
+
+      try {
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+
+        await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+        // Contrast enhancement
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          const cv = (v > 130) ? Math.min(255, v * 1.15) : Math.max(0, v * 0.85);
+          d[i] = cv;
+          d[i + 1] = cv;
+          d[i + 2] = cv;
+        }
+        ctx.putImageData(imgData, 0, 0);
+
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        const worker = await Tesseract.createWorker('tha+eng', 1);
+        const ret = await worker.recognize(blob);
+        await worker.terminate();
+
+        const ocrText = (ret.data.text || '')
+          .replace(/([ผพ])\s*[บB]\s*[Eе]/gi, '$1บE')
+          .replace(/([ผพ])\s*[บB]\s*[\.\s]*ส/gi, '$1บ ส')
+          .replace(/([ตพดขฝผบมฟวยอเสEะ])\s+(\d+)/gi, '$1$2')
+          .replace(/(\d+)\s*\/\s*(\d+)/g, '$1/$2');
+
+        const ocrLines = ocrText.split('\n').map(l => l.trim()).filter(Boolean);
+        pageRecords = extractDispatchRecordsFromLines(ocrLines);
+      } catch (ocrErr) {
+        console.warn(`OCR fallback error on page ${pageNum}:`, ocrErr);
+      }
+    }
+
+    // รวมรายการจากหน้านี้เข้า allRecords (ป้องกันซ้ำ)
+    pageRecords.forEach(rec => {
+      if (!allRecords.some(r => r.caseNumber === rec.caseNumber)) {
+        allRecords.push(rec);
+      }
+    });
+  }
+
+  if (onProgress) onProgress(100, `วิเคราะห์ครบทุกหน้าเรียบร้อย (พบทั้งหมด ${allRecords.length} รายการ)`);
   return allRecords;
 }
 
 /**
- * สกัดข้อมูลตารางบัญชีจ่ายหมายจากไฟล์ภาพ (Tesseract.js OCR พร้อม Canvas Preprocessing)
+ * สกัดข้อมูลตารางบัญชีจ่ายหมายจากไฟล์ภาพ (รองรับการอัพโหลดหลายไฟล์ พร้อม Canvas Contrast Preprocessing & OCR)
  * @param {FileList|File[]} files - รายการไฟล์ภาพ
- * @param {Function} onProgress - Callback รายงาน % ความคืบหน้า
+ * @param {Function} [onProgress] - Callback % ความคืบหน้า
  * @returns {Promise<Array>} รายการหมายที่สกัดได้
  */
 async function parseImageDispatchFiles(files, onProgress) {
@@ -8310,32 +8277,28 @@ async function parseImageDispatchFiles(files, onProgress) {
 
   const allRecords = [];
   const total = files.length;
-  const caseRegex = /([ตพดขฝผบมฟวยอเสEะ\.\s]{1,12}\d{1,6}\s*\/\s*\d{2,4})/gi;
 
   for (let idx = 0; idx < total; idx++) {
     const file = files[idx];
-    if (onProgress) onProgress(Math.round((idx / total) * 100), `กำลังประมวลผลภาพ ${idx + 1}/${total}: ${file.name}`);
+    if (onProgress) onProgress(Math.round((idx / total) * 100), `กำลังวิเคราะห์ภาพ ${idx + 1}/${total}: ${file.name}`);
 
-    // Preprocessing ภาพผ่าน Offscreen Canvas เพื่อเพิ่ม Contrast และความคมชัดของภาษาไทย
     let processedBlob = file;
     try {
       const imgBitmap = await createImageBitmap(file);
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
-      // ปรับขนาด Scale ให้เหมาะสมสำหรับ OCR (กว้าง ~1800-2400px)
-      const scale = Math.max(1, Math.min(2.5, 2000 / imgBitmap.width));
+      const scale = Math.max(1, Math.min(2.5, 2200 / imgBitmap.width));
       canvas.width = Math.round(imgBitmap.width * scale);
       canvas.height = Math.round(imgBitmap.height * scale);
 
       ctx.drawImage(imgBitmap, 0, 0, canvas.width, canvas.height);
 
-      // ปรับ Grayscale & Contrast
+      // Contrast enhancement
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = imgData.data;
       for (let i = 0; i < d.length; i += 4) {
         const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        // Contrast enhancement
         const cv = (v > 130) ? Math.min(255, v * 1.15) : Math.max(0, v * 0.85);
         d[i] = cv;
         d[i + 1] = cv;
@@ -8353,7 +8316,7 @@ async function parseImageDispatchFiles(files, onProgress) {
       logger: m => {
         if (m.status === 'recognizing text' && onProgress) {
           const filePct = Math.round((idx / total) * 100 + (m.progress / total) * 100);
-          onProgress(filePct, `กำลัง OCR ตัวอักษรภาพ ${idx + 1}/${total}: ${Math.round(m.progress * 100)}%`);
+          onProgress(filePct, `กำลัง OCR ภาพ ${idx + 1}/${total}: ${Math.round(m.progress * 100)}%`);
         }
       }
     });
@@ -8362,8 +8325,6 @@ async function parseImageDispatchFiles(files, onProgress) {
     await worker.terminate();
 
     const rawText = ret.data.text || '';
-    
-    // ทำความสะอาดและแก้คำผิด OCR ทั่วไป
     const cleanedText = rawText
       .replace(/[|]/g, ' ')
       .replace(/([ผพ])\s*[บB]\s*[Eе]/gi, '$1บE')
@@ -8372,79 +8333,16 @@ async function parseImageDispatchFiles(files, onProgress) {
       .replace(/(\d+)\s*\/\s*(\d+)/g, '$1/$2');
 
     const lines = cleanedText.split('\n').map(l => l.trim()).filter(Boolean);
+    const fileRecords = extractDispatchRecordsFromLines(lines);
 
-    for (const line of lines) {
-      // ข้ามหัวตาราง
-      if (
-        line.includes('บัญชีจ่ายหมาย') ||
-        line.includes('ศาลจังหวัด') ||
-        line.includes('พนักงานศาลนี้ส่ง') ||
-        line.includes('เลขดำที่') ||
-        line.includes('ชื่อผู้รับ') ||
-        line.includes('หน้าที่')
-      ) {
-        continue;
+    fileRecords.forEach(rec => {
+      if (!allRecords.some(r => r.caseNumber === rec.caseNumber)) {
+        allRecords.push(rec);
       }
-
-      const matches = line.match(caseRegex);
-      if (!matches || matches.length === 0) continue;
-
-      const rawCases = matches.map(c => c.trim().replace(/\s+/g, ' '));
-      const tCases = rawCases.filter(c => /^ต/i.test(c.replace(/\s+/g, '')));
-      const finalCases = (tCases.length > 0) ? tCases : rawCases;
-      const primaryCase = finalCases[0];
-
-      // สกัดที่อยู่
-      let houseNo = '';
-      let moo = '';
-      let isCentralReg = line.includes('ทะเบียนบ้านกลาง');
-      let centralRegText = '';
-
-      if (isCentralReg) {
-        const cMatch = line.match(/ทะเบียนบ้านกลาง\s*(\d*)/);
-        centralRegText = cMatch && cMatch[1] ? `ทะเบียนบ้านกลาง ${cMatch[1]}`.trim() : 'ทะเบียนบ้านกลาง';
-      } else {
-        const hMatch = line.match(/(\d+(?:\/\d+)?)\s*(?:ม\.?|หมู่)\s*(\d+|-)/);
-        if (hMatch) {
-          houseNo = hMatch[1];
-          moo = (hMatch[2] !== '-') ? hMatch[2] : '';
-        } else {
-          // หาเฉพาะบ้านเลขที่
-          const hOnly = line.match(/(\d+(?:\/\d+)?)/);
-          if (hOnly && hOnly[1] !== primaryCase.split('/')[0].replace(/\D/g, '')) {
-            houseNo = hOnly[1];
-          }
-          const mOnly = line.match(/(?:ม\.?|หมู่)\s*(\d+)/);
-          if (mOnly) moo = mOnly[1];
-        }
-      }
-
-      let subdistrict = '';
-      let district = '';
-
-      const subMatch = line.match(/(?:ต\.?|ตำบล)\s*([ก-๙]+)/);
-      if (subMatch) subdistrict = subMatch[1];
-
-      const distMatch = line.match(/(?:อ\.?|อำเภอ)\s*([ก-๙]+)/);
-      if (distMatch) district = distMatch[1];
-
-      // ป้องกันแถวซ้ำ
-      if (!allRecords.some(r => r.caseNumber === primaryCase)) {
-        allRecords.push({
-          caseNumber: primaryCase,
-          allCases: finalCases,
-          houseNo: isCentralReg ? '' : houseNo,
-          moo: isCentralReg ? '' : moo,
-          isCentralReg,
-          centralRegText,
-          subdistrict: subdistrict || 'นาข่า',
-          district: district || 'เมืองอุดรธานี',
-          rawText: line
-        });
-      }
-    }
+    });
   }
 
+  if (onProgress) onProgress(100, `OCR เสร็จสิ้นทุกภาพ (พบทั้งหมด ${allRecords.length} รายการ)`);
   return allRecords;
 }
 
@@ -8992,11 +8890,11 @@ window.openMapAreaSelectorModal = function() {
 
           if (isPdf) {
             const pdfFile = fileArr.find(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
-            if (statusText) statusText.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังอ่านข้อมูล PDF จากตาราง...';
-            if (progressBar) progressBar.style.width = '45%';
-            if (percentText) percentText.textContent = '45%';
-            
-            parsedRecords = await parsePdfDispatchFile(pdfFile);
+            parsedRecords = await parsePdfDispatchFile(pdfFile, (pct, msg) => {
+              if (progressBar) progressBar.style.width = `${pct}%`;
+              if (percentText) percentText.textContent = `${pct}%`;
+              if (statusText) statusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${msg}`;
+            });
 
             logServerActivity('MAP_UPLOAD_PDF', `อัพโหลดไฟล์ PDF "${pdfFile.name}" สกัดได้ ${parsedRecords.length} รายการ (เลขคดี: ${parsedRecords.map(r => r.caseNumber).slice(0, 7).join(', ')}${parsedRecords.length > 7 ? '...' : ''})`, {
               fileName: pdfFile.name,
@@ -9763,6 +9661,10 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
 
   renderRouteSidebarList(stops, totalDistanceKm);
 
+  try {
+    localStorage.setItem('slts_shared_route_stops', JSON.stringify(stops));
+  } catch (e) {}
+
   if (bounds.length > 1) {
     state.interactiveLeafletMap.fitBounds(bounds, { padding: [40, 40] });
   }
@@ -10042,8 +9944,38 @@ window.openFullRouteInGoogleMaps = function() {
 
 /**
  * เปิดหน้าต่างแผนที่และเส้นทางส่งหมายสำหรับหน้าจอมือถือ (< 768px)
+ * (ต้องล็อกอินก่อนใช้งาน และรอข้อมูลเส้นทางที่จัด/ยืนยันจากหน้าจอ Desktop)
  */
 window.showMobileRouteMapModal = function() {
+  // 1. ตรวจสอบการเข้าสู่ระบบ
+  const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+  if (!isUserLoggedIn) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'จำเป็นต้องเข้าสู่ระบบ',
+      text: 'กรุณาเข้าสู่ระบบก่อนเปิดดูแผนที่และเส้นทางส่งหมาย',
+      confirmButtonText: '<i class="fa-solid fa-right-to-bracket mr-1"></i> เข้าสู่ระบบทันที',
+      showCancelButton: true,
+      cancelButtonText: 'ยกเลิก',
+      confirmButtonColor: '#2563eb'
+    }).then((res) => {
+      if (res.isConfirmed) {
+        openLoginModal();
+      }
+    });
+    return;
+  }
+
+  // 2. โหลดข้อมูลเส้นทางที่จัดและยืนยันจากหน้าจอ Desktop
+  if (!state.currentRouteStops || state.currentRouteStops.length === 0) {
+    try {
+      const savedStops = localStorage.getItem('slts_shared_route_stops');
+      if (savedStops) {
+        state.currentRouteStops = JSON.parse(savedStops);
+      }
+    } catch (e) {}
+  }
+
   const stops = state.currentRouteStops || [];
   const start = state.routeStartLocation;
   const prov = state.selectedProvince || 'อุดรธานี';
@@ -10054,10 +9986,17 @@ window.showMobileRouteMapModal = function() {
   let stopsHtml = '';
   if (stops.length === 0) {
     stopsHtml = `
-      <div class="p-6 text-center text-gray-400">
-        <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
-        <p class="text-xs font-semibold">ยังไม่มีรายการหมุดที่เลือก</p>
-        <p class="text-[10px] text-gray-400 mt-1">กดปุ่ม "ตัวกรอง" เพื่อเลือกพื้นที่หรือจัดตารางส่งหมาย</p>
+      <div class="p-8 text-center text-gray-500 flex flex-col items-center justify-center">
+        <div class="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 text-2xl mb-3 shadow-sm">
+          <i class="fa-solid fa-desktop"></i>
+        </div>
+        <h3 class="text-sm font-bold text-gray-800 mb-1">รอข้อมูลเส้นทางจากหน้าจอหลัก (Desktop)</h3>
+        <p class="text-xs text-gray-500 max-w-xs leading-relaxed mb-4">
+          กรุณาจัดรายการตารางส่งหมายบนคอมพิวเตอร์และกดยืนยัน ข้อมูลจะแสดงผลที่หน้าจอนี้อัตโนมัติ
+        </p>
+        <button type="button" onclick="showMobileRouteMapModal()" class="px-4 py-2 bg-blue-600 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm cursor-pointer">
+          <i class="fa-solid fa-rotate-right"></i> รีเฟรชข้อมูลเส้นทาง
+        </button>
       </div>
     `;
   } else {
@@ -10084,22 +10023,6 @@ window.showMobileRouteMapModal = function() {
             <p class="text-[11px] opacity-80 truncate">${stop.locationText}</p>
             ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติ (มีหมุดเส้นทาง)</span>` : (isNear ? `<span class="text-[9px] text-amber-800 font-bold inline-block mt-0.5"><i class="fa-solid fa-location-dot text-[8px] mr-1"></i>${stop.matchNote || 'หมุดใกล้เคียง'}</span>` : `<span class="text-[9px] text-gray-400 font-normal inline-block mt-0.5">ไม่มีข้อมูลในฐานข้อมูล (ไม่มีหมุด)</span>`)}
           </div>
-          <div class="flex items-center gap-1 flex-shrink-0">
-            <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer">
-              <i class="fa-solid fa-pen-to-square text-xs"></i>
-            </button>
-            <button type="button" onclick="deleteRouteStop(${index}, event)" class="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer">
-              <i class="fa-solid fa-trash-can text-xs"></i>
-            </button>
-            <div class="flex flex-col gap-0.5">
-              <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 cursor-pointer">
-                <i class="fa-solid fa-chevron-up"></i>
-              </button>
-              <button type="button" onclick="moveStopDown(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 cursor-pointer">
-                <i class="fa-solid fa-chevron-down"></i>
-              </button>
-            </div>
-          </div>
         </div>
       `;
     });
@@ -10119,11 +10042,8 @@ window.showMobileRouteMapModal = function() {
             <p class="slts-modal-subtitle">📍 จ.${prov} (${stops.length} คดี)</p>
           </div>
           <div class="flex items-center gap-1">
-            <button type="button" onclick="openAddRouteStopModal()" class="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer">
-              <i class="fa-solid fa-plus"></i> เพิ่ม
-            </button>
-            <button type="button" onclick="openMapAreaSelectorModal()" class="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer">
-              <i class="fa-solid fa-layer-group"></i> ตัวกรอง
+            <button type="button" onclick="showMobileRouteMapModal()" class="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
+              <i class="fa-solid fa-rotate-right"></i> รีเฟรช
             </button>
           </div>
         </div>
@@ -10141,9 +10061,11 @@ window.showMobileRouteMapModal = function() {
               <span class="font-bold text-gray-800 text-[11px]">🏁 ${start.name}</span>
               ${totalDistKm > 0 ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">${totalDistKm.toFixed(1)} กม.</span>` : ''}
             </div>
-            <button type="button" onclick="openFullRouteInGoogleMaps()" class="px-2.5 py-1 bg-emerald-600 active:scale-95 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer">
-              <i class="fa-solid fa-diamond-turn-right"></i> นำทาง Google Maps
-            </button>
+            ${stops.length > 0 ? `
+              <button type="button" onclick="openFullRouteInGoogleMaps()" class="px-2.5 py-1 bg-emerald-600 active:scale-95 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer">
+                <i class="fa-solid fa-diamond-turn-right"></i> นำทาง Google Maps
+              </button>
+            ` : ''}
           </div>
 
           <!-- Stops List -->
