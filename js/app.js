@@ -1266,53 +1266,110 @@ window.loadGoogleSheetData = async function(forceRefresh = false) {
   // 2. โหลดสดจาก Google Apps Script Web App API (รองรับ Private/Restricted Sheet 100%)
   showCustomLoading('กำลังดึงข้อมูลประวัติการส่งหมาย...', 'กำลังเชื่อมต่อ Google Apps Script');
 
+  let rows = null;
+
+  // 2.1 ลองดึงผ่าน GET API: ?action=get_data
   try {
     const apiUrl = `${state.appsScriptUrl}?action=get_data&_t=${now}`;
     const response = await fetch(apiUrl, { cache: 'no-store' });
     const jsonResult = await response.json();
 
-    hideCustomLoading();
-
     if (jsonResult && jsonResult.status === 'success' && Array.isArray(jsonResult.data)) {
-      const rows = jsonResult.data || [];
-
-      // บันทึกลง localStorage
-      try {
-        localStorage.setItem(CACHE_KEY_SHEET_DATA, JSON.stringify(rows));
-        localStorage.setItem(CACHE_KEY_SHEET_TIME, String(Date.now()));
-      } catch (saveErr) {
-        console.warn('Could not save to localStorage:', saveErr);
-      }
-
-      const timeStr = new Date().toLocaleTimeString('th-TH');
-      updateCacheBadgeUI(false, timeStr);
-      renderDataTable(rows);
-      return;
-    } else {
-      throw new Error(jsonResult.message || 'รูปแบบข้อมูลไม่ถูกต้อง');
+      rows = jsonResult.data;
     }
-  } catch (apiErr) {
-    console.warn('GAS API get_data error:', apiErr);
-    hideCustomLoading();
-
-    // หากดึงสดล้มเหลว แต่มีแคชเดิม ให้ใช้แคชเดิมแทน
-    if (cachedDataStr) {
-      try {
-        const cachedRows = JSON.parse(cachedDataStr);
-        renderDataTable(cachedRows);
-        const timeStr = new Date(lastFetchTime).toLocaleTimeString('th-TH');
-        updateCacheBadgeUI(true, timeStr);
-        return;
-      } catch (e) {}
-    }
-
-    Swal.fire({
-      icon: 'warning',
-      title: 'ไม่สามารถดึงข้อมูลจากระบบได้',
-      text: 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต หรือสถานะการ Deploy ของ Google Apps Script',
-      confirmButtonColor: '#2563eb'
-    });
+  } catch (e) {
+    console.warn('GAS GET get_data failed:', e);
   }
+
+  // 2.2 หากยังไม่ได้ข้อมูล ลองผ่าน POST API: { action: 'get_data' }
+  if (!rows) {
+    try {
+      const response = await fetch(state.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'get_data' })
+      });
+      const jsonResult = await response.json();
+      if (jsonResult && jsonResult.status === 'success' && Array.isArray(jsonResult.data)) {
+        rows = jsonResult.data;
+      }
+    } catch (e) {
+      console.warn('GAS POST get_data failed:', e);
+    }
+  }
+
+  // 2.3 หากยังไม่ได้ข้อมูล ลองดึงผ่าน CSV (กรณีเปิดชีตสาธารณะ)
+  if (!rows && state.googleSheetCsvUrl) {
+    try {
+      rows = await new Promise((resolve) => {
+        Papa.parse(`${state.googleSheetCsvUrl}&_t=${now}`, {
+          download: true,
+          header: true,
+          skipEmptyLines: true,
+          complete: (res) => resolve(res.data || []),
+          error: () => resolve(null)
+        });
+      });
+    } catch (e) {
+      rows = null;
+    }
+  }
+
+  hideCustomLoading();
+
+  // ประมวลผลผลลัพธ์
+  if (rows && Array.isArray(rows)) {
+    try {
+      localStorage.setItem(CACHE_KEY_SHEET_DATA, JSON.stringify(rows));
+      localStorage.setItem(CACHE_KEY_SHEET_TIME, String(Date.now()));
+    } catch (saveErr) {
+      console.warn('Could not save to localStorage:', saveErr);
+    }
+
+    const timeStr = new Date().toLocaleTimeString('th-TH');
+    updateCacheBadgeUI(false, timeStr);
+    renderDataTable(rows);
+    return;
+  }
+
+  // 3. หากดึงข้อมูลสดล้มเหลวทุกวิธี แต่มีข้อมูลแคชเดิมในเครื่อง
+  if (cachedDataStr) {
+    try {
+      const cachedRows = JSON.parse(cachedDataStr);
+      renderDataTable(cachedRows);
+      const timeStr = new Date(lastFetchTime).toLocaleTimeString('th-TH');
+      updateCacheBadgeUI(true, timeStr);
+
+      const Toast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 3500,
+        timerProgressBar: true
+      });
+      Toast.fire({
+        icon: 'info',
+        title: 'กำลังแสดงข้อมูลแคชล่าสุดในเครื่อง'
+      });
+      return;
+    } catch (e) {}
+  }
+
+  // 4. หากไม่มีแคชเลย และดึงข้อมูลไม่สำเร็จ
+  Swal.fire({
+    icon: 'warning',
+    title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
+    html: `
+      <div class="text-left text-xs space-y-2 text-gray-600 leading-relaxed">
+        <p>เนื่องจาก Google Sheet ถูกตั้งเป็นส่วนตัว (Private) ต้องอาศัย Google Apps Script ในการดึงข้อมูล</p>
+        <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 font-medium">
+          <strong>วิธีแก้ไข:</strong> กรุณาเปิด Apps Script บน Google Sheet > กด <u>Deploy (ทำให้ใช้งานได้)</u> > <u>Manage deployments (จัดการการทำให้ใช้งานได้)</u> > แก้ไขเป็น <strong>"New version (เวอร์ชันใหม่)"</strong>
+        </div>
+      </div>
+    `,
+    confirmButtonText: 'รับทราบ',
+    confirmButtonColor: '#2563eb'
+  });
 };
 
 function updateCacheBadgeUI(isFromCache, timeStr) {

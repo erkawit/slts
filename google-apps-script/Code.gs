@@ -177,6 +177,35 @@ function doPost(e) {
     }
 
     // ==========================================
+    // ACTION: GET_DATA (ดึงข้อมูลบันทึกการส่งหมายทั้งหมด)
+    // ==========================================
+    if (data.action === "get_data" || data.action === "get_summons") {
+      const sheet = getSummonsSheet(spreadsheet);
+      const sData = sheet.getDataRange().getValues();
+      const rows = [];
+      if (sData.length > 1) {
+        const headers = sData[0];
+        for (let i = 1; i < sData.length; i++) {
+          if (!sData[i][0] && !sData[i][1]) continue;
+          const rowObj = {};
+          for (let j = 0; j < headers.length; j++) {
+            const h = String(headers[j] || '').trim();
+            let val = sData[i][j];
+            if (val instanceof Date) {
+              val = Utilities.formatDate(val, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
+            }
+            rowObj[h] = val !== undefined && val !== null ? String(val) : '';
+          }
+          rows.push(rowObj);
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        data: rows
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ==========================================
     // ACTION: USER MANAGEMENT (จัดการผู้ใช้งานใน Sheet 'users')
     // ==========================================
     if (data.action === "get_users") {
