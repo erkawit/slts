@@ -710,11 +710,12 @@ window.performDirectLogout = function(sourceMode = (window.innerWidth < 768 ? 'm
   Swal.close();
 
   if (sourceMode === 'mobile' || window.innerWidth < 768) {
-    // บนหน้าจอมือถือ (< 768px): กลับไปที่หน้าโหมดกล้องถ่ายภาพทันทีโดยไม่ต้องกดยืนยันซ้ำสอง
-    openCameraModal().catch(e => console.warn('Camera reopen error:', e));
+    // บนหน้าจอมือถือ (< 768px): หากมีการกดออกจากระบบแล้ว ให้แสดงหน้าต่างล็อกอินทันทีเพื่อป้องกันการใช้งานหน้าจอโดยไม่ล็อกอิน
+    openLoginModal(true);
   } else {
-    // บนหน้าจอ Desktop (>= 768px): สลับไปที่หน้าแบบฟอร์ม
+    // บนหน้าจอ Desktop (>= 768px): สลับไปที่หน้าแบบฟอร์ม และเปิดหน้าต่างล็อกอินทันที
     switchTab('form');
+    openLoginModal(true);
   }
 };
 
@@ -7239,6 +7240,59 @@ async function handleDesktopUpload() {
     // บีบอัดรูปภาพให้ไม่เกิน 1MB (ไม่ต้องดาวน์โหลดไฟล์ลงเครื่องเพราะเป็นการอัปโหลดไฟล์จากเครื่อง)
     const compressedImageBase64 = await compressImageToMax1MB(finalImageDataUrl);
 
+    // 3. แสดงหน้าต่างแจ้งเตือนเพื่อตรวจสอบข้อมูลและยืนยันก่อนอัปโหลดจริง
+    const confirmUploadRes = await Swal.fire({
+      title: `<div class="flex items-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-clipboard-check text-blue-600"></i> ตรวจสอบความถูกต้องก่อนอัปโหลด</div>`,
+      html: `
+        <div class="text-left space-y-3 p-1 select-none">
+          <!-- แสดงภาพถ่ายที่แนบให้เห็นชัดๆ -->
+          <div class="space-y-1">
+            <span class="text-[11px] font-bold text-gray-600">รูปภาพส่งหมายที่จะอัปโหลด:</span>
+            <div class="relative bg-gray-900 rounded-2xl overflow-hidden border border-gray-300 max-h-56 min-h-[140px] flex items-center justify-center shadow-inner">
+              <img src="${finalImageDataUrl}" alt="ภาพส่งหมาย" class="max-h-56 w-full object-contain rounded-xl">
+            </div>
+          </div>
+
+          <!-- ข้อมูลเลขคดีและที่ตั้งส่งหมาย -->
+          <div class="p-3 bg-gray-50 border border-gray-200 rounded-2xl space-y-1 text-xs text-gray-800">
+            <div class="flex items-center justify-between font-bold">
+              <span class="text-blue-700 font-mono text-sm"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i> ${caseNumber}</span>
+              <span class="text-gray-600">${courtType}</span>
+            </div>
+            <div>
+              <i class="fa-solid fa-location-pin text-rose-500 mr-1"></i> <b>ที่ตั้ง:</b> ${locationText}
+            </div>
+          </div>
+
+          <!-- เน้นการแสดงผลในส่วนของพิกัดให้ชัดเจนเป็นพิเศษ (Highlight Box) -->
+          <div class="p-3.5 bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border-2 border-blue-400 rounded-2xl text-center shadow-xs">
+            <div class="text-xs font-bold text-blue-700 mb-1 flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-crosshairs text-rose-500 text-sm"></i>
+              <span>พิกัด GPS ที่จะบันทึกลงระบบ</span>
+            </div>
+            <div class="text-xl font-mono font-black text-gray-900 tracking-wider">
+              ${state.lat ? Number(state.lat).toFixed(6) : '-'}, ${state.lng ? Number(state.lng).toFixed(6) : '-'}
+            </div>
+            <p class="text-[10px] text-gray-500 mt-1">โปรดตรวจสอบพิกัดและรูปภาพก่อนกดยืนยันอัปโหลด</p>
+          </div>
+        </div>
+      `,
+      width: '580px',
+      customClass: {
+        popup: 'rounded-3xl p-5'
+      },
+      showCancelButton: true,
+      confirmButtonText: '<i class="fa-solid fa-cloud-arrow-up mr-1.5"></i> ยืนยันเพื่อทำการอัปโหลด',
+      cancelButtonText: '<i class="fa-solid fa-pen-to-square mr-1.5"></i> ย้อนกลับเพื่อแก้ไข',
+      confirmButtonColor: '#2563eb',
+      cancelButtonColor: '#6b7280',
+      allowOutsideClick: false
+    });
+
+    if (!confirmUploadRes.isConfirmed) {
+      return; // ย้อนกลับเพื่อปิดและแก้ไข
+    }
+
     const uploadPayload = {
       action: 'upload_image',
       ...payloadData,
@@ -7246,7 +7300,7 @@ async function handleDesktopUpload() {
       imageBase64: compressedImageBase64
     };
 
-    // 3. ตรวจสอบสถานะการเชื่อมต่ออินเทอร์เน็ต
+    // 4. ตรวจสอบสถานะการเชื่อมต่ออินเทอร์เน็ต
     if (!navigator.onLine) {
       addToOfflineQueue({
         payload: uploadPayload,
@@ -7271,31 +7325,18 @@ async function handleDesktopUpload() {
         showCloseButton: true,
         allowOutsideClick: false
       });
-      resetDesktopForm();
+      resetDesktopForm(true);
       return;
     }
 
     // อัปโหลดขึ้น Google Drive พร้อมนำเข้าข้อมูลลง Google Sheet ในขั้นตอนเดียว
     const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
 
-    // เคลียร์แคชและโหลดข้อมูลใหม่
+    // เคลียร์แคชชีต
     localStorage.removeItem(CACHE_KEY_SHEET_DATA);
     localStorage.removeItem(CACHE_KEY_SHEET_TIME);
 
-    Swal.fire({
-      icon: 'success',
-      title: 'อัปโหลดภาพสำเร็จ!',
-      showCloseButton: true,
-      allowOutsideClick: false,
-      html: `<p class="text-gray-700">อัปโหลดภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงใน Google Drive & Sheet เรียบร้อยแล้ว</p>
-             ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
-      confirmButtonColor: '#2563eb'
-    }).then(() => {
-      resetDesktopForm();
-      loadGoogleSheetData(true);
-    });
-
-    // บันทึกประวัติการกรอกข้อมูลลงในเครื่อง (Desktop Form History) เพื่อลดความผิดพลาดในการกรอกซ้ำ
+    // บันทึกประวัติการกรอกข้อมูลลงในเครื่อง (Desktop Form History)
     saveDesktopFormHistory({
       caseNumber: caseNumber,
       courtType: payloadData.courtType,
@@ -7319,6 +7360,47 @@ async function handleDesktopUpload() {
       otherCaseYear: elements.otherCaseYearSelect ? elements.otherCaseYearSelect.value : ''
     });
 
+    // แสดงผลข้อมูลการอัปโหลดสำเร็จ พร้อมนับเวลาถอยหลัง 3 วินาทีเพื่อปิดหน้าต่าง (ไม่ต้องมีปุ่มเปิด Google Drive และปุ่มยืนยัน)
+    let timerInterval;
+    Swal.fire({
+      icon: 'success',
+      title: 'อัปโหลดภาพส่งหมายสำเร็จ!',
+      html: `
+        <div class="text-center space-y-2.5 text-xs text-gray-700 py-1 select-none">
+          <p class="font-bold text-gray-900 text-sm">บันทึกข้อมูลเลขคดี <span class="text-blue-700 font-mono font-bold">${caseNumber}</span> เรียบร้อยแล้ว</p>
+          <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-900 text-[11px] text-left space-y-1">
+            <div>📍 <b>พิกัด GPS:</b> <span class="font-mono font-bold">${state.lat ? Number(state.lat).toFixed(6) : ''}, ${state.lng ? Number(state.lng).toFixed(6) : ''}</span></div>
+            <div>🏠 <b>ที่ตั้งส่งหมาย:</b> ${locationText}</div>
+          </div>
+          <div class="pt-2 text-[11px] text-gray-500 flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
+            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalUploadCountdown" class="text-blue-600 font-bold text-sm">3</b> วินาที</span>
+          </div>
+        </div>
+      `,
+      timer: 3000,
+      timerProgressBar: true,
+      showConfirmButton: false,
+      showCancelButton: false,
+      allowOutsideClick: false,
+      didOpen: () => {
+        const cdEl = document.getElementById('swalUploadCountdown');
+        timerInterval = setInterval(() => {
+          if (cdEl && Swal.getTimerLeft()) {
+            const secLeft = Math.ceil(Swal.getTimerLeft() / 1000);
+            cdEl.textContent = secLeft;
+          }
+        }, 200);
+      },
+      willClose: () => {
+        clearInterval(timerInterval);
+      }
+    }).then(() => {
+      // รีเซ็ตเฉพาะรูปภาพ แต่เก็บข้อมูลล่าสุดไว้ในฟอร์มเพื่อช่วยลดการกรอกข้อมูลในครั้งถัดไป
+      resetDesktopForm(true);
+      loadGoogleSheetData(true);
+    });
+
   } catch (err) {
     console.error('Desktop upload error:', err);
     hideCustomLoading();
@@ -7326,12 +7408,14 @@ async function handleDesktopUpload() {
   }
 }
 
-function resetDesktopForm() {
-  resetFormForNextCase();
+function resetDesktopForm(keepValues = true) {
   state.selectedDesktopImageDataUrl = null;
   if (elements.desktopImageFileInput) elements.desktopImageFileInput.value = '';
   if (elements.desktopImagePreviewContainer) elements.desktopImagePreviewContainer.classList.add('hidden');
   if (elements.desktopPreviewImg) elements.desktopPreviewImg.src = '';
+  if (!keepValues) {
+    resetFormForNextCase();
+  }
 }
 
 // =========================================================================
