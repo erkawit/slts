@@ -7260,31 +7260,35 @@ state.routeStartLocation = {
  * @param {Object} [extraData] - ข้อมูลเพิ่มเติม
  */
 async function logServerActivity(actionType, details, extraData = null) {
-  const user = state.currentUser || { username: 'anonymous', name: 'ไม่ได้ระบุผู้ใช้', role: 'guest' };
-  const payload = {
-    action: 'log_activity',
-    actionType: actionType,
-    details: details,
-    user: {
-      username: user.username || 'anonymous',
-      name: user.name || user.username || 'anonymous',
-      role: user.role || 'user'
-    },
-    extra: extraData,
-    clientTimestamp: new Date().toISOString()
-  };
+  setTimeout(() => {
+    try {
+      const user = state.currentUser || { username: 'anonymous', name: 'ไม่ได้ระบุผู้ใช้', role: 'guest' };
+      const payload = {
+        action: 'log_activity',
+        actionType: actionType,
+        details: details,
+        user: {
+          username: user.username || 'anonymous',
+          name: user.name || user.username || 'anonymous',
+          role: user.role || 'user'
+        },
+        extra: extraData,
+        clientTimestamp: new Date().toISOString()
+      };
 
-  try {
-    if (state.appsScriptUrl && navigator.onLine) {
-      fetch(state.appsScriptUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload)
-      }).catch(err => console.warn('Server logging silent warning:', err));
+      if (state.appsScriptUrl && navigator.onLine) {
+        fetch(state.appsScriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          cache: 'no-cache',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        }).catch(() => {});
+      }
+    } catch (e) {
+      // Non-blocking silent catch
     }
-  } catch (e) {
-    console.warn('logServerActivity error:', e);
-  }
+  }, 20);
 }
 
 /**
