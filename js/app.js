@@ -284,6 +284,13 @@ document.addEventListener('DOMContentLoaded', () => {
   initResponsiveUI();
   initMobileHandoffReceiver();
 
+  // ตรวจสอบและแสดงคำอธิบายคู่มือการใช้งานระบบสำหรับผู้ใช้ใหม่
+  if (localStorage.getItem('slts_onboarding_completed') !== 'true') {
+    setTimeout(() => {
+      showSystemOnboardingModal(false);
+    }, 600);
+  }
+
   // กำหนดขั้นตอนเริ่มต้นตามขนาดหน้าจอ (Mobile vs Desktop)
   if (window.innerWidth < 768) {
     // จอมือถือ (< 768px): เปิดหน้ากล้องถ่ายภาพสดทันที (ไม่โหลดฟอร์ม SweetAlert ขึ้นมาก่อน)
@@ -5999,6 +6006,26 @@ function fetchCurrentLocation(isManual = false) {
   );
 }
 
+/**
+ * จัดการการกดปุ่มดึงพิกัดใหม่บนหน้ากล้องมือถือ (< 768px)
+ */
+window.handleCameraRefreshGps = function(e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  const icon = document.querySelector('#btnFlipOrientationQuick i');
+  if (icon) icon.classList.add('fa-spin');
+
+  fetchCurrentLocation(true);
+
+  setTimeout(() => {
+    if (icon) icon.classList.remove('fa-spin');
+    updateLiveMapHUD();
+  }, 1000);
+};
+
 function initCameraEvents() {
   const handleOpenCam = () => {
     if (!validateForm()) return;
@@ -6036,7 +6063,8 @@ function initCameraEvents() {
     elements.btnToggleOrientation.addEventListener('click', toggleOrientation);
   }
   if (elements.btnFlipOrientationQuick) {
-    elements.btnFlipOrientationQuick.addEventListener('click', toggleOrientation);
+    elements.btnFlipOrientationQuick.title = 'ดึงพิกัดใหม่ (Refresh GPS)';
+    elements.btnFlipOrientationQuick.addEventListener('click', handleCameraRefreshGps);
   }
 
   if (elements.btnEditMobileForm) {
@@ -10721,10 +10749,13 @@ function applyReceivedHandoff(handoff) {
 
 /**
  * เปิดหน้าต่างแผนที่และเส้นทางส่งหมายสำหรับหน้าจอมือถือ (< 768px)
- * (ต้องล็อกอินก่อนใช้งาน และรอข้อมูลเส้นทางที่จัด/ยืนยันจากหน้าจอ Desktop)
+ * (ปรับสัดส่วน Layout ให้สมดุล พร้อมแผนที่ Leaflet และ Timeline นำทาง)
  */
+window.mobileModalMap = null;
+window.mobileModalMarkersLayer = null;
+window.mobileModalPolyline = null;
+
 window.showMobileRouteMapModal = function() {
-  // 1. ตรวจสอบการเข้าสู่ระบบ
   const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
   if (!isUserLoggedIn) {
     Swal.fire({
@@ -10743,7 +10774,6 @@ window.showMobileRouteMapModal = function() {
     return;
   }
 
-  // 2. โหลดข้อมูลเส้นทางที่จัดและยืนยันจากหน้าจอ Desktop
   if (!state.currentRouteStops || state.currentRouteStops.length === 0) {
     try {
       const savedStops = localStorage.getItem('slts_shared_route_stops');
@@ -10760,94 +10790,54 @@ window.showMobileRouteMapModal = function() {
   let totalDistKm = 0;
   stops.forEach(s => { if (s.legDistanceKm) totalDistKm += s.legDistanceKm; });
 
-  let stopsHtml = '';
-  if (stops.length === 0) {
-    stopsHtml = `
-      <div class="p-8 text-center text-gray-500 flex flex-col items-center justify-center">
-        <div class="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 text-2xl mb-3 shadow-sm">
-          <i class="fa-solid fa-desktop"></i>
-        </div>
-        <h3 class="text-sm font-bold text-gray-800 mb-1">รอข้อมูลเส้นทางจากหน้าจอหลัก (Desktop)</h3>
-        <p class="text-xs text-gray-500 max-w-xs leading-relaxed mb-4">
-          กรุณาจัดรายการตารางส่งหมายบนคอมพิวเตอร์และกดยืนยัน ข้อมูลจะแสดงผลที่หน้าจอนี้อัตโนมัติ
-        </p>
-        <button type="button" onclick="showMobileRouteMapModal()" class="px-4 py-2 bg-blue-600 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm cursor-pointer">
-          <i class="fa-solid fa-rotate-right"></i> รีเฟรชข้อมูลเส้นทาง
-        </button>
-      </div>
-    `;
-  } else {
-    stops.forEach((stop, index) => {
-      const isExact = stop.matchType === 'exact' || stop.isMatched;
-      const isNear = stop.matchType === 'near';
-      const hasPin = stop.pinNumber !== null && stop.pinNumber !== undefined;
-      const distText = hasPin ? `+ ${stop.legDistanceKm.toFixed(1)} กม.` : 'ไม่มีหมุด';
-      const itemClass = isExact ? 'slts-match-exact' : (isNear ? 'slts-match-near' : 'slts-match-none');
-      const badgeBg = isExact ? 'bg-emerald-600 text-white' : (isNear ? 'bg-amber-500 text-white' : 'bg-gray-300 text-gray-700');
-
-      stopsHtml += `
-        <div class="p-2.5 rounded-xl border flex items-start gap-2 text-xs transition ${itemClass}">
-          <span class="w-5 h-5 rounded-full ${badgeBg} text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
-            ${hasPin ? stop.pinNumber : '-'}
-          </span>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center justify-between gap-1 mb-0.5">
-              <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : (isNear ? 'text-amber-950' : 'text-gray-900')} truncate">${stop.caseNumber}</span>
-              <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : (isNear ? 'text-amber-800 bg-amber-50 border-amber-200' : 'text-gray-500 bg-gray-100 border-gray-200')} px-1.5 py-0.2 rounded border flex-shrink-0">
-                ${distText}
-              </span>
-            </div>
-            <p class="text-[11px] opacity-80 truncate">${stop.locationText}</p>
-            ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติ (มีหมุดเส้นทาง)</span>` : (isNear ? `<span class="text-[9px] text-amber-800 font-bold inline-block mt-0.5"><i class="fa-solid fa-location-dot text-[8px] mr-1"></i>${stop.matchNote || 'หมุดใกล้เคียง'}</span>` : `<span class="text-[9px] text-gray-400 font-normal inline-block mt-0.5">ไม่มีข้อมูลในฐานข้อมูล (ไม่มีหมุด)</span>`)}
-          </div>
-        </div>
-      `;
-    });
-  }
-
   Swal.fire({
     html: `
-      <div class="slts-province-modal flex flex-col h-[88dvh]">
+      <div class="slts-province-modal flex flex-col h-[88dvh] overflow-hidden bg-gray-50">
         <!-- Header -->
-        <div class="slts-modal-header flex-shrink-0">
-          <button type="button" onclick="showMobileSummonsFormModal(true)" class="slts-back-header-btn" title="กลับไปฟอร์ม">
+        <div class="slts-modal-header flex-shrink-0 px-3.5 py-2.5 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white flex items-center justify-between shadow-sm">
+          <button type="button" onclick="showMobileSummonsFormModal(true)" class="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="กลับไปฟอร์ม">
             <i class="fa-solid fa-arrow-left"></i>
             <span>กลับ</span>
           </button>
-          <div class="flex-1 text-center pr-2">
-            <h2 class="slts-modal-title">🗺️ แผนที่เส้นทางส่งหมาย</h2>
-            <p class="slts-modal-subtitle">📍 จ.${prov} (${stops.length} คดี)</p>
+          <div class="flex-1 text-center px-2">
+            <h2 class="text-xs font-bold text-white truncate">🗺️ แผนที่เส้นทางส่งหมาย</h2>
+            <p class="text-[10px] text-blue-100 truncate">📍 จ.${prov} (${stops.length} จุดหมาย)</p>
           </div>
-          <div class="flex items-center gap-1">
-            <button type="button" onclick="showMobileRouteMapModal()" class="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
-              <i class="fa-solid fa-rotate-right"></i> รีเฟรช
+          <button type="button" onclick="showMobileRouteMapModal()" class="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
+            <i class="fa-solid fa-rotate-right"></i>
+          </button>
+        </div>
+
+        <!-- Balanced Mobile Leaflet Map (Height 40dvh) -->
+        <div class="relative w-full h-[40dvh] min-h-[190px] max-h-[340px] bg-slate-100 border-b border-gray-200 flex-shrink-0 overflow-hidden">
+          <div id="mobileModalLeafletMap" class="w-full h-full z-0"></div>
+          
+          <!-- Floating Center Button -->
+          <div class="absolute bottom-2.5 right-2.5 z-[1000]">
+            <button type="button" onclick="centerMobileModalMap()" class="w-8 h-8 rounded-full bg-white/95 text-blue-700 shadow-md flex items-center justify-center text-xs font-bold cursor-pointer border border-gray-200 active:scale-95 transition" title="จัดกึ่งกลางแผนที่">
+              <i class="fa-solid fa-location-crosshairs"></i>
             </button>
           </div>
         </div>
 
-        <!-- Mobile Leaflet Map -->
-        <div class="relative flex-1 min-h-[220px] max-h-[44dvh] w-full bg-slate-100 border-b border-gray-200">
-          <div id="sltsInteractiveMap" class="w-full h-full"></div>
-        </div>
-
-        <!-- Mobile Controls & Stops List -->
+        <!-- Bottom Timeline & Stats (Height 48dvh) -->
         <div class="flex-1 flex flex-col min-h-0 bg-white">
-          <!-- Control Bar -->
-          <div class="p-2.5 bg-blue-50/70 border-b border-blue-100 flex items-center justify-between text-xs flex-shrink-0">
-            <div class="flex items-center gap-1.5 truncate">
-              <span class="font-bold text-gray-800 text-[11px]">🏁 ${start.name}</span>
-              ${totalDistKm > 0 ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">${totalDistKm.toFixed(1)} กม.</span>` : ''}
+          <!-- Summary Bar -->
+          <div class="p-2.5 bg-blue-50/80 border-b border-blue-100 flex items-center justify-between text-xs flex-shrink-0 gap-2">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span class="font-bold text-gray-800 text-[11px] truncate">🏁 ${start.name}</span>
+              ${totalDistKm > 0 ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold flex-shrink-0">${totalDistKm.toFixed(1)} กม.</span>` : ''}
             </div>
             ${stops.length > 0 ? `
-              <button type="button" onclick="openFullRouteInGoogleMaps()" class="px-2.5 py-1 bg-emerald-600 active:scale-95 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer">
-                <i class="fa-solid fa-diamond-turn-right"></i> นำทาง Google Maps
+              <button type="button" onclick="openFullRouteInGoogleMaps()" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-[11px] flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer">
+                <i class="fa-solid fa-diamond-turn-right"></i> นำทางทั้งหมด
               </button>
             ` : ''}
           </div>
 
-          <!-- Stops List -->
-          <div id="mobileMapRouteStopsList" class="flex-1 overflow-y-auto p-2 space-y-1.5 divide-y divide-gray-100 slts-swal-body-scroll">
-            ${stopsHtml}
+          <!-- Stops List Scrollable Container -->
+          <div id="mobileMapRouteStopsList" class="flex-1 overflow-y-auto p-2.5 space-y-2 slts-swal-body-scroll bg-gray-50/40">
+            <!-- Rendered by renderMobileRouteList -->
           </div>
         </div>
       </div>
@@ -10858,69 +10848,393 @@ window.showMobileRouteMapModal = function() {
     allowOutsideClick: false,
     customClass: {
       container: 'slts-swal-top-container',
-      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding'
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding rounded-2xl overflow-hidden'
     },
     didOpen: () => {
-      // Re-init map
+      renderMobileRouteList();
       setTimeout(() => {
-        if (state.currentRouteStops.length > 0) {
-          recalculateRouteFromStops(false);
-        } else if (state.currentMapFilter) {
-          renderMapAndPins(state.currentMapFilter.province, state.currentMapFilter.district, state.currentMapFilter.subdistrict);
-        } else {
-          renderMapAndPins(prov, '', '');
-        }
-      }, 150);
+        initMobileModalMapInstance();
+      }, 200);
     }
   });
+};
+
+window.initMobileModalMapInstance = function() {
+  const container = document.getElementById('mobileModalLeafletMap');
+  if (!container || typeof L === 'undefined') return;
+
+  if (window.mobileModalMap) {
+    try {
+      window.mobileModalMap.remove();
+    } catch (e) {}
+    window.mobileModalMap = null;
+  }
+
+  const start = state.routeStartLocation;
+  const stops = state.currentRouteStops || [];
+
+  window.mobileModalMap = L.map('mobileModalLeafletMap', {
+    zoomControl: true,
+    attributionControl: false
+  }).setView([start.lat, start.lng], 12);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19
+  }).addTo(window.mobileModalMap);
+
+  window.mobileModalMarkersLayer = L.layerGroup().addTo(window.mobileModalMap);
+
+  // 1. วาดหมุดจุดเริ่มต้น (Start Location Hub)
+  const startIcon = L.divIcon({
+    html: `<div class="w-7 h-7 rounded-full bg-blue-700 text-white flex items-center justify-center font-extrabold text-[11px] shadow-lg border-2 border-white ring-2 ring-blue-400/50"><i class="fa-solid fa-flag"></i></div>`,
+    className: 'slts-div-icon',
+    iconSize: [28, 28],
+    iconAnchor: [14, 28]
+  });
+  L.marker([start.lat, start.lng], { icon: startIcon })
+    .addTo(window.mobileModalMarkersLayer)
+    .bindPopup(`<b>🏁 ${start.name}</b>`);
+
+  // 2. วาดหมุดจุดส่งหมาย (Stops)
+  const latlngs = [[start.lat, start.lng]];
+  let pinNum = 1;
+
+  stops.forEach((stop) => {
+    if (stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && stop.lat > 0 && stop.lng > 0) {
+      const pinIcon = L.divIcon({
+        html: `<div class="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-[10px] shadow-md border-2 border-white ring-2 ring-rose-300">${pinNum}</div>`,
+        className: 'slts-div-icon',
+        iconSize: [24, 24],
+        iconAnchor: [12, 24]
+      });
+      L.marker([stop.lat, stop.lng], { icon: pinIcon })
+        .addTo(window.mobileModalMarkersLayer)
+        .bindPopup(`<b>#${pinNum} ${stop.caseNumber}</b><br><span class="text-xs text-gray-600">${stop.locationText}</span>`);
+      latlngs.push([stop.lat, stop.lng]);
+      pinNum++;
+    }
+  });
+
+  if (state.isRoundTrip && latlngs.length > 1) {
+    latlngs.push([start.lat, start.lng]);
+  }
+
+  if (latlngs.length > 1) {
+    window.mobileModalPolyline = L.polyline(latlngs, {
+      color: '#2563eb',
+      weight: 4,
+      opacity: 0.85,
+      dashArray: '6, 6'
+    }).addTo(window.mobileModalMap);
+
+    const bounds = L.latLngBounds(latlngs);
+    window.mobileModalMap.fitBounds(bounds, { padding: [25, 25] });
+  }
+
+  window.mobileModalMap.invalidateSize();
+};
+
+window.centerMobileModalMap = function() {
+  if (!window.mobileModalMap) return;
+  const start = state.routeStartLocation;
+  const stops = (state.currentRouteStops || []).filter(s => s.lat && s.lng);
+  const latlngs = [[start.lat, start.lng], ...stops.map(s => [s.lat, s.lng])];
+  if (latlngs.length > 1) {
+    window.mobileModalMap.fitBounds(L.latLngBounds(latlngs), { padding: [25, 25] });
+  } else {
+    window.mobileModalMap.setView([start.lat, start.lng], 13);
+  }
 };
 
 window.renderMobileRouteList = function() {
   const container = document.getElementById('mobileMapRouteStopsList');
   if (!container) return;
   const stops = state.currentRouteStops || [];
-  let stopsHtml = '';
-  stops.forEach((stop, index) => {
+  
+  if (stops.length === 0) {
+    container.innerHTML = `
+      <div class="p-8 text-center text-gray-400 flex flex-col items-center justify-center">
+        <i class="fa-solid fa-map-location-dot text-3xl mb-2 text-gray-300"></i>
+        <p class="text-xs font-bold text-gray-600">ยังไม่มีรายการส่งหมายในแผนที่</p>
+        <p class="text-[10px] text-gray-400 mt-0.5">จัดรายการตารางส่งหมายบนคอมพิวเตอร์และกดยืนยัน</p>
+      </div>
+    `;
+    return;
+  }
+
+  let pinCounter = 1;
+  container.innerHTML = stops.map((stop, index) => {
     const isExact = stop.matchType === 'exact' || stop.isMatched;
     const isNear = stop.matchType === 'near';
-    const hasPin = stop.pinNumber !== null && stop.pinNumber !== undefined;
-    const distText = hasPin ? `+ ${stop.legDistanceKm.toFixed(1)} กม.` : 'ไม่มีหมุด';
-    const itemClass = isExact ? 'slts-match-exact' : (isNear ? 'slts-match-near' : 'slts-match-none');
+    const hasPin = stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && stop.lat > 0 && stop.lng > 0;
+    const currentPin = hasPin ? pinCounter++ : null;
+    const distText = hasPin ? `+ ${(stop.legDistanceKm || 0).toFixed(1)} กม.` : 'ไม่มีหมุด';
+    const itemClass = isExact ? 'border-emerald-200 bg-emerald-50/50' : (isNear ? 'border-amber-200 bg-amber-50/50' : 'border-gray-200 bg-white');
     const badgeBg = isExact ? 'bg-emerald-600 text-white' : (isNear ? 'bg-amber-500 text-white' : 'bg-gray-300 text-gray-700');
 
-    stopsHtml += `
-      <div class="p-2.5 rounded-xl border flex items-start gap-2 text-xs transition ${itemClass}">
-        <span class="w-5 h-5 rounded-full ${badgeBg} text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
-          ${hasPin ? stop.pinNumber : '-'}
+    return `
+      <div class="p-2.5 rounded-2xl border flex items-start gap-2 text-xs transition shadow-2xs ${itemClass}">
+        <span class="w-6 h-6 rounded-full ${badgeBg} text-[11px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
+          ${currentPin !== null ? currentPin : '-'}
         </span>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between gap-1 mb-0.5">
             <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : (isNear ? 'text-amber-950' : 'text-gray-900')} truncate">${stop.caseNumber}</span>
-            <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : (isNear ? 'text-amber-800 bg-amber-50 border-amber-200' : 'text-gray-500 bg-gray-100 border-gray-200')} px-1.5 py-0.2 rounded border flex-shrink-0">
+            <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-100/80 border-emerald-200' : (isNear ? 'text-amber-800 bg-amber-100/80 border-amber-200' : 'text-gray-500 bg-gray-100 border-gray-200')} px-1.5 py-0.2 rounded-md border flex-shrink-0">
               ${distText}
             </span>
           </div>
-          <p class="text-[11px] opacity-80 truncate">${stop.locationText}</p>
-          ${isExact ? `<span class="text-[9px] text-emerald-700 font-bold inline-block mt-0.5"><i class="fa-solid fa-circle-check text-[8px] mr-1"></i>ตรงกับประวัติ (มีหมุดเส้นทาง)</span>` : (isNear ? `<span class="text-[9px] text-amber-800 font-bold inline-block mt-0.5"><i class="fa-solid fa-location-dot text-[8px] mr-1"></i>${stop.matchNote || 'หมุดใกล้เคียง'}</span>` : `<span class="text-[9px] text-gray-400 font-normal inline-block mt-0.5">ไม่มีข้อมูลในฐานข้อมูล (ไม่มีหมุด)</span>`)}
+          <p class="text-[11px] text-gray-700 leading-snug truncate">${stop.locationText}</p>
+          <div class="flex items-center justify-between mt-1 text-[10px]">
+            ${isExact ? `<span class="text-emerald-700 font-bold flex items-center gap-1"><i class="fa-solid fa-circle-check text-[9px]"></i> มีพิกัดตรง</span>` : (isNear ? `<span class="text-amber-800 font-bold flex items-center gap-1"><i class="fa-solid fa-location-dot text-[9px]"></i> ${stop.matchNote || 'ใกล้เคียง'}</span>` : `<span class="text-gray-400">○ ไม่มีหมุดในระบบ</span>`)}
+            ${hasPin ? `
+              <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="text-blue-600 hover:text-blue-800 font-bold underline flex items-center gap-1">
+                <i class="fa-solid fa-location-arrow"></i> นำทางจุดนี้
+              </a>
+            ` : ''}
+          </div>
         </div>
-        <div class="flex items-center gap-1 flex-shrink-0">
-          <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1 text-blue-600 hover:bg-blue-50 rounded cursor-pointer">
+        <div class="flex items-center gap-1 flex-shrink-0 self-center">
+          <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1.5 text-blue-600 hover:bg-blue-100/60 rounded-lg cursor-pointer" title="แก้ไข">
             <i class="fa-solid fa-pen-to-square text-xs"></i>
           </button>
-          <button type="button" onclick="deleteRouteStop(${index}, event)" class="p-1 text-red-600 hover:bg-red-50 rounded cursor-pointer">
+          <button type="button" onclick="deleteRouteStop(${index}, event); renderMobileRouteList(); initMobileModalMapInstance();" class="p-1.5 text-red-600 hover:bg-red-100/60 rounded-lg cursor-pointer" title="ลบ">
             <i class="fa-solid fa-trash-can text-xs"></i>
           </button>
-          <div class="flex flex-col gap-0.5">
-            <button type="button" onclick="moveStopUp(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 cursor-pointer">
-              <i class="fa-solid fa-chevron-up"></i>
-            </button>
-            <button type="button" onclick="moveStopDown(${index}, event); renderMobileRouteList();" class="p-1 text-[9px] text-gray-400 hover:text-blue-600 cursor-pointer">
-              <i class="fa-solid fa-chevron-down"></i>
-            </button>
-          </div>
         </div>
       </div>
     `;
+  }).join('');
+};
+
+/**
+ * แสดงคำอธิบายและขั้นตอนการใช้งานระบบ (Onboarding Walkthrough Tour)
+ * @param {boolean} forceOpen - บังคับเปิดแม้เคยอ่านแล้ว
+ */
+window.showSystemOnboardingModal = function(forceOpen = false) {
+  if (!forceOpen && localStorage.getItem('slts_onboarding_completed') === 'true') {
+    return;
+  }
+
+  const steps = [
+    {
+      title: 'ยินดีต้อนรับสู่ระบบ SLTS',
+      subtitle: 'ระบบจัดเก็บข้อมูลพิกัดส่งหมาย ศาลจังหวัดอุดรธานี',
+      icon: 'fa-landmark-flag',
+      iconColor: 'from-blue-600 to-indigo-600',
+      badge: 'ภาพรวมระบบ',
+      content: `
+        <div class="space-y-2.5 text-left text-xs leading-relaxed text-gray-700">
+          <p class="font-bold text-gray-900 text-sm">
+            ระบบสนับสนุนการปฏิบัติงานของเจ้าหน้าที่ส่งหมายอย่างครบวงจร
+          </p>
+          <ul class="space-y-2 text-gray-600">
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-circle-check text-blue-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>ความแม่นยำสูง:</strong> บันทึกภาพพร้อมพิกัด GPS จริง ณ สถานที่ส่งหมาย และประทับลายน้ำรับรองทันที</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-circle-check text-blue-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>เชื่อมโยงข้ามอุปกรณ์:</strong> ส่งพิกัดและเส้นทางจากคอมพิวเตอร์เข้าสู่มือถือ (Handoff) ให้อัตโนมัติ</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-circle-check text-blue-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>ทำงานออฟไลน์ได้:</strong> บันทึกข้อมูลและจัดเก็บลงเครื่องชั่วคราวเมื่อไม่มีสัญญาณอินเทอร์เน็ต</span>
+            </li>
+          </ul>
+        </div>
+      `
+    },
+    {
+      title: 'บันทึกส่งหมาย & พิกัดอัจฉริยะ',
+      subtitle: 'ถ่ายภาพพร้อมพิกัด GPS และแปลงที่อยู่อัตโนมัติ',
+      icon: 'fa-camera-retro',
+      iconColor: 'from-emerald-600 to-teal-600',
+      badge: 'การบันทึกหมาย',
+      content: `
+        <div class="space-y-2.5 text-left text-xs leading-relaxed text-gray-700">
+          <p class="font-bold text-gray-900 text-sm">
+            สะดวกรวดเร็วด้วยระบบ Reverse Geocoding อัจฉริยะ
+          </p>
+          <ul class="space-y-2 text-gray-600">
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-camera text-emerald-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>บนมือถือ:</strong> เปิดกล้องถ่ายภาพ ระบบจะดึงพิกัด GPS, ทิศเข็มทิศ และแผนที่ย่อประทับลงบนภาพทันที</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-wand-magic-sparkles text-emerald-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>แปลงพิกัดอัตโนมัติ:</strong> เมื่อมีพิกัด ระบบจะค้นหาและเลือกตำบล อำเภอ ให้โดยไม่ต้องเลือกเอง</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-upload text-emerald-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>บนคอมพิวเตอร์:</strong> อัปโหลดภาพถ่าย ระบบจะดึงพิกัดจากไฟล์ (EXIF GPS) ให้อัตโนมัติ</span>
+            </li>
+          </ul>
+        </div>
+      `
+    },
+    {
+      title: 'ตารางประวัติ & ค้นหาข้อมูลหมาย',
+      subtitle: 'สืบค้นข้อมูลย้อนหลัง และตรวจสอบภาพถ่าย',
+      icon: 'fa-table-list',
+      iconColor: 'from-amber-500 to-orange-600',
+      badge: 'การสืบค้นประวัติ',
+      content: `
+        <div class="space-y-2.5 text-left text-xs leading-relaxed text-gray-700">
+          <p class="font-bold text-gray-900 text-sm">
+            จัดการและตรวจสอบข้อมูลหมายที่เคยส่งในระบบ
+          </p>
+          <ul class="space-y-2 text-gray-600">
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-magnifying-glass text-amber-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>สืบค้นได้ทุกคอลัมน์:</strong> ค้นหาตามเลขดำ, ชื่อผู้รับ, บ้านเลขที่, ตำบล หรืออำเภอ</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-image text-amber-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>ดูภาพถ่ายและพิกัด:</strong> คลิกดูภาพถ่ายที่เคยบันทึกไว้ และเปิดตำแหน่งบนแผนที่ได้ทันที</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-filter text-amber-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>กรองตามช่วงเวลา & พื้นที่:</strong> เลือกดูข้อมูลเฉพาะตำบล หรือช่วงวันที่ต้องการได้อย่างง่ายดาย</span>
+            </li>
+          </ul>
+        </div>
+      `
+    },
+    {
+      title: 'แผนที่ & วางแผนเส้นทางส่งหมาย',
+      subtitle: 'คำนวณเส้นทางวงรอบ 2-Opt TSP และนำทาง Google Maps',
+      icon: 'fa-map-location-dot',
+      iconColor: 'from-violet-600 to-purple-600',
+      badge: 'การวางแผนเส้นทาง',
+      content: `
+        <div class="space-y-2.5 text-left text-xs leading-relaxed text-gray-700">
+          <p class="font-bold text-gray-900 text-sm">
+            วางแผนเส้นทางส่งหมายอย่างชาญฉลาดและประหยัดเวลา
+          </p>
+          <ul class="space-y-2 text-gray-600">
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-route text-violet-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>เส้นทางไม่ตัดกัน (2-Opt TSP):</strong> จัดลำดับจุดส่งหมายแบบวงรอบ วกกลับมาจบที่ศาลฯ อย่างราบรื่น</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-file-pdf text-violet-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>อัปโหลดบัญชีจ่ายหมาย:</strong> รองรับ PDF และภาพหลายภาพ สกัดเลขคดีและจับคู่พิกัดประวัติให้อัตโนมัติ</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <i class="fa-solid fa-diamond-turn-right text-violet-600 mt-0.5 flex-shrink-0"></i>
+              <span><strong>ส่งพิกัดนำทาง:</strong> คลิกปุ่มเปิดใน Google Maps เพื่อเริ่มระบบนำทางเลี้ยวต่อเลี้ยวได้ทันที</span>
+            </li>
+          </ul>
+        </div>
+      `
+    }
+  ];
+
+  let currentStep = 0;
+
+  function renderOnboardingStep() {
+    const step = steps[currentStep];
+    const total = steps.length;
+    const isLast = currentStep === total - 1;
+    const isFirst = currentStep === 0;
+
+    const indicatorsHtml = steps.map((_, i) => `
+      <div class="h-1.5 rounded-full transition-all duration-300 ${i === currentStep ? 'bg-blue-600 w-8' : (i < currentStep ? 'bg-blue-300 w-4' : 'bg-gray-200 w-4')}"></div>
+    `).join('');
+
+    const html = `
+      <div class="p-1 text-center select-none">
+        <!-- Step Icon Header -->
+        <div class="w-16 h-16 mx-auto rounded-3xl bg-gradient-to-tr ${step.iconColor} text-white flex items-center justify-center text-2xl shadow-lg shadow-blue-500/20 mb-3 animate-fade-in">
+          <i class="fa-solid ${step.icon}"></i>
+        </div>
+
+        <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 mb-1.5">
+          ${step.badge} • ขั้นตอนที่ ${currentStep + 1}/${total}
+        </span>
+
+        <h3 class="text-base font-bold text-gray-900 mb-0.5">${step.title}</h3>
+        <p class="text-[11px] text-gray-500 mb-3">${step.subtitle}</p>
+
+        <!-- Step Content Card -->
+        <div class="bg-gray-50/80 border border-gray-200/90 rounded-2xl p-3.5 mb-4 text-left shadow-2xs">
+          ${step.content}
+        </div>
+
+        <!-- Indicator Bar -->
+        <div class="flex items-center justify-center gap-1.5 mb-4">
+          ${indicatorsHtml}
+        </div>
+
+        <!-- Navigation Buttons -->
+        <div class="flex items-center justify-between gap-2 pt-2 border-t border-gray-100">
+          <button type="button" id="btnOnboardPrev" class="px-3.5 py-2 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-100 transition cursor-pointer ${isFirst ? 'opacity-0 pointer-events-none' : ''}">
+            <i class="fa-solid fa-chevron-left mr-1"></i> ย้อนกลับ
+          </button>
+
+          ${isLast ? `
+            <button type="button" id="btnOnboardFinish" class="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-500/25 transition cursor-pointer flex items-center gap-1.5">
+              <i class="fa-solid fa-circle-check"></i> ยืนยัน & เริ่มใช้งาน
+            </button>
+          ` : `
+            <button type="button" id="btnOnboardNext" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/25 transition cursor-pointer flex items-center gap-1.5">
+              <span>ถัดไป</span> <i class="fa-solid fa-chevron-right text-[10px]"></i>
+            </button>
+          `}
+        </div>
+      </div>
+    `;
+
+    const modalContainer = Swal.getHtmlContainer();
+    if (modalContainer) {
+      modalContainer.innerHTML = html;
+      bindStepEvents();
+    }
+  }
+
+  function bindStepEvents() {
+    const prevBtn = document.getElementById('btnOnboardPrev');
+    const nextBtn = document.getElementById('btnOnboardNext');
+    const finishBtn = document.getElementById('btnOnboardFinish');
+
+    if (prevBtn) {
+      prevBtn.onclick = () => {
+        if (currentStep > 0) {
+          currentStep--;
+          renderOnboardingStep();
+        }
+      };
+    }
+
+    if (nextBtn) {
+      nextBtn.onclick = () => {
+        if (currentStep < steps.length - 1) {
+          currentStep++;
+          renderOnboardingStep();
+        }
+      };
+    }
+
+    if (finishBtn) {
+      finishBtn.onclick = () => {
+        localStorage.setItem('slts_onboarding_completed', 'true');
+        Swal.close();
+      };
+    }
+  }
+
+  Swal.fire({
+    html: `<div id="onboardingWrapper"></div>`,
+    width: '460px',
+    showConfirmButton: false,
+    showCloseButton: true,
+    allowOutsideClick: false,
+    customClass: {
+      popup: 'rounded-3xl p-4 sm:p-5 shadow-2xl'
+    },
+    didOpen: () => {
+      renderOnboardingStep();
+    }
   });
-  container.innerHTML = stopsHtml;
 };

@@ -148,6 +148,10 @@
               </div>
               
               <div class="py-1">
+                <button type="button" onclick="showSystemOnboardingModal(true)" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
+                  <i class="fa-solid fa-book-open text-emerald-600 w-4 text-center"></i>
+                  <span>คู่มือการใช้งานระบบ</span>
+                </button>
                 <button type="button" onclick="openEditProfileModal()" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
                   <i class="fa-solid fa-user-pen text-blue-600 w-4 text-center"></i>
                   <span>แก้ไขข้อมูลส่วนตัว</span>
@@ -657,7 +661,7 @@
         
         <!-- Left: Interactive Leaflet Map Container (lg:col-span-8 or 9) -->
         <div class="lg:col-span-8 xl:col-span-9 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden relative">
-          <div id="sltsInteractiveMap" class="w-full h-[620px] lg:h-[720px] bg-slate-100 z-0"></div>
+          <div id="sltsInteractiveMap" class="w-full h-[360px] sm:h-[460px] lg:h-[720px] bg-slate-100 z-0"></div>
           
           <!-- Map Overlay Controls (Toggle Route Layer / Baselayer Switch) -->
           <div class="absolute top-3 right-3 z-[1000] bg-white/95 backdrop-blur-sm rounded-xl shadow-md border border-gray-200 p-1.5 flex flex-col gap-1 text-xs">
@@ -669,7 +673,7 @@
         </div>
 
         <!-- Right: Route Stops & Distance Matrix Sidebar (lg:col-span-4 or 3) -->
-        <div class="lg:col-span-4 xl:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col h-[620px] lg:h-[720px] overflow-hidden">
+        <div class="lg:col-span-4 xl:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col h-auto max-h-[560px] lg:h-[720px] overflow-hidden">
           
           <!-- Header & Reorder Tool -->
           <div class="p-3.5 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between flex-shrink-0 gap-1.5">
@@ -1015,8 +1019,8 @@
         </div>
       </button>
 
-      <!-- ปุ่มสลับแนวกล้องด่วนที่มุมขวาล่าง -->
-      <button id="btnFlipOrientationQuick" type="button" class="camera-circle-btn" title="สลับแนวนอน 4:3 / แนวตั้ง 3:4">
+      <!-- ปุ่มดึงพิกัดใหม่ที่มุมขวาล่าง -->
+      <button id="btnFlipOrientationQuick" type="button" class="camera-circle-btn" title="ดึงพิกัดใหม่ (Refresh GPS)" onclick="handleCameraRefreshGps(event)">
         <i class="fa-solid fa-arrows-rotate text-xl"></i>
       </button>
     </div>
