@@ -970,8 +970,10 @@
           <span id="txtOrientationMode" class="whitespace-nowrap">แนวนอน 4:3</span>
         </button>
 
-        <button id="btnCloseCamera" type="button" class="p-2 text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition aspect-square flex items-center justify-center" title="ปิดหน้ากล้อง">
-          <i class="fa-solid fa-xmark text-lg"></i>
+        <!-- ปุ่มเข้าสู่ระบบ / ออกจากระบบ (สลับตามสถานะการล็อกอิน) -->
+        <button id="btnCameraAuth" type="button" onclick="handleMobileCameraAuthAction()" class="px-2.5 py-1.5 bg-blue-600/95 hover:bg-blue-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-blue-400/50 shadow-md whitespace-nowrap cursor-pointer" title="เข้าสู่ระบบ">
+          <i class="fa-solid fa-right-to-bracket text-xs"></i>
+          <span id="txtCameraAuthBtn" class="whitespace-nowrap">เข้าสู่ระบบ</span>
         </button>
       </div>
     </div>

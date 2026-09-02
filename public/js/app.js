@@ -614,8 +614,55 @@ function updateAuthUI() {
     elements.currentDefaultResetPassText.textContent = localStorage.getItem('slts_default_reset_pass') || '123456';
   }
 
+  // ปรับการแสดงผลปุ่ม Auth ที่มุมขวาบนของหน้ากล้องมือถือ (< 768px)
+  const cameraAuthBtn = document.getElementById('btnCameraAuth');
+  if (cameraAuthBtn) {
+    if (isLoggedIn) {
+      cameraAuthBtn.className = 'px-2.5 py-1.5 bg-rose-600/95 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-rose-400/50 shadow-md whitespace-nowrap cursor-pointer';
+      cameraAuthBtn.title = `ออกจากระบบ (${state.currentUser.displayName || state.currentUser.name || state.currentUser.username})`;
+      cameraAuthBtn.innerHTML = `<i class="fa-solid fa-right-from-bracket text-xs"></i><span class="whitespace-nowrap">ออกระบบ</span>`;
+    } else {
+      cameraAuthBtn.className = 'px-2.5 py-1.5 bg-blue-600/95 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-blue-400/50 shadow-md whitespace-nowrap cursor-pointer';
+      cameraAuthBtn.title = 'เข้าสู่ระบบ';
+      cameraAuthBtn.innerHTML = `<i class="fa-solid fa-right-to-bracket text-xs"></i><span class="whitespace-nowrap">เข้าสู่ระบบ</span>`;
+    }
+  }
+
   renderUserList();
 }
+
+/**
+ * จัดการการคลิกปุ่ม Auth ที่มุมขวาบนของหน้ากล้องมือถือ
+ */
+window.handleMobileCameraAuthAction = function() {
+  const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+  if (!isLoggedIn) {
+    openLoginModal();
+  } else {
+    const displayName = state.currentUser.displayName || state.currentUser.name || state.currentUser.username || 'ผู้ใช้งาน';
+    Swal.fire({
+      title: 'ข้อมูลผู้ใช้งานปัจจุบัน',
+      html: `
+        <div class="text-center space-y-2 py-2">
+          <div class="w-14 h-14 mx-auto rounded-full bg-blue-600 text-white flex items-center justify-center text-2xl font-bold shadow-md">
+            <i class="fa-solid fa-user"></i>
+          </div>
+          <p class="font-bold text-gray-900 text-sm">${displayName}</p>
+          <p class="text-xs text-gray-500 font-mono">@${state.currentUser.username} (${state.currentUser.role.toUpperCase()})</p>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: '<i class="fa-solid fa-right-from-bracket mr-1"></i> ออกจากระบบ',
+      cancelButtonText: 'ปิดหน้าต่าง',
+      confirmButtonColor: '#e11d48',
+      cancelButtonColor: '#6b7280'
+    }).then((res) => {
+      if (res.isConfirmed) {
+        handleLogout();
+      }
+    });
+  }
+};
 
 // User Profile Dropdown Toggle
 window.toggleUserDropdown = function(e) {
@@ -5104,9 +5151,11 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
           <!-- ปุ่มค้นหาข้อมูลประวัติส่งหมาย ที่มุมซ้ายบนแทนสัญลักษณ์เดิม (Disabled เมื่อออฟไลน์) -->
           <div class="flex items-center gap-1">
             ${searchBtnHtml}
-            <button type="button" onclick="saveTempModalFormState(); showMobileRouteMapModal();" class="slts-header-search-icon-btn bg-rose-500/20 text-rose-200 border-rose-400/30 hover:bg-rose-500/30" title="เปิดแผนที่และเส้นทางส่งหมาย">
-              <i class="fa-solid fa-map-location-dot"></i>
-            </button>
+            ${(state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest') ? `
+              <button type="button" onclick="saveTempModalFormState(); showMobileRouteMapModal();" class="slts-header-search-icon-btn bg-rose-500/20 text-rose-200 border-rose-400/30 hover:bg-rose-500/30" title="เปิดแผนที่และเส้นทางส่งหมาย">
+                <i class="fa-solid fa-map-location-dot"></i>
+              </button>
+            ` : ''}
           </div>
           <div class="flex-1 ${isOnline ? 'cursor-pointer' : ''}" ${headerTitleAction}>
             <h2 class="slts-modal-title flex items-center gap-1.5">
