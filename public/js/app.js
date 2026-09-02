@@ -7522,20 +7522,38 @@ state.routeStartLocation = {
 };
 
 /**
+ * กรองและลบ Circular Structure (เช่น leafletMarker) ออกจาก Array ของ Stops ก่อนบันทึกหรือแปลงเป็น JSON
+ */
+function cleanStopsForStorage(stops) {
+  if (!Array.isArray(stops)) return [];
+  return stops.map(s => {
+    if (!s || typeof s !== 'object') return s;
+    const clean = {};
+    for (const key of Object.keys(s)) {
+      if (key !== 'leafletMarker' && typeof s[key] !== 'function') {
+        clean[key] = s[key];
+      }
+    }
+    return clean;
+  });
+}
+
+/**
  * บันทึกประวัติลำดับเส้นทางการส่งหมายล่าสุดลง LocalStorage เสมอ (ป้องกันหน้าจอว่างเปล่า)
  */
 window.saveCurrentRouteStopsHistory = function(stops) {
   if (!stops) stops = state.currentRouteStops || [];
   try {
+    const cleanStops = cleanStopsForStorage(stops);
     const dataToSave = {
-      stops: stops,
+      stops: cleanStops,
       savedAt: new Date().toISOString(),
       province: state.selectedProvince || 'อุดรธานี',
       startLocation: state.routeStartLocation,
       isRoundTrip: state.isRoundTrip
     };
     localStorage.setItem('slts_saved_route_stops', JSON.stringify(dataToSave));
-    localStorage.setItem('slts_shared_route_stops', JSON.stringify(stops));
+    localStorage.setItem('slts_shared_route_stops', JSON.stringify(cleanStops));
   } catch (e) {
     console.warn('Error saving route stops history:', e);
   }
@@ -7628,7 +7646,7 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 /**
- * จัดลำดับเส้นทางแบบ Nearest Neighbor TSP เฉพาะจุดที่มีพิกัดถูกต้อง
+ * จัดลำดับเส้นทางแบบวงรอบ 2-Opt TSP (ป้องกันเส้นทางตัดกัน/ทับกัน และวนกลับมาจบที่จุดเริ่มต้น)
  */
 function optimizeStopsSequence(stops, startLat = null, startLng = null) {
   if (!stops || stops.length <= 1) return stops;
@@ -7636,34 +7654,71 @@ function optimizeStopsSequence(stops, startLat = null, startLng = null) {
   const stopsWithCoords = stops.filter(s => s.lat && s.lng && !isNaN(s.lat) && !isNaN(s.lng) && s.lat > 0 && s.lng > 0);
   const stopsWithoutCoords = stops.filter(s => !s.lat || !s.lng || isNaN(s.lat) || isNaN(s.lng) || s.lat <= 0 || s.lng <= 0);
 
-  const remaining = [...stopsWithCoords];
-  const ordered = [];
+  if (stopsWithCoords.length <= 1) return stops;
 
-  let currentLat = (startLat !== null && !isNaN(startLat)) ? startLat : (remaining[0] ? remaining[0].lat : 17.4138);
-  let currentLng = (startLng !== null && !isNaN(startLng)) ? startLng : (remaining[0] ? remaining[0].lng : 102.7872);
+  const hubLat = (startLat !== null && !isNaN(startLat)) ? startLat : (stopsWithCoords[0]?.lat || 17.4138);
+  const hubLng = (startLng !== null && !isNaN(startLng)) ? startLng : (stopsWithCoords[0]?.lng || 102.7872);
 
-  while (remaining.length > 0) {
-    let nearestIdx = 0;
-    let minDist = Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const d = calculateHaversineDistance(currentLat, currentLng, remaining[i].lat, remaining[i].lng);
-      if (d < minDist) {
-        minDist = d;
-        nearestIdx = i;
+  // ขั้นที่ 1: จัดเรียงจุดตามมุมเรเดียนรอบจุดเริ่มต้น (Polar Angle Sweep) เพื่อสร้างเส้นรอบวงเริ่มต้นที่ลื่นไหล
+  const withAngles = stopsWithCoords.map(s => {
+    const dLat = s.lat - hubLat;
+    const dLng = s.lng - hubLng;
+    const angle = Math.atan2(dLng, dLat);
+    return { stop: s, angle };
+  });
+
+  withAngles.sort((a, b) => a.angle - b.angle);
+  let tour = withAngles.map(item => item.stop);
+
+  // ขั้นที่ 2: รัน 2-Opt Algorithm เพื่อแก้เส้นทางที่ตัดกันหรือทับซ้อนกัน (Uncrossing intersecting segments)
+  let improved = true;
+  let maxIterations = 60;
+  let iteration = 0;
+
+  while (improved && iteration < maxIterations) {
+    improved = false;
+    iteration++;
+
+    for (let i = 0; i < tour.length - 1; i++) {
+      for (let k = i + 1; k < tour.length; k++) {
+        const prevA = (i === 0) ? { lat: hubLat, lng: hubLng } : tour[i - 1];
+        const a = tour[i];
+        const b = tour[k];
+        const nextB = (k === tour.length - 1) ? { lat: hubLat, lng: hubLng } : tour[k + 1];
+
+        const currentDist = calculateHaversineDistance(prevA.lat, prevA.lng, a.lat, a.lng) +
+                            calculateHaversineDistance(b.lat, b.lng, nextB.lat, nextB.lng);
+
+        const newDist = calculateHaversineDistance(prevA.lat, prevA.lng, b.lat, b.lng) +
+                        calculateHaversineDistance(a.lat, a.lng, nextB.lat, nextB.lng);
+
+        if (newDist < currentDist - 0.0001) {
+          const newTour = tour.slice(0, i)
+            .concat(tour.slice(i, k + 1).reverse())
+            .concat(tour.slice(k + 1));
+          tour = newTour;
+          improved = true;
+          break;
+        }
       }
+      if (improved) break;
     }
-    const [nextStop] = remaining.splice(nearestIdx, 1);
-    nextStop.legDistanceKm = minDist;
-    ordered.push(nextStop);
-    currentLat = nextStop.lat;
-    currentLng = nextStop.lng;
   }
+
+  // คำนวณระยะทางแต่ละช่วง
+  let prevLat = hubLat;
+  let prevLng = hubLng;
+  tour.forEach((s) => {
+    s.legDistanceKm = calculateHaversineDistance(prevLat, prevLng, s.lat, s.lng);
+    prevLat = s.lat;
+    prevLng = s.lng;
+  });
 
   stopsWithoutCoords.forEach(s => {
     s.legDistanceKm = 0;
   });
 
-  return [...ordered, ...stopsWithoutCoords];
+  return [...tour, ...stopsWithoutCoords];
 }
 
 /**
@@ -8748,8 +8803,8 @@ window.openMapAreaSelectorModal = function() {
   const distOptionsHtml = `<option value="">-- ทุกอำเภอในจังหวัด --</option>` + districts.map(d => `<option value="${d}" ${d === currentDistrict ? 'selected' : ''}>${d}</option>`).join('');
   const subOptionsHtml = `<option value="">-- ทุกตำบลในอำเภอ --</option>` + subdistricts.map(s => `<option value="${s}" ${s === currentSubdistrict ? 'selected' : ''}>${s}</option>`).join('');
 
-  // คัดลอกรายการ Stops ปัจจุบันมาเป็น Staged Stops ใน Modal
-  state.stagedScheduleStops = JSON.parse(JSON.stringify(state.currentRouteStops || []));
+  // คัดลอกรายการ Stops ปัจจุบันมาเป็น Staged Stops ใน Modal (แบบตัด Circular Structure ทิ้ง 100%)
+  state.stagedScheduleStops = cleanStopsForStorage(state.currentRouteStops || []);
   let editingStagedIndex = null;
 
   Swal.fire({
@@ -8765,7 +8820,7 @@ window.openMapAreaSelectorModal = function() {
           </button>
           <button type="button" id="tabBtnModalSchedule" onclick="switchModalTab('schedule')" class="px-3 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer text-xs whitespace-nowrap">
             <i class="fa-solid fa-table-list text-emerald-600"></i>
-            <span>2. จัดรายการตารางส่งหมาย</span>
+            <span>2. สืบค้น & จัดรายการส่งหมาย</span>
           </button>
           <button type="button" id="tabBtnModalUpload" onclick="switchModalTab('upload')" class="px-3 py-2 font-bold text-gray-500 hover:text-blue-600 border-b-2 border-transparent transition flex items-center gap-1.5 cursor-pointer text-xs whitespace-nowrap">
             <i class="fa-solid fa-file-arrow-up text-violet-600"></i>
@@ -8809,56 +8864,83 @@ window.openMapAreaSelectorModal = function() {
           </div>
         </div>
 
-        <!-- Tab 2: จัดรายการตารางส่งหมาย (Manual / Staged Schedule Builder) -->
-        <div id="modalTabContentSchedule" class="hidden space-y-3.5">
-          <p class="text-gray-600 leading-relaxed bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-            <i class="fa-solid fa-pen-to-square text-emerald-600 mr-1"></i>
-            กรอกข้อมูลหมายเพื่อเพิ่มรายการส่งหมายลงในตาราง สามารถเพิ่มได้ทีละรายการ แก้ไข จัดลำดับ และระบบจะจับคู่พิกัดจากประวัติให้อัตโนมัติ
+        <!-- Tab 2: สืบค้นและเลือกรายการตารางส่งหมาย (DataTables Multi-Column Search & Multi-Select) -->
+        <div id="modalTabContentSchedule" class="hidden space-y-3">
+          <p class="text-gray-600 leading-relaxed bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs">
+            <i class="fa-solid fa-magnifying-glass text-emerald-600 mr-1"></i>
+            สืบค้นข้อมูลจากทุกคอลัมน์ในระบบ (เลขคดี, ที่อยู่, ตำบล, อำเภอ ฯลฯ) ติ๊กถูกหน้ารายการที่ต้องการส่งหมายเพื่อนำเข้าสู่ <strong>"ลำดับเส้นทางส่งหมาย"</strong>
           </p>
 
-          <!-- Schedule Input Form Accordion -->
-          <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3.5 space-y-3" id="scheduleFormWrapper">
-            <div class="flex items-center justify-between pb-2 border-b border-gray-200">
-              <span id="scheduleFormTitle" class="font-bold text-xs text-blue-700 flex items-center gap-1.5">
-                <i class="fa-solid fa-file-circle-plus"></i> เพิ่มรายการส่งหมายใหม่
-              </span>
-              <button type="button" id="btnResetScheduleForm" onclick="resetScheduleModalForm(true)" class="text-[11px] text-gray-500 hover:text-red-600 cursor-pointer">
-                <i class="fa-solid fa-rotate-left mr-0.5"></i> ล้างฟอร์ม
+          <!-- Search & Multi-Select Stats Bar -->
+          <div class="space-y-2 bg-gray-50 border border-gray-200 rounded-2xl p-2.5">
+            <div class="flex gap-2 items-center">
+              <div class="relative flex-1">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-gray-400 text-xs"></i>
+                <input type="text" id="schedSearchInput" placeholder="พิมพ์ค้นหาทุกคอลัมน์ เช่น เลขดำ, บ้านเลขที่, ตำบล, อำเภอ..." class="w-full bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-2 text-xs font-semibold text-gray-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" autocomplete="off" oninput="filterScheduleSearchTable(this.value)">
+              </div>
+              <button type="button" onclick="document.getElementById('schedSearchInput').value=''; filterScheduleSearchTable('');" class="px-2.5 py-2 text-xs text-gray-500 hover:text-red-600 bg-white border border-gray-200 rounded-xl cursor-pointer" title="ล้างการค้นหา">
+                <i class="fa-solid fa-xmark"></i>
               </button>
             </div>
 
-            <!-- Form Content Injected -->
-            <div id="scheduleFormContainer">
-              ${getSummonsFormHtml('sched_')}
-            </div>
-
-            <!-- Form Submit Buttons -->
-            <div class="pt-1 flex gap-2">
-              <button type="button" id="btnAddScheduleItem" onclick="handleAddOrUpdateScheduleItem()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-2 px-3 rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm text-xs cursor-pointer">
-                <i class="fa-solid fa-plus"></i> <span id="txtBtnAddScheduleItem">เพิ่มรายการลงตาราง</span>
-              </button>
-              <button type="button" id="btnCancelEditScheduleItem" onclick="cancelEditScheduleItem()" class="hidden bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-3 rounded-xl transition text-xs cursor-pointer">
-                ยกเลิกแก้ไข
-              </button>
-            </div>
-          </div>
-
-          <!-- Staged Schedule Items List Preview -->
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-xs font-bold text-gray-800">
-              <span>รายการตารางส่งหมาย (<strong id="stagedScheduleCount" class="text-blue-700">0</strong> รายการ)</span>
-              <div class="flex items-center gap-2 text-[10px]">
-                <span class="text-emerald-700 font-semibold">● ตรงประวัติ</span>
-                <span class="text-amber-700 font-semibold">● พิกัดใกล้เคียง</span>
-                <span class="text-gray-500 font-normal">○ ไม่มีหมุด</span>
+            <div class="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-gray-200 text-xs">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-gray-800">เลือกแล้ว: <strong id="schedSelectedCountBadge" class="text-emerald-700 font-extrabold text-sm">0</strong> รายการ</span>
+                <span class="text-[11px] text-gray-400">|</span>
+                <span class="text-[11px] text-gray-500" id="schedFoundCountText">พบ 0 รายการ</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <button type="button" onclick="toggleSelectAllSchedItems(true)" class="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition">
+                  <i class="fa-solid fa-check-double mr-0.5"></i> เลือกที่แสดงทั้งหมด
+                </button>
+                <button type="button" onclick="toggleSelectAllSchedItems(false)" class="px-2.5 py-1 text-[11px] font-semibold text-gray-600 bg-white hover:bg-gray-100 border border-gray-200 rounded-lg cursor-pointer transition">
+                  <i class="fa-solid fa-square-minus mr-0.5"></i> ยกเลิกทั้งหมด
+                </button>
               </div>
             </div>
+          </div>
 
-            <div id="stagedScheduleListContainer" class="max-h-52 overflow-y-auto space-y-1.5 border border-gray-200 rounded-xl p-2 bg-white slts-swal-body-scroll">
-              <!-- Injected by JS -->
+          <!-- DataTables Table Container -->
+          <div class="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-xs">
+            <div class="max-h-60 overflow-y-auto overflow-x-auto slts-swal-body-scroll">
+              <table class="w-full text-left text-xs border-collapse" id="schedDataTable">
+                <thead class="bg-gray-100 sticky top-0 z-10 text-gray-700 font-bold border-b border-gray-200 shadow-xs">
+                  <tr>
+                    <th class="p-2 w-10 text-center">
+                      <input type="checkbox" id="schedHeaderCheckbox" onchange="toggleHeaderSelectAll(this.checked)" class="w-4 h-4 rounded text-blue-600 cursor-pointer">
+                    </th>
+                    <th class="p-2 whitespace-nowrap">เลขคดี</th>
+                    <th class="p-2 min-w-[150px]">ที่อยู่ส่งหมาย</th>
+                    <th class="p-2 whitespace-nowrap">ตำบล</th>
+                    <th class="p-2 whitespace-nowrap">อำเภอ</th>
+                    <th class="p-2 whitespace-nowrap">จังหวัด</th>
+                    <th class="p-2 whitespace-nowrap text-center">สถานะหมุด</th>
+                  </tr>
+                </thead>
+                <tbody id="schedDataTableBody" class="divide-y divide-gray-100 font-normal text-gray-700">
+                  <!-- Injected by JS -->
+                </tbody>
+              </table>
             </div>
           </div>
 
+          <!-- Quick Accordion for Custom/Manual Add (Optional fallback) -->
+          <div class="border border-dashed border-gray-300 rounded-xl p-2.5 bg-gray-50/50">
+            <div class="flex items-center justify-between cursor-pointer" onclick="toggleCustomScheduleForm()">
+              <span class="font-bold text-xs text-blue-700 flex items-center gap-1.5">
+                <i class="fa-solid fa-plus-circle"></i> หรือพิมพ์เพิ่มรายการส่งหมายใหม่ด้วยตนเอง
+              </span>
+              <i id="icoToggleCustomForm" class="fa-solid fa-chevron-down text-gray-400 text-xs transition"></i>
+            </div>
+            <div id="customScheduleFormWrapper" class="hidden mt-2.5 pt-2 border-t border-gray-200 space-y-2">
+              <div id="scheduleFormContainer">
+                ${getSummonsFormHtml('sched_')}
+              </div>
+              <button type="button" onclick="handleAddOrUpdateScheduleItem()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-xl text-xs transition cursor-pointer">
+                <i class="fa-solid fa-plus mr-1"></i> เพิ่มรายการนี้เข้าสู่ตาราง
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Tab 3: อัพโหลดบัญชีจ่ายหมาย (PDF / Multi-Image Upload & Parse) -->
@@ -8918,11 +9000,11 @@ window.openMapAreaSelectorModal = function() {
 
       </div>
     `,
-    width: '680px',
+    width: '750px',
     customClass: { popup: 'rounded-2xl p-4 sm:p-5' },
     showCloseButton: true,
     showCancelButton: true,
-    confirmButtonText: '<i class="fa-solid fa-check mr-1.5"></i> ตกลง (แสดงหมุดแผนที่)',
+    confirmButtonText: '<i class="fa-solid fa-check mr-1.5"></i> ยืนยัน (แสดงหมุดและเส้นทาง)',
     cancelButtonText: 'ยกเลิก',
     confirmButtonColor: '#2563eb',
     cancelButtonColor: '#6b7280',
@@ -8948,7 +9030,7 @@ window.openMapAreaSelectorModal = function() {
         if (contentUpload) contentUpload.classList.toggle('hidden', tab !== 'upload');
 
         if (tab === 'schedule') {
-          renderStagedScheduleList();
+          filterScheduleSearchTable(document.getElementById('schedSearchInput')?.value || '');
         } else if (tab === 'upload') {
           renderUploadedDispatchList();
         }
@@ -8956,66 +9038,195 @@ window.openMapAreaSelectorModal = function() {
 
       bindScheduleFormEvents('sched_');
 
-      // Functions for Staged Schedule Items
-      window.renderStagedScheduleList = function() {
-        const container = document.getElementById('stagedScheduleListContainer');
-        const countBadge = document.getElementById('stagedScheduleCount');
-        const stops = state.stagedScheduleStops || [];
+      // ==========================================
+      // DataTables Global Multi-Column Search & Multi-Select Engine
+      // ==========================================
+      window.schedTableRawRows = (state.allSheetRows || []).map((r, idx) => {
+        const rCopy = { ...r };
+        rCopy._rowIndex = idx;
+        rCopy._stopItem = convertSheetRowToStopItem(r, idx);
+        return rCopy;
+      });
 
-        if (countBadge) countBadge.textContent = stops.length;
-        if (!container) return;
+      window.currentFilteredSchedRows = [...window.schedTableRawRows];
 
-        if (stops.length === 0) {
-          container.innerHTML = `
-            <div class="py-6 text-center text-gray-400 text-xs">
-              <i class="fa-solid fa-list-check text-2xl mb-1 text-gray-300"></i>
-              <p>ยังไม่มีรายการในตาราง กรุณากรอกแบบฟอร์มด้านบน หรืออัพโหลดไฟล์ในแท็บที่ 3</p>
-            </div>
+      function convertSheetRowToStopItem(r, idx) {
+        const rawLat = r['ละติจูด (Lat)'] || r['ละติจูด'] || '';
+        const rawLng = r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || '';
+        const lat = parseFloat(rawLat);
+        const lng = parseFloat(rawLng);
+        const hasCoords = !isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0;
+        const caseNumber = (r['เลขคดี'] || '-').trim();
+        const subdistrict = (r['ตำบล'] || '').trim();
+        const district = (r['อำเภอ'] || '').trim();
+        const province = getRowProvince(r) || currentProvince;
+        const locationText = r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || (district ? `อ.${district} ต.${subdistrict}` : '-');
+
+        return {
+          id: 'stop_row_' + idx + '_' + (caseNumber !== '-' ? caseNumber.replace(/[^a-zA-Z0-9ก-๙]/g, '_') : Date.now()),
+          caseNumber,
+          courtType: (r['ประเภทศาล'] || '').trim(),
+          prefix: '',
+          caseNo: '',
+          caseYear: '',
+          caseExtra: '',
+          locationType: 'หมายบ้าน',
+          houseNo: (r['บ้านเลขที่'] || '').trim(),
+          moo: (r['หมู่ที่'] || '').trim(),
+          localAdminName: '',
+          customOtherLocationName: '',
+          locationText,
+          subdistrict,
+          district,
+          province,
+          lat: hasCoords ? lat : null,
+          lng: hasCoords ? lng : null,
+          imageUrl: extractRowImageUrl(r),
+          dateTime: formatThaiDateDisplay(r['วัน-เวลาบันทึก'] || r['Timestamp'] || ''),
+          matchType: hasCoords ? 'exact' : 'none',
+          matchNote: hasCoords ? 'ตรงกับประวัติ (พบพิกัดจริง)' : 'ไม่มีหมุดในระบบ',
+          isMatched: hasCoords,
+          hasCoords
+        };
+      }
+
+      function isStopInStaged(stop) {
+        return (state.stagedScheduleStops || []).some(s => 
+          s.id === stop.id || 
+          (s.caseNumber && s.caseNumber !== '-' && s.caseNumber === stop.caseNumber && s.locationText === stop.locationText)
+        );
+      }
+
+      window.filterScheduleSearchTable = function(query = '') {
+        const tbody = document.getElementById('schedDataTableBody');
+        const foundBadge = document.getElementById('schedFoundCountText');
+        const selectedBadge = document.getElementById('schedSelectedCountBadge');
+        if (selectedBadge) selectedBadge.textContent = (state.stagedScheduleStops || []).length;
+        if (!tbody) return;
+
+        const q = (query || '').trim().toLowerCase();
+        const allRows = window.schedTableRawRows || [];
+
+        window.currentFilteredSchedRows = allRows.filter(r => {
+          if (!q) return true;
+          // ตรวจสอบทุก column ใน object
+          for (const key of Object.keys(r)) {
+            if (key.startsWith('_')) continue;
+            const val = String(r[key] || '').toLowerCase();
+            if (val.includes(q)) return true;
+          }
+          return false;
+        });
+
+        if (foundBadge) foundBadge.textContent = `พบ ${window.currentFilteredSchedRows.length} รายการ`;
+
+        if (window.currentFilteredSchedRows.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="7" class="py-8 text-center text-gray-400 text-xs">
+                <i class="fa-solid fa-magnifying-glass text-2xl mb-1 text-gray-300"></i>
+                <p>ไม่พบรายการที่ตรงกับคำค้นหา "${escapeHtml(query)}"</p>
+              </td>
+            </tr>
           `;
           return;
         }
 
-        container.innerHTML = stops.map((s, idx) => {
-          const isExact = s.matchType === 'exact';
-          const isNear = s.matchType === 'near';
-          const badgeClass = isExact ? 'slts-match-exact' : (isNear ? 'slts-match-near' : 'slts-match-none');
-          const statusText = isExact ? '✓ ตรงกับประวัติ (พบพิกัดจริง)' : (isNear ? `📍 ${s.matchNote || 'หมุดใกล้เคียง'}` : '○ ไม่มีหมุดในระบบ');
+        tbody.innerHTML = window.currentFilteredSchedRows.map((r) => {
+          const stop = r._stopItem;
+          const isSelected = isStopInStaged(stop);
+          const hasCoords = stop.hasCoords;
+          const statusBadge = hasCoords 
+            ? `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">✓ มีพิกัด</span>`
+            : `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500 border border-gray-200">○ ไม่มีพิกัด</span>`;
+
+          const rowClass = isSelected 
+            ? 'bg-blue-50/90 font-semibold border-l-4 border-l-blue-600 shadow-xs' 
+            : 'hover:bg-gray-50/80 transition';
 
           return `
-            <div class="p-2 rounded-xl border flex items-center justify-between gap-2 text-xs transition ${badgeClass}">
-              <div class="flex items-center gap-2 min-w-0">
-                <span class="w-5 h-5 rounded-full ${isExact ? 'bg-emerald-600 text-white' : (isNear ? 'bg-amber-500 text-white' : 'bg-gray-300 text-gray-700')} text-[10px] font-bold flex items-center justify-center flex-shrink-0">
-                  ${idx + 1}
-                </span>
-                <div class="min-w-0">
-                  <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
-                    <span class="font-bold text-gray-900">${s.caseNumber || '(ไม่มีเลขคดี)'}</span>
-                    <span class="text-[10px] px-1.5 py-0.2 rounded font-semibold ${isExact ? 'bg-emerald-100 text-emerald-800' : (isNear ? 'bg-amber-100 text-amber-800' : 'bg-gray-200 text-gray-600')}">
-                      ${statusText}
-                    </span>
-                  </div>
-                  <p class="text-[11px] opacity-90 truncate">${s.locationText}</p>
-                </div>
-              </div>
-
-              <!-- Actions -->
-              <div class="flex items-center gap-1 flex-shrink-0">
-                <button type="button" onclick="editStagedScheduleItem(${idx})" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg text-xs cursor-pointer" title="แก้ไขรายการนี้">
-                  <i class="fa-solid fa-pen-to-square"></i>
-                </button>
-                <button type="button" onclick="deleteStagedScheduleItem(${idx})" class="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs cursor-pointer" title="ลบรายการนี้">
-                  <i class="fa-solid fa-trash-can"></i>
-                </button>
-                <button type="button" onclick="moveStagedScheduleItem(${idx}, -1)" ${idx === 0 ? 'disabled' : ''} class="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer" title="เลื่อนขึ้น">
-                  <i class="fa-solid fa-chevron-up text-[10px]"></i>
-                </button>
-                <button type="button" onclick="moveStagedScheduleItem(${idx}, 1)" ${idx === stops.length - 1 ? 'disabled' : ''} class="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer" title="เลื่อนลง">
-                  <i class="fa-solid fa-chevron-down text-[10px]"></i>
-                </button>
-              </div>
-            </div>
+            <tr class="cursor-pointer transition select-none ${rowClass}" id="schedRow_${r._rowIndex}" onclick="toggleSchedRowSelect(${r._rowIndex}, event)">
+              <td class="p-2 text-center" onclick="event.stopPropagation()">
+                <input type="checkbox" id="schedChk_${r._rowIndex}" ${isSelected ? 'checked' : ''} onchange="toggleSchedRowSelect(${r._rowIndex})" class="w-4 h-4 rounded text-blue-600 cursor-pointer">
+              </td>
+              <td class="p-2 whitespace-nowrap font-bold text-gray-900">${stop.caseNumber}</td>
+              <td class="p-2 text-gray-700 truncate max-w-[200px]" title="${stop.locationText}">${stop.locationText}</td>
+              <td class="p-2 whitespace-nowrap text-gray-600">${stop.subdistrict || '-'}</td>
+              <td class="p-2 whitespace-nowrap text-gray-600">${stop.district || '-'}</td>
+              <td class="p-2 whitespace-nowrap text-gray-600">${stop.province || '-'}</td>
+              <td class="p-2 whitespace-nowrap text-center">${statusBadge}</td>
+            </tr>
           `;
         }).join('');
+
+        updateHeaderCheckboxState();
+      };
+
+      window.toggleSchedRowSelect = function(rowIdx, ev) {
+        const rowData = (window.schedTableRawRows || []).find(r => r._rowIndex === rowIdx);
+        if (!rowData) return;
+
+        const stop = rowData._stopItem;
+        const existsIdx = (state.stagedScheduleStops || []).findIndex(s => 
+          s.id === stop.id || 
+          (s.caseNumber && s.caseNumber !== '-' && s.caseNumber === stop.caseNumber && s.locationText === stop.locationText)
+        );
+
+        const chk = document.getElementById(`schedChk_${rowIdx}`);
+        const tr = document.getElementById(`schedRow_${rowIdx}`);
+
+        if (existsIdx >= 0) {
+          state.stagedScheduleStops.splice(existsIdx, 1);
+          if (chk) chk.checked = false;
+          if (tr) tr.className = 'hover:bg-gray-50/80 transition cursor-pointer select-none';
+        } else {
+          state.stagedScheduleStops.push(stop);
+          if (chk) chk.checked = true;
+          if (tr) tr.className = 'bg-blue-50/90 font-semibold border-l-4 border-l-blue-600 shadow-xs cursor-pointer transition select-none';
+        }
+
+        const selectedBadge = document.getElementById('schedSelectedCountBadge');
+        if (selectedBadge) selectedBadge.textContent = state.stagedScheduleStops.length;
+        updateHeaderCheckboxState();
+      };
+
+      window.toggleSelectAllSchedItems = function(select) {
+        if (select) {
+          (window.currentFilteredSchedRows || []).forEach(r => {
+            const stop = r._stopItem;
+            if (!isStopInStaged(stop)) {
+              state.stagedScheduleStops.push(stop);
+            }
+          });
+        } else {
+          state.stagedScheduleStops = [];
+        }
+        filterScheduleSearchTable(document.getElementById('schedSearchInput')?.value || '');
+      };
+
+      window.toggleHeaderSelectAll = function(checked) {
+        toggleSelectAllSchedItems(checked);
+      };
+
+      function updateHeaderCheckboxState() {
+        const headerChk = document.getElementById('schedHeaderCheckbox');
+        if (!headerChk) return;
+        const currentFiltered = window.currentFilteredSchedRows || [];
+        if (currentFiltered.length === 0) {
+          headerChk.checked = false;
+          return;
+        }
+        const allSelected = currentFiltered.every(r => isStopInStaged(r._stopItem));
+        headerChk.checked = allSelected;
+      }
+
+      window.toggleCustomScheduleForm = function() {
+        const wrapper = document.getElementById('customScheduleFormWrapper');
+        const ico = document.getElementById('icoToggleCustomForm');
+        if (!wrapper) return;
+        const isHidden = wrapper.classList.contains('hidden');
+        wrapper.classList.toggle('hidden', !isHidden);
+        if (ico) ico.className = isHidden ? 'fa-solid fa-chevron-up text-blue-600 text-xs transition' : 'fa-solid fa-chevron-down text-gray-400 text-xs transition';
       };
 
       window.handleAddOrUpdateScheduleItem = function() {
@@ -9025,7 +9236,6 @@ window.openMapAreaSelectorModal = function() {
           return;
         }
 
-        // จับคู่ข้อมูลกับประวัติในฐานข้อมูล
         const matchRes = matchSingleCaseWithHistory(
           data.caseNumber,
           data.houseNo,
@@ -9063,100 +9273,19 @@ window.openMapAreaSelectorModal = function() {
           hasCoords: Boolean(matchRes.lat && matchRes.lng)
         };
 
-        if (editingStagedIndex !== null) {
-          state.stagedScheduleStops[editingStagedIndex] = stopItem;
-          editingStagedIndex = null;
-        } else {
-          state.stagedScheduleStops.push(stopItem);
-        }
+        state.stagedScheduleStops.push(stopItem);
+        const selectedBadge = document.getElementById('schedSelectedCountBadge');
+        if (selectedBadge) selectedBadge.textContent = state.stagedScheduleStops.length;
 
-        // จำค่าล่าสุดที่มีการบันทึก
-        state.lastScheduleFormData = {
-          province: data.province,
-          district: data.district,
-          subdistrict: data.subdistrict,
-          courtType: data.courtType,
-          prefix: data.prefix,
-          caseYear: data.caseYear,
-          locationType: data.locationType,
-          moo: data.moo,
-          localAdminName: data.localAdminName,
-          customOtherLocationName: data.customOtherLocationName
-        };
-        try {
-          localStorage.setItem('slts_last_schedule_form', JSON.stringify(state.lastScheduleFormData));
-        } catch (e) {}
-
-        resetScheduleModalForm(false);
-        renderStagedScheduleList();
-
-        // โฟกัสไปที่ช่องเลขคดีอัตโนมัติ เพื่อให้กรอกรายการถัดไปได้รวดเร็วต่อเนื่อง
-        setTimeout(() => {
-          const isOther = (data.courtType || '').includes('หมายศาลอื่น');
-          const targetInput = isOther ? document.getElementById('sched_otherCaseNo') : document.getElementById('sched_udonCaseNo');
-          if (targetInput) targetInput.focus();
-        }, 50);
-      };
-
-      window.editStagedScheduleItem = function(idx) {
-        const item = state.stagedScheduleStops[idx];
-        if (!item) return;
-
-        editingStagedIndex = idx;
-        const formContainer = document.getElementById('scheduleFormContainer');
-        if (formContainer) {
-          formContainer.innerHTML = getSummonsFormHtml('sched_', item);
-          bindScheduleFormEvents('sched_');
-        }
-
-        const titleEl = document.getElementById('scheduleFormTitle');
-        const txtBtn = document.getElementById('txtBtnAddScheduleItem');
-        const btnCancel = document.getElementById('btnCancelEditScheduleItem');
-
-        if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-pen-to-square"></i> แก้ไขรายการลำดับที่ ${idx + 1}`;
-        if (txtBtn) txtBtn.textContent = 'บันทึกแก้ไขรายการ';
-        if (btnCancel) btnCancel.classList.remove('hidden');
-      };
-
-      window.cancelEditScheduleItem = function() {
-        editingStagedIndex = null;
-        resetScheduleModalForm(false);
-      };
-
-      window.resetScheduleModalForm = function(clearAll = false) {
-        editingStagedIndex = null;
-        if (clearAll) {
-          state.lastScheduleFormData = null;
-          try {
-            localStorage.removeItem('slts_last_schedule_form');
-          } catch (e) {}
-        }
+        // Reset form
         const formContainer = document.getElementById('scheduleFormContainer');
         if (formContainer) {
           formContainer.innerHTML = getSummonsFormHtml('sched_');
           bindScheduleFormEvents('sched_');
         }
-        const titleEl = document.getElementById('scheduleFormTitle');
-        const txtBtn = document.getElementById('txtBtnAddScheduleItem');
-        const btnCancel = document.getElementById('btnCancelEditScheduleItem');
 
-        if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-file-circle-plus"></i> เพิ่มรายการส่งหมายใหม่`;
-        if (txtBtn) txtBtn.textContent = 'เพิ่มรายการลงตาราง';
-        if (btnCancel) btnCancel.classList.add('hidden');
-      };
-
-      window.deleteStagedScheduleItem = function(idx) {
-        state.stagedScheduleStops.splice(idx, 1);
-        if (editingStagedIndex === idx) cancelEditScheduleItem();
-        renderStagedScheduleList();
-      };
-
-      window.moveStagedScheduleItem = function(idx, dir) {
-        const target = idx + dir;
-        if (target < 0 || target >= state.stagedScheduleStops.length) return;
-        const [moved] = state.stagedScheduleStops.splice(idx, 1);
-        state.stagedScheduleStops.splice(target, 0, moved);
-        renderStagedScheduleList();
+        Swal.showValidationMessage('');
+        filterScheduleSearchTable(document.getElementById('schedSearchInput')?.value || '');
       };
 
       // ==========================================
@@ -9334,7 +9463,7 @@ window.openMapAreaSelectorModal = function() {
         }
 
         // นำเข้ารายการสู่ stagedScheduleStops
-        state.stagedScheduleStops = JSON.parse(JSON.stringify(records));
+        state.stagedScheduleStops = cleanStopsForStorage(records);
         
         logServerActivity('MAP_IMPORT_DISPATCH_TO_SCHEDULE', `นำเข้ารายการจากเอกสาร ${records.length} รายการ เข้าสู่ตารางจัดเส้นทางส่งหมาย`, {
           count: records.length,
