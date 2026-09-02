@@ -6283,24 +6283,50 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
         i.src = dataUrl;
       });
 
-      // ครอบตัดโซนล่าง 45% (ตำแหน่งมาตรฐานของลายน้ำพิกัด) เพื่อให้ OCR ทำงานเร็วและแม่นยำ
+      // สร้าง Canvas รวมโซนบน 40% (สำหรับลายน้ำบน/หัวภาพ) และ โซนล่าง 45% (สำหรับลายน้ำล่าง/ท้ายภาพ)
       const canvas = document.createElement('canvas');
-      const cropHeight = Math.round(img.height * 0.45);
-      const cropY = img.height - cropHeight;
-      canvas.width = img.width;
-      canvas.height = cropHeight;
+      const topHeight = Math.round(img.height * 0.40);
+      const bottomHeight = Math.round(img.height * 0.45);
+      const bottomY = img.height - bottomHeight;
+      
+      canvas.width = Math.min(img.width, 1920);
+      canvas.height = Math.round((topHeight + bottomHeight) * (canvas.width / img.width));
 
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, cropY, img.width, cropHeight, 0, 0, img.width, cropHeight);
+      const scale = canvas.width / img.width;
+      const scaledTopH = Math.round(topHeight * scale);
+      const scaledBottomH = Math.round(bottomHeight * scale);
+
+      // วาดส่วนบน
+      ctx.drawImage(img, 0, 0, img.width, topHeight, 0, 0, canvas.width, scaledTopH);
+      // วาดส่วนล่างต่อท้าย
+      ctx.drawImage(img, 0, bottomY, img.width, bottomHeight, 0, scaledTopH, canvas.width, scaledBottomH);
 
       const ocrResult = await Tesseract.recognize(canvas, 'eng+tha', {
         logger: () => {}
       });
 
       const fullText = (ocrResult && ocrResult.data && ocrResult.data.text) ? ocrResult.data.text : '';
-      console.log('[GPS Detection] OCR Text:', fullText);
+      console.log('[GPS Detection] Multi-Zone OCR Text:', fullText);
 
-      const parsedGps = parseCoordinatesFromText(fullText);
+      let parsedGps = parseCoordinatesFromText(fullText);
+
+      // หากยังไม่พบพิกัดในโซนหัว-ท้าย ให้ลองตรวจจากภาพเต็มขนาดย่อ (Full Image Fallback)
+      if (!parsedGps && (img.width > 0 && img.height > 0)) {
+        const fullCanvas = document.createElement('canvas');
+        fullCanvas.width = 1280;
+        fullCanvas.height = Math.round((img.height / img.width) * 1280);
+        const fctx = fullCanvas.getContext('2d');
+        fctx.drawImage(img, 0, 0, fullCanvas.width, fullCanvas.height);
+
+        const fullOcrResult = await Tesseract.recognize(fullCanvas, 'eng+tha', {
+          logger: () => {}
+        });
+        const fullImgText = (fullOcrResult && fullOcrResult.data && fullOcrResult.data.text) ? fullOcrResult.data.text : '';
+        console.log('[GPS Detection] Full Image OCR Text:', fullImgText);
+        parsedGps = parseCoordinatesFromText(fullImgText);
+      }
+
       if (parsedGps) {
         result = {
           lat: parsedGps.lat,
@@ -6340,11 +6366,11 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
 
       const locStatus = document.getElementById('locationStatus');
       if (locStatus) {
-        locStatus.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>ดึงพิกัดจากภาพถ่ายสำเร็จ (${latNum.toFixed(4)}, ${lngNum.toFixed(4)})</span>`;
+        locStatus.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>ดึงพิกัดจากภาพถ่ายสำเร็จ (${latFormatted}, ${lngFormatted})</span>`;
       }
 
       if (detectNotice && detectedGpsTxt) {
-        detectedGpsTxt.textContent = `${latNum.toFixed(4)}, ${lngNum.toFixed(4)}`;
+        detectedGpsTxt.textContent = `${latFormatted}, ${lngFormatted}`;
         detectNotice.classList.remove('hidden');
       }
 
@@ -6360,47 +6386,72 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
 
 /**
  * แยกสกัดพิกัด ละติจูด / ลองจิจูด จากข้อความ OCR
+ * รองรับรูปแบบทศนิยมความละเอียดสูง, ทิศทาง N/E, DMS, DDM, ป้ายข้อความภาษาไทย
  */
 function parseCoordinatesFromText(text) {
   if (!text) return null;
 
-  // 1. รูปแบบตัวอย่าง: 17.3891N 102.8138E หรือ 17.3891°N 102.8138°E
-  const matchDir = text.match(/(1[0-9]\.\d{3,8})\s*°?\s*([NS])\s*(10[0-6]\.\d{3,8})\s*°?\s*([EW])/i);
+  // ทำความสะอาดข้อความและแก้ข้อผิดพลาด OCR ทั่วไป
+  const clean = text
+    .replace(/[—–]/g, '-')
+    .replace(/[\n\r]+/g, ' ');
+
+  function isValid(lat, lng) {
+    return !isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && (lat !== 0 || lng !== 0);
+  }
+
+  // 1. รูปแบบตัวอย่าง: 16.436440683333334N 102.82303225E หรือ 17.389100°N 102.813800°E (ตัวเลขทศนิยมไม่จำกัดหลัก)
+  const matchDir = clean.match(/([0-8]?\d\.\d+)\s*°?\s*([NS])\s*[,|\/|\s]?\s*([0-1]?\d{1,2}\.\d+)\s*°?\s*([EW])/i);
   if (matchDir) {
     let lat = parseFloat(matchDir[1]);
     let lng = parseFloat(matchDir[3]);
     if (matchDir[2].toUpperCase() === 'S') lat = -lat;
     if (matchDir[4].toUpperCase() === 'W') lng = -lng;
-    return { lat, lng };
+    if (isValid(lat, lng)) return { lat, lng };
   }
 
-  // 2. รูปแบบทศนิยม: 17.3891, 102.8138 หรือ 17.389100 102.813800
-  const matchDec = text.match(/(1[0-9]\.\d{3,8})\s*[,|\s]\s*(10[0-6]\.\d{3,8})/i);
+  // 2. รูปแบบนำหน้าด้วยทิศทาง: N 16.436440683 E 102.82303225 หรือ Lat: 16.436440683 Long: 102.82303225 หรือ ละติจูด/ลองจิจูด
+  const matchPrefix = clean.match(/(?:[NS]|Lat(?:itude)?|ละติจูด)\s*[:\s]?\s*([0-8]?\d\.\d+)\s*[,|\/|\s]?\s*(?:[EW]|Long(?:itude)?|ลองจิจูด|Lng)\s*[:\s]?\s*([0-1]?\d{1,2}\.\d+)/i);
+  if (matchPrefix) {
+    const lat = parseFloat(matchPrefix[1]);
+    const lng = parseFloat(matchPrefix[2]);
+    if (isValid(lat, lng)) return { lat, lng };
+  }
+
+  // 3. รูปแบบพิกัดประเทศไทยโดยเฉพาะ: Lat (5 - 21) และ Lng (97 - 106)
+  const matchDecThai = clean.match(/([0-2]?\d\.\d{3,16})\s*[,|\s]\s*(9[7-9]\.\d{3,16}|10[0-6]\.\d{3,16})/);
+  if (matchDecThai) {
+    const lat = parseFloat(matchDecThai[1]);
+    const lng = parseFloat(matchDecThai[2]);
+    if (isValid(lat, lng)) return { lat, lng };
+  }
+
+  // 4. รูปแบบทศนิยมมาตรฐาน: 17.389100, 102.813800 หรือ 17.389100 102.813800
+  const matchDec = clean.match(/(-?[0-8]?\d\.\d{3,16})\s*[,|\s]\s*(-?[0-1]?\d{1,2}\.\d{3,16})/);
   if (matchDec) {
-    return {
-      lat: parseFloat(matchDec[1]),
-      lng: parseFloat(matchDec[2])
-    };
+    const lat = parseFloat(matchDec[1]);
+    const lng = parseFloat(matchDec[2]);
+    if (isValid(lat, lng)) return { lat, lng };
   }
 
-  // 3. รูปแบบสากลทั่วไป: (\d{1,2}\.\d{3,8}) N/S (\d{2,3}\.\d{3,8}) E/W
-  const matchGeneral = text.match(/([0-8]?\d\.\d{3,8})\s*°?\s*([NS])\s*([0-1]?\d{1,2}\.\d{3,8})\s*°?\s*([EW])/i);
-  if (matchGeneral) {
-    let lat = parseFloat(matchGeneral[1]);
-    let lng = parseFloat(matchGeneral[3]);
-    if (matchGeneral[2].toUpperCase() === 'S') lat = -lat;
-    if (matchGeneral[4].toUpperCase() === 'W') lng = -lng;
-    return { lat, lng };
+  // 5. รูปแบบ DDM (Degrees Decimal Minutes): 16°26.186'N 102°49.382'E
+  const matchDdm = clean.match(/(\d{1,2})[°\s]+(\d{1,2}(?:\.\d+)?)['\s]*([NS])\s*(\d{2,3})[°\s]+(\d{1,2}(?:\.\d+)?)['\s]*([EW])/i);
+  if (matchDdm) {
+    let lat = parseInt(matchDdm[1]) + (parseFloat(matchDdm[2]) / 60);
+    let lng = parseInt(matchDdm[4]) + (parseFloat(matchDdm[5]) / 60);
+    if (matchDdm[3].toUpperCase() === 'S') lat = -lat;
+    if (matchDdm[6].toUpperCase() === 'W') lng = -lng;
+    if (isValid(lat, lng)) return { lat, lng };
   }
 
-  // 4. DMS (องศา ลิปดา พิลิปดา): 17°23'20"N 102°48'50"E
-  const matchDms = text.match(/(\d{1,2})[°\s]+(\d{1,2})['\s]+(\d{1,2}(?:\.\d+)?)["\s]*([NS])\s*(\d{2,3})[°\s]+(\d{1,2})['\s]+(\d{1,2}(?:\.\d+)?)["\s]*([EW])/i);
+  // 6. รูปแบบ DMS (องศา ลิปดา พิลิปดา): 16°26'11.2"N 102°49'22.9"E
+  const matchDms = clean.match(/(\d{1,2})[°\s]+(\d{1,2})['\s]+(\d{1,2}(?:\.\d+)?)["\s]*([NS])\s*(\d{2,3})[°\s]+(\d{1,2})['\s]+(\d{1,2}(?:\.\d+)?)["\s]*([EW])/i);
   if (matchDms) {
     let lat = parseInt(matchDms[1]) + (parseInt(matchDms[2]) / 60) + (parseFloat(matchDms[3]) / 3600);
     let lng = parseInt(matchDms[5]) + (parseInt(matchDms[6]) / 60) + (parseFloat(matchDms[7]) / 3600);
     if (matchDms[4].toUpperCase() === 'S') lat = -lat;
     if (matchDms[8].toUpperCase() === 'W') lng = -lng;
-    return { lat, lng };
+    if (isValid(lat, lng)) return { lat, lng };
   }
 
   return null;
