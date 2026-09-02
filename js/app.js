@@ -10401,18 +10401,6 @@ window.clearAllRouteStops = function() {
 
       recalculateRouteFromStops(true);
 
-      const Toast = Swal.mixin({
-        toast: true,
-        position: 'top-end',
-        showConfirmButton: false,
-        timer: 1500,
-        timerProgressBar: true
-      });
-      Toast.fire({
-        icon: 'success',
-        title: 'ล้างข้อมูลรายการส่งหมายเรียบร้อยแล้ว'
-      });
-
       logServerActivity('MAP_CLEAR_ALL_STOPS', `ล้างข้อมูลรายการส่งหมาย ${currentCount} รายการ ออกจากหน้าแผนที่`);
     }
   });
