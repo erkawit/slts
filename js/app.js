@@ -11112,6 +11112,59 @@ function initLeafletMapInstance() {
  * คำนวณและเรนเดอร์เส้นทางใหม่จากลำดับใน state.currentRouteStops (ลากเส้นเฉพาะจุดที่มีหมุดพิกัด)
  * พร้อมระบบ Mouseover Pop Up แสดงภาพและข้อมูลหมายที่เคยส่ง
  */
+let routeFetchSeq = 0;
+
+/**
+ * ดึงข้อมูลเส้นทางและพิกัดถนนจริง (OSRM Real Road Driving Network)
+ * ลากเส้นตามโครงข่ายถนนสัญจรหลักจริง ไม่ตัดผ่านพื้นที่ที่ไม่มีถนน
+ */
+async function fetchRealRoadRoute(coords) {
+  if (!coords || coords.length < 2) return null;
+
+  // แปลงพิกัดเป็น lng,lat ตามข้อกำหนดของ OSRM
+  const coordQuery = coords.map(c => `${c[1]},${c[0]}`).join(';');
+  const osrmUrl1 = `https://router.project-osrm.org/route/v1/driving/${coordQuery}?overview=full&geometries=geojson&steps=false&continue_straight=true`;
+  const osrmUrl2 = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coordQuery}?overview=full&geometries=geojson&steps=false&continue_straight=true`;
+
+  try {
+    let res = await fetch(osrmUrl1, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) throw new Error('OSRM mirror 1 error');
+    let data = await res.json();
+    if (data.code === 'Ok' && data.routes && data.routes[0]) {
+      const route = data.routes[0];
+      const roadLatLngs = route.geometry.coordinates.map(pt => [pt[1], pt[0]]);
+      return {
+        latLngs: roadLatLngs,
+        distanceKm: route.distance / 1000,
+        durationMin: route.duration / 60
+      };
+    }
+  } catch (err1) {
+    try {
+      let res2 = await fetch(osrmUrl2, { signal: AbortSignal.timeout(6000) });
+      if (res2.ok) {
+        let data2 = await res2.json();
+        if (data2.code === 'Ok' && data2.routes && data2.routes[0]) {
+          const route = data2.routes[0];
+          const roadLatLngs = route.geometry.coordinates.map(pt => [pt[1], pt[0]]);
+          return {
+            latLngs: roadLatLngs,
+            distanceKm: route.distance / 1000,
+            durationMin: route.duration / 60
+          };
+        }
+      }
+    } catch (err2) {
+      console.warn('OSRM routing failed:', err2);
+    }
+  }
+  return null;
+}
+
+/**
+ * คำนวณและเรนเดอร์เส้นทางใหม่จากลำดับใน state.currentRouteStops (ลากเส้นเฉพาะจุดที่มีหมุดพิกัด)
+ * พร้อมระบบลากเส้นบนโครงข่ายถนนสัญจรหลักจริง (Real Road Routing) และ Pop Up แสดงภาพ
+ */
 function recalculateRouteFromStops(isResetToOptimal = false) {
   if (!state.interactiveLeafletMap) return;
 
@@ -11277,15 +11330,43 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
     totalDistanceKm += returnDist;
   }
 
-  // วาด Polyline เฉพาะกรณีมีจุดหมุดอย่างน้อย 1 จุด
+  // วาด Polyline บนถนนจริงในแผนที่ (Real Road Navigation Network)
   if (polylineCoords.length > 1 && state.showRouteLayer) {
+    const currentSeq = ++routeFetchSeq;
+
+    // สร้างเส้นพื้นฐานไว้ก่อนระหว่างรอ API โครงข่ายถนนจริง
     state.mapRoutePolyline = L.polyline(polylineCoords, {
       color: '#2563eb',
-      weight: 3.5,
-      opacity: 0.85,
-      dashArray: '8, 8',
+      weight: 4,
+      opacity: 0.6,
+      lineJoin: 'round',
       lineCap: 'round'
     }).addTo(state.interactiveLeafletMap);
+
+    // ดึงเส้นทางโครงข่ายถนนสัญจรหลักจริง (OSRM Driving Engine)
+    fetchRealRoadRoute(polylineCoords).then(roadResult => {
+      if (currentSeq !== routeFetchSeq || !state.showRouteLayer) return;
+      if (roadResult && roadResult.latLngs && roadResult.latLngs.length > 0) {
+        if (state.mapRoutePolyline) {
+          state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
+        }
+        state.mapRoutePolyline = L.polyline(roadResult.latLngs, {
+          color: '#2563eb',
+          weight: 5,
+          opacity: 0.9,
+          lineJoin: 'round',
+          lineCap: 'round'
+        }).addTo(state.interactiveLeafletMap);
+
+        // อัปเดตระยะทางรวมบนถนนจริง
+        if (roadResult.distanceKm > 0) {
+          const totalDistEl = document.getElementById('mapTotalDistanceText');
+          if (totalDistEl) {
+            totalDistEl.textContent = `${roadResult.distanceKm.toFixed(1)} กม. (ถนนจริง)`;
+          }
+        }
+      }
+    }).catch(e => console.warn('Real road route render error:', e));
   }
 
   // บันทึก Optimal Baseline

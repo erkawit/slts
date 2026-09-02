@@ -700,15 +700,15 @@
       </div>
 
       <!-- Main Map Grid (Map View + Route Timeline Sidebar) -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
         
         <!-- Left: Interactive Leaflet Map Container (lg:col-span-8 or 9) -->
-        <div class="lg:col-span-8 xl:col-span-9 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden relative">
-          <div id="sltsInteractiveMap" class="w-full h-[360px] sm:h-[460px] lg:h-[720px] bg-slate-100 z-0"></div>
+        <div class="lg:col-span-8 xl:col-span-9 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden relative flex flex-col h-[500px] sm:h-[600px] lg:h-[calc(100vh-210px)] min-h-[580px]">
+          <div id="sltsInteractiveMap" class="w-full h-full flex-1 bg-slate-100 z-0"></div>
           
           <!-- Map Overlay Controls (Toggle Route Layer / Baselayer Switch) -->
           <div class="absolute top-3 right-3 z-[1000] bg-white/95 backdrop-blur-sm rounded-xl shadow-md border border-gray-200 p-1.5 flex flex-col gap-1 text-xs">
-            <button type="button" onclick="toggleMapRouteLayer()" id="btnToggleRouteLine" class="px-2.5 py-1.5 bg-blue-50 text-blue-700 font-bold rounded-lg hover:bg-blue-100 flex items-center gap-1.5 transition">
+            <button type="button" onclick="toggleMapRouteLayer()" id="btnToggleRouteLine" class="px-2.5 py-1.5 bg-blue-50 text-blue-700 font-bold rounded-lg hover:bg-blue-100 flex items-center gap-1.5 transition cursor-pointer">
               <i class="fa-solid fa-bezier-curve"></i>
               <span id="txtToggleRouteLine">ซ่อนเส้นทาง</span>
             </button>
@@ -716,7 +716,7 @@
         </div>
 
         <!-- Right: Route Stops & Distance Matrix Sidebar (lg:col-span-4 or 3) -->
-        <div class="lg:col-span-4 xl:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col h-auto max-h-[560px] lg:h-[720px] overflow-hidden">
+        <div class="lg:col-span-4 xl:col-span-3 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col h-[500px] sm:h-[600px] lg:h-[calc(100vh-210px)] min-h-[580px] overflow-hidden">
           
           <!-- Header & Reorder Tool -->
           <div class="p-3.5 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between flex-shrink-0 gap-1.5">
@@ -741,13 +741,13 @@
           </div>
 
           <!-- Start Point & Round-Trip Config Box -->
-          <div class="p-2.5 bg-blue-50/70 border-b border-blue-100/80 space-y-2 text-xs">
+          <div class="p-2.5 bg-blue-50/70 border-b border-blue-100/80 space-y-2 text-xs flex-shrink-0">
             <div class="flex items-center justify-between">
               <label class="font-bold text-gray-800 text-[11px] flex items-center gap-1">
                 <i class="fa-solid fa-flag-checkered text-blue-600"></i>
                 <span>จุดเริ่มต้นการเดินทาง:</span>
               </label>
-              <button type="button" onclick="openStartPointConfigModal()" class="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline">
+              <button type="button" onclick="openStartPointConfigModal()" class="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer">
                 <i class="fa-solid fa-pen-to-square"></i> เปลี่ยนจุดเริ่ม
               </button>
             </div>
@@ -765,13 +765,13 @@
           </div>
 
           <!-- Distance Delta Banner -->
-          <div id="routeDistanceDeltaBanner" class="hidden px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800 font-semibold items-center justify-between">
+          <div id="routeDistanceDeltaBanner" class="hidden px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800 font-semibold items-center justify-between flex-shrink-0">
             <span id="routeDistanceDeltaText">ระยะทางเพิ่มขึ้น +0.0 กม.</span>
-            <button type="button" onclick="optimizeTripRoute()" class="text-[10px] underline font-bold text-amber-900">รีเซ็ตเส้นทางสั้นสุด</button>
+            <button type="button" onclick="optimizeTripRoute()" class="text-[10px] underline font-bold text-amber-900 cursor-pointer">รีเซ็ตเส้นทางสั้นสุด</button>
           </div>
 
           <!-- Stops List Scroll Area -->
-          <div id="mapRouteStopsList" class="flex-1 overflow-y-auto p-3 space-y-2 divide-y divide-gray-100 slts-swal-body-scroll">
+          <div id="mapRouteStopsList" class="flex-1 overflow-y-auto p-3 space-y-2 divide-y divide-gray-100 slts-swal-body-scroll min-h-0">
             <div class="p-8 text-center text-gray-400">
               <i class="fa-solid fa-map-location text-3xl mb-2 text-gray-300"></i>
               <p class="text-xs font-semibold">ยังไม่มีรายการหมุดที่เลือก</p>
