@@ -284,6 +284,14 @@ document.addEventListener('DOMContentLoaded', () => {
   initResponsiveUI();
   initMobileHandoffReceiver();
 
+  // ตรวจสอบการเปิดผ่าน LINE: หากเป็น LINE In-App Browser ให้สลับไปเปิดในเบราว์เซอร์ภายนอก (Chrome/Safari) ทันที
+  if (/Line/i.test(navigator.userAgent) && !window.location.search.includes('openExternalBrowser=1')) {
+    const currentUrl = window.location.href.split('#')[0];
+    const lineUrl = currentUrl.includes('?') ? currentUrl + '&openExternalBrowser=1' : currentUrl + '?openExternalBrowser=1';
+    window.location.href = lineUrl;
+    return;
+  }
+
   // ตรวจสอบและแสดงคำอธิบายคู่มือการใช้งานระบบสำหรับผู้ใช้ใหม่
   if (localStorage.getItem('slts_onboarding_completed') !== 'true') {
     setTimeout(() => {
@@ -293,7 +301,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // กำหนดขั้นตอนเริ่มต้นตามขนาดหน้าจอ (Mobile vs Desktop)
   if (window.innerWidth < 768) {
-    // จอมือถือ (< 768px): เปิดหน้ากล้องถ่ายภาพสดทันที (ไม่โหลดฟอร์ม SweetAlert ขึ้นมาก่อน)
+    // จอมือถือ (< 768px): เปิดหน้ากล้องถ่ายภาพสดทันที
     openCameraModal().catch(e => console.warn('Camera open error:', e));
   } else {
     // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
@@ -7159,6 +7167,178 @@ function stopLiveCameraHUD() {
   }
 }
 
+/**
+ * ตรวจสอบว่าเปิดผ่าน In-App Browser (WebView เช่น LINE, Facebook, IG, ฯลฯ) หรือไม่
+ */
+window.isMobileWebView = function() {
+  const ua = navigator.userAgent || navigator.vendor || window.opera || '';
+  const isLine = /Line/i.test(ua);
+  const isFb = /FBAN|FBAV/i.test(ua);
+  const isIg = /Instagram/i.test(ua);
+  const isTwitter = /Twitter/i.test(ua);
+  const isAndroidWebView = /Android.*Version\/[0-9.]+/i.test(ua) || (/Android/i.test(ua) && /wv/i.test(ua));
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isIOSWebView = isIOS && !window.MSStream && !/Safari/i.test(ua);
+
+  return isLine || isFb || isIg || isTwitter || isAndroidWebView || isIOSWebView;
+};
+
+/**
+ * บังคับเปิดหน้าเว็บในแอป Google Chrome หรือเบราว์เซอร์ภายนอกของเครื่อง
+ */
+window.openInChromeOrBrowser = function() {
+  const currentUrl = window.location.href.split('#')[0];
+  const urlWithoutProtocol = window.location.host + window.location.pathname + window.location.search;
+  const ua = navigator.userAgent || '';
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  // 1. กรณีเปิดใน LINE: ใช้ openExternalBrowser=1
+  if (/Line/i.test(ua)) {
+    const lineUrl = currentUrl.includes('?') 
+      ? currentUrl + '&openExternalBrowser=1' 
+      : currentUrl + '?openExternalBrowser=1';
+    window.location.href = lineUrl;
+    return;
+  }
+
+  // 2. กรณี Android: ใช้ Chrome Intent Scheme เพื่อบังคับเปิดด้วย Google Chrome App
+  if (isAndroid) {
+    const chromeIntentUrl = `intent://${urlWithoutProtocol}#Intent;scheme=https;package=com.android.chrome;end`;
+    window.location.href = chromeIntentUrl;
+
+    setTimeout(() => {
+      const genericIntentUrl = `intent://${urlWithoutProtocol}#Intent;scheme=https;action=android.intent.action.VIEW;end`;
+      window.location.href = genericIntentUrl;
+    }, 1200);
+    return;
+  }
+
+  // 3. กรณี iOS: พยายามเปิด googlechromes:// หรือ Safari
+  if (isIOS) {
+    const chromeIosUrl = `googlechromes://${urlWithoutProtocol}`;
+    window.location.href = chromeIosUrl;
+    setTimeout(() => {
+      window.location.href = currentUrl;
+    }, 1200);
+    return;
+  }
+
+  window.open(currentUrl, '_system');
+};
+
+/**
+ * คัดลอกลิงก์เว็บไซต์เพื่อนำไปวางใน Google Chrome
+ */
+window.copyAppUrlToClipboard = async function() {
+  const url = window.location.href.split('#')[0].replace(/[\?&]openExternalBrowser=1/, '');
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+    }
+    const Toast = Swal.mixin({
+      toast: true,
+      position: 'top',
+      showConfirmButton: false,
+      timer: 1800
+    });
+    Toast.fire({
+      icon: 'success',
+      title: 'คัดลอกลิงก์สำเร็จ นำไปวางใน Google Chrome ได้ทันที'
+    });
+  } catch (e) {
+    console.warn('Copy error:', e);
+  }
+};
+
+/**
+ * จัดการข้อผิดพลาดเมื่อไม่สามารถเปิดกล้องสดได้ พร้อมตัวเลือกเปิดใน Google Chrome
+ */
+window.handleCameraAccessError = function(err) {
+  elements.cameraStatus.textContent = 'ไม่สามารถเปิดกล้องสดได้';
+  const isWebView = isMobileWebView();
+
+  Swal.fire({
+    html: `
+      <div class="p-2 text-center select-none">
+        <div class="w-16 h-16 mx-auto rounded-3xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center text-3xl shadow-lg shadow-blue-500/20 mb-3">
+          <i class="fa-solid fa-camera"></i>
+        </div>
+
+        <h3 class="text-base font-bold text-gray-900 mb-1">ไม่สามารถเปิดกล้องสดได้โดยตรง</h3>
+        
+        ${isWebView ? `
+          <div class="bg-amber-50 border border-amber-200/90 rounded-2xl p-3 mb-3 text-left">
+            <p class="text-xs font-bold text-amber-900 mb-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-triangle-exclamation text-amber-600"></i>
+              <span>ตรวจพบการเปิดผ่าน WebView / ในแอปอื่น</span>
+            </p>
+            <p class="text-[11px] text-amber-800 leading-relaxed">
+              แอปพลิเคชันนี้จำกัดสิทธิ์การเข้าถึงกล้องสดและ GPS แนะนำให้เปิดด้วย <b>Google Chrome</b> เพื่อใช้งานระบบได้อย่างเต็มประสิทธิภาพ
+            </p>
+          </div>
+        ` : `
+          <div class="bg-blue-50 border border-blue-200/90 rounded-2xl p-3 mb-3 text-left">
+            <p class="text-xs font-bold text-blue-900 mb-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-circle-info text-blue-600"></i>
+              <span>การขอสิทธิ์เข้าถึงกล้อง</span>
+            </p>
+            <p class="text-[11px] text-blue-800 leading-relaxed">
+              โปรดอนุญาตสิทธิ์การเข้าถึงกล้อง หรือเปิดผ่าน <b>Google Chrome</b> หรือเลือกถ่ายภาพจากอุปกรณ์
+            </p>
+          </div>
+        `}
+
+        <div class="space-y-2 pt-1">
+          <!-- ปุ่มเปิดใน Google Chrome -->
+          <button type="button" onclick="openInChromeOrBrowser()" class="w-full py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/25 transition flex items-center justify-center gap-2 cursor-pointer">
+            <i class="fa-brands fa-chrome text-sm"></i>
+            <span>เปิดด้วย Google Chrome (แนะนำ)</span>
+          </button>
+
+          <!-- ปุ่มถ่ายรูปจากอุปกรณ์ Fallback -->
+          <button type="button" id="btnSwalFallbackPhoto" class="w-full py-2.5 px-3 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-800 text-xs font-bold rounded-xl border border-gray-300 transition flex items-center justify-center gap-2 cursor-pointer">
+            <i class="fa-solid fa-camera-retro text-sm text-gray-600"></i>
+            <span>ถ่ายรูปจากอุปกรณ์ (แอปกล้องในเครื่อง)</span>
+          </button>
+
+          <!-- ปุ่มคัดลอกลิงก์ -->
+          <button type="button" onclick="copyAppUrlToClipboard()" class="w-full py-2 px-3 text-gray-500 hover:text-gray-700 text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer">
+            <i class="fa-solid fa-link text-[10px]"></i> คัดลอกลิงก์เว็บไซต์
+          </button>
+        </div>
+
+        <p class="text-[10px] text-gray-400 mt-2">
+          💡 หรือแตะจุด 3 จุด (⋮) ที่มุมจอ &rarr; เลือก <b>"เปิดในเบราว์เซอร์ภายนอก / Chrome"</b>
+        </p>
+      </div>
+    `,
+    showConfirmButton: false,
+    showCloseButton: true,
+    allowOutsideClick: false,
+    customClass: {
+      popup: 'rounded-3xl p-4 shadow-2xl'
+    },
+    didOpen: () => {
+      const fallbackBtn = document.getElementById('btnSwalFallbackPhoto');
+      if (fallbackBtn) {
+        fallbackBtn.onclick = () => {
+          Swal.close();
+          closeCameraModal();
+          elements.fileFallbackInput.click();
+        };
+      }
+    }
+  });
+};
+
 async function startCameraStream() {
   if (state.cameraStream) {
     state.cameraStream.getTracks().forEach(track => track.stop());
@@ -7176,6 +7356,10 @@ async function startCameraStream() {
       audio: false
     };
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('navigator.mediaDevices.getUserMedia is not supported');
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     state.cameraStream = stream;
     elements.videoPreview.srcObject = stream;
@@ -7183,18 +7367,7 @@ async function startCameraStream() {
     elements.cameraStatus.textContent = 'พร้อมถ่ายภาพ';
   } catch (err) {
     console.error('Camera access error:', err);
-    elements.cameraStatus.textContent = 'ไม่สามารถเปิดกล้องสดได้';
-    
-    Swal.fire({
-      icon: 'info',
-      title: 'ไม่สามารถเปิดกล้องสดได้โดยตรง',
-      text: 'ระบบจะเปิดเมนูถ่ายภาพของอุปกรณ์ให้แทน',
-      confirmButtonText: 'ถ่ายรูปจากอุปกรณ์',
-      confirmButtonColor: '#2563eb'
-    }).then(() => {
-      closeCameraModal();
-      elements.fileFallbackInput.click();
-    });
+    handleCameraAccessError(err);
   }
 }
 
