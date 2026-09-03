@@ -12545,6 +12545,9 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
     fetchRealRoadRoute(polylineCoords).then(roadResult => {
       if (currentSeq !== routeFetchSeq || !state.showRouteLayer) return;
       if (roadResult && roadResult.latLngs && roadResult.latLngs.length > 0) {
+        state.mapRoutePolylineCoords = roadResult.latLngs;
+        state.calculatedRoadDistanceKm = roadResult.distanceKm;
+
         if (state.mapRoutePolyline) {
           state.interactiveLeafletMap.removeLayer(state.mapRoutePolyline);
         }
@@ -12923,7 +12926,7 @@ window.clearAllRouteStops = function() {
  */
 window.openFullRouteInGoogleMaps = function() {
   const validStops = (state.currentRouteStops || []).filter(s => s.lat && s.lng && !isNaN(s.lat) && !isNaN(s.lng) && s.lat > 0 && s.lng > 0);
-  const start = state.routeStartLocation;
+  const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี', lat: 17.4138, lng: 102.7872 };
 
   if (!validStops || validStops.length === 0) {
     Swal.fire('ไม่มีรายการหมุด', 'ไม่พบหมุดพิกัดที่มีประวัติในรายการที่เลือก จึงไม่สามารถสร้างเส้นทางนำทางได้', 'info');
@@ -12992,7 +12995,7 @@ window.buildVillageCenterSearchQuery = function(moo, subdistrict, district, prov
  * ส่งข้อมูลเส้นทางหรือตำแหน่งพิกัดไปยังหน้าจอมือถือ (Cross-Device Handoff)
  * สำหรับหน้าจอ > 768px (Sender)
  */
-window.sendActiveRouteToMobileHandoff = function(targetStop = null) {
+window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
   const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
   if (!isUserLoggedIn) {
     Swal.fire({
@@ -13022,6 +13025,42 @@ window.sendActiveRouteToMobileHandoff = function(targetStop = null) {
   const userId = (state.currentUser.username || 'user').trim();
   const userName = state.currentUser.name || userId;
 
+  // อ่านจุดเริ่มต้น และจุดสิ้นสุดที่มีการวางไว้จากหน้าจอ Desktop ให้ตรงกันทั้งหมด
+  const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872, isCustom: false };
+  const end = state.routeEndLocation || { name: '', lat: null, lng: null, enabled: false };
+
+  // รวบรวม Waypoints สำหรับคำนวณโครงข่ายถนนสัญจรจริง
+  const waypoints = [[start.lat, start.lng]];
+  cleanStops.forEach(s => {
+    if (s.lat && s.lng && !isNaN(s.lat) && !isNaN(s.lng) && s.lat > 0 && s.lng > 0) {
+      waypoints.push([s.lat, s.lng]);
+    }
+  });
+
+  if (end && end.enabled && end.lat && end.lng) {
+    waypoints.push([end.lat, end.lng]);
+  } else if (state.isRoundTrip && waypoints.length > 1) {
+    waypoints.push([start.lat, start.lng]);
+  }
+
+  // คำนวณเส้นทางโครงข่ายถนนจริง (OSRM Driving Route) สำหรับรถยนต์สัญจรปกติ ไม่ใช้ทางลัดป่า
+  let roadLatLngs = state.mapRoutePolylineCoords || null;
+  let roadDistKm = state.calculatedRoadDistanceKm || null;
+
+  if ((!roadLatLngs || roadLatLngs.length === 0) && waypoints.length > 1) {
+    try {
+      const roadRes = await fetchRealRoadRoute(waypoints);
+      if (roadRes && roadRes.latLngs && roadRes.latLngs.length > 0) {
+        roadLatLngs = roadRes.latLngs;
+        roadDistKm = roadRes.distanceKm;
+        state.mapRoutePolylineCoords = roadLatLngs;
+        state.calculatedRoadDistanceKm = roadDistKm;
+      }
+    } catch (e) {
+      console.warn('Handoff road calculation error:', e);
+    }
+  }
+
   const payload = {
     action: 'send_handoff',
     user_id: userId,
@@ -13032,21 +13071,41 @@ window.sendActiveRouteToMobileHandoff = function(targetStop = null) {
     lat: primaryStop.lat || null,
     lng: primaryStop.lng || null,
     stops: cleanStops,
+    startLocation: start,
+    endLocation: end,
+    isRoundTrip: Boolean(state.isRoundTrip),
+    routeRoadPolyline: roadLatLngs,
+    totalDistanceKm: roadDistKm,
     status: 'pending',
     timestamp: new Date().toISOString()
   };
 
-  // บันทึก Local Storage & Shared State
+  // 1. บันทึก Local Storage & Shared State
   try {
-    localStorage.setItem('slts_device_handoff_' + userId, JSON.stringify(payload));
+    localStorage.setItem('slts_device_handoff_' + userId.toLowerCase(), JSON.stringify(payload));
+    localStorage.setItem('slts_latest_handoff', JSON.stringify(payload));
     localStorage.setItem('slts_shared_route_stops', JSON.stringify(cleanStops));
+    localStorage.setItem('slts_shared_route_start', JSON.stringify(start));
+    localStorage.setItem('slts_shared_route_end', JSON.stringify(end));
+    if (roadLatLngs) {
+      localStorage.setItem('slts_shared_route_polyline', JSON.stringify(roadLatLngs));
+    }
     localStorage.setItem('slts_handoff_event', Date.now().toString());
     window.dispatchEvent(new Event('storage'));
   } catch (e) {
     console.warn('Handoff local storage error:', e);
   }
 
-  // ส่งบันทึกไปยัง Database (Google Sheet 'device_handoff')
+  // 2. ส่งผ่าน BroadcastChannel สำหรับ Real-time ข้ามแท็บ/หน้าต่างทันที (< 10ms)
+  if (window.BroadcastChannel) {
+    try {
+      const bc = new BroadcastChannel('slts_device_handoff');
+      bc.postMessage(payload);
+      bc.close();
+    } catch (e) {}
+  }
+
+  // 3. ส่งบันทึกไปยัง Database (Google Sheet 'device_handoff')
   if (state.appsScriptUrl && navigator.onLine) {
     fetch(state.appsScriptUrl, {
       method: 'POST',
@@ -13069,10 +13128,12 @@ window.sendActiveRouteToMobileHandoff = function(targetStop = null) {
     html: `
       <div class="text-left text-xs space-y-2 bg-violet-50 p-3.5 rounded-2xl border border-violet-200 mt-2">
         <p><strong>ผู้รับ:</strong> <span class="text-violet-700 font-bold">@${userId} (${userName})</span></p>
-        <p><strong>พิกัดค้นหาศูนย์กลาง:</strong> <span class="text-gray-900 font-semibold">${queryString}</span></p>
-        <p><strong>รายการส่งหมาย:</strong> <span class="text-emerald-700 font-bold">${stops.length} รายการ</span></p>
+        <p><strong>จุดเริ่มต้น:</strong> <span class="text-blue-700 font-semibold">${start.name}</span></p>
+        ${end && end.enabled ? `<p><strong>จุดสิ้นสุด:</strong> <span class="text-indigo-700 font-semibold">${end.name}</span></p>` : (state.isRoundTrip ? `<p><strong>เส้นทาง:</strong> <span class="text-emerald-700 font-semibold">วนกลับจุดเริ่มต้น</span></p>` : '')}
+        <p><strong>รายการส่งหมาย:</strong> <span class="text-emerald-700 font-bold">${cleanStops.length} รายการ</span></p>
+        ${roadDistKm ? `<p><strong>ระยะทางบนถนนจริง:</strong> <span class="font-mono text-gray-800 font-bold">${roadDistKm.toFixed(1)} กม.</span></p>` : ''}
         <p class="text-[11px] text-gray-500 pt-1.5 border-t border-violet-200">
-          <i class="fa-solid fa-mobile-screen-button mr-1 text-violet-600"></i> เมื่อเปิดหน้าจอบนมือถือ (< 768px) ระบบจะดึงพิกัดและเส้นทางนี้ขึ้นแสดงผลให้อัตโนมัติ
+          <i class="fa-solid fa-mobile-screen-button mr-1 text-violet-600"></i> อัปเดตไปยังหน้าจอมือถือ (< 768px) แบบ Real-time เรียบร้อยแล้ว
         </p>
       </div>
     `,
@@ -13094,10 +13155,7 @@ window.sendSingleStopToMobileHandoff = function(index) {
 
 /**
  * Realtime Listener สำหรับรับข้อมูลข้ามอุปกรณ์ (Receiver - สำหรับหน้าจอ < 768px)
- */
-/**
- * Realtime Listener สำหรับรับข้อมูลข้ามอุปกรณ์ (Receiver - สำหรับหน้าจอ < 768px)
- * ตรวจสอบพิกัดและเส้นทางที่ส่งมาจากคอมพิวเตอร์ตาม User ที่ล็อกอินทันที
+ * ตรวจสอบพิกัดและเส้นทางที่ส่งมาจากคอมพิวเตอร์ตาม User ที่ล็อกอินทันที แบบ Real-time
  */
 let handoffPollInterval = null;
 let lastReceivedHandoffTime = null;
@@ -13106,14 +13164,30 @@ window.dismissedHandoffTime = null;
 window.initMobileHandoffReceiver = function() {
   if (handoffPollInterval) clearInterval(handoffPollInterval);
 
-  // ตรวจสอบข้อมูลเมื่อมี Storage Event ข้ามแท็บ/เบราว์เซอร์
+  // 1. BroadcastChannel Listener (Real-time ทันที < 10ms ข้ามแท็บ/เบราว์เซอร์)
+  if (window.BroadcastChannel) {
+    try {
+      const bc = new BroadcastChannel('slts_device_handoff');
+      bc.onmessage = (event) => {
+        if (window.innerWidth < 768 && event.data) {
+          const currentUserId = (state.currentUser?.username || '').trim().toLowerCase();
+          const targetUserId = (event.data.user_id || '').trim().toLowerCase();
+          if (currentUserId && targetUserId && currentUserId === targetUserId) {
+            applyReceivedHandoff(event.data);
+          }
+        }
+      };
+    } catch (e) {}
+  }
+
+  // 2. ตรวจสอบข้อมูลเมื่อมี Storage Event ข้ามแท็บ/เบราว์เซอร์
   window.addEventListener('storage', (e) => {
     if (window.innerWidth < 768 && e.key && (e.key.startsWith('slts_device_handoff_') || e.key === 'slts_handoff_event' || e.key === 'slts_latest_handoff')) {
       checkLocalHandoffData();
     }
   });
 
-  // ตรวจสอบทันทีเมื่อเริ่มต้นระบบ
+  // 3. ตรวจสอบทันทีเมื่อเริ่มต้นระบบ
   if (window.innerWidth < 768) {
     checkHandoffForCurrentUser();
     // ตรวจสอบและอัปเดต Badge รายการเดิมถ้ามี
@@ -13127,14 +13201,26 @@ window.initMobileHandoffReceiver = function() {
         }
       } catch (e) {}
     }
+    const cachedStart = localStorage.getItem('slts_shared_route_start');
+    if (cachedStart) {
+      try { state.routeStartLocation = JSON.parse(cachedStart); } catch (e) {}
+    }
+    const cachedEnd = localStorage.getItem('slts_shared_route_end');
+    if (cachedEnd) {
+      try { state.routeEndLocation = JSON.parse(cachedEnd); } catch (e) {}
+    }
+    const cachedPolyline = localStorage.getItem('slts_shared_route_polyline');
+    if (cachedPolyline) {
+      try { state.routeRoadPolylineCoords = JSON.parse(cachedPolyline); } catch (e) {}
+    }
   }
 
-  // Polling ตรวจสอบจาก Database หรือ LocalStorage ทุก 3 วินาที
+  // 4. Polling ตรวจสอบจาก Database (Google Apps Script API) ทุก 2 วินาที
   handoffPollInterval = setInterval(() => {
     if (window.innerWidth < 768) {
       checkHandoffForCurrentUser();
     }
-  }, 3000);
+  }, 2000);
 };
 
 function checkLocalHandoffData() {
@@ -13185,8 +13271,16 @@ async function checkHandoffForCurrentUser() {
 }
 
 function applyReceivedHandoff(handoff) {
+  if (!handoff) return;
+  const currentUserId = (state.currentUser?.username || '').trim().toLowerCase();
+  const targetUserId = (handoff.user_id || '').trim().toLowerCase();
+
+  // ตรวจสอบความถูกต้องตาม User ที่ส่งมาตรงกันเท่านั้น
+  if (!currentUserId || !targetUserId || currentUserId !== targetUserId) {
+    return;
+  }
+
   lastReceivedHandoffTime = handoff.timestamp;
-  const userId = (state.currentUser?.username || 'user').trim().toLowerCase();
 
   // 1. อัปเดตสถานะใน Database เป็น "received"
   if (state.appsScriptUrl && navigator.onLine) {
@@ -13197,20 +13291,38 @@ function applyReceivedHandoff(handoff) {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'ack_handoff',
-        user_id: userId,
+        user_id: currentUserId,
         timestamp: new Date().toISOString()
       })
     }).catch(() => {});
   }
 
-  // 2. อัปเดต Local Storage และ State
+  // 2. อัปเดต Local Storage และ State ให้ตรงตามที่ส่งมาทั้งหมด (จุดเริ่มต้น, จุดสิ้นสุด, รายการจุดหมาย, โครงข่ายถนนจริง)
   handoff.status = 'received';
   try {
-    localStorage.setItem('slts_device_handoff_' + userId, JSON.stringify(handoff));
+    localStorage.setItem('slts_device_handoff_' + currentUserId, JSON.stringify(handoff));
     localStorage.setItem('slts_latest_handoff', JSON.stringify(handoff));
     if (handoff.stops && handoff.stops.length > 0) {
       state.currentRouteStops = handoff.stops;
       localStorage.setItem('slts_shared_route_stops', JSON.stringify(handoff.stops));
+    }
+    if (handoff.startLocation) {
+      state.routeStartLocation = handoff.startLocation;
+      localStorage.setItem('slts_shared_route_start', JSON.stringify(handoff.startLocation));
+    }
+    if (handoff.endLocation) {
+      state.routeEndLocation = handoff.endLocation;
+      localStorage.setItem('slts_shared_route_end', JSON.stringify(handoff.endLocation));
+    }
+    if (handoff.isRoundTrip !== undefined) {
+      state.isRoundTrip = handoff.isRoundTrip;
+    }
+    if (handoff.routeRoadPolyline && Array.isArray(handoff.routeRoadPolyline)) {
+      state.routeRoadPolylineCoords = handoff.routeRoadPolyline;
+      localStorage.setItem('slts_shared_route_polyline', JSON.stringify(handoff.routeRoadPolyline));
+    }
+    if (handoff.totalDistanceKm) {
+      state.calculatedRoadDistanceKm = handoff.totalDistanceKm;
     }
   } catch (e) {}
 
@@ -13234,47 +13346,57 @@ function applyReceivedHandoff(handoff) {
   // 4. อัปเดต UI Badge และ Floating Pill Banner บนหน้าจอกล้อง
   updateMobileRouteMapButtonBadge(handoff.stops ? handoff.stops.length : 0);
 
-  logServerActivity('MAP_CROSS_DEVICE_HANDOFF_RECEIVED', `มือถือได้รับข้อมูลตำแหน่งจากคอมพิวเตอร์: ${handoff.queryString} (คดี: ${handoff.caseNumber || '-'}, ผู้รับ: @${userId})`, {
-    user_id: userId,
+  logServerActivity('MAP_CROSS_DEVICE_HANDOFF_RECEIVED', `มือถือได้รับข้อมูลตำแหน่งจากคอมพิวเตอร์: ${handoff.queryString} (คดี: ${handoff.caseNumber || '-'}, ผู้รับ: @${currentUserId})`, {
+    user_id: currentUserId,
     queryString: handoff.queryString,
     stopsCount: handoff.stops ? handoff.stops.length : 0
   });
 
-  // 5. แสดงผลแจ้งเตือนบนหน้าจอมือถือ
+  // 5. แสดงผลการอัปเดตแบบ Real-time บนหน้าจอมือถือ
   const isMapModalOpen = Boolean(document.querySelector('.slts-province-modal'));
   
   if (isMapModalOpen) {
-    // ถ้าหน้าต่างแผนที่เปิดอยู่ ให้รีเฟรชแผนที่ทันที
-    recalculateRouteFromStops(true);
+    // ถ้าเปิดหน้าต่างแผนที่อยู่บนมือถือ ให้อัปเดตแผนที่ Leaflet และ Timeline ทันทีแบบ Real-time
+    initMobileModalMapInstance();
     renderMobileRouteList();
     
-    const Toast = Swal.mixin({
+    // อัปเดตข้อมูลบน Header ของ Pop Up แผนที่
+    const provTextEl = document.querySelector('.slts-modal-header p');
+    if (provTextEl) {
+      const prov = state.selectedProvince || 'อุดรธานี';
+      provTextEl.textContent = `📍 จ.${prov} (${handoff.stops ? handoff.stops.length : 0} จุดหมาย)`;
+    }
+
+    Swal.fire({
       toast: true,
       position: 'top',
-      showConfirmButton: false,
-      timer: 3500,
-      timerProgressBar: true
-    });
-    Toast.fire({
       icon: 'success',
-      title: `📲 อัปเดตพิกัด: ${handoff.queryString || 'ตำแหน่งใหม่'}`
+      title: '📲 ได้รับข้อมูลเส้นทางส่งหมายแบบ Real-time',
+      text: `จุดเริ่มต้น: ${handoff.startLocation?.name || 'จุดตั้งต้น'} • ${handoff.stops ? handoff.stops.length : 0} จุดหมาย`,
+      timer: 3000,
+      showConfirmButton: false
     });
   } else {
     // ถ้ายังไม่ได้เปิดหน้าต่างแผนที่ ให้แจ้งเตือนพร้อมปุ่มเปิดดูทันที
+    const startName = handoff.startLocation?.name || 'จุดเริ่มต้น';
+    const endName = handoff.endLocation?.enabled ? handoff.endLocation.name : (handoff.isRoundTrip ? 'วนกลับจุดเริ่มต้น' : 'จุดส่งหมายสุดท้าย');
+    const distText = handoff.totalDistanceKm ? ` • ระยะทาง ${handoff.totalDistanceKm.toFixed(1)} กม.` : '';
+
     Swal.fire({
       icon: 'info',
-      title: '📲 ได้รับพิกัดส่งหมายจากคอมพิวเตอร์!',
+      title: '📲 ได้รับเส้นทางส่งหมายจากคอมพิวเตอร์!',
       html: `
         <div class="text-left text-xs space-y-2 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-2xl border border-blue-200 mt-2 select-none shadow-inner">
           <div class="flex items-center justify-between pb-1.5 border-b border-blue-200">
-            <span class="font-bold text-gray-700">ผู้รับ: <strong class="text-blue-700">@${userId}</strong></span>
+            <span class="font-bold text-gray-700">ผู้รับ: <strong class="text-blue-700">@${currentUserId}</strong></span>
             <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">${handoff.stops ? handoff.stops.length : 1} จุดหมาย</span>
           </div>
-          <p><strong>เลขคดีหลัก:</strong> <span class="font-bold text-blue-900">${handoff.caseNumber || '-'}</span></p>
-          <p><strong>ศูนย์กลางค้นหา:</strong> <span class="text-gray-900 font-semibold">${handoff.queryString || '-'}</span></p>
+          <p><strong>🏛️ จุดเริ่มต้น:</strong> <span class="text-blue-800 font-semibold">${startName}</span></p>
+          <p><strong>🏁 จุดสิ้นสุด:</strong> <span class="text-indigo-800 font-semibold">${endName}${distText}</span></p>
+          <p><strong>📍 จุดหมายแรก:</strong> <span class="text-gray-900 font-semibold">${handoff.queryString || '-'}</span></p>
           ${handoff.fullAddress ? `<p class="text-gray-600 truncate"><strong>ที่อยู่:</strong> ${handoff.fullAddress}</p>` : ''}
-          <p class="text-[10px] text-gray-500 pt-1 border-t border-blue-100 flex items-center gap-1">
-            <i class="fa-solid fa-circle-info text-blue-600"></i> ระบบดึงพิกัดและเส้นทางเข้าสู่เครื่องมือถือนี้เรียบร้อยแล้ว
+          <p class="text-[10px] text-emerald-700 pt-1 border-t border-blue-100 flex items-center gap-1 font-semibold">
+            <i class="fa-solid fa-route text-emerald-600"></i> ลากเส้นทางตามโครงข่ายถนนสัญจรจริงของชุมชนเรียบร้อยแล้ว
           </p>
         </div>
       `,
@@ -13401,7 +13523,7 @@ function hasDesktopHandoffForCurrentUser() {
     const raw = localStorage.getItem('slts_device_handoff_' + currentUserId);
     if (raw) {
       const parsed = JSON.parse(raw);
-      const isTargetUser = (parsed.userId || parsed.targetUserId || '').toLowerCase() === currentUserId;
+      const isTargetUser = (parsed.user_id || parsed.userId || parsed.targetUserId || '').toLowerCase() === currentUserId;
       const isFromDesktop = parsed.sender === 'desktop' || parsed.action === 'send_handoff';
       const hasStops = Array.isArray(parsed.stops) && parsed.stops.length > 0;
       if (isTargetUser && isFromDesktop && hasStops) {
@@ -13442,11 +13564,13 @@ window.showMobileRouteMapModal = function() {
   }
 
   const stops = state.currentRouteStops || [];
-  const start = state.routeStartLocation;
+  const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872 };
+  const end = state.routeEndLocation;
   const prov = state.selectedProvince || 'อุดรธานี';
 
   let totalDistKm = 0;
   stops.forEach(s => { if (s.legDistanceKm) totalDistKm += s.legDistanceKm; });
+  const displayDistKm = state.calculatedRoadDistanceKm || totalDistKm;
 
   const hasHandoffFromDesktop = hasDesktopHandoffForCurrentUser();
 
@@ -13495,8 +13619,8 @@ window.showMobileRouteMapModal = function() {
           <!-- Summary Bar -->
           <div class="p-2.5 bg-blue-50/80 border-b border-blue-100 flex items-center justify-between text-xs flex-shrink-0 gap-2">
             <div class="flex items-center gap-1.5 min-w-0">
-              <span class="font-bold text-gray-800 text-[11px] truncate">🏁 ${start.name}</span>
-              ${totalDistKm > 0 ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold flex-shrink-0">${totalDistKm.toFixed(1)} กม.</span>` : ''}
+              <span class="font-bold text-gray-800 text-[11px] truncate">🏛️ ${start.name}</span>
+              ${displayDistKm > 0 ? `<span class="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold flex-shrink-0 font-mono">${displayDistKm.toFixed(1)} กม. (ถนนจริง)</span>` : ''}
             </div>
             ${stops.length > 0 ? `
               <button type="button" onclick="openFullRouteInGoogleMaps()" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-[11px] flex items-center gap-1 shadow-sm flex-shrink-0 cursor-pointer">
@@ -13540,8 +13664,9 @@ window.initMobileModalMapInstance = function() {
     window.mobileModalMap = null;
   }
 
-  const start = state.routeStartLocation;
+  const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872 };
   const stops = state.currentRouteStops || [];
+  const end = state.routeEndLocation;
 
   window.mobileModalMap = L.map('mobileModalLeafletMap', {
     zoomControl: true,
@@ -13554,51 +13679,113 @@ window.initMobileModalMapInstance = function() {
 
   window.mobileModalMarkersLayer = L.layerGroup().addTo(window.mobileModalMap);
 
-  // 1. วาดหมุดจุดเริ่มต้น (Start Location Hub)
+  // 1. วาดหมุดจุดเริ่มต้น (Start Location Hub) ให้ตรงกับหน้าจอคอมพิวเตอร์
   const startIcon = L.divIcon({
-    html: `<div class="w-7 h-7 rounded-full bg-blue-700 text-white flex items-center justify-center font-extrabold text-[11px] shadow-lg border-2 border-white ring-2 ring-blue-400/50"><i class="fa-solid fa-flag"></i></div>`,
-    className: 'slts-div-icon',
+    html: `
+      <div class="slts-map-pin-marker" title="จุดเริ่มต้น: ${start.name}">
+        <div class="w-7 h-7 rounded-full bg-blue-700 text-white flex items-center justify-center font-extrabold text-[12px] shadow-lg border-2 border-white ring-2 ring-blue-400/50">
+          🏛️
+        </div>
+      </div>
+    `,
+    className: 'slts-custom-div-icon',
     iconSize: [28, 28],
-    iconAnchor: [14, 28]
+    iconAnchor: [14, 28],
+    popupAnchor: [0, -28]
   });
   L.marker([start.lat, start.lng], { icon: startIcon })
     .addTo(window.mobileModalMarkersLayer)
-    .bindPopup(`<b>🏁 ${start.name}</b>`);
+    .bindPopup(`<div class="p-2.5 font-bold text-xs text-blue-900">🏛️ จุดเริ่มต้น: ${start.name}<p class="text-[10px] font-normal text-gray-500 font-mono mt-0.5">${Number(start.lat).toFixed(4)}, ${Number(start.lng).toFixed(4)}</p></div>`);
 
-  // 2. วาดหมุดจุดส่งหมาย (Stops)
-  const latlngs = [[start.lat, start.lng]];
+  // 2. วาดหมุดจุดส่งหมาย (Stops) ในลำดับที่ตรงกัน
+  const waypoints = [[start.lat, start.lng]];
   let pinNum = 1;
 
   stops.forEach((stop) => {
     if (stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && stop.lat > 0 && stop.lng > 0) {
       const pinIcon = L.divIcon({
-        html: `<div class="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-[10px] shadow-md border-2 border-white ring-2 ring-rose-300">${pinNum}</div>`,
-        className: 'slts-div-icon',
+        html: `
+          <div class="slts-map-pin-marker" title="หมุดที่ ${pinNum}: ${stop.caseNumber}">
+            <div class="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-[10px] shadow-md border-2 border-white ring-2 ring-rose-300">
+              ${pinNum}
+            </div>
+          </div>
+        `,
+        className: 'slts-custom-div-icon',
         iconSize: [24, 24],
-        iconAnchor: [12, 24]
+        iconAnchor: [12, 24],
+        popupAnchor: [0, -24]
       });
       L.marker([stop.lat, stop.lng], { icon: pinIcon })
         .addTo(window.mobileModalMarkersLayer)
         .bindPopup(`<b>#${pinNum} ${stop.caseNumber}</b><br><span class="text-xs text-gray-600">${stop.locationText}</span>`);
-      latlngs.push([stop.lat, stop.lng]);
+      waypoints.push([stop.lat, stop.lng]);
       pinNum++;
     }
   });
 
-  if (state.isRoundTrip && latlngs.length > 1) {
-    latlngs.push([start.lat, start.lng]);
+  // 3. วาดหมุดจุดสิ้นสุด (End Location) ให้ตรงกับหน้าจอคอมพิวเตอร์
+  if (end && end.enabled && end.lat && end.lng) {
+    waypoints.push([end.lat, end.lng]);
+    const endIcon = L.divIcon({
+      html: `
+        <div class="slts-map-pin-marker" title="จุดสิ้นสุด: ${end.name}">
+          <div class="w-7 h-7 rounded-full bg-indigo-700 text-white flex items-center justify-center font-extrabold text-[12px] shadow-lg border-2 border-white ring-2 ring-indigo-400/50">
+            🏁
+          </div>
+        </div>
+      `,
+      className: 'slts-custom-div-icon',
+      iconSize: [28, 28],
+      iconAnchor: [14, 28],
+      popupAnchor: [0, -28]
+    });
+    L.marker([end.lat, end.lng], { icon: endIcon })
+      .addTo(window.mobileModalMarkersLayer)
+      .bindPopup(`<div class="p-2.5 font-bold text-xs text-indigo-900">🏁 จุดสิ้นสุด: ${end.name}<p class="text-[10px] font-normal text-gray-500 font-mono mt-0.5">${Number(end.lat).toFixed(4)}, ${Number(end.lng).toFixed(4)}</p></div>`);
+  } else if (state.isRoundTrip && waypoints.length > 1) {
+    waypoints.push([start.lat, start.lng]);
   }
 
-  if (latlngs.length > 1) {
-    window.mobileModalPolyline = L.polyline(latlngs, {
+  // 4. การลากเส้นทางบนถนนสัญจรจริงของชุมชน (Real Drivable Road Route)
+  // ใช้เส้นทางที่คำนวณมาจากหน้าจอคอมพิวเตอร์ หรือดึงจากโครงข่ายถนนสัญจรจริง ไม่ตัดผ่านพื้นที่ป่า
+  if (state.routeRoadPolylineCoords && state.routeRoadPolylineCoords.length > 0) {
+    window.mobileModalPolyline = L.polyline(state.routeRoadPolylineCoords, {
       color: '#2563eb',
-      weight: 4,
-      opacity: 0.85,
-      dashArray: '6, 6'
+      weight: 5,
+      opacity: 0.9,
+      lineJoin: 'round',
+      lineCap: 'round'
     }).addTo(window.mobileModalMap);
 
-    const bounds = L.latLngBounds(latlngs);
+    const bounds = L.latLngBounds(state.routeRoadPolylineCoords);
     window.mobileModalMap.fitBounds(bounds, { padding: [25, 25] });
+  } else if (waypoints.length > 1) {
+    window.mobileModalPolyline = L.polyline(waypoints, {
+      color: '#2563eb',
+      weight: 3,
+      opacity: 0.5,
+      dashArray: '4, 4'
+    }).addTo(window.mobileModalMap);
+
+    window.mobileModalMap.fitBounds(L.latLngBounds(waypoints), { padding: [25, 25] });
+
+    fetchRealRoadRoute(waypoints).then(roadResult => {
+      if (roadResult && roadResult.latLngs && roadResult.latLngs.length > 0) {
+        state.routeRoadPolylineCoords = roadResult.latLngs;
+        state.calculatedRoadDistanceKm = roadResult.distanceKm;
+        if (window.mobileModalPolyline && window.mobileModalMap) {
+          window.mobileModalMap.removeLayer(window.mobileModalPolyline);
+        }
+        window.mobileModalPolyline = L.polyline(roadResult.latLngs, {
+          color: '#2563eb',
+          weight: 5,
+          opacity: 0.9,
+          lineJoin: 'round',
+          lineCap: 'round'
+        }).addTo(window.mobileModalMap);
+      }
+    }).catch(() => {});
   }
 
   window.mobileModalMap.invalidateSize();
@@ -13606,7 +13793,11 @@ window.initMobileModalMapInstance = function() {
 
 window.centerMobileModalMap = function() {
   if (!window.mobileModalMap) return;
-  const start = state.routeStartLocation;
+  if (state.routeRoadPolylineCoords && state.routeRoadPolylineCoords.length > 0) {
+    window.mobileModalMap.fitBounds(L.latLngBounds(state.routeRoadPolylineCoords), { padding: [25, 25] });
+    return;
+  }
+  const start = state.routeStartLocation || { lat: 17.4138, lng: 102.7872 };
   const stops = (state.currentRouteStops || []).filter(s => s.lat && s.lng);
   const latlngs = [[start.lat, start.lng], ...stops.map(s => [s.lat, s.lng])];
   if (latlngs.length > 1) {
@@ -13620,20 +13811,42 @@ window.renderMobileRouteList = function() {
   const container = document.getElementById('mobileMapRouteStopsList');
   if (!container) return;
   const stops = state.currentRouteStops || [];
+  const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872 };
+  const end = state.routeEndLocation;
   
   if (stops.length === 0) {
     container.innerHTML = `
       <div class="p-8 text-center text-gray-400 flex flex-col items-center justify-center">
         <i class="fa-solid fa-map-location-dot text-3xl mb-2 text-gray-300"></i>
         <p class="text-xs font-bold text-gray-600">ยังไม่มีรายการส่งหมายในแผนที่</p>
-        <p class="text-[10px] text-gray-400 mt-0.5">จัดรายการตารางส่งหมายบนคอมพิวเตอร์และกดยืนยัน</p>
+        <p class="text-[10px] text-gray-400 mt-0.5">จัดรายการตารางส่งหมายบนคอมพิวเตอร์และส่งมายังมือถือ</p>
       </div>
     `;
     return;
   }
 
   let pinCounter = 1;
-  container.innerHTML = stops.map((stop, index) => {
+
+  // 1. หมุดจุดเริ่มต้นด้านบนสุด
+  let html = `
+    <div class="p-2.5 rounded-2xl border border-blue-200 bg-blue-50/80 flex items-start gap-2 text-xs shadow-2xs">
+      <span class="w-6 h-6 rounded-full bg-blue-700 text-white text-[12px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
+        🏛️
+      </span>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between gap-1 mb-0.5">
+          <span class="font-bold text-xs text-blue-950 truncate">จุดเริ่มต้น: ${start.name}</span>
+          <span class="text-[10px] font-semibold text-blue-800 bg-blue-100/80 border border-blue-200 px-1.5 py-0.2 rounded-md">
+            จุดตั้งต้น
+          </span>
+        </div>
+        <p class="text-[10px] text-gray-500 font-mono">${start.lat ? Number(start.lat).toFixed(4) : ''}, ${start.lng ? Number(start.lng).toFixed(4) : ''}</p>
+      </div>
+    </div>
+  `;
+
+  // 2. หมุดรายการจุดหมายระหว่างทาง
+  html += stops.map((stop, index) => {
     const isExact = stop.matchType === 'exact' || stop.isMatched;
     const isNear = stop.matchType === 'near';
     const hasPin = stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && stop.lat > 0 && stop.lng > 0;
@@ -13675,6 +13888,45 @@ window.renderMobileRouteList = function() {
       </div>
     `;
   }).join('');
+
+  // 3. หมุดจุดสิ้นสุดด้านล่างสุด
+  if (end && end.enabled && end.lat && end.lng) {
+    html += `
+      <div class="p-2.5 rounded-2xl border border-indigo-200 bg-indigo-50/80 flex items-start gap-2 text-xs shadow-2xs">
+        <span class="w-6 h-6 rounded-full bg-indigo-700 text-white text-[12px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
+          🏁
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-1 mb-0.5">
+            <span class="font-bold text-xs text-indigo-950 truncate">จุดสิ้นสุด: ${end.name}</span>
+            <span class="text-[10px] font-semibold text-indigo-800 bg-indigo-100/80 border border-indigo-200 px-1.5 py-0.2 rounded-md">
+              จุดหมายปลายทาง
+            </span>
+          </div>
+          <p class="text-[10px] text-gray-500 font-mono">${Number(end.lat).toFixed(4)}, ${Number(end.lng).toFixed(4)}</p>
+        </div>
+      </div>
+    `;
+  } else if (state.isRoundTrip) {
+    html += `
+      <div class="p-2.5 rounded-2xl border border-blue-200 bg-blue-50/60 flex items-start gap-2 text-xs shadow-2xs">
+        <span class="w-6 h-6 rounded-full bg-blue-600 text-white text-[12px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
+          🔄
+        </span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-1 mb-0.5">
+            <span class="font-bold text-xs text-blue-900 truncate">วนกลับ: ${start.name}</span>
+            <span class="text-[10px] font-semibold text-blue-700 bg-blue-100/80 border border-blue-200 px-1.5 py-0.2 rounded-md">
+              จบรอบ
+            </span>
+          </div>
+          <p class="text-[10px] text-gray-500 font-mono">${Number(start.lat).toFixed(4)}, ${Number(start.lng).toFixed(4)}</p>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
 };
 
 /**
