@@ -815,8 +815,8 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  // ตรวจสอบและแสดงคำอธิบายคู่มือการใช้งานระบบสำหรับผู้ใช้ใหม่
-  if (localStorage.getItem('slts_onboarding_completed') !== 'true') {
+  // ตรวจสอบและแสดงคำอธิบายคู่มือการใช้งานระบบสำหรับผู้ใช้ใหม่ (เฉพาะ Desktop >= 768px)
+  if (window.innerWidth >= 768 && localStorage.getItem('slts_onboarding_completed') !== 'true') {
     setTimeout(() => {
       showSystemOnboardingModal(false);
     }, 600);
@@ -1260,7 +1260,9 @@ window.handleGlobalClick = function(e) {
 window.openLoginModal = function(isForced = false) {
   if (!elements.loginModal) return;
   if (typeof window.freezeCameraStream === 'function') {
-    window.freezeCameraStream();
+    if (state.cameraStream && state.cameraStream.active) {
+      window.freezeCameraStream();
+    }
   }
   elements.loginModal.classList.remove('hidden');
   elements.loginModal.classList.add('flex');
@@ -1319,7 +1321,9 @@ function handleLogin(e) {
     initMobileHandoffReceiver();
 
     if (deviceMode === 'mobile' || window.innerWidth < 768) {
-      openCameraModal().catch(e => console.warn('Camera open error:', e));
+      if (typeof window.resumeCameraStream === 'function') {
+        window.resumeCameraStream();
+      }
     }
 
     if (state.dataTableInstance) {
@@ -8662,10 +8666,34 @@ async function openCameraModal() {
   // เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
   setCaptureOrientation('landscape');
 
-  elements.cameraModal.classList.remove('hidden');
-  elements.cameraModal.classList.add('flex');
+  state.isCameraFrozen = false;
+
+  if (elements.cameraModal) {
+    elements.cameraModal.classList.remove('hidden');
+    elements.cameraModal.classList.add('flex');
+  }
   updateCaptureButtonState();
-  await startCameraStream();
+
+  const isStreamLive = state.cameraStream && state.cameraStream.active && state.cameraStream.getVideoTracks().some(t => t.readyState === 'live');
+  if (isStreamLive) {
+    try {
+      state.cameraStream.getVideoTracks().forEach(track => { track.enabled = true; });
+      if (elements.videoPreview) {
+        if (!elements.videoPreview.srcObject) {
+          elements.videoPreview.srcObject = state.cameraStream;
+        }
+        if (elements.videoPreview.paused) {
+          await elements.videoPreview.play();
+        }
+      }
+    } catch (e) {
+      console.warn('Reusing stream error, restarting camera:', e);
+      await startCameraStream();
+    }
+  } else {
+    await startCameraStream();
+  }
+
   startLiveCameraHUD();
   updateCameraTopBarUI();
 
@@ -8740,21 +8768,27 @@ function stopLiveCameraHUD() {
 }
 
 /**
- * Freeze โหมดกล้องชั่วคราวเมื่อเปิด Pop Up / SweetAlert เพื่อลดการกินทรัพยากรเครื่อง (CPU / GPU / Battery) ตามข้อ 2
+ * Freeze โหมดกล้องชั่วคราวเมื่อเปิด Pop Up / SweetAlert เพื่อลดการกินทรัพยากรเครื่อง (CPU / GPU / Battery)
+ * ใช้วิธีปิดการส่งภาพจากแทร็กฮาร์ดแวร์เพื่อไม่ให้ติดบั๊ก pause() บน Chromium มือถือ
  */
 window.freezeCameraStream = function() {
-  if (state.isCameraFrozen) return;
   state.isCameraFrozen = true;
-  if (elements.videoPreview && !elements.videoPreview.paused) {
-    try { elements.videoPreview.pause(); } catch (e) {}
-  }
   stopLiveCameraHUD();
+  if (state.cameraStream) {
+    try {
+      state.cameraStream.getVideoTracks().forEach(track => {
+        track.enabled = false;
+      });
+    } catch (e) {}
+  }
 };
 
 /**
  * ปลด Freeze และกลับมาเรนเดอร์กล้องตามปกติเมื่อปิด Pop Up / SweetAlert
  */
-window.resumeCameraStream = function() {
+window.resumeCameraStream = async function() {
+  state.isCameraFrozen = false;
+
   // หากยังมี Modal อื่นๆ หรือ SweetAlert ค้างอยู่ หรือยังไม่ปิด ห้ามปลด Freeze
   if (document.body.classList.contains('swal2-shown')) return;
   if (elements.loginModal && !elements.loginModal.classList.contains('hidden')) return;
@@ -8764,20 +8798,35 @@ window.resumeCameraStream = function() {
     if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
       const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
       if (isLoggedIn) {
-        openCameraModal().then(() => fetchCurrentLocation(true)).catch(e => console.warn(e));
+        await openCameraModal();
         return;
       }
     }
 
-    state.isCameraFrozen = false;
-    if (elements.videoPreview) {
-      if (elements.videoPreview.srcObject) {
-        try { elements.videoPreview.play().catch(() => {}); } catch (e) {}
-      } else if (!state.cameraStream) {
-        startCameraStream().catch(e => console.warn(e));
+    const isStreamLive = state.cameraStream && state.cameraStream.active && state.cameraStream.getVideoTracks().some(t => t.readyState === 'live');
+    if (isStreamLive) {
+      state.cameraStream.getVideoTracks().forEach(track => {
+        track.enabled = true;
+      });
+      if (elements.videoPreview) {
+        if (!elements.videoPreview.srcObject) {
+          elements.videoPreview.srcObject = state.cameraStream;
+        }
+        if (elements.videoPreview.paused) {
+          try {
+            await elements.videoPreview.play();
+          } catch (pErr) {
+            console.warn('Video preview play retry on resume:', pErr);
+            await startCameraStream();
+          }
+        }
       }
+    } else {
+      await startCameraStream();
     }
+
     startLiveCameraHUD();
+    updateCameraTopBarUI();
 
     // ข้อ 2: เมื่อกลับมาใช้งานโหมดกล้องทุกครั้ง ต้องทำการเช็คพิกัดทันทีเป็นอันดับต้นเสมอ
     if (typeof fetchCurrentLocation === 'function') {
