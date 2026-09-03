@@ -504,12 +504,21 @@
                     <span>กำลังวิเคราะห์และค้นหาพิกัด GPS จากภาพถ่าย...</span>
                   </div>
 
-                  <div id="desktopGpsDetectNotice" class="hidden bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-xs text-emerald-800 flex items-center justify-between transition-all">
-                    <div class="flex items-center gap-2">
-                      <i class="fa-solid fa-satellite-dish text-emerald-600 text-sm animate-pulse"></i>
-                      <span>ตรวจพบพิกัดจากภาพ: <b id="desktopDetectedGpsText" class="font-mono text-emerald-700 font-bold">17.389100, 102.813800</b></span>
+                  <div id="desktopGpsDetectNotice" class="hidden bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-xs text-emerald-800 flex flex-col gap-1 transition-all">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-satellite-dish text-emerald-600 text-sm animate-pulse"></i>
+                        <span>ตรวจพบพิกัดจากภาพ: <b id="desktopDetectedGpsText" class="font-mono text-emerald-700 font-bold">17.389100, 102.813800</b></span>
+                      </div>
+                      <span class="text-[10px] bg-emerald-200/90 text-emerald-900 font-bold px-2 py-0.5 rounded-full whitespace-nowrap">อ่านพิกัดสำเร็จ</span>
                     </div>
-                    <span class="text-[10px] bg-emerald-200/90 text-emerald-900 font-bold px-2 py-0.5 rounded-full whitespace-nowrap">กรอกลงฟอร์มแล้ว</span>
+                    <div id="desktopDetectedAddressRow" class="hidden text-[11px] text-emerald-900 font-medium pl-6 pt-0.5 border-t border-emerald-200/60 flex items-center justify-between">
+                      <div class="flex items-center gap-1.5 truncate">
+                        <i class="fa-solid fa-wand-magic-sparkles text-emerald-600"></i>
+                        <span>วิเคราะห์ที่ตั้งออนไลน์: <b id="desktopDetectedAddressText" class="font-bold text-emerald-900">-</b></span>
+                      </div>
+                      <span class="text-[10px] text-emerald-700 font-semibold whitespace-nowrap bg-emerald-100 px-1.5 py-0.2 rounded">กรอกลงฟอร์มแล้ว</span>
+                    </div>
                   </div>
 
                   <!-- ตัวเลือก: ภาพถ่ายมีพิกัดบนภาพแล้ว -->
@@ -1175,17 +1184,17 @@
   </aside>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260903_08"></script>
-  <script src="js/compass.js?v=20260903_08"></script>
-  <script src="js/map.js?v=20260903_08"></script>
-  <script src="js/watermark.js?v=20260903_08"></script>
-  <script src="js/app.js?v=20260903_08"></script>
+  <script src="js/data.js?v=20260903_09"></script>
+  <script src="js/compass.js?v=20260903_09"></script>
+  <script src="js/map.js?v=20260903_09"></script>
+  <script src="js/watermark.js?v=20260903_09"></script>
+  <script src="js/app.js?v=20260903_09"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260903_08')
+        navigator.serviceWorker.register('./sw.js?v=20260903_09')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

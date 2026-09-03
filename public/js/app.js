@@ -5014,9 +5014,9 @@ window.reverseGeocodeLatLng = async function(lat, lng) {
   const lngNum = parseFloat(lng);
   if (isNaN(latNum) || isNaN(lngNum) || latNum <= 0 || lngNum <= 0) return null;
 
-  // 1. ดึงจาก OpenStreetMap (Nominatim API)
+  // 1. ดึงข้อมูลออนไลน์จาก OpenStreetMap (Nominatim API ระดับบ้าน/ตำบล/อำเภอ/จังหวัด)
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latNum}&lon=${lngNum}&accept-language=th`;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latNum}&lon=${lngNum}&accept-language=th&addressdetails=1`;
     const response = await fetch(url, {
       headers: { 'Accept': 'application/json' }
     });
@@ -5025,15 +5025,15 @@ window.reverseGeocodeLatLng = async function(lat, lng) {
       if (data && data.address) {
         const addr = data.address;
         let prov = addr.province || addr.state || '';
-        let dist = addr.district || addr.city_district || addr.county || addr.city || '';
-        let sub = addr.subdistrict || addr.quarter || addr.suburb || addr.village || addr.neighbourhood || '';
+        let dist = addr.county || addr.district || addr.city_district || addr.city || '';
+        let sub = addr.subdistrict || addr.municipality || addr.suburb || addr.village || addr.quarter || addr.town || '';
 
         // ทำความสะอาดคำนำหน้า
-        prov = prov.replace(/^จังหวัด\s*/, '').trim();
+        prov = prov.replace(/^(?:จังหวัด|จ\.)\s*/, '').trim();
         dist = dist.replace(/^(?:อำเภอ|เขต|อ\.)\s*/, '').trim();
         sub = sub.replace(/^(?:ตำบล|แขวง|ต\.)\s*/, '').trim();
 
-        const matched = matchWithThailandDatabase(prov, dist, sub, data.display_name);
+        const matched = matchWithThailandDatabase(prov, dist, sub, data.display_name || '');
         if (matched && (matched.district || matched.subdistrict)) {
           return matched;
         }
@@ -5043,7 +5043,7 @@ window.reverseGeocodeLatLng = async function(lat, lng) {
     console.warn('Nominatim reverse geocode error:', e);
   }
 
-  // 2. Fallback: BigDataCloud Reverse Geocode API
+  // 2. Fallback ออนไลน์: BigDataCloud Reverse Geocode API
   try {
     const bdcUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latNum}&longitude=${lngNum}&localityLanguage=th`;
     const bdcRes = await fetch(bdcUrl);
@@ -5053,19 +5053,22 @@ window.reverseGeocodeLatLng = async function(lat, lng) {
       let dist = bdcData.locality || bdcData.city || '';
       let sub = '';
 
-      prov = prov.replace(/^จังหวัด\s*/, '').trim();
+      prov = prov.replace(/^(?:จังหวัด|จ\.)\s*/, '').trim();
       dist = dist.replace(/^(?:อำเภอ|เขต|อ\.)\s*/, '').trim();
 
       if (bdcData.localityInfo && Array.isArray(bdcData.localityInfo.administrative)) {
         bdcData.localityInfo.administrative.forEach(item => {
           const name = item.name || '';
-          if (item.adminLevel === 8 || item.description === 'subdistrict' || name.startsWith('ตำบล') || name.startsWith('แขวง')) {
+          if (name.startsWith('อำเภอ') || name.startsWith('เขต')) {
+            dist = name.replace(/^(?:อำเภอ|เขต|อ\.)\s*/, '').trim();
+          }
+          if (name.startsWith('ตำบล') || name.startsWith('แขวง') || item.adminLevel === 8 || item.description === 'subdistrict' || item.description === 'municipality') {
             sub = name.replace(/^(?:ตำบล|แขวง|ต\.)\s*/, '').trim();
           }
         });
       }
 
-      const matched = matchWithThailandDatabase(prov, dist, sub, bdcData.localityInfo?.description || '');
+      const matched = matchWithThailandDatabase(prov, dist, sub, bdcData.localityInfo?.description || bdcData.locality || '');
       if (matched && (matched.district || matched.subdistrict)) {
         return matched;
       }
@@ -5091,7 +5094,7 @@ window.reverseGeocodeLatLng = async function(lat, lng) {
       }
     });
 
-    if (nearestRow && minDistance <= 8) { // ระยะห่างไม่เกิน 8 กม.
+    if (nearestRow && minDistance <= 10) { // ระยะห่างไม่เกิน 10 กม.
       const prov = (nearestRow['จังหวัด'] || state.selectedProvince || 'อุดรธานี').trim();
       const dist = (nearestRow['อำเภอ'] || nearestRow.district || '').trim();
       const sub = (nearestRow['ตำบล'] || nearestRow.subdistrict || '').trim();
@@ -5103,7 +5106,7 @@ window.reverseGeocodeLatLng = async function(lat, lng) {
 };
 
 /**
- * เทียบชื่อจังหวัด อำเภอ ตำบล ให้ตรงกับฐานข้อมูล THAILAND_PROVINCES, THAILAND_DISTRICTS, THAILAND_SUBDISTRICTS
+ * เทียบชื่อจังหวัด อำเภอ ตำบล ให้ตรงกับฐานข้อมูล THAILAND_PROVINCES, THAILAND_DISTRICTS, THAILAND_SUBDISTRICTS อย่างแม่นยำ
  */
 function matchWithThailandDatabase(rawProv, rawDist, rawSub, fullDisplayName = '') {
   let matchedProv = state.selectedProvince || 'อุดรธานี';
@@ -5111,24 +5114,48 @@ function matchWithThailandDatabase(rawProv, rawDist, rawSub, fullDisplayName = '
   let matchedSub = '';
 
   // 1. แมตช์จังหวัด
-  if (rawProv && typeof THAILAND_PROVINCES !== 'undefined') {
-    const foundProv = THAILAND_PROVINCES.find(p => p.name === rawProv || p.name.includes(rawProv) || rawProv.includes(p.name));
+  const provClean = (rawProv || '').replace(/^(?:จังหวัด|จ\.)\s*/, '').trim();
+  if (typeof THAILAND_PROVINCES !== 'undefined') {
+    const foundProv = THAILAND_PROVINCES.find(p => p.name === provClean || p.name.includes(provClean) || provClean.includes(p.name) || fullDisplayName.includes(p.name));
     if (foundProv) matchedProv = foundProv.name;
   }
 
   // 2. แมตช์อำเภอ
   const availableDistricts = getDistrictsByProvince(matchedProv);
-  if (rawDist && availableDistricts.length > 0) {
-    const foundDist = availableDistricts.find(d => d === rawDist || d.includes(rawDist) || rawDist.includes(d));
-    if (foundDist) matchedDist = foundDist;
+  const distClean = (rawDist || '').replace(/^(?:อำเภอ|เขต|อ\.)\s*/, '').trim();
+
+  let foundDist = availableDistricts.find(d => d === distClean || distClean.includes(d) || (d.includes(distClean) && distClean.length >= 3));
+  if (!foundDist && availableDistricts.length > 0) {
+    foundDist = availableDistricts.find(d => fullDisplayName.includes('อำเภอ' + d) || fullDisplayName.includes(d));
   }
+  // กรณีพิเศษ เช่น เทศบาลนคร... ให้จัดเข้าอำเภอเมือง
+  if (!foundDist && (fullDisplayName.includes('เทศบาลนคร' + matchedProv) || (rawDist && rawDist.includes('เทศบาลนคร')))) {
+    foundDist = availableDistricts.find(d => d === 'เมือง' + matchedProv || d.startsWith('เมือง'));
+  }
+  if (foundDist) matchedDist = foundDist;
 
   // 3. แมตช์ตำบล
   if (matchedDist) {
     const availableSubdistricts = getSubdistrictsByDistrict(matchedProv, matchedDist);
-    if (rawSub && availableSubdistricts.length > 0) {
-      const foundSub = availableSubdistricts.find(s => s === rawSub || s.includes(rawSub) || rawSub.includes(s));
+    const subClean = (rawSub || '').replace(/^(?:ตำบล|แขวง|ต\.)\s*/, '').trim();
+
+    if (subClean && availableSubdistricts.length > 0) {
+      const foundSub = availableSubdistricts.find(s => s === subClean || subClean.includes(s) || s.includes(subClean));
       if (foundSub) matchedSub = foundSub;
+    }
+
+    // หากยังไม่พบ ให้ตรวจจากข้อความที่อยู่เต็ม (fullDisplayName)
+    if (!matchedSub && availableSubdistricts.length > 0) {
+      const matches = availableSubdistricts.filter(s => fullDisplayName.includes('ตำบล' + s) || fullDisplayName.includes(s));
+      if (matches.length > 0) {
+        matches.sort((a, b) => b.length - a.length);
+        matchedSub = matches[0];
+      }
+    }
+
+    // กรณีในตัวเมืองอุดรธานี (เทศบาลนคร / ศาลากลาง / หมากแข้ง)
+    if (!matchedSub && matchedDist === 'เมืองอุดรธานี' && (fullDisplayName.includes('เทศบาลนคร') || fullDisplayName.includes('หมากแข้ง') || fullDisplayName.includes('ศาลากลาง'))) {
+      matchedSub = 'หมากแข้ง';
     }
   }
 
@@ -5144,11 +5171,11 @@ function matchWithThailandDatabase(rawProv, rawDist, rawSub, fullDisplayName = '
  * นำพิกัดไปอ้างอิงและเติม อำเภอ/ตำบล ในฟอร์มให้อัตโนมัติ (Auto-fill Address from Coordinates)
  */
 window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = 'พิกัด') {
-  if (!lat || !lng) return;
+  if (!lat || !lng) return null;
 
   const locStatus = document.getElementById('locationStatus');
   if (locStatus) {
-    locStatus.innerHTML = `<span class="text-blue-600 font-semibold"><i class="fa-solid fa-spinner fa-spin mr-1"></i>กำลังอ้างอิง อำเภอ/ตำบล จากพิกัด...</span>`;
+    locStatus.innerHTML = `<span class="text-blue-600 font-semibold"><i class="fa-solid fa-spinner fa-spin mr-1"></i>กำลังวิเคราะห์ที่ตั้งออนไลน์ (ตำบล/อำเภอ/จังหวัด)...</span>`;
   }
 
   const result = await reverseGeocodeLatLng(lat, lng);
@@ -5156,30 +5183,35 @@ window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = '
     if (locStatus) {
       locStatus.innerHTML = `<span class="text-gray-500 font-normal"><i class="fa-solid fa-location-dot mr-1"></i>พิกัด: ${parseFloat(lat).toFixed(4)}, ${parseFloat(lng).toFixed(4)} (${sourceLabel})</span>`;
     }
-    return;
+    return null;
   }
 
   let changesApplied = [];
 
-  // อัปเดตจังหวัด (ถ้าเปลี่ยน)
-  if (result.province && result.province !== state.selectedProvince) {
+  // 1. อัปเดตจังหวัด
+  if (result.province) {
+    if (elements.provinceSelect) {
+      elements.provinceSelect.value = result.province;
+    }
     setProvince(result.province);
     changesApplied.push(`จ.${result.province}`);
   }
 
-  // อัปเดตอำเภอ
+  // 2. อัปเดตอำเภอ
   if (result.district && elements.districtSelect) {
     updateDistricts(result.province || state.selectedProvince, result.district);
+    elements.districtSelect.value = result.district;
     changesApplied.push(`อ.${result.district}`);
   }
 
-  // อัปเดตตำบล
+  // 3. อัปเดตตำบล
   if (result.subdistrict && elements.subdistrictSelect) {
     updateSubdistricts(result.province || state.selectedProvince, result.district || elements.districtSelect?.value, result.subdistrict);
+    elements.subdistrictSelect.value = result.subdistrict;
     changesApplied.push(`ต.${result.subdistrict}`);
   }
 
-  // อัปเดตฟอร์มบน Mobile Modal (ถ้าเปิดอยู่)
+  // 4. อัปเดตฟอร์มบน Mobile Modal (ถ้าเปิดอยู่)
   const mDistSelect = document.getElementById('m_district');
   const mSubSelect = document.getElementById('m_subdistrict');
   if (mDistSelect && result.district) {
@@ -5189,13 +5221,23 @@ window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = '
     }
   }
 
+  // 5. แสดงผลบน Desktop Notice ที่แนบภาพถ่าย (> 768px)
+  const desktopAddrRow = document.getElementById('desktopDetectedAddressRow');
+  const desktopAddrTxt = document.getElementById('desktopDetectedAddressText');
+  if (desktopAddrRow && desktopAddrTxt) {
+    desktopAddrRow.classList.remove('hidden');
+    desktopAddrTxt.textContent = `${result.subdistrict ? `ต.${result.subdistrict} ` : ''}${result.district ? `อ.${result.district} ` : ''}${result.province ? `จ.${result.province}` : ''}`;
+  }
+
   if (changesApplied.length > 0) {
     const summaryText = `${result.subdistrict ? `ต.${result.subdistrict} ` : ''}${result.district ? `อ.${result.district} ` : ''}${result.province ? `จ.${result.province}` : ''}`;
     
     if (locStatus) {
-      locStatus.innerHTML = `<span class="text-emerald-700 font-semibold"><i class="fa-solid fa-wand-magic-sparkles mr-1 text-emerald-600"></i>อ้างอิงตำแหน่งสำเร็จ: <strong>${summaryText}</strong> (${sourceLabel})</span>`;
+      locStatus.innerHTML = `<span class="text-emerald-700 font-semibold"><i class="fa-solid fa-wand-magic-sparkles mr-1 text-emerald-600"></i>วิเคราะห์ที่ตั้งออนไลน์สำเร็จ: <strong>${summaryText}</strong> (${sourceLabel})</span>`;
     }
   }
+
+  return result;
 };
 
 /**
@@ -7443,7 +7485,7 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
       }
 
       // อ้างอิงและเติม จังหวัด, อำเภอ, ตำบล จากพิกัดภาพถ่ายให้อัตโนมัติทันที
-      autoFillAddressFromCoordinates(latNum, lngNum, 'พิกัดภาพถ่าย');
+      await autoFillAddressFromCoordinates(latNum, lngNum, 'พิกัดภาพถ่าย');
     }
 
     return result;
