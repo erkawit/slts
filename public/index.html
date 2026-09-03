@@ -1184,17 +1184,17 @@
   </aside>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260903_15"></script>
-  <script src="js/compass.js?v=20260903_15"></script>
-  <script src="js/map.js?v=20260903_15"></script>
-  <script src="js/watermark.js?v=20260903_15"></script>
-  <script src="js/app.js?v=20260903_15"></script>
+  <script src="js/data.js?v=20260903_16"></script>
+  <script src="js/compass.js?v=20260903_16"></script>
+  <script src="js/map.js?v=20260903_16"></script>
+  <script src="js/watermark.js?v=20260903_16"></script>
+  <script src="js/app.js?v=20260903_16"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260903_15')
+        navigator.serviceWorker.register('./sw.js?v=20260903_16')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

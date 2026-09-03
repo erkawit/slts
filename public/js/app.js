@@ -4283,6 +4283,30 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
     showConfirmButton: false,
     allowOutsideClick: false,
     didOpen: () => {
+      // บีบพื้นที่ส่วนหัวในกรอบสี่เหลี่ยมสีแดงขึ้นชิดขอบบนทันที กำจัด padding/margin ส่วนเกินทั้งหมด
+      const titleEl = Swal.getTitle();
+      if (titleEl) {
+        titleEl.style.setProperty('padding', '0', 'important');
+        titleEl.style.setProperty('margin', '0 0 6px 0', 'important');
+        titleEl.style.setProperty('font-size', '14px', 'important');
+        titleEl.style.setProperty('line-height', '1.2', 'important');
+      }
+      const htmlEl = Swal.getHtmlContainer();
+      if (htmlEl) {
+        htmlEl.style.setProperty('padding', '0', 'important');
+        htmlEl.style.setProperty('margin', '0', 'important');
+      }
+      const popupEl = Swal.getPopup();
+      if (popupEl) {
+        popupEl.style.setProperty('padding', '6px 10px 10px 10px', 'important');
+        popupEl.style.setProperty('margin-top', '2px', 'important');
+      }
+      const containerEl = Swal.getContainer();
+      if (containerEl) {
+        containerEl.style.setProperty('align-items', 'flex-start', 'important');
+        containerEl.style.setProperty('padding-top', 'max(4px, env(safe-area-inset-top, 4px))', 'important');
+      }
+
       const searchInput = document.getElementById('mobileSearchInput');
       const refreshBtn = document.getElementById('btnRefreshMobileSearch');
       const refreshIcon = document.getElementById('iconRefreshMobileSearch');
@@ -4574,7 +4598,31 @@ window.openMobileSubRecordsModal = function(caseNumber) {
     width: '96%',
     showCloseButton: false,
     showConfirmButton: false,
-    allowOutsideClick: false
+    allowOutsideClick: false,
+    didOpen: () => {
+      const titleEl = Swal.getTitle();
+      if (titleEl) {
+        titleEl.style.setProperty('padding', '0', 'important');
+        titleEl.style.setProperty('margin', '0 0 6px 0', 'important');
+        titleEl.style.setProperty('font-size', '14px', 'important');
+        titleEl.style.setProperty('line-height', '1.2', 'important');
+      }
+      const htmlEl = Swal.getHtmlContainer();
+      if (htmlEl) {
+        htmlEl.style.setProperty('padding', '0', 'important');
+        htmlEl.style.setProperty('margin', '0', 'important');
+      }
+      const popupEl = Swal.getPopup();
+      if (popupEl) {
+        popupEl.style.setProperty('padding', '6px 10px 10px 10px', 'important');
+        popupEl.style.setProperty('margin-top', '2px', 'important');
+      }
+      const containerEl = Swal.getContainer();
+      if (containerEl) {
+        containerEl.style.setProperty('align-items', 'flex-start', 'important');
+        containerEl.style.setProperty('padding-top', 'max(4px, env(safe-area-inset-top, 4px))', 'important');
+      }
+    }
   });
 };
 
