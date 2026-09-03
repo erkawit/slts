@@ -1118,6 +1118,8 @@ async function syncUserToGoogleSheet(action, payload) {
 function updateAuthUI() {
   const isDesktop = window.innerWidth > 768;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
+  const canManageUsers = isAdmin || isLocalAdvisor;
   const isLoggedIn = !!state.currentUser;
 
   // ปรับการแสดงผลโปรไฟล์และปุ่มล็อกอิน
@@ -1128,13 +1130,17 @@ function updateAuthUI() {
     
     const displayName = state.currentUser.name || state.currentUser.username;
     elements.authUserName.textContent = displayName;
-    elements.authUserRole.textContent = state.currentUser.role.toUpperCase();
+    elements.authUserRole.textContent = (state.currentUser.role || 'user').toUpperCase().replace('_', ' ');
     elements.dropdownUserFullName.textContent = displayName;
     elements.dropdownUsername.textContent = `@${state.currentUser.username}`;
     
     if (isAdmin) {
       elements.dropdownRoleBadge.className = 'inline-block mt-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200';
       elements.dropdownRoleBadge.textContent = 'Admin (ผู้ดูแลระบบ)';
+    } else if (isLocalAdvisor) {
+      const prov = state.currentUser.assignedProvince || 'อุดรธานี';
+      elements.dropdownRoleBadge.className = 'inline-block mt-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200';
+      elements.dropdownRoleBadge.textContent = `Local Advisor (จ.${prov})`;
     } else {
       elements.dropdownRoleBadge.className = 'inline-block mt-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200';
       elements.dropdownRoleBadge.textContent = 'User (เจ้าหน้าที่)';
@@ -1153,11 +1159,53 @@ function updateAuthUI() {
     if (elements.tabBtnMap) elements.tabBtnMap.classList.add('hidden');
   }
 
-  // Tab จัดการผู้ใช้งาน (แสดงเฉพาะ Admin บน Desktop)
-  if (isAdmin && isDesktop) {
+  // Tab จัดการผู้ใช้งาน (แสดงเฉพาะ Admin และ Local Advisor บน Desktop)
+  if (canManageUsers && isDesktop) {
     elements.tabBtnUsers.classList.remove('hidden');
   } else {
     elements.tabBtnUsers.classList.add('hidden');
+  }
+
+  // ปรับแต่งการแสดงผลฟอร์มจัดการผู้ใช้และส่วนควบคุมตามระดับสิทธิ์
+  const assignedProvContainer = document.getElementById('newAssignedProvinceContainer');
+  const roleSelect = document.getElementById('newRole');
+  const noticeContainer = document.getElementById('localAdvisorNoticeContainer');
+  const advisorProvText = document.getElementById('localAdvisorProvinceText');
+  const usersListTitle = document.getElementById('usersListTitleText');
+  const usersListSub = document.getElementById('usersListSubtitle');
+  const resetPassCard = document.getElementById('defaultResetPassConfigCard');
+
+  if (isLocalAdvisor) {
+    const prov = (state.currentUser.assignedProvince || 'อุดรธานี').trim();
+    if (assignedProvContainer) assignedProvContainer.classList.add('hidden');
+    if (noticeContainer) {
+      noticeContainer.classList.remove('hidden');
+      if (advisorProvText) advisorProvText.textContent = `จ.${prov}`;
+    }
+    if (roleSelect) {
+      roleSelect.innerHTML = `<option value="user" selected>User (เจ้าหน้าที่ทั่วไป)</option>`;
+      roleSelect.value = 'user';
+      roleSelect.disabled = true;
+    }
+    if (usersListTitle) usersListTitle.textContent = `รายชื่อผู้ใช้งาน (จ.${prov})`;
+    if (usersListSub) usersListSub.textContent = `แสดงเฉพาะผู้ใช้งานในพื้นที่รับผิดชอบ จ.${prov}`;
+    if (resetPassCard) resetPassCard.classList.add('hidden');
+  } else if (isAdmin) {
+    if (assignedProvContainer) assignedProvContainer.classList.remove('hidden');
+    if (noticeContainer) noticeContainer.classList.add('hidden');
+    if (roleSelect) {
+      roleSelect.disabled = false;
+      if (!roleSelect.innerHTML.includes('local_advisor')) {
+        roleSelect.innerHTML = `
+          <option value="user">User (เจ้าหน้าที่ทั่วไป)</option>
+          <option value="local_advisor">Local Advisor (ผู้ดูแลประจำจังหวัด)</option>
+          <option value="admin">Admin (ผู้ดูแลระบบ)</option>
+        `;
+      }
+    }
+    if (usersListTitle) usersListTitle.textContent = `รายชื่อผู้ใช้งานทั้งหมด`;
+    if (usersListSub) usersListSub.textContent = `จัดเก็บและซิงค์ข้อมูลผ่าน Google Sheet (Tab: users)`;
+    if (resetPassCard) resetPassCard.classList.remove('hidden');
   }
 
   // ปุ่มตั้งค่า GAS (แสดงเฉพาะหน้าจอ > 768px และเป็น Admin เท่านั้น)
@@ -1469,21 +1517,31 @@ window.handleSaveNewPassword = function(e) {
 };
 
 // =========================================================================
-// 2. จัดการผู้ใช้งาน (User Management - Admin Only)
+// 2. จัดการผู้ใช้งาน (User Management - Admin & Local Advisor)
 // =========================================================================
 
 function handleCreateUser(e) {
   e.preventDefault();
-  if (!state.currentUser || state.currentUser.role !== 'admin') {
-    Swal.fire('ไม่มีสิทธิ์', 'เฉพาะ Admin เท่านั้นที่สามารถเพิ่มผู้ใช้ได้', 'error');
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
+
+  if (!isAdmin && !isLocalAdvisor) {
+    Swal.fire('ไม่มีสิทธิ์', 'เฉพาะ Admin หรือ Local Advisor เท่านั้นที่สามารถเพิ่มผู้ใช้ได้', 'error');
     return;
   }
 
   const username = document.getElementById('newUsername').value.trim();
   const fullName = document.getElementById('newFullName').value.trim();
   const password = document.getElementById('newPassword').value.trim();
-  const role = document.getElementById('newRole').value;
-  const assignedProvince = document.getElementById('newAssignedProvince')?.value.trim() || 'อุดรธานี';
+  
+  let role = document.getElementById('newRole').value;
+  let assignedProvince = document.getElementById('newAssignedProvince')?.value.trim() || 'อุดรธานี';
+
+  // หากเป็น Local Advisor: บังคับให้สร้างได้เฉพาะ Role => User ในจังหวัดที่ตนเองรับผิดชอบเท่านั้น
+  if (isLocalAdvisor) {
+    role = 'user';
+    assignedProvince = (state.currentUser.assignedProvince || 'อุดรธานี').trim();
+  }
 
   if (!username || !password) return;
 
@@ -1500,7 +1558,7 @@ function handleCreateUser(e) {
     password: password,
     role: role,
     assignedProvince: assignedProvince,
-    name: fullName || (role === 'admin' ? `Admin (${username})` : `เจ้าหน้าที่ (${username})`),
+    name: fullName || (role === 'admin' ? `Admin (${username})` : (role === 'local_advisor' ? `Local Advisor (${username})` : `เจ้าหน้าที่ (${username})`)),
     createdAt: dateNow
   };
 
@@ -1508,7 +1566,7 @@ function handleCreateUser(e) {
   localStorage.setItem('slts_users', JSON.stringify(users));
   document.getElementById('addUserForm').reset();
   if (document.getElementById('newAssignedProvince')) {
-    document.getElementById('newAssignedProvince').value = 'อุดรธานี';
+    document.getElementById('newAssignedProvince').value = isLocalAdvisor ? assignedProvince : 'อุดรธานี';
   }
   renderUserList();
 
@@ -1518,7 +1576,7 @@ function handleCreateUser(e) {
   Swal.fire({
     icon: 'success',
     title: 'เพิ่มผู้ใช้งานสำเร็จ',
-    text: `สร้างผู้ใช้ "${username}" (จ.${assignedProvince}) เรียบร้อยแล้ว`,
+    text: `สร้างผู้ใช้ "${username}" (Role: ${role.toUpperCase()}, จ.${assignedProvince}) เรียบร้อยแล้ว`,
     timer: 1800,
     showConfirmButton: false
   });
@@ -1526,23 +1584,63 @@ function handleCreateUser(e) {
 
 function renderUserList() {
   if (!elements.userListBody) return;
-  const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  const allUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
+  const advisorProvince = (state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+
+  // หากเป็น Local Advisor: กรองแสดงเฉพาะผู้ใช้งานในจังหวัดที่ตนเองรับผิดชอบเท่านั้น
+  let users = allUsers;
+  if (isLocalAdvisor) {
+    users = allUsers.filter(u => (u.assignedProvince || 'อุดรธานี').trim() === advisorProvince);
+  }
+
   elements.userListBody.innerHTML = '';
+
+  if (users.length === 0) {
+    elements.userListBody.innerHTML = `
+      <tr>
+        <td colspan="5" class="py-8 text-center text-gray-400">
+          <i class="fa-solid fa-user-slash text-2xl mb-1 text-gray-300"></i>
+          <p class="text-xs">ไม่พบรายชื่อผู้ใช้งาน${isLocalAdvisor ? ` ในพื้นที่ จ.${advisorProvince}` : ''}</p>
+        </td>
+      </tr>
+    `;
+    return;
+  }
 
   users.forEach((u) => {
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-gray-50/80 transition';
 
-    const isAdmin = u.role === 'admin';
-    const roleBadge = isAdmin
-      ? `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">Admin</span>`
-      : `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">User</span>`;
+    let roleBadge = '';
+    let avatarIcon = 'fa-user';
+    let avatarClass = 'bg-blue-100 text-blue-700';
+
+    if (u.role === 'admin') {
+      roleBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">Admin</span>`;
+      avatarIcon = 'fa-shield-halved';
+      avatarClass = 'bg-purple-100 text-purple-700';
+    } else if (u.role === 'local_advisor') {
+      roleBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">Local Advisor</span>`;
+      avatarIcon = 'fa-user-tie';
+      avatarClass = 'bg-amber-100 text-amber-700';
+    } else {
+      roleBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">User</span>`;
+      avatarIcon = 'fa-user';
+      avatarClass = 'bg-blue-100 text-blue-700';
+    }
 
     const isPrimaryAdmin = u.username === 'admin';
     const userProvince = u.assignedProvince || 'อุดรธานี';
     
+    // สิทธิ์การจัดการปุ่ม Action:
+    // Admin: จัดการได้ทุกบัญชี (ยกเว้นลบ primary admin)
+    // Local Advisor: จัดการได้เฉพาะบัญชีที่เป็น Role => User ในจังหวัดของตนเองเท่านั้น
     let actionButtons = '';
-    if (state.currentUser && state.currentUser.role === 'admin') {
+    const canManageThisUser = isAdmin || (isLocalAdvisor && u.role === 'user');
+
+    if (canManageThisUser) {
       actionButtons = `
         <div class="flex items-center justify-end gap-1.5">
           <button type="button" onclick="editUserModal('${u.username}')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold border border-blue-200 transition" title="แก้ไขข้อมูลผู้ใช้">
@@ -1558,13 +1656,15 @@ function renderUserList() {
           ` : '<span class="text-[11px] text-gray-400 italic ml-1">หลัก</span>'}
         </div>
       `;
+    } else {
+      actionButtons = `<span class="text-[11px] text-gray-400 italic">${u.role === 'admin' ? 'ผู้ดูแลระบบ' : 'Local Advisor'}</span>`;
     }
 
     tr.innerHTML = `
       <td class="py-3 px-4">
         <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-full ${isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'} flex items-center justify-center font-bold text-xs">
-            <i class="fa-solid ${isAdmin ? 'fa-shield-halved' : 'fa-user'}"></i>
+          <div class="w-8 h-8 rounded-full ${avatarClass} flex items-center justify-center font-bold text-xs">
+            <i class="fa-solid ${avatarIcon}"></i>
           </div>
           <div>
             <p class="font-bold text-gray-900 leading-tight">${u.name || u.username}</p>
@@ -1586,13 +1686,31 @@ function renderUserList() {
   });
 }
 
-// Edit User Modal (Admin)
+// Edit User Modal (Admin & Local Advisor)
 window.editUserModal = function(username) {
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
+  if (!isAdmin && !isLocalAdvisor) return;
+
   const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
   const user = users.find(u => u.username === username);
   if (!user) return;
 
   const isPrimary = username === 'admin';
+  const advisorProvince = (state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+
+  // Local Advisor: แก้ไขได้เฉพาะผู้ใช้งานที่เป็น Role => User ในจังหวัดตนเองเท่านั้น
+  if (isLocalAdvisor) {
+    if (user.role !== 'user') {
+      Swal.fire('ไม่มีสิทธิ์', 'Local Advisor สามารถแก้ไขได้เฉพาะผู้ใช้งานที่เป็น Role => User เท่านั้น', 'error');
+      return;
+    }
+    if ((user.assignedProvince || 'อุดรธานี').trim() !== advisorProvince) {
+      Swal.fire('ไม่มีสิทธิ์', 'ไม่สามารถแก้ไขข้อมูลผู้ใช้งานนอกพื้นที่จังหวัดที่รับผิดชอบได้', 'error');
+      return;
+    }
+  }
+
   const currentAssigned = user.assignedProvince || 'อุดรธานี';
 
   let provinceOptionsHtml = '';
@@ -1602,6 +1720,51 @@ window.editUserModal = function(username) {
     });
   }
 
+  // ส่วนสิทธิ์การใช้งาน (Role):
+  // หากเป็น Local Advisor: ล็อก Role เป็น User (ไม่สามารถเปลี่ยน Role ได้)
+  // หากเป็น Admin: สามารถเลือกเปลี่ยน Role ได้
+  const roleSectionHtml = isLocalAdvisor ? `
+    <div>
+      <label class="block text-xs font-bold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role)</label>
+      <div class="px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-700 font-semibold flex items-center gap-1.5">
+        <i class="fa-solid fa-user text-blue-600"></i>
+        <span>User (เจ้าหน้าที่ทั่วไป)</span>
+      </div>
+      <input type="hidden" id="swalEditRole" value="user">
+    </div>
+  ` : `
+    <div>
+      <label class="block text-xs font-bold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) *</label>
+      <select id="swalEditRole" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500" ${isPrimary ? 'disabled' : ''}>
+        <option value="user" ${user.role === 'user' ? 'selected' : ''}>User (เจ้าหน้าที่ทั่วไป)</option>
+        <option value="local_advisor" ${user.role === 'local_advisor' ? 'selected' : ''}>Local Advisor (ผู้ดูแลประจำจังหวัด)</option>
+        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin (ผู้ดูแลระบบ)</option>
+      </select>
+      ${isPrimary ? '<p class="text-[11px] text-gray-400 mt-1">ผู้ดูแลระบบหลักไม่สามารถเปลี่ยน Role ได้</p>' : ''}
+    </div>
+  `;
+
+  // ส่วนจังหวัดที่ส่งหมาย:
+  // หากเป็น Local Advisor: "จะไม่สามารถมองเห็นหมวดหมู่ จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *" เพื่อป้องกันการแก้ไขจังหวัด
+  // หากเป็น Admin: มองเห็นและค้นหาเลือกเปลี่ยนจังหวัดได้
+  const provinceSectionHtml = isLocalAdvisor ? `
+    <input type="hidden" id="swalEditAssignedProvince" value="${currentAssigned}">
+  ` : `
+    <div>
+      <label class="block text-xs font-bold text-gray-700 mb-1">จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *</label>
+      <div class="space-y-1.5">
+        <div class="relative">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-gray-400"></i>
+          <input type="text" id="swalFilterProvinceInput" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full bg-gray-50 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:bg-white focus:border-blue-500">
+        </div>
+        <select id="swalEditAssignedProvince" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
+          ${provinceOptionsHtml}
+        </select>
+      </div>
+      <p class="text-[11px] text-gray-400 mt-1">กำหนดพื้นที่จังหวัดที่เจ้าหน้าที่คนนี้ได้รับมอบหมายให้ปฏิบัติงาน</p>
+    </div>
+  `;
+
   Swal.fire({
     title: `แก้ไขข้อมูลผู้ใช้ (@${username})`,
     html: `
@@ -1610,45 +1773,28 @@ window.editUserModal = function(username) {
           <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อ-นามสกุล / ชื่อแสดง *</label>
           <input type="text" id="swalEditName" value="${user.name || user.username}" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
         </div>
-        <div>
-          <label class="block text-xs font-bold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) *</label>
-          <select id="swalEditRole" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500" ${isPrimary ? 'disabled' : ''}>
-            <option value="user" ${user.role === 'user' ? 'selected' : ''}>User (เจ้าหน้าที่ทั่วไป)</option>
-            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin (ผู้ดูแลระบบ)</option>
-          </select>
-          ${isPrimary ? '<p class="text-[11px] text-gray-400 mt-1">ผู้ดูแลระบบหลักไม่สามารถเปลี่ยน Role ได้</p>' : ''}
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-gray-700 mb-1">จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *</label>
-          <div class="space-y-1.5">
-            <div class="relative">
-              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-gray-400"></i>
-              <input type="text" id="swalFilterProvinceInput" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full bg-gray-50 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:bg-white focus:border-blue-500">
-            </div>
-            <select id="swalEditAssignedProvince" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
-              ${provinceOptionsHtml}
-            </select>
-          </div>
-          <p class="text-[11px] text-gray-400 mt-1">กำหนดพื้นที่จังหวัดที่เจ้าหน้าที่คนนี้ได้รับมอบหมายให้ปฏิบัติงาน</p>
-        </div>
+        ${roleSectionHtml}
+        ${provinceSectionHtml}
       </div>
     `,
     didOpen: () => {
-      const filterInput = document.getElementById('swalFilterProvinceInput');
-      const selectEl = document.getElementById('swalEditAssignedProvince');
-      if (filterInput && selectEl) {
-        filterInput.addEventListener('input', (e) => {
-          const val = e.target.value.trim().toLowerCase();
-          let firstMatch = null;
-          Array.from(selectEl.options).forEach(opt => {
-            const matches = opt.text.toLowerCase().includes(val);
-            opt.style.display = matches ? '' : 'none';
-            if (matches && !firstMatch) firstMatch = opt;
+      if (!isLocalAdvisor) {
+        const filterInput = document.getElementById('swalFilterProvinceInput');
+        const selectEl = document.getElementById('swalEditAssignedProvince');
+        if (filterInput && selectEl) {
+          filterInput.addEventListener('input', (e) => {
+            const val = e.target.value.trim().toLowerCase();
+            let firstMatch = null;
+            Array.from(selectEl.options).forEach(opt => {
+              const matches = opt.text.toLowerCase().includes(val);
+              opt.style.display = matches ? '' : 'none';
+              if (matches && !firstMatch) firstMatch = opt;
+            });
+            if (firstMatch && val) {
+              selectEl.value = firstMatch.value;
+            }
           });
-          if (firstMatch && val) {
-            selectEl.value = firstMatch.value;
-          }
-        });
+        }
       }
     },
     showCancelButton: true,
@@ -1657,8 +1803,8 @@ window.editUserModal = function(username) {
     confirmButtonColor: '#2563eb',
     preConfirm: () => {
       const name = document.getElementById('swalEditName').value.trim();
-      const role = document.getElementById('swalEditRole').value;
-      const assignedProvince = document.getElementById('swalEditAssignedProvince').value;
+      const role = isLocalAdvisor ? 'user' : (document.getElementById('swalEditRole')?.value || 'user');
+      const assignedProvince = isLocalAdvisor ? currentAssigned : (document.getElementById('swalEditAssignedProvince')?.value || currentAssigned);
       if (!name) {
         Swal.showValidationMessage('กรุณาระบุชื่อ-นามสกุล');
         return false;
@@ -1668,8 +1814,8 @@ window.editUserModal = function(username) {
   }).then((res) => {
     if (res.isConfirmed && res.value) {
       user.name = res.value.name;
-      if (!isPrimary) user.role = res.value.role;
-      user.assignedProvince = res.value.assignedProvince || 'อุดรธานี';
+      if (!isPrimary && !isLocalAdvisor) user.role = res.value.role;
+      if (!isLocalAdvisor) user.assignedProvince = res.value.assignedProvince || 'อุดรธานี';
       localStorage.setItem('slts_users', JSON.stringify(users));
 
       // ถ้าแก้ไขบัญชีที่ล็อกอินอยู่ ให้ sync session ด้วย
@@ -1685,16 +1831,32 @@ window.editUserModal = function(username) {
       // ซิงค์ไปยัง Google Sheet (Tab: users)
       syncUserToGoogleSheet('save_user', user);
 
-      Swal.fire('สำเร็จ', `อัปเดตข้อมูลผู้ใช้ @${username} (จ.${user.assignedProvince}) เรียบร้อยแล้ว`, 'success');
+      Swal.fire('สำเร็จ', `อัปเดตข้อมูลผู้ใช้ @${username} เรียบร้อยแล้ว`, 'success');
     }
   });
 };
 
-// Reset User Password Modal (Admin)
+// Reset User Password Modal (Admin & Local Advisor)
 window.resetUserPasswordModal = function(username) {
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
+  if (!isAdmin && !isLocalAdvisor) return;
+
   const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
   const user = users.find(u => u.username === username);
   if (!user) return;
+
+  const advisorProvince = (state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+  if (isLocalAdvisor) {
+    if (user.role !== 'user') {
+      Swal.fire('ไม่มีสิทธิ์', 'Local Advisor สามารถรีเซ็ตรหัสผ่านได้เฉพาะผู้ใช้งานทั่วไป (User) เท่านั้น', 'error');
+      return;
+    }
+    if ((user.assignedProvince || 'อุดรธานี').trim() !== advisorProvince) {
+      Swal.fire('ไม่มีสิทธิ์', 'ไม่สามารถรีเซ็ตรหัสผ่านผู้ใช้งานนอกพื้นที่จังหวัดที่รับผิดชอบได้', 'error');
+      return;
+    }
+  }
 
   const defaultPass = localStorage.getItem('slts_default_reset_pass') || '123456';
 
@@ -1764,11 +1926,16 @@ window.resetUserPasswordModal = function(username) {
 
 // Set Default Reset Password Config Modal (Admin)
 window.openDefaultPasswordConfigModal = function() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') {
+    Swal.fire('ไม่มีสิทธิ์', 'เฉพาะ Admin เท่านั้นที่สามารถตั้งค่ารหัสผ่านตั้งต้นของระบบได้', 'error');
+    return;
+  }
+
   const currentDefault = localStorage.getItem('slts_default_reset_pass') || '123456';
 
   Swal.fire({
     title: 'ตั้งค่ารหัสผ่านตั้งต้นของระบบ',
-    text: 'รหัสผ่านนี้จะถูกใช้เป็นค่าเริ่มต้นเมื่อ Admin กดยืนยันรีเซ็ตรหัสผ่านให้แก่ผู้ใช้งาน',
+    text: 'รหัสผ่านนี้จะถูกใช้เป็นค่าเริ่มต้นเมื่อรีเซ็ตรหัสผ่านให้แก่ผู้ใช้งาน',
     input: 'text',
     inputValue: currentDefault,
     inputPlaceholder: 'เช่น 123456',
@@ -1796,11 +1963,29 @@ window.openDefaultPasswordConfigModal = function() {
 };
 
 window.deleteUser = function(username) {
-  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
+  if (!isAdmin && !isLocalAdvisor) return;
 
   if (username.toLowerCase() === 'admin') {
     Swal.fire('ไม่สามารถลบได้', 'ไม่สามารถลบผู้ดูแลระบบหลัก (admin) ได้', 'warning');
     return;
+  }
+
+  const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  const targetUser = users.find(u => u.username === username);
+  if (!targetUser) return;
+
+  const advisorProvince = (state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+  if (isLocalAdvisor) {
+    if (targetUser.role !== 'user') {
+      Swal.fire('ไม่มีสิทธิ์', 'Local Advisor สามารถลบได้เฉพาะผู้ใช้งานทั่วไป (User) เท่านั้น', 'error');
+      return;
+    }
+    if ((targetUser.assignedProvince || 'อุดรธานี').trim() !== advisorProvince) {
+      Swal.fire('ไม่มีสิทธิ์', 'ไม่สามารถลบผู้ใช้งานนอกพื้นที่จังหวัดที่รับผิดชอบได้', 'error');
+      return;
+    }
   }
 
   Swal.fire({
@@ -1813,9 +1998,9 @@ window.deleteUser = function(username) {
     confirmButtonColor: '#dc2626'
   }).then((res) => {
     if (res.isConfirmed) {
-      let users = JSON.parse(localStorage.getItem('slts_users') || '[]');
-      users = users.filter(u => u.username !== username);
-      localStorage.setItem('slts_users', JSON.stringify(users));
+      let updatedUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
+      updatedUsers = updatedUsers.filter(u => u.username !== username);
+      localStorage.setItem('slts_users', JSON.stringify(updatedUsers));
       renderUserList();
 
       // ซิงค์การลบไปยัง Google Sheet (Tab: users)
@@ -1922,6 +2107,11 @@ window.switchTab = function(tabName) {
       }, 150);
     }
   } else if (tabName === 'users') {
+    const isAllowed = state.currentUser && (state.currentUser.role === 'admin' || state.currentUser.role === 'local_advisor');
+    if (!isAllowed) {
+      switchTab('form');
+      return;
+    }
     closeCameraModal();
     if (elements.tabBtnUsers) elements.tabBtnUsers.classList.add('active');
     if (elements.tabContentUsers) {
@@ -5138,6 +5328,9 @@ window.getUserAssignedProvince = function() {
 window.isUserOutsideAssignedProvince = function() {
   if (window.innerWidth >= 768) return false;
   if (!state.currentUser || state.currentUser.role === 'guest' || !state.currentUser.username) return false;
+
+  // 1. Role => Admin ดูแล และเข้าถึงทุกอย่างในระบบทั้งในหน้าจอความกว้างมากกว่า หรือน้อยกว่า 768 pixel
+  if (state.currentUser.role === 'admin') return false;
 
   const currentProv = (state.selectedProvince || 'อุดรธานี').trim();
   const assignedProv = getUserAssignedProvince();

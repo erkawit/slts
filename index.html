@@ -835,6 +835,14 @@
             <p class="text-xs text-gray-500">สร้างบัญชีสำหรับเจ้าพนักงานหรือผู้ดูแลระบบ</p>
           </div>
 
+          <!-- Local Advisor notice box (shown dynamically when logged in as Local Advisor) -->
+          <div id="localAdvisorNoticeContainer" class="hidden mb-3.5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+            <i class="fa-solid fa-shield-halved text-amber-600 mt-0.5 shrink-0 text-sm"></i>
+            <div class="leading-snug">
+              <span class="font-bold">สิทธิ์ Local Advisor:</span> สามารถสร้างและจัดการผู้ใช้งาน Role => User ในพื้นที่ <b id="localAdvisorProvinceText" class="text-amber-800 underline">จ.อุดรธานี</b> เท่านั้น
+            </div>
+          </div>
+
           <form id="addUserForm" onsubmit="handleCreateUser(event)" class="space-y-3.5">
             <div>
               <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อผู้ใช้ (Username) *</label>
@@ -852,10 +860,12 @@
               <label class="block text-xs font-bold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) *</label>
               <select id="newRole" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                 <option value="user">User (เจ้าหน้าที่ทั่วไป)</option>
+                <option value="local_advisor">Local Advisor (ผู้ดูแลประจำจังหวัด)</option>
                 <option value="admin">Admin (ผู้ดูแลระบบ)</option>
               </select>
             </div>
-            <div>
+            <!-- หมวดหมู่จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) * (ซ่อนเมื่อเป็น Local Advisor) -->
+            <div id="newAssignedProvinceContainer">
               <label class="block text-xs font-bold text-gray-700 mb-1">จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *</label>
               <div class="relative">
                 <input type="text" id="newAssignedProvince" list="assignedProvinceDatalist" required placeholder="เลือกหรือพิมพ์ค้นหาจังหวัด..." value="อุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
@@ -873,7 +883,7 @@
           </form>
 
           <!-- Default Reset Password Configuration Card -->
-          <div class="pt-4 border-t border-gray-100">
+          <div id="defaultResetPassConfigCard" class="pt-4 border-t border-gray-100">
             <div class="flex items-center justify-between">
               <div>
                 <p class="text-xs font-bold text-gray-800">รหัสผ่านตั้งต้นเมื่อรีเซ็ต</p>
@@ -893,9 +903,9 @@
             <div>
               <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
                 <i class="fa-solid fa-users text-blue-600"></i>
-                <span>รายชื่อผู้ใช้งานทั้งหมด</span>
+                <span id="usersListTitleText">รายชื่อผู้ใช้งานทั้งหมด</span>
               </h3>
-              <p class="text-xs text-gray-500 mt-0.5">จัดเก็บและซิงค์ข้อมูลผ่าน Google Sheet (Tab: users)</p>
+              <p id="usersListSubtitle" class="text-xs text-gray-500 mt-0.5">จัดเก็บและซิงค์ข้อมูลผ่าน Google Sheet (Tab: users)</p>
             </div>
             <button type="button" onclick="loadUsersData(true)" class="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-xl text-xs transition flex items-center gap-1.5 border border-blue-200 shadow-sm" title="โหลดข้อมูลผู้ใช้ล่าสุดจาก Google Sheet">
               <i class="fa-solid fa-rotate"></i>
@@ -1195,17 +1205,17 @@
   </aside>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260903_18"></script>
-  <script src="js/compass.js?v=20260903_18"></script>
-  <script src="js/map.js?v=20260903_18"></script>
-  <script src="js/watermark.js?v=20260903_18"></script>
-  <script src="js/app.js?v=20260903_18"></script>
+  <script src="js/data.js?v=20260903_19"></script>
+  <script src="js/compass.js?v=20260903_19"></script>
+  <script src="js/map.js?v=20260903_19"></script>
+  <script src="js/watermark.js?v=20260903_19"></script>
+  <script src="js/app.js?v=20260903_19"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260903_18')
+        navigator.serviceWorker.register('./sw.js?v=20260903_19')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
