@@ -30,6 +30,13 @@ const state = {
   selectedProvince: localStorage.getItem('slts_selected_province') || null,
   selectedDistrict: localStorage.getItem('slts_selected_district') || null,
   selectedSubdistrict: localStorage.getItem('slts_selected_subdistrict') || null,
+  currentFilterCriteria: (function() {
+    try {
+      return JSON.parse(localStorage.getItem('slts_latest_target_search') || 'null');
+    } catch (e) {
+      return null;
+    }
+  })(),
   stagedScheduleStops: [],
   lastScheduleFormData: (function() {
     try {
@@ -3165,10 +3172,16 @@ function getRowProvince(row) {
 }
 
 /**
- * นำเงื่อนไขการค้นหาแบบเจาะจงไปกรองข้อมูลและแสดงผลใน DataTables
+ * นำเงื่อนไขการค้นหาแบบเจาะจงไปกรองข้อมูลและแสดงผลใน DataTables พร้อมบันทึกค่าล่าสุด
  */
 window.applyTargetedFilter = function(criteria) {
   state.currentFilterCriteria = criteria;
+  try {
+    localStorage.setItem('slts_latest_target_search', JSON.stringify(criteria));
+  } catch (e) {
+    console.warn('[TargetSearch] Cannot save latest search criteria:', e);
+  }
+
   const rows = state.allSheetRows || [];
 
   if (criteria.type === 'province' || criteria.type === 'all') {
@@ -3185,19 +3198,45 @@ window.applyTargetedFilter = function(criteria) {
 };
 
 /**
+ * ล้างเงื่อนไขการค้นหาแบบเจาะจง และกลับมาแสดงผลทั้งหมด
+ */
+window.clearTargetedFilter = function() {
+  state.currentFilterCriteria = null;
+  localStorage.removeItem('slts_latest_target_search');
+  renderDataTable(state.allSheetRows || [], { type: 'all', province: state.selectedProvince || 'อุดรธานี' });
+};
+
+/**
  * เปิด Pop Up ค้นหาข้อมูลเจาะจงในหน้าตารางประวัติส่งหมาย (เฉพาะ Desktop > 768px)
+ * จดจำและดึงค่าล่าสุดที่มีการเลือกเพื่อค้นหาไว้เสมอ
  */
 window.openTargetSearchModal = function() {
   if (window.innerWidth <= 768) return;
 
-  const currentProvince = state.selectedProvince || 'อุดรธานี';
+  const savedSearch = (function() {
+    try {
+      return JSON.parse(localStorage.getItem('slts_latest_target_search') || 'null') || state.currentFilterCriteria;
+    } catch (e) {
+      return state.currentFilterCriteria || null;
+    }
+  })();
+
+  const initialCat = savedSearch?.type || 'all';
+  const currentProvince = savedSearch?.province || state.selectedProvince || 'อุดรธานี';
   const provinces = (typeof THAILAND_PROVINCES !== 'undefined') ? THAILAND_PROVINCES : [{ name: currentProvince }];
   const districts = getDistrictsByProvince(currentProvince);
-  const subdistricts = districts.length > 0 ? getSubdistrictsByDistrict(currentProvince, districts[0]) : [];
+
+  const targetDist = savedSearch?.district || '';
+  const initialDist = (targetDist && districts.includes(targetDist)) ? targetDist : (districts[0] || '');
+  const subdistricts = initialDist ? getSubdistrictsByDistrict(currentProvince, initialDist) : [];
+  const targetSub = savedSearch?.subdistrict || '';
+  const initialSub = (targetSub && subdistricts.includes(targetSub)) ? targetSub : (subdistricts[0] || '');
 
   const provOptionsHtml = provinces.map(p => `<option value="${p.name}" ${p.name === currentProvince ? 'selected' : ''}>${p.name}</option>`).join('');
-  const distOptionsHtml = districts.map(d => `<option value="${d}">${d}</option>`).join('');
-  const subOptionsHtml = subdistricts.map(s => `<option value="${s}">${s}</option>`).join('');
+  const distOptionsHtml = districts.map(d => `<option value="${d}" ${d === initialDist ? 'selected' : ''}>${d}</option>`).join('');
+  const subOptionsHtml = subdistricts.map(s => `<option value="${s}" ${s === initialSub ? 'selected' : ''}>${s}</option>`).join('');
+
+  const savedLocType = savedSearch?.locationType || 'หมายบ้าน';
 
   const instructions = {
     all: "ตัวเลือก <b>'ทั้งหมด'</b> จะดึงข้อมูลประวัติการส่งหมายทุกรายการของจังหวัดที่เลือกมาแสดงผลทั้งหมดในตาราง เพื่อให้สามารถตรวจดูภาพรวมของจังหวัดได้อย่างครบถ้วน",
@@ -3221,13 +3260,13 @@ window.openTargetSearchModal = function() {
             <span class="text-[11px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">7 หมวดหมู่</span>
           </label>
           <select id="ts_categorySelect" class="w-full bg-white border-2 border-blue-500 rounded-xl px-3.5 py-2.5 text-sm font-bold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-200 cursor-pointer">
-            <option value="all" selected>🌟 ทั้งหมด (แสดงภาพรวมทั้งหมดในจังหวัด)</option>
-            <option value="case">⚖️ เลขคดี (กรองเฉพาะเลขคดี)</option>
-            <option value="province">🏛️ จังหวัด (กรองเฉพาะจังหวัด)</option>
-            <option value="district">📍 อำเภอ (กรองตามจังหวัดและอำเภอ)</option>
-            <option value="subdistrict">🏠 ตำบล (กรองตามจังหวัด อำเภอ และตำบล)</option>
-            <option value="location">🏢 ที่ตั้งหมาย (ประเภทสถานที่ / บ้านเลขที่ / อบต.)</option>
-            <option value="coords">🛰️ พิกัดหมาย (ละติจูด และ ลองจิจูด)</option>
+            <option value="all" ${initialCat === 'all' ? 'selected' : ''}>🌟 ทั้งหมด (แสดงภาพรวมทั้งหมดในจังหวัด)</option>
+            <option value="case" ${initialCat === 'case' ? 'selected' : ''}>⚖️ เลขคดี (กรองเฉพาะเลขคดี)</option>
+            <option value="province" ${initialCat === 'province' ? 'selected' : ''}>🏛️ จังหวัด (กรองเฉพาะจังหวัด)</option>
+            <option value="district" ${initialCat === 'district' ? 'selected' : ''}>📍 อำเภอ (กรองตามจังหวัดและอำเภอ)</option>
+            <option value="subdistrict" ${initialCat === 'subdistrict' ? 'selected' : ''}>🏠 ตำบล (กรองตามจังหวัด อำเภอ และตำบล)</option>
+            <option value="location" ${initialCat === 'location' ? 'selected' : ''}>🏢 ที่ตั้งหมาย (ประเภทสถานที่ / บ้านเลขที่ / อบต.)</option>
+            <option value="coords" ${initialCat === 'coords' ? 'selected' : ''}>🛰️ พิกัดหมาย (ละติจูด และ ลองจิจูด)</option>
           </select>
         </div>
 
@@ -3238,7 +3277,7 @@ window.openTargetSearchModal = function() {
             <span>คำอธิบายขั้นตอนการปฏิบัติ:</span>
           </div>
           <p id="ts_instructionText" class="text-gray-700 leading-relaxed">
-            ${instructions.all}
+            ${instructions[initialCat] || instructions.all}
           </p>
         </div>
 
@@ -3264,7 +3303,7 @@ window.openTargetSearchModal = function() {
           <div id="ts_field_case" class="hidden space-y-1.5">
             <label class="block font-semibold text-gray-700">พิมพ์เลขคดีที่ต้องการค้นหา (เช่น ต1641/2569, ผบ ส197/2569 หรือ 197) *</label>
             <div class="relative">
-              <input type="text" id="ts_caseInput" placeholder="พิมพ์เลขคดี เช่น ต1641/2569, ผบ ส197/2569, 197" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+              <input type="text" id="ts_caseInput" value="${(savedSearch?.caseNo || '').replace(/"/g, '&quot;')}" placeholder="พิมพ์เลขคดี เช่น ต1641/2569, ผบ ส197/2569, 197" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-bold text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
             </div>
           </div>
 
@@ -3275,7 +3314,7 @@ window.openTargetSearchModal = function() {
               <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
                 <i class="fa-solid fa-magnifying-glass text-xs"></i>
               </div>
-              <input type="text" id="ts_provSearchInput" placeholder="พิมพ์ชื่อจังหวัดเพื่อค้นหา เช่น เชียงใหม่, อุดรธานี, กรุงเทพ..." class="w-full bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-2 text-xs sm:text-sm font-semibold text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" autocomplete="off" value="${currentProvince}">
+              <input type="text" id="ts_provSearchInput" placeholder="พิมพ์ชื่อจังหวัดเพื่อค้นหา เช่น เชียงใหม่, อุดรธานี, กรุงเทพ..." class="w-full bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-2 text-xs sm:text-sm font-semibold text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" autocomplete="off" value="${(savedSearch?.province || currentProvince).replace(/"/g, '&quot;')}">
             </div>
             <select id="ts_provinceSelect" size="5" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs sm:text-sm font-medium text-gray-800 focus:border-blue-500 overflow-y-auto cursor-pointer">
               ${provOptionsHtml}
@@ -3287,7 +3326,7 @@ window.openTargetSearchModal = function() {
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block font-semibold text-gray-700 mb-1">พิมพ์/เลือกจังหวัด *</label>
-                <input type="text" id="ts_dist_provSearch" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full mb-1 bg-white border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off" value="${currentProvince}">
+                <input type="text" id="ts_dist_provSearch" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full mb-1 bg-white border border-gray-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off" value="${(savedSearch?.province || currentProvince).replace(/"/g, '&quot;')}">
                 <select id="ts_dist_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-2.5 py-2 text-xs font-semibold text-gray-800">
                   ${provOptionsHtml}
                 </select>
@@ -3306,7 +3345,7 @@ window.openTargetSearchModal = function() {
           <div id="ts_field_subdistrict" class="hidden space-y-2">
             <div>
               <label class="block font-semibold text-gray-700 mb-1">พิมพ์/เลือกจังหวัด *</label>
-              <input type="text" id="ts_sub_provSearch" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full mb-1 bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off" value="${currentProvince}">
+              <input type="text" id="ts_sub_provSearch" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full mb-1 bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off" value="${(savedSearch?.province || currentProvince).replace(/"/g, '&quot;')}">
               <select id="ts_sub_provSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
                 ${provOptionsHtml}
               </select>
@@ -3332,9 +3371,9 @@ window.openTargetSearchModal = function() {
             <div>
               <label class="block font-semibold text-gray-700 mb-1">ประเภทสถานที่ *</label>
               <select id="ts_locTypeSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800">
-                <option value="หมายบ้าน" selected>หมายบ้าน (บ้านเลขที่ / หมู่)</option>
-                <option value="ที่ทำการปกครองส่วนท้องถิ่น">ที่ทำการปกครองส่วนท้องถิ่น (อบต. / เทศบาล)</option>
-                <option value="อื่นๆ">อื่นๆ (ชื่อสถานที่เฉพาะ)</option>
+                <option value="หมายบ้าน" ${savedLocType === 'หมายบ้าน' ? 'selected' : ''}>หมายบ้าน (บ้านเลขที่ / หมู่)</option>
+                <option value="ที่ทำการปกครองส่วนท้องถิ่น" ${savedLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'selected' : ''}>ที่ทำการปกครองส่วนท้องถิ่น (อบต. / เทศบาล)</option>
+                <option value="อื่นๆ" ${savedLocType === 'อื่นๆ' ? 'selected' : ''}>อื่นๆ (ชื่อสถานที่เฉพาะ)</option>
               </select>
             </div>
 
@@ -3342,24 +3381,24 @@ window.openTargetSearchModal = function() {
             <div id="ts_loc_houseGroup" class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">บ้านเลขที่ *</label>
-                <input type="text" id="ts_loc_houseNo" placeholder="เช่น 2/18 หรือ 154/2" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+                <input type="text" id="ts_loc_houseNo" value="${(savedSearch?.houseNo || '').replace(/"/g, '&quot;')}" placeholder="เช่น 2/18 หรือ 154/2" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
               </div>
               <div>
                 <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">หมู่ที่ (ตัวเลข)</label>
-                <input type="text" id="ts_loc_moo" placeholder="เช่น 3 (ไม่บังคับ)" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+                <input type="text" id="ts_loc_moo" value="${(savedSearch?.moo || '').replace(/"/g, '&quot;')}" placeholder="เช่น 3 (ไม่บังคับ)" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
               </div>
             </div>
 
             <!-- อบต. / เทศบาล -->
             <div id="ts_loc_adminGroup" class="hidden">
               <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">ชื่อ อบต. / เทศบาล *</label>
-              <input type="text" id="ts_loc_adminName" placeholder="เช่น อบต.กุดสระ หรือ เทศบาลนครอุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+              <input type="text" id="ts_loc_adminName" value="${(savedSearch?.adminName || '').replace(/"/g, '&quot;')}" placeholder="เช่น อบต.กุดสระ หรือ เทศบาลนครอุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
             </div>
 
             <!-- อื่นๆ -->
             <div id="ts_loc_otherGroup" class="hidden">
               <label class="block text-[11px] font-semibold text-gray-600 mb-0.5">ชื่อสถานที่ส่งหมาย *</label>
-              <input type="text" id="ts_loc_otherName" placeholder="เช่น โรงเรียนบ้านนาดี หรือ วัดโพธิสมภรณ์" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
+              <input type="text" id="ts_loc_otherName" value="${(savedSearch?.otherName || '').replace(/"/g, '&quot;')}" placeholder="เช่น โรงเรียนบ้านนาดี หรือ วัดโพธิสมภรณ์" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-bold text-gray-800">
             </div>
           </div>
 
@@ -3369,11 +3408,11 @@ window.openTargetSearchModal = function() {
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block font-semibold text-gray-700 mb-1">ละติจูด (Latitude) *</label>
-                <input type="text" id="ts_latInput" placeholder="เช่น 17.3816" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-800 text-center">
+                <input type="text" id="ts_latInput" value="${savedSearch?.lat !== undefined ? savedSearch.lat : ''}" placeholder="เช่น 17.3816" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-800 text-center">
               </div>
               <div>
                 <label class="block font-semibold text-gray-700 mb-1">ลองจิจูด (Longitude) *</label>
-                <input type="text" id="ts_lngInput" placeholder="เช่น 102.7578" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-800 text-center">
+                <input type="text" id="ts_lngInput" value="${savedSearch?.lng !== undefined ? savedSearch.lng : ''}" placeholder="เช่น 102.7578" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-800 text-center">
               </div>
             </div>
           </div>
@@ -3388,11 +3427,14 @@ window.openTargetSearchModal = function() {
     },
     showCloseButton: true,
     showCancelButton: true,
+    showDenyButton: !!savedSearch && savedSearch.type !== 'all',
+    denyButtonText: '<i class="fa-solid fa-rotate-left mr-1"></i> ล้างค่าค้นหา (แสดงทั้งหมด)',
+    denyButtonColor: '#4b5563',
     allowOutsideClick: false,
     confirmButtonText: '<i class="fa-solid fa-magnifying-glass mr-1.5"></i> ตกลง (ค้นหาข้อมูล)',
     cancelButtonText: 'ปิด',
     confirmButtonColor: '#2563eb',
-    cancelButtonColor: '#6b7280',
+    cancelButtonColor: '#9ca3af',
     didOpen: () => {
       const categorySelect = document.getElementById('ts_categorySelect');
       const instructionText = document.getElementById('ts_instructionText');
@@ -3580,6 +3622,43 @@ window.openTargetSearchModal = function() {
 
       sanitizeCoordInput(latInp);
       sanitizeCoordInput(lngInp);
+
+      // โหลดและคืนค่าหมวดหมู่พร้อมข้อมูลค้นหาล่าสุดที่ผู้ใช้เคยเลือกไว้
+      if (initialCat) {
+        categorySelect.value = initialCat;
+        categorySelect.dispatchEvent(new Event('change'));
+      }
+      if (initialCat === 'location') {
+        if (locTypeSelect) {
+          locTypeSelect.value = savedLocType;
+          locTypeSelect.dispatchEvent(new Event('change'));
+        }
+      }
+      if (initialCat === 'province' && savedSearch?.province) {
+        if (provinceSelect) provinceSelect.value = savedSearch.province;
+      }
+      if (initialCat === 'district') {
+        if (distProvSelect && savedSearch?.province) {
+          distProvSelect.value = savedSearch.province;
+          distProvSelect.dispatchEvent(new Event('change'));
+        }
+        if (districtSelect && savedSearch?.district) {
+          districtSelect.value = savedSearch.district;
+        }
+      }
+      if (initialCat === 'subdistrict') {
+        if (subProvSelect && savedSearch?.province) {
+          subProvSelect.value = savedSearch.province;
+          subProvSelect.dispatchEvent(new Event('change'));
+        }
+        if (subDistSelect && savedSearch?.district) {
+          subDistSelect.value = savedSearch.district;
+          subDistSelect.dispatchEvent(new Event('change'));
+        }
+        if (subdistrictSelect && savedSearch?.subdistrict) {
+          subdistrictSelect.value = savedSearch.subdistrict;
+        }
+      }
     },
     preConfirm: () => {
       const cat = document.getElementById('ts_categorySelect').value;
@@ -3634,30 +3713,31 @@ window.openTargetSearchModal = function() {
       } else if (cat === 'location') {
         const locType = document.getElementById('ts_locTypeSelect').value;
         let query = '';
+        const houseNo = (document.getElementById('ts_loc_houseNo')?.value || '').trim();
+        const moo = (document.getElementById('ts_loc_moo')?.value || '').trim();
+        const adminName = (document.getElementById('ts_loc_adminName')?.value || '').trim();
+        const otherName = (document.getElementById('ts_loc_otherName')?.value || '').trim();
+
         if (locType === 'หมายบ้าน') {
-          const houseNo = (document.getElementById('ts_loc_houseNo')?.value || '').trim();
-          const moo = (document.getElementById('ts_loc_moo')?.value || '').trim();
           if (!houseNo) {
             Swal.showValidationMessage('กรุณากรอกบ้านเลขที่');
             return false;
           }
           query = houseNo + (moo ? ` ม.${moo}` : '');
         } else if (locType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
-          const adminName = (document.getElementById('ts_loc_adminName')?.value || '').trim();
           if (!adminName) {
             Swal.showValidationMessage('กรุณากรอกชื่อ อบต. หรือ เทศบาล');
             return false;
           }
           query = adminName;
         } else if (locType === 'อื่นๆ') {
-          const otherName = (document.getElementById('ts_loc_otherName')?.value || '').trim();
           if (!otherName) {
             Swal.showValidationMessage('กรุณากรอกชื่อสถานที่');
             return false;
           }
           query = otherName;
         }
-        return { type: 'location', locationType: locType, query };
+        return { type: 'location', locationType: locType, query, houseNo, moo, adminName, otherName };
       } else if (cat === 'coords') {
         const latStr = (document.getElementById('ts_latInput')?.value || '').trim();
         const lngStr = (document.getElementById('ts_lngInput')?.value || '').trim();
@@ -3677,6 +3757,8 @@ window.openTargetSearchModal = function() {
   }).then((res) => {
     if (res.isConfirmed && res.value) {
       applyTargetedFilter(res.value);
+    } else if (res.isDenied) {
+      clearTargetedFilter();
     }
   });
 };
@@ -3778,6 +3860,9 @@ function renderDataTable(rows, filterCriteria = null) {
 
   const tableProvFilterBadge = document.getElementById('tableProvFilterBadge');
   if (tableProvFilterBadge) {
+    if (activeCriteria && activeCriteria.type !== 'all') {
+      filterBadgeHtml += ` <button type="button" onclick="clearTargetedFilter()" class="ml-2 px-2 py-0.5 bg-red-100 hover:bg-red-200 text-red-700 text-[11px] font-bold rounded-md border border-red-200 transition active:scale-95 cursor-pointer" title="ล้างค่าการค้นหาเจาะจงและแสดงทั้งหมด">✕ ล้างค่าค้นหา</button>`;
+    }
     tableProvFilterBadge.innerHTML = filterBadgeHtml;
   }
 
