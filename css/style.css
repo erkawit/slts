@@ -1340,6 +1340,18 @@ table.dataTable tbody td {
   color: #111827 !important;
 }
 
+/* Map Popup Navigation Button Styles */
+.leaflet-popup.slts-map-popup .leaflet-popup-content a.bg-emerald-600,
+.leaflet-popup.slts-map-popup .leaflet-popup-content a.bg-emerald-600:visited,
+.leaflet-popup.slts-map-popup .leaflet-popup-content a.bg-emerald-600:hover,
+.leaflet-popup.slts-map-popup .leaflet-popup-content a.bg-emerald-600 *,
+.slts-map-popup a.bg-emerald-600,
+.slts-map-popup a.bg-emerald-600 * {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+}
+
+
 
 
 

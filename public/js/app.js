@@ -13169,8 +13169,9 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
           ` : ''}
 
           <div class="pt-1">
-            <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="block w-full text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-lg text-[11px] font-bold shadow-xs transition">
-              <i class="fa-solid fa-diamond-turn-right mr-1"></i> นำทางจุดนี้ด้วย Google Maps
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" rel="noopener noreferrer" class="block w-full text-center py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white !text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5" style="color: #ffffff !important; text-decoration: none;">
+              <i class="fa-solid fa-diamond-turn-right text-xs text-white" style="color: #ffffff !important;"></i>
+              <span class="text-white font-bold" style="color: #ffffff !important;">นำทางจุดนี้ด้วย Google Map</span>
             </a>
           </div>
         </div>
