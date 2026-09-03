@@ -7082,15 +7082,17 @@ function initLocationService() {
   }
 }
 
+let isFetchingLocation = false;
+
 function startLocationInterval() {
   if (state.locationIntervalId) {
     clearInterval(state.locationIntervalId);
   }
-  // รันเฉพาะบนอุปกรณ์หน้าจอขนาดเล็ก (Mobile <= 768px) เท่านั้น
+  // รันเฉพาะบนอุปกรณ์หน้าจอขนาดเล็ก (Mobile <= 768px) เท่านั้น - ตรวจสอบพิกัดเบื้องหลังทุก 3 วินาที
   if (window.innerWidth <= 768) {
     state.locationIntervalId = setInterval(() => {
       fetchCurrentLocation(false);
-    }, 10000);
+    }, 3000);
   }
 }
 
@@ -7099,6 +7101,12 @@ function fetchCurrentLocation(isManual = false) {
     return;
   }
 
+  // ป้องกันการยิง Geolocation ซ้อนทับกันกรณีฮาร์ดแวร์ GPS ยังคืนค่าไม่เสร็จ
+  if (isFetchingLocation && !isManual) {
+    return;
+  }
+  isFetchingLocation = true;
+
   if (isManual && elements.locationStatus) {
     elements.locationStatus.textContent = 'กำลังดึงพิกัดล่าสุด...';
     elements.locationStatus.className = 'text-xs text-blue-600 font-semibold';
@@ -7106,6 +7114,7 @@ function fetchCurrentLocation(isManual = false) {
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
+      isFetchingLocation = false;
       state.lat = Number(position.coords.latitude.toFixed(6));
       state.lng = Number(position.coords.longitude.toFixed(6));
       state.accuracy = Math.round(position.coords.accuracy);
@@ -7145,6 +7154,7 @@ function fetchCurrentLocation(isManual = false) {
       updateLiveMapHUD();
     },
     (error) => {
+      isFetchingLocation = false;
       console.warn('Geolocation error:', error);
       let msg = 'ไม่สามารถดึงพิกัดได้';
       if (error.code === error.PERMISSION_DENIED) {
@@ -7157,8 +7167,8 @@ function fetchCurrentLocation(isManual = false) {
     },
     {
       enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0
+      timeout: 6000,
+      maximumAge: 2000
     }
   );
 }
@@ -8875,8 +8885,9 @@ async function captureAndProcessPhoto() {
     closeCameraModal();
     hideCustomLoading();
 
-    // 1. บันทึกลงอุปกรณ์ทันที (เงียบๆ ไม่เด้งถามเปิดไฟล์)
-    WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
+    // 1. นำคำสั่ง triggerDownload ออก เพื่อป้องกันไม่ให้ Google Chrome แสดงแจ้งเตือนดาวน์โหลดไฟล์รบกวนหน้ากล้อง
+    // ข้อมูลและภาพถูกจัดเก็บอย่างปลอดภัยใน Background Queue / Offline Queue / Google Drive & Sheet แล้ว
+    // (เตรียมกล้องให้พร้อมถ่ายภาพต่อเนื่องได้ตลอดเวลา 100%)
 
     // 2. ปรับลดขนาดรูปภาพให้ <= 1MB
     const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
@@ -9009,8 +9020,9 @@ async function handleFallbackFile(e) {
     
     hideCustomLoading();
 
-    // 1. บันทึกลงอุปกรณ์ทันที
-    WatermarkEngine.triggerDownload(result.dataUrl, imageFilename);
+    // 1. นำคำสั่ง triggerDownload ออก เพื่อป้องกันไม่ให้ Google Chrome แสดงแจ้งเตือนดาวน์โหลดไฟล์รบกวนหน้ากล้อง
+    // ข้อมูลและภาพถูกจัดเก็บอย่างปลอดภัยใน Background Queue / Offline Queue / Google Drive & Sheet แล้ว
+    // (เตรียมกล้องให้พร้อมถ่ายภาพต่อเนื่องได้ตลอดเวลา 100%)
 
     // 2. ปรับลดขนาดรูปภาพให้ <= 1MB
     const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
@@ -12818,6 +12830,7 @@ window.sendSingleStopToMobileHandoff = function(index) {
  */
 let handoffPollInterval = null;
 let lastReceivedHandoffTime = null;
+window.dismissedHandoffTime = null;
 
 window.initMobileHandoffReceiver = function() {
   if (handoffPollInterval) clearInterval(handoffPollInterval);
@@ -12864,7 +12877,7 @@ function checkLocalHandoffData() {
     if (!raw) return;
 
     const handoff = JSON.parse(raw);
-    if (handoff && handoff.status === 'pending' && handoff.timestamp !== lastReceivedHandoffTime) {
+    if (handoff && handoff.status === 'pending' && handoff.timestamp !== lastReceivedHandoffTime && handoff.timestamp !== window.dismissedHandoffTime) {
       applyReceivedHandoff(handoff);
     }
   } catch (e) {
@@ -12891,7 +12904,7 @@ async function checkHandoffForCurrentUser() {
     const data = await res.json();
 
     if (data && data.status === 'success' && (data.hasPending || data.hasData) && data.handoff) {
-      if (data.handoff.timestamp !== lastReceivedHandoffTime) {
+      if (data.handoff.timestamp !== lastReceivedHandoffTime && data.handoff.timestamp !== window.dismissedHandoffTime) {
         applyReceivedHandoff(data.handoff);
       }
     }
@@ -13044,6 +13057,58 @@ window.updateMobileRouteMapButtonBadge = function(count) {
 };
 
 /**
+ * ล้างข้อมูลเส้นทางส่งหมายที่ส่งมาจากหน้าจอ Desktop และปิดการแจ้งเตือนบนหน้าจอกล้อง
+ */
+window.clearMobileRouteHandoff = function(event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+
+  // 1. เคลียร์ State และ LocalStorage ของเส้นทางส่งหมาย
+  state.currentRouteStops = [];
+  localStorage.removeItem('slts_shared_route_stops');
+
+  const userId = (state.currentUser?.username || '').trim().toLowerCase();
+  if (userId) {
+    localStorage.removeItem('slts_device_handoff_' + userId);
+  }
+  localStorage.removeItem('slts_latest_handoff');
+
+  // บันทึก timestamp ที่ถูกล้าง เพื่อไม่ให้ Polling ดึงซ้ำมาอีก
+  window.dismissedHandoffTime = lastReceivedHandoffTime;
+
+  // 2. แจ้ง Server ผ่าน API เพื่อปลด pending handoff (ถ้ามี)
+  if (state.appsScriptUrl && navigator.onLine && userId) {
+    fetch(state.appsScriptUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      cache: 'no-cache',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'dismiss_handoff',
+        user_id: userId,
+        timestamp: new Date().toISOString()
+      })
+    }).catch(() => {});
+  }
+
+  // 3. ปิดการแจ้งเตือนบนหน้าจอกล้อง และรีเซ็ตปุ่มแผนที่
+  updateMobileRouteMapButtonBadge(0);
+
+  // 4. แสดง Toast แจ้งเตือนสั้นๆ แบบไม่ขัดจังหวะ
+  Swal.fire({
+    toast: true,
+    position: 'top',
+    icon: 'success',
+    title: 'ล้างเส้นทางส่งหมายเรียบร้อยแล้ว',
+    text: 'ปิดการแจ้งเตือนและกลับสู่หน้าจอกล้องปกติ',
+    timer: 2000,
+    showConfirmButton: false
+  });
+};
+
+/**
  * เปิดหน้าต่างแผนที่และเส้นทางส่งหมายสำหรับหน้าจอมือถือ (< 768px)
  * (ปรับสัดส่วน Layout ให้สมดุล พร้อมแผนที่ Leaflet และ Timeline นำทาง)
  */
@@ -13099,9 +13164,15 @@ window.showMobileRouteMapModal = function() {
             <h2 class="text-xs font-bold text-white truncate">🗺️ แผนที่เส้นทางส่งหมาย</h2>
             <p class="text-[10px] text-blue-100 truncate">📍 จ.${prov} (${stops.length} จุดหมาย)</p>
           </div>
-          <button type="button" onclick="showMobileRouteMapModal()" class="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
-            <i class="fa-solid fa-rotate-right"></i>
-          </button>
+          <div class="flex items-center gap-1.5 flex-shrink-0">
+            <button type="button" onclick="clearMobileRouteHandoff(); Swal.close();" class="px-2 py-1.5 bg-rose-500/80 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="ล้างเส้นทางส่งหมาย">
+              <i class="fa-solid fa-trash-can text-[10px]"></i>
+              <span class="text-[10px]">ล้าง</span>
+            </button>
+            <button type="button" onclick="showMobileRouteMapModal()" class="px-2 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+          </div>
         </div>
 
         <!-- Balanced Mobile Leaflet Map (Height 40dvh) -->

@@ -1055,19 +1055,24 @@
 
     <!-- Floating Top Handoff Notification Pill Banner on Camera -->
     <div id="mobileHandoffPillBanner" class="hidden absolute top-14 left-3 right-3 z-40 animate-bounce">
-      <div onclick="showMobileRouteMapModal()" class="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-2.5 rounded-2xl shadow-2xl border border-emerald-300 flex items-center justify-between gap-2 cursor-pointer active:scale-98 transition">
-        <div class="flex items-center gap-2 min-w-0">
+      <div class="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-2.5 rounded-2xl shadow-2xl border border-emerald-300 flex items-center justify-between gap-2">
+        <div onclick="showMobileRouteMapModal()" class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer active:scale-98 transition" title="แตะเพื่อเปิดแผนที่">
           <span class="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 text-white text-xs">
-            <i class="fa-solid fa-mobile-screen"></i>
+            <i class="fa-solid fa-route"></i>
           </span>
           <div class="min-w-0">
             <p id="mobileHandoffPillTitle" class="text-xs font-bold truncate">📲 ได้รับพิกัดส่งหมายจากคอมพิวเตอร์!</p>
             <p id="mobileHandoffPillSub" class="text-[10px] text-emerald-100 truncate">แตะที่นี่เพื่อเปิดแผนที่และนำทาง</p>
           </div>
         </div>
-        <span class="px-2.5 py-1 bg-white text-emerald-800 text-[11px] font-bold rounded-xl flex-shrink-0 shadow-xs">
-          เปิดดู <i class="fa-solid fa-arrow-right text-[9px] ml-0.5"></i>
-        </span>
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          <button type="button" onclick="clearMobileRouteHandoff(event)" class="px-2.5 py-1 bg-rose-500/90 hover:bg-rose-600 active:scale-95 text-white text-[11px] font-bold rounded-xl border border-rose-300/50 shadow-xs flex items-center gap-1 cursor-pointer transition" title="ล้างการส่งเพื่อปิดการแจ้งเตือน">
+            <i class="fa-solid fa-trash-can text-[10px]"></i> ล้างการส่ง
+          </button>
+          <button type="button" onclick="showMobileRouteMapModal()" class="px-2.5 py-1 bg-white hover:bg-emerald-50 active:scale-95 text-emerald-800 text-[11px] font-bold rounded-xl shadow-xs flex items-center gap-0.5 cursor-pointer transition" title="เปิดดูแผนที่">
+            เปิดดู <i class="fa-solid fa-arrow-right text-[9px]"></i>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1165,17 +1170,17 @@
   </aside>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260903_06"></script>
-  <script src="js/compass.js?v=20260903_06"></script>
-  <script src="js/map.js?v=20260903_06"></script>
-  <script src="js/watermark.js?v=20260903_06"></script>
-  <script src="js/app.js?v=20260903_06"></script>
+  <script src="js/data.js?v=20260903_07"></script>
+  <script src="js/compass.js?v=20260903_07"></script>
+  <script src="js/map.js?v=20260903_07"></script>
+  <script src="js/watermark.js?v=20260903_07"></script>
+  <script src="js/app.js?v=20260903_07"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260903_06')
+        navigator.serviceWorker.register('./sw.js?v=20260903_07')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

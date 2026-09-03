@@ -3,7 +3,7 @@
  * ระบบจัดเก็บข้อมูลพิกัดส่งหมาย - ศาลจังหวัดอุดรธานี
  */
 
-const CACHE_NAME = 'slts-court-cache-v43';
+const CACHE_NAME = 'slts-court-cache-v44';
 
 const STATIC_ASSETS = [
   './',
