@@ -1097,7 +1097,7 @@
   <!-- Modal: กล้องถ่ายภาพสด (Camera Live Viewfinder Modal พร้อม Live Watermark HUD & Manual Orientation Switcher) -->
   <div id="cameraModal" class="fixed inset-0 bg-black/95 z-50 hidden flex-col justify-between select-none">
     <!-- Top Bar (เรียงปุ่มตามสเปก 4.1-4.5 และข้อ 5) -->
-    <div class="p-2.5 sm:p-3.5 flex items-center justify-between text-white bg-gradient-to-b from-black/95 via-black/70 to-transparent z-10">
+    <div id="cameraTopBar" class="camera-top-bar p-2.5 sm:p-3.5 flex items-center justify-between text-white bg-gradient-to-b from-black/95 via-black/70 to-transparent z-10">
       <!-- 4.1: โหมดออนไลน์/ออฟไลน์ (จุดกระพริบเขียวเมื่อออนไลน์ / แดงเมื่อออฟไลน์) พร้อมปุ่มนับจำนวนทำงานเบื้องหลัง (ข้อ 5) -->
       <div class="flex items-center gap-1.5 sm:gap-2">
         <div id="cameraNetworkStatusIndicator" class="flex items-center pl-1 cursor-default" title="สถานะการเชื่อมต่อ: ออนไลน์">
@@ -1256,17 +1256,17 @@
   </aside>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260903_25"></script>
-  <script src="js/compass.js?v=20260903_25"></script>
-  <script src="js/map.js?v=20260903_25"></script>
-  <script src="js/watermark.js?v=20260903_25"></script>
-  <script src="js/app.js?v=20260903_25"></script>
+  <script src="js/data.js?v=20260903_26"></script>
+  <script src="js/compass.js?v=20260903_26"></script>
+  <script src="js/map.js?v=20260903_26"></script>
+  <script src="js/watermark.js?v=20260903_26"></script>
+  <script src="js/app.js?v=20260903_26"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260903_25')
+        navigator.serviceWorker.register('./sw.js?v=20260903_26')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

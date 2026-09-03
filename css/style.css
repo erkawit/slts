@@ -1351,6 +1351,53 @@ table.dataTable tbody td {
   fill: #ffffff !important;
 }
 
+/* ================================================================
+   Camera Top Bar Safe Area Fix for Safari & Mobile Notches (< 768px)
+   เลื่อนแถบด้านบนของกล้องลงมาให้พ้นจากกรอบกล้องหน้า / Notch / Dynamic Island / Status Bar
+   ================================================================ */
+.camera-top-bar,
+#cameraTopBar {
+  padding-top: max(14px, calc(env(safe-area-inset-top, 0px) + 8px)) !important;
+  padding-left: max(10px, calc(env(safe-area-inset-left, 0px) + 6px)) !important;
+  padding-right: max(10px, calc(env(safe-area-inset-right, 0px) + 6px)) !important;
+  transition: padding-top 0.2s ease-out;
+}
+
+/* ตรวจจับอุปกรณ์ iOS / WebKit (Safari) */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 768px) {
+    .camera-top-bar,
+    #cameraTopBar {
+      padding-top: max(54px, calc(env(safe-area-inset-top, 0px) + 16px)) !important;
+    }
+
+    #mobileHandoffPillBanner {
+      top: max(105px, calc(env(safe-area-inset-top, 0px) + 68px)) !important;
+    }
+
+    .swal2-container.slts-mobile-search-container {
+      padding-top: max(48px, calc(env(safe-area-inset-top, 0px) + 10px)) !important;
+    }
+  }
+}
+
+/* คลาสเสริมเมื่อตรวจพบว่าเป็นเบราว์เซอร์ Safari หรือ iOS */
+@media (max-width: 768px) {
+  .is-safari-device .camera-top-bar,
+  .is-safari-device #cameraTopBar,
+  .safari-camera-top-bar {
+    padding-top: max(54px, calc(env(safe-area-inset-top, 0px) + 16px)) !important;
+  }
+
+  .is-safari-device #mobileHandoffPillBanner {
+    top: max(105px, calc(env(safe-area-inset-top, 0px) + 68px)) !important;
+  }
+
+  .is-safari-device .swal2-container.slts-mobile-search-container {
+    padding-top: max(48px, calc(env(safe-area-inset-top, 0px) + 10px)) !important;
+  }
+}
+
 
 
 

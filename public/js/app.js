@@ -918,6 +918,7 @@ function initDOMElements() {
   
   // Camera Modal Elements
   elements.cameraModal = document.getElementById('cameraModal');
+  elements.cameraTopBar = document.getElementById('cameraTopBar');
   elements.videoPreview = document.getElementById('videoPreview');
   elements.btnCapture = document.getElementById('btnCapture');
   elements.btnCloseCamera = document.getElementById('btnCloseCamera');
@@ -2579,11 +2580,41 @@ window.switchTab = function(tabName) {
   }
 };
 
+/**
+ * ปรับระยะเว้นขอบบน (Safe Area Inset Top) สำหรับเบราว์เซอร์ Safari และอุปกรณ์ iOS
+ * เพื่อเลื่อนแถบด้านบนของกล้อง (Top Bar) ให้พ้นจากกรอบกล้องหน้า, รอยบาก (Notch) และ Dynamic Island
+ */
+function applySafariMobileCameraSafeAreas() {
+  const ua = navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isSafari = (/Safari/i.test(ua) && !/Chrome|CriOS|Android|Edg/i.test(ua)) || isIOS;
+
+  if (isSafari || isIOS) {
+    document.documentElement.classList.add('is-safari-device');
+    const topBar = document.getElementById('cameraTopBar') || elements.cameraTopBar;
+    if (topBar) {
+      topBar.classList.add('safari-camera-top-bar');
+      if (window.innerWidth < 768) {
+        topBar.style.setProperty('padding-top', 'max(54px, calc(env(safe-area-inset-top, 0px) + 16px))', 'important');
+      } else {
+        topBar.style.removeProperty('padding-top');
+      }
+    }
+    const handoffBanner = document.getElementById('mobileHandoffPillBanner');
+    if (handoffBanner && window.innerWidth < 768) {
+      handoffBanner.style.setProperty('top', 'max(105px, calc(env(safe-area-inset-top, 0px) + 68px))', 'important');
+    }
+  }
+}
+window.applySafariMobileCameraSafeAreas = applySafariMobileCameraSafeAreas;
+
 function initResponsiveUI() {
   const handleResize = () => {
     updateAuthUI();
+    applySafariMobileCameraSafeAreas();
   };
   window.addEventListener('resize', handleResize);
+  window.addEventListener('orientationchange', handleResize);
   handleResize();
 }
 
@@ -9759,6 +9790,7 @@ async function openCameraModal() {
     elements.cameraModal.classList.remove('hidden');
     elements.cameraModal.classList.add('flex');
   }
+  applySafariMobileCameraSafeAreas();
   updateCaptureButtonState();
 
   // 3. เริ่มต้นกล้องหรือใช้สตรีมที่ทำงานอยู่แล้ว โดยไม่ตัดสตรีมซ้ำซ้อน
