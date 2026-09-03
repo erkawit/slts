@@ -1280,7 +1280,17 @@ window.closeLoginModal = function() {
   if (!elements.loginModal) return;
   elements.loginModal.classList.add('hidden');
   elements.loginModal.classList.remove('flex');
-  if (typeof window.resumeCameraStream === 'function') {
+
+  if (window.innerWidth < 768) {
+    const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+    if (isLoggedIn) {
+      if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
+        openCameraModal().catch(e => console.warn(e));
+      } else if (typeof window.resumeCameraStream === 'function') {
+        window.resumeCameraStream();
+      }
+    }
+  } else if (typeof window.resumeCameraStream === 'function') {
     window.resumeCameraStream();
   }
 };
@@ -1308,7 +1318,7 @@ function handleLogin(e) {
     updateAuthUI();
     initMobileHandoffReceiver();
 
-    if (deviceMode === 'mobile') {
+    if (deviceMode === 'mobile' || window.innerWidth < 768) {
       openCameraModal().catch(e => console.warn('Camera open error:', e));
     }
 
@@ -8658,6 +8668,11 @@ async function openCameraModal() {
   await startCameraStream();
   startLiveCameraHUD();
   updateCameraTopBarUI();
+
+  // ข้อ 2: เมื่อเข้าสู่โหมดกล้อง ต้องทำการเช็คพิกัดทันทีเป็นอันดับต้นเสมอ
+  if (window.innerWidth < 768 && typeof fetchCurrentLocation === 'function') {
+    fetchCurrentLocation(true);
+  }
 }
 
 function closeCameraModal() {
@@ -8740,17 +8755,37 @@ window.freezeCameraStream = function() {
  * ปลด Freeze และกลับมาเรนเดอร์กล้องตามปกติเมื่อปิด Pop Up / SweetAlert
  */
 window.resumeCameraStream = function() {
-  if (!state.isCameraFrozen) return;
-  // หากยังมี Modal อื่นๆ หรือ SweetAlert ค้างอยู่ ห้ามปลด Freeze
+  // หากยังมี Modal อื่นๆ หรือ SweetAlert ค้างอยู่ หรือยังไม่ปิด ห้ามปลด Freeze
   if (document.body.classList.contains('swal2-shown')) return;
   if (elements.loginModal && !elements.loginModal.classList.contains('hidden')) return;
-  if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) return;
 
-  state.isCameraFrozen = false;
-  if (elements.videoPreview && elements.videoPreview.srcObject) {
-    try { elements.videoPreview.play().catch(() => {}); } catch (e) {}
+  if (window.innerWidth < 768) {
+    // หาก cameraModal ถูกซ่อนอยู่ ให้เปิดกลับขึ้นมา
+    if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
+      const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+      if (isLoggedIn) {
+        openCameraModal().then(() => fetchCurrentLocation(true)).catch(e => console.warn(e));
+        return;
+      }
+    }
+
+    state.isCameraFrozen = false;
+    if (elements.videoPreview) {
+      if (elements.videoPreview.srcObject) {
+        try { elements.videoPreview.play().catch(() => {}); } catch (e) {}
+      } else if (!state.cameraStream) {
+        startCameraStream().catch(e => console.warn(e));
+      }
+    }
+    startLiveCameraHUD();
+
+    // ข้อ 2: เมื่อกลับมาใช้งานโหมดกล้องทุกครั้ง ต้องทำการเช็คพิกัดทันทีเป็นอันดับต้นเสมอ
+    if (typeof fetchCurrentLocation === 'function') {
+      fetchCurrentLocation(true);
+    }
+  } else {
+    state.isCameraFrozen = false;
   }
-  startLiveCameraHUD();
 };
 
 // ตรวจสอบการเปิด-ปิด SweetAlert2 บน body อัตโนมัติ เพื่อ Freeze/Resume กล้องแบบครอบคลุมทุกฟังก์ชั่น (ตามข้อ 2)
@@ -8761,7 +8796,9 @@ if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') 
         if (document.body.classList.contains('swal2-shown')) {
           window.freezeCameraStream();
         } else {
-          window.resumeCameraStream();
+          setTimeout(() => {
+            window.resumeCameraStream();
+          }, 60);
         }
       }
     }
@@ -13218,9 +13255,9 @@ window.showMobileRouteMapModal = function() {
       <div class="slts-province-modal flex flex-col h-[88dvh] overflow-hidden bg-gray-50">
         <!-- Header -->
         <div class="slts-modal-header flex-shrink-0 px-3.5 py-2.5 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white flex items-center justify-between shadow-sm">
-          <button type="button" onclick="showMobileSummonsFormModal(true)" class="px-2.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="กลับไปฟอร์ม">
-            <i class="fa-solid fa-arrow-left"></i>
-            <span>กลับ</span>
+          <!-- ปุ่มรีเฟรชข้อมูลเส้นทาง (ย้ายมาไว้ทางซ้ายตามข้อ 3) -->
+          <button type="button" onclick="showMobileRouteMapModal()" class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs font-bold transition cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
+            <i class="fa-solid fa-rotate-right"></i>
           </button>
           <div class="flex-1 text-center px-2">
             <h2 class="text-xs font-bold text-white truncate">🗺️ แผนที่เส้นทางส่งหมาย</h2>
@@ -13231,8 +13268,9 @@ window.showMobileRouteMapModal = function() {
               <i class="fa-solid fa-trash-can text-[10px]"></i>
               <span class="text-[10px]">ล้าง</span>
             </button>
-            <button type="button" onclick="showMobileRouteMapModal()" class="px-2 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
-              <i class="fa-solid fa-rotate-right"></i>
+            <!-- ปุ่มกากบาทเพื่อปิดการแสดงผล Pop Up แผนที่ (แทนปุ่มรีเฟรชทางขวาตามข้อ 3) -->
+            <button type="button" onclick="Swal.close()" class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs font-bold transition cursor-pointer" title="ปิดหน้าต่างแผนที่">
+              <i class="fa-solid fa-xmark text-sm"></i>
             </button>
           </div>
         </div>
