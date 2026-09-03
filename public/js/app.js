@@ -227,7 +227,7 @@ async function syncOfflineQueue(isManual = false) {
       allowOutsideClick: false,
       confirmButtonColor: '#2563eb'
     }).then(() => {
-      loadGoogleSheetData(true);
+      loadGoogleSheetData(true, true);
     });
   } else if (failCount > 0) {
     Swal.fire({
@@ -692,7 +692,7 @@ async function processBackgroundQueue() {
       processBackgroundQueue();
     } else {
       updateBackgroundQueueUI();
-      loadGoogleSheetData(true);
+      loadGoogleSheetData(true, true);
     }
   }
 }
@@ -1817,7 +1817,7 @@ function initResponsiveUI() {
  * ดึงข้อมูล Google Sheet ด้วยระบบ Smart Cache 1 นาที
  * @param {boolean} forceRefresh - บังคับดึงข้อมูลสดจาก Google Sheet หรือไม่
  */
-window.loadGoogleSheetData = async function(forceRefresh = false) {
+window.loadGoogleSheetData = async function(forceRefresh = false, silent = false) {
   const cachedDataStr = localStorage.getItem(CACHE_KEY_SHEET_DATA);
   const lastFetchTime = Number(localStorage.getItem(CACHE_KEY_SHEET_TIME) || 0);
   const now = Date.now();
@@ -1837,8 +1837,16 @@ window.loadGoogleSheetData = async function(forceRefresh = false) {
     }
   }
 
-  // 2. โหลดสดจาก Google Apps Script Web App API (รองรับ Private/Restricted Sheet 100%)
-  showCustomLoading('กำลังดึงข้อมูลประวัติการส่งหมาย...', 'กำลังเชื่อมต่อ Google Apps Script');
+  // บนหน้าจอความกว้างมากกว่า 768 pixel ไม่ต้องแสดงหน้าต่างโหลด ให้ทำงานในเบื้องหลังเท่านั้น
+  const isDesktop = window.innerWidth > 768;
+  const shouldShowLoading = !silent && !isDesktop;
+
+  if (shouldShowLoading) {
+    showCustomLoading('กำลังดึงข้อมูลประวัติการส่งหมาย...', 'กำลังเชื่อมต่อ Google Apps Script');
+  } else if (elements.cacheStatusBadge) {
+    elements.cacheStatusBadge.className = 'text-blue-700 font-medium bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200 animate-pulse';
+    elements.cacheStatusBadge.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1 text-blue-600"></i>กำลังซิงค์ข้อมูล...`;
+  }
 
   let rows = null;
 
@@ -1889,7 +1897,9 @@ window.loadGoogleSheetData = async function(forceRefresh = false) {
     }
   }
 
-  hideCustomLoading();
+  if (shouldShowLoading) {
+    hideCustomLoading();
+  }
 
   // ประมวลผลผลลัพธ์
   if (rows && Array.isArray(rows)) {
@@ -1930,20 +1940,32 @@ window.loadGoogleSheetData = async function(forceRefresh = false) {
   }
 
   // 4. หากไม่มีแคชเลย และดึงข้อมูลไม่สำเร็จ
-  Swal.fire({
-    icon: 'warning',
-    title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
-    html: `
-      <div class="text-left text-xs space-y-2 text-gray-600 leading-relaxed">
-        <p>เนื่องจาก Google Sheet ถูกตั้งเป็นส่วนตัว (Private) ต้องอาศัย Google Apps Script ในการดึงข้อมูล</p>
-        <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 font-medium">
-          <strong>วิธีแก้ไข:</strong> กรุณาเปิด Apps Script บน Google Sheet > กด <u>Deploy (ทำให้ใช้งานได้)</u> > <u>Manage deployments (จัดการการทำให้ใช้งานได้)</u> > แก้ไขเป็น <strong>"New version (เวอร์ชันใหม่)"</strong>
+  if (shouldShowLoading) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
+      html: `
+        <div class="text-left text-xs space-y-2 text-gray-600 leading-relaxed">
+          <p>เนื่องจาก Google Sheet ถูกตั้งเป็นส่วนตัว (Private) ต้องอาศัย Google Apps Script ในการดึงข้อมูล</p>
+          <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 font-medium">
+            <strong>วิธีแก้ไข:</strong> กรุณาเปิด Apps Script บน Google Sheet > กด <u>Deploy (ทำให้ใช้งานได้)</u> > <u>Manage deployments (จัดการการทำให้ใช้งานได้)</u> > แก้ไขเป็น <strong>"New version (เวอร์ชันใหม่)"</strong>
+          </div>
         </div>
-      </div>
-    `,
-    confirmButtonText: 'รับทราบ',
-    confirmButtonColor: '#2563eb'
-  });
+      `,
+      confirmButtonText: 'รับทราบ',
+      confirmButtonColor: '#2563eb'
+    });
+  } else {
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'warning',
+      title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
+      text: 'ระบบจะลองดึงข้อมูลใหม่อีกครั้งในรอบถัดไป',
+      timer: 3000,
+      showConfirmButton: false
+    });
+  }
 };
 
 function updateCacheBadgeUI(isFromCache, timeStr) {
