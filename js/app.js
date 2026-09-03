@@ -119,6 +119,9 @@ function updateOfflineBadgeUI() {
 function initOfflineSyncSystem() {
   window.addEventListener('online', () => {
     updateOfflineBadgeUI();
+    updateBackgroundQueueUI();
+    processBackgroundQueue();
+
     const queue = getOfflineQueue();
     if (queue.length > 0) {
       Swal.fire({
@@ -136,6 +139,7 @@ function initOfflineSyncSystem() {
 
   window.addEventListener('offline', () => {
     updateOfflineBadgeUI();
+    updateBackgroundQueueUI();
     Swal.fire({
       icon: 'warning',
       title: 'เข้าสู่โหมดออฟไลน์',
@@ -148,6 +152,7 @@ function initOfflineSyncSystem() {
   });
 
   updateOfflineBadgeUI();
+  updateBackgroundQueueUI();
 }
 
 async function syncOfflineQueue(isManual = false) {
@@ -236,6 +241,310 @@ async function syncOfflineQueue(isManual = false) {
   }
 }
 
+// =========================================================================
+// BACKGROUND UPLOAD QUEUE SYSTEM (ระบบจัดเรียงคิวอัปโหลดภาพเบื้องหลัง Non-Blocking)
+// =========================================================================
+const BG_UPLOAD_QUEUE_KEY = 'slts_bg_upload_queue';
+let isBgQueueWorkerRunning = false;
+let bgQueueProgressInterval = null;
+
+function getBackgroundQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(BG_UPLOAD_QUEUE_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveBackgroundQueue(queue) {
+  try {
+    localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(queue));
+  } catch (e) {
+    console.error('[BgQueue] Save error:', e);
+  }
+  updateBackgroundQueueUI();
+}
+
+function enqueueBackgroundUpload(taskData) {
+  const queue = getBackgroundQueue();
+  const item = {
+    id: 'bg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    createdAt: new Date().toISOString(),
+    status: 'pending', // 'pending' | 'uploading' | 'failed'
+    retryCount: 0,
+    ...taskData
+  };
+  queue.push(item);
+  saveBackgroundQueue(queue);
+  return item;
+}
+
+function removeBackgroundQueueItem(id) {
+  let queue = getBackgroundQueue();
+  queue = queue.filter(q => q.id !== id);
+  saveBackgroundQueue(queue);
+}
+
+function clearBackgroundQueue() {
+  saveBackgroundQueue([]);
+}
+
+window.cancelCurrentBackgroundQueue = async function() {
+  const queue = getBackgroundQueue();
+  if (queue.length === 0) return;
+  const res = await Swal.fire({
+    icon: 'warning',
+    title: 'ต้องการล้างคิวอัปโหลดเบื้องหลัง?',
+    text: `มีรายการค้างในคิว ${queue.length} รายการ คุณต้องการยกเลิกการส่งข้อมูลทั้งหมดในคิวใช่หรือไม่?`,
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-trash-can mr-1"></i> ใช่, ล้างคิวทั้งหมด',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#ef4444',
+    cancelButtonColor: '#6b7280'
+  });
+  if (res.isConfirmed) {
+    clearBackgroundQueue();
+    updateBackgroundQueueUI();
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'info',
+      title: 'ล้างคิวเรียบร้อยแล้ว',
+      timer: 2000,
+      showConfirmButton: false
+    });
+  }
+};
+
+window.minimizeFloatingBgQueueWidget = function(minimize) {
+  const card = document.getElementById('bgQueueExpandedCard');
+  const pill = document.getElementById('bgQueueMinimizedPill');
+  if (!card || !pill) return;
+  if (minimize) {
+    card.classList.add('hidden');
+    pill.classList.remove('hidden');
+    pill.classList.add('inline-flex');
+    localStorage.setItem('slts_bg_queue_minimized', 'true');
+  } else {
+    pill.classList.add('hidden');
+    pill.classList.remove('inline-flex');
+    card.classList.remove('hidden');
+    localStorage.setItem('slts_bg_queue_minimized', 'false');
+  }
+};
+
+window.toggleFloatingBgQueueWidget = function() {
+  const widget = document.getElementById('floatingBgQueueWidget');
+  if (!widget) return;
+  if (widget.classList.contains('hidden')) {
+    widget.classList.remove('hidden');
+    window.minimizeFloatingBgQueueWidget(false);
+  } else {
+    const card = document.getElementById('bgQueueExpandedCard');
+    if (card && !card.classList.contains('hidden')) {
+      window.minimizeFloatingBgQueueWidget(true);
+    } else {
+      window.minimizeFloatingBgQueueWidget(false);
+    }
+  }
+};
+
+function updateBackgroundQueueUI() {
+  const queue = getBackgroundQueue();
+  const widget = document.getElementById('floatingBgQueueWidget');
+  const headerBtn = document.getElementById('btnBgUploadQueueHeader');
+  const headerBadge = document.getElementById('bgUploadQueueHeaderBadge');
+
+  const countPill = document.getElementById('bgQueueCountPill');
+  const currentCase = document.getElementById('bgQueueCurrentCase');
+  const currentLocation = document.getElementById('bgQueueCurrentLocation');
+  const waitingCount = document.getElementById('bgQueueWaitingCount');
+  const miniText = document.getElementById('bgQueueMiniText');
+
+  const total = queue.length;
+
+  // 1. Header Badge
+  if (headerBtn && headerBadge) {
+    if (total > 0) {
+      headerBtn.classList.remove('hidden');
+      headerBtn.classList.add('inline-flex');
+      headerBadge.textContent = `คิวส่ง (${total})`;
+    } else {
+      headerBtn.classList.add('hidden');
+      headerBtn.classList.remove('inline-flex');
+    }
+  }
+
+  // 2. Floating Widget
+  if (!widget) return;
+
+  if (total === 0) {
+    widget.classList.add('opacity-0', 'pointer-events-none');
+    setTimeout(() => {
+      if (getBackgroundQueue().length === 0) {
+        widget.classList.add('hidden');
+        widget.classList.remove('opacity-0', 'pointer-events-none');
+      }
+    }, 400);
+    return;
+  }
+
+  widget.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+
+  const isMinimized = localStorage.getItem('slts_bg_queue_minimized') === 'true';
+  window.minimizeFloatingBgQueueWidget(isMinimized);
+
+  const activeItem = queue[0];
+  if (countPill) countPill.textContent = `1/${total}`;
+  if (currentCase) currentCase.textContent = activeItem.caseNumber || 'กำลังอัปโหลด...';
+  if (currentLocation) currentLocation.textContent = activeItem.locationText ? `📍 ${activeItem.locationText}` : '-';
+  if (waitingCount) waitingCount.textContent = Math.max(0, total - 1);
+  if (miniText) miniText.textContent = `กำลังส่งภาพเบื้องหลัง (${total})`;
+}
+
+async function processBackgroundQueue() {
+  if (isBgQueueWorkerRunning) return;
+
+  const queue = getBackgroundQueue();
+  if (queue.length === 0) {
+    isBgQueueWorkerRunning = false;
+    updateBackgroundQueueUI();
+    return;
+  }
+
+  if (!navigator.onLine) {
+    console.log('[BgQueue] Device offline. Pausing queue worker.');
+    const statusBadge = document.getElementById('bgQueueStatusBadge');
+    if (statusBadge) {
+      statusBadge.className = 'text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1 shadow-2xs shrink-0';
+      statusBadge.innerHTML = '<i class="fa-solid fa-wifi text-amber-600"></i><span>รอเน็ต</span>';
+    }
+    return;
+  }
+
+  isBgQueueWorkerRunning = true;
+  updateBackgroundQueueUI();
+
+  const currentItem = queue[0];
+  currentItem.status = 'uploading';
+
+  const progressBar = document.getElementById('bgQueueProgressBar');
+  const progressPercent = document.getElementById('bgQueueProgressPercent');
+  const speedTxt = document.getElementById('bgQueueSpeedTxt');
+  const statusBadge = document.getElementById('bgQueueStatusBadge');
+
+  if (statusBadge) {
+    statusBadge.className = 'text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1 shadow-2xs shrink-0';
+    statusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-blue-600"></i><span>กำลังส่ง</span>';
+  }
+
+  // Progress ticker
+  let percent = 20;
+  if (progressBar) progressBar.style.width = '20%';
+  if (progressPercent) progressPercent.textContent = '20%';
+  if (speedTxt) speedTxt.textContent = 'เชื่อมต่อ Google Apps Script...';
+
+  clearInterval(bgQueueProgressInterval);
+  bgQueueProgressInterval = setInterval(() => {
+    if (percent < 88) {
+      percent += Math.floor(Math.random() * 8) + 4;
+      if (percent > 88) percent = 88;
+      if (progressBar) progressBar.style.width = percent + '%';
+      if (progressPercent) progressPercent.textContent = percent + '%';
+      if (percent > 60 && speedTxt) speedTxt.textContent = 'บันทึก Google Drive & Sheet...';
+    }
+  }, 300);
+
+  const targetUrl = getSanitizedAppsScriptUrl();
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(currentItem.payload),
+      redirect: 'follow'
+    });
+
+    clearInterval(bgQueueProgressInterval);
+
+    if (progressBar) progressBar.style.width = '100%';
+    if (progressPercent) progressPercent.textContent = '100%';
+    if (speedTxt) speedTxt.textContent = 'สำเร็จ!';
+
+    const rawText = await response.text();
+    let resJson;
+    try {
+      resJson = JSON.parse(rawText);
+    } catch (parseErr) {
+      console.warn('[BgQueue] Non-JSON response:', rawText);
+      throw new Error('การตอบกลับจาก Google Apps Script ไม่ถูกต้อง');
+    }
+
+    if (resJson && resJson.status === 'error') {
+      throw new Error(resJson.message || 'เกิดข้อผิดพลาดจาก Google Apps Script');
+    }
+
+    // Success! Remove from queue
+    removeBackgroundQueueItem(currentItem.id);
+
+    // Show non-blocking success toast
+    Swal.fire({
+      toast: true,
+      position: 'bottom-end',
+      icon: 'success',
+      title: `อัปโหลดสำเร็จ!`,
+      html: `<div class="text-xs text-gray-700 select-none">บันทึกภาพถ่ายหมาย <b>${currentItem.caseNumber}</b> ลงระบบเรียบร้อยแล้ว</div>`,
+      timer: 3000,
+      showConfirmButton: false
+    });
+
+    // Invalidate sheet cache
+    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
+  } catch (err) {
+    clearInterval(bgQueueProgressInterval);
+    console.error('[BgQueue] Upload error for item:', currentItem.caseNumber, err);
+
+    currentItem.retryCount = (currentItem.retryCount || 0) + 1;
+    if (currentItem.retryCount >= 3) {
+      // Fallback to offline queue
+      addToOfflineQueue({
+        payload: currentItem.payload,
+        fileName: currentItem.fileName,
+        caseNumber: currentItem.caseNumber
+      });
+      removeBackgroundQueueItem(currentItem.id);
+
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'warning',
+        title: `การส่งภาพล่าช้า (${currentItem.caseNumber})`,
+        text: 'ระบบได้ย้ายข้อมูลเข้าสู่คิวออฟไลน์ไว้ให้แล้ว ท่านสามารถกดซิงค์ใหม่ได้ที่ปุ่มบนหัวเว็บ',
+        timer: 5000,
+        showConfirmButton: false
+      });
+    } else {
+      const q = getBackgroundQueue();
+      if (q.length > 0) {
+        q[0].retryCount = currentItem.retryCount;
+        saveBackgroundQueue(q);
+      }
+      await new Promise(res => setTimeout(res, 3000));
+    }
+  } finally {
+    isBgQueueWorkerRunning = false;
+    const remainingQueue = getBackgroundQueue();
+    if (remainingQueue.length > 0) {
+      processBackgroundQueue();
+    } else {
+      updateBackgroundQueueUI();
+      loadGoogleSheetData(true);
+    }
+  }
+}
+
 /**
  * แสดงหน้าต่างโหลดข้อมูลแบบ SweetAlert2 โปร่งใส 100%
  */
@@ -284,6 +593,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initResponsiveUI();
   initMobileHandoffReceiver();
   renderDesktopFormHistoryCard();
+  updateBackgroundQueueUI();
+  processBackgroundQueue();
 
   // ตรวจสอบการเปิดผ่าน LINE: หากเป็น LINE In-App Browser ให้สลับไปเปิดในเบราว์เซอร์ภายนอก (Chrome/Safari) ทันที
   if (/Line/i.test(navigator.userAgent) && !window.location.search.includes('openExternalBrowser=1')) {
@@ -7316,43 +7627,7 @@ async function handleDesktopUpload() {
       imageBase64: compressedImageBase64
     };
 
-    // 4. ตรวจสอบสถานะการเชื่อมต่ออินเทอร์เน็ต
-    if (!navigator.onLine) {
-      addToOfflineQueue({
-        payload: uploadPayload,
-        fileName: imageFilename,
-        caseNumber: caseNumber
-      });
-
-      Swal.fire({
-        icon: 'info',
-        title: 'บันทึกสำเร็จ (โหมดออฟไลน์)',
-        html: `
-          <div class="text-left text-xs space-y-2 text-gray-700">
-            <p>บันทึกภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงในเครื่องเรียบร้อยแล้ว</p>
-            <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800">
-              <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-600"></i>
-              <b>แจ้งเตือน:</b> เนื่องจากขณะนี้ไม่มีสัญญาณอินเทอร์เน็ต ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์</b> ในเครื่องไว้แล้ว และจะทำการอัปโหลดขึ้น Google Drive & Sheet ให้โดยอัตโนมัติเมื่อท่านเชื่อมต่ออินเทอร์เน็ต
-            </div>
-          </div>
-        `,
-        confirmButtonText: 'ตกลง',
-        confirmButtonColor: '#2563eb',
-        showCloseButton: true,
-        allowOutsideClick: false
-      });
-      resetDesktopForm(true);
-      return;
-    }
-
-    // อัปโหลดขึ้น Google Drive พร้อมนำเข้าข้อมูลลง Google Sheet ในขั้นตอนเดียว
-    const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
-
-    // เคลียร์แคชชีต
-    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
-    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
-
-    // บันทึกประวัติการกรอกข้อมูลลงในเครื่อง (Desktop Form History)
+    // 1. บันทึกประวัติการกรอกข้อมูลลงในเครื่อง (Desktop Form History) ทันที
     saveDesktopFormHistory({
       caseNumber: caseNumber,
       courtType: payloadData.courtType,
@@ -7376,46 +7651,49 @@ async function handleDesktopUpload() {
       otherCaseYear: elements.otherCaseYearSelect ? elements.otherCaseYearSelect.value : ''
     });
 
-    // แสดงผลข้อมูลการอัปโหลดสำเร็จ พร้อมนับเวลาถอยหลัง 3 วินาทีเพื่อปิดหน้าต่าง (ไม่ต้องมีปุ่มเปิด Google Drive และปุ่มยืนยัน)
-    let timerInterval;
+    // 2. บรรจุงานเข้าสู่คิวอัปโหลดรูปภาพเบื้องหลัง (Background Upload Queue)
+    enqueueBackgroundUpload({
+      caseNumber: caseNumber,
+      courtType: courtType,
+      locationText: locationText,
+      fileName: imageFilename,
+      payload: uploadPayload
+    });
+
+    // 3. ปลดล็อกและล้างฟอร์มทันที (Instant Form Release - ผู้ใช้ไม่ต้องรอการอัปโหลดรูป)
+    resetDesktopForm(true);
+
+    // 4. เลื่อนเคอร์เซอร์ไปรอที่ช่องเลขคดีเพื่อให้พิมพ์หมายใบถัดไปได้ทันที
+    if (elements.udonCaseNoInput && !document.getElementById('udonCaseField')?.classList.contains('hidden')) {
+      elements.udonCaseNoInput.value = '';
+      elements.udonCaseNoInput.focus();
+    } else if (elements.otherCaseNoInput) {
+      elements.otherCaseNoInput.value = '';
+      elements.otherCaseNoInput.focus();
+    }
+
+    // 5. แสดงการแจ้งเตือนแบบ Toast มุมขวาบน (ไม่บดบังหน้าจอการทำงาน)
     Swal.fire({
+      toast: true,
+      position: 'top-end',
       icon: 'success',
-      title: 'อัปโหลดภาพส่งหมายสำเร็จ!',
+      title: 'นำเข้าข้อมูลเข้าสู่คิวอัปโหลดแล้ว',
       html: `
-        <div class="text-center space-y-2.5 text-xs text-gray-700 py-1 select-none">
-          <p class="font-bold text-gray-900 text-sm">บันทึกข้อมูลเลขคดี <span class="text-blue-700 font-mono font-bold">${caseNumber}</span> เรียบร้อยแล้ว</p>
-          <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-900 text-[11px] text-left space-y-1">
-            <div>📍 <b>พิกัด GPS:</b> <span class="font-mono font-bold">${state.lat ? Number(state.lat).toFixed(6) : ''}, ${state.lng ? Number(state.lng).toFixed(6) : ''}</span></div>
-            <div>🏠 <b>ที่ตั้งส่งหมาย:</b> ${locationText}</div>
-          </div>
-          <div class="pt-2 text-[11px] text-gray-500 flex items-center justify-center gap-1.5">
-            <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
-            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalUploadCountdown" class="text-blue-600 font-bold text-sm">2</b> วินาที</span>
+        <div class="text-left text-xs space-y-1 select-none text-gray-700">
+          <div>หมายเลขคดี <b class="text-blue-700 font-mono">${caseNumber}</b> กำลังส่งในเบื้องหลัง</div>
+          <div class="text-emerald-700 font-bold flex items-center gap-1">
+            <i class="fa-solid fa-circle-check text-emerald-600"></i>
+            <span>คุณสามารถพิมพ์กรอกหมายถัดไปได้ทันที</span>
           </div>
         </div>
       `,
-      timer: 2000,
-      timerProgressBar: true,
       showConfirmButton: false,
-      showCancelButton: false,
-      allowOutsideClick: false,
-      didOpen: () => {
-        const cdEl = document.getElementById('swalUploadCountdown');
-        timerInterval = setInterval(() => {
-          if (cdEl && Swal.getTimerLeft()) {
-            const secLeft = Math.ceil(Swal.getTimerLeft() / 1000);
-            cdEl.textContent = secLeft;
-          }
-        }, 200);
-      },
-      willClose: () => {
-        clearInterval(timerInterval);
-      }
-    }).then(() => {
-      // รีเซ็ตเฉพาะรูปภาพ แต่เก็บข้อมูลล่าสุดไว้ในฟอร์มเพื่อช่วยลดการกรอกข้อมูลในครั้งถัดไป
-      resetDesktopForm(true);
-      loadGoogleSheetData(true);
+      timer: 3500,
+      timerProgressBar: true
     });
+
+    // 6. เริ่มการทำงานของ Background Worker ในเบื้องหลัง
+    processBackgroundQueue();
 
   } catch (err) {
     console.error('Desktop upload error:', err);

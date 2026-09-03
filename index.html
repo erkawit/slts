@@ -113,6 +113,12 @@
           <span id="offlineQueueCountBadge">ซิงค์ (0)</span>
         </button>
 
+        <!-- Background Upload Queue Badge (แสดงเมื่อมีคิวอัปโหลดภาพเบื้องหลัง) -->
+        <button id="btnBgUploadQueueHeader" type="button" onclick="toggleFloatingBgQueueWidget()" class="hidden items-center gap-1.5 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-full text-[11px] sm:text-xs font-bold shadow-sm transition select-none" title="คลิกเพื่อดู/ย่อขยายสถานะคิวอัปโหลดรูปภาพเบื้องหลัง">
+          <i class="fa-solid fa-cloud-arrow-up animate-pulse"></i>
+          <span id="bgUploadQueueHeaderBadge">คิวส่ง (0)</span>
+        </button>
+
         <!-- Settings Button (แสดงเฉพาะจอ > 768px และเป็น Admin เท่านั้น) -->
         <button id="btnSettings" type="button" title="ตั้งค่าเชื่อมต่อ Google Drive (เฉพาะ Admin)" class="hidden p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition border border-transparent hover:border-blue-200">
           <i class="fa-solid fa-gear text-lg"></i>
@@ -1146,6 +1152,79 @@
 
     </div>
   </div>
+
+  <!-- ========================================================= -->
+  <!-- FLOATING MINI QUEUE WIDGET: ระบบแสดงสถานะคิวอัปโหลดรูปภาพเบื้องหลัง (Desktop & Tablet) -->
+  <!-- ========================================================= -->
+  <aside id="floatingBgQueueWidget" aria-label="สถานะคิวอัปโหลดภาพเบื้องหลัง" class="fixed bottom-5 right-5 z-40 hidden max-w-sm w-84 sm:w-92 transition-all duration-300 select-none">
+    
+    <!-- Expanded Card View -->
+    <div id="bgQueueExpandedCard" class="bg-white/95 backdrop-blur-md border border-blue-200 rounded-2xl shadow-2xl p-4 space-y-3">
+      <!-- Card Header -->
+      <div class="flex items-center justify-between pb-2 border-b border-gray-100">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold shadow-2xs">
+            <i class="fa-solid fa-cloud-arrow-up animate-pulse"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-gray-900 leading-tight">คิวอัปโหลดรูปภาพเบื้องหลัง</h4>
+            <p id="bgQueueSubTitle" class="text-[10px] text-gray-500 font-medium">ทำงานเบื้องหลัง กรอกหมายต่อได้ทันที</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span id="bgQueueCountPill" class="text-[10px] font-bold font-mono bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+            1/1
+          </span>
+          <button type="button" onclick="minimizeFloatingBgQueueWidget(true)" class="p-1 text-gray-400 hover:text-gray-600 rounded-lg transition cursor-pointer" title="ย่อหน้าต่างนี้">
+            <i class="fa-solid fa-chevron-down text-xs"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Current Upload Item Details -->
+      <div class="bg-blue-50/70 border border-blue-100 rounded-xl p-2.5 space-y-1 text-xs">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-blue-900 font-mono flex items-center gap-1 truncate max-w-[200px]">
+            <i class="fa-solid fa-gavel text-[11px] text-blue-600 shrink-0"></i>
+            <span id="bgQueueCurrentCase" class="truncate">กำลังประมวลผล...</span>
+          </span>
+          <span id="bgQueueStatusBadge" class="text-[10px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1 shadow-2xs shrink-0">
+            <i class="fa-solid fa-spinner fa-spin text-[10px] text-blue-600"></i>
+            <span>กำลังส่ง</span>
+          </span>
+        </div>
+        <div id="bgQueueCurrentLocation" class="text-[11px] text-gray-600 truncate">
+          -
+        </div>
+      </div>
+
+      <!-- Animated Progress Bar -->
+      <div class="space-y-1">
+        <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden border border-gray-200 p-0.5 shadow-inner">
+          <div id="bgQueueProgressBar" class="bg-gradient-to-r from-blue-500 via-indigo-600 to-blue-700 h-full rounded-full transition-all duration-300 ease-out" style="width: 25%"></div>
+        </div>
+        <div class="flex items-center justify-between text-[10px] text-gray-400">
+          <span id="bgQueueProgressPercent" class="font-mono font-bold text-blue-600">25%</span>
+          <span id="bgQueueSpeedTxt">เชื่อมต่อ Google Apps Script</span>
+        </div>
+      </div>
+
+      <!-- Pending Queue Summary -->
+      <div id="bgQueueRemainingSummary" class="text-[10px] text-gray-500 flex items-center justify-between pt-1 border-t border-gray-100">
+        <span><i class="fa-solid fa-list-check mr-1 text-blue-500"></i> รอในคิวถัดไป: <b id="bgQueueWaitingCount" class="font-mono text-gray-700">0</b> รายการ</span>
+        <button type="button" onclick="cancelCurrentBackgroundQueue()" class="text-gray-400 hover:text-red-600 transition cursor-pointer text-[10px]" title="ล้างคิวที่รออยู่">
+          <i class="fa-solid fa-trash-can mr-0.5"></i> ล้างคิว
+        </button>
+      </div>
+    </div>
+
+    <!-- Minimized Pill View -->
+    <button type="button" id="bgQueueMinimizedPill" onclick="minimizeFloatingBgQueueWidget(false)" class="hidden bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg px-4 py-2.5 items-center gap-2 text-xs font-bold transition-all transform active:scale-95 border border-white/20 cursor-pointer">
+      <i class="fa-solid fa-cloud-arrow-up animate-pulse"></i>
+      <span id="bgQueueMiniText">กำลังส่งภาพเบื้องหลัง (1)</span>
+      <i class="fa-solid fa-chevron-up text-[10px]"></i>
+    </button>
+  </aside>
 
   <!-- Scripts -->
   <script src="js/data.js?v=20260901_18"></script>
