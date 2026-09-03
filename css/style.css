@@ -1158,6 +1158,30 @@ table.dataTable tbody td {
     overflow-y: auto !important;
     padding: 1.5rem !important;
   }
+
+  /* Mobile Case Search Modal Compact Top Styling (< 768px) */
+  .swal2-container.slts-mobile-search-container {
+    align-items: flex-start !important;
+    padding-top: max(8px, env(safe-area-inset-top, 8px)) !important;
+  }
+
+  .swal2-popup.slts-mobile-search-popup {
+    margin-top: 4px !important;
+    padding: 0.6rem 0.75rem 0.75rem 0.75rem !important;
+    border-radius: 1.25rem !important;
+    max-height: calc(100dvh - 16px) !important;
+    width: 96% !important;
+  }
+
+  .swal2-popup.slts-mobile-search-popup .swal2-title {
+    padding: 0 !important;
+    margin: 0 0 0.35rem 0 !important;
+  }
+
+  .swal2-popup.slts-mobile-search-popup .swal2-html-container {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
 }
 
 /* ========================================================= */

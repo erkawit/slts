@@ -4212,14 +4212,17 @@ window.handleMobileModalBackOrClose = function() {
 
 /**
  * Modal ค้นหาข้อมูลหมายบนหน้าจอมือถือ (< 768px)
- * 1. เรียกใช้งานแป้นพิมพ์ทันทีเมื่อเปิด (Auto-focus)
- * 2. เปลี่ยนปุ่มค้นหาเป็นปุ่ม "รีเฟรช" ที่ตรวจสอบรายการใหม่เทียบกับปัจจุบัน
- * 3. รองรับการค้นหาออฟไลน์ และลดการกินทรัพยากรเครื่อง
+ * 1. บีบพื้นที่ด้านบนขึ้น (position: 'top' และ compact padding) เพื่อให้ได้พื้นที่แสดงผลรายการมากที่สุด
+ * 2. เรียกใช้งานแป้นพิมพ์ทันทีเมื่อเปิด (Auto-focus)
+ * 3. ปุ่มรีเฟรช / การเข้าสู่โหมดค้นหา:
+ *    - เมื่อเข้าสู่โหมดค้นหา หากออนไลน์ จะทำการอัปเดตอัตโนมัติเบื้องหลังเงียบๆ (ไม่มีการแจ้งเตือนรบกวน)
+ *    - เมื่ออัปเดตเสร็จ จะบันทึกลงเครื่องเพื่อให้นำไปใช้ในโหมดออฟไลน์ได้
+ *    - หากออฟไลน์ ปุ่มรีเฟรชจะถูก Disable กดไม่ได้ แต่สามารถค้นหาข้อมูลล่าสุดที่มีในเครื่องได้ตามปกติ
  * 4. รองรับการย้อนกลับไป-มาใน Pop Up อย่างราบรื่น
  */
 window.openMobileCaseSearchModal = async function(initialQuery = '') {
-  // หากออฟไลน์ และยังไม่มีข้อมูลใน memory ให้ดึงจาก cache ในเครื่อง
-  if (!navigator.onLine && (!state.allSheetRows || state.allSheetRows.length === 0)) {
+  // 1. โหลดข้อมูลเดิมจาก memory หรือ cache ในเครื่องทันทีก่อน เพื่อให้เปิดหน้าต่างได้เร็วที่สุดโดยไม่ต้องรอโหลด
+  if (!state.allSheetRows || state.allSheetRows.length === 0) {
     try {
       const cachedStr = localStorage.getItem('slts_cached_sheet_data');
       if (cachedStr) {
@@ -4228,64 +4231,54 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
     } catch (e) {}
   }
 
-  // หากออนไลน์ และยังไม่มีข้อมูลใน memory ให้ดึงมาแสดงผลครั้งแรก (เก็บเฉพาะใน memory state.allSheetRows เพื่อประหยัดพื้นที่เครื่อง)
-  if (navigator.onLine && (!state.allSheetRows || state.allSheetRows.length === 0)) {
-    showCustomLoading('กำลังดึงข้อมูลหมาย...', 'กำลังเชื่อมต่อ Google Sheet');
-    try {
-      const now = Date.now();
-      const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${now}`;
-      const freshRows = await new Promise((resolve, reject) => {
-        Papa.parse(csvFetchUrl, {
-          download: true,
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => resolve(results.data || []),
-          error: (err) => reject(err)
-        });
-      });
-      hideCustomLoading();
-      state.allSheetRows = freshRows;
-      renderDataTable(freshRows);
-    } catch (e) {
-      hideCustomLoading();
-      console.warn('Mobile search load error:', e);
-    }
-  }
+  const isOnline = navigator.onLine;
 
   Swal.fire({
+    position: 'top',
+    customClass: {
+      container: 'slts-mobile-search-container',
+      popup: 'slts-mobile-search-popup rounded-2xl shadow-xl'
+    },
     title: `
-      <div class="flex items-center justify-between w-full pr-1 text-gray-900 font-bold text-base">
-        <div class="flex items-center gap-2">
-          <i class="fa-solid fa-magnifying-glass text-blue-600"></i>
+      <div class="flex items-center justify-between w-full pr-0.5 text-gray-900 font-bold text-sm">
+        <div class="flex items-center gap-1.5">
+          <i class="fa-solid fa-magnifying-glass text-blue-600 text-xs"></i>
           <span>ค้นหาข้อมูลหมาย</span>
         </div>
-        <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-600 flex items-center justify-center text-xs transition cursor-pointer" title="ปิดหน้าต่าง">
+        <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-600 flex items-center justify-center text-xs transition cursor-pointer" title="ปิดหน้าต่าง">
           <i class="fa-solid fa-xmark text-sm"></i>
         </button>
       </div>
     `,
     html: `
-      <div class="text-left space-y-3 pt-1">
-        <!-- ช่องค้นหาเลขคดี + ปุ่มรีเฟรชข้อมูล (แทนปุ่มค้นหาตามข้อ 3) -->
-        <div class="flex gap-2">
-          <input type="text" id="mobileSearchInput" value="${initialQuery || ''}" placeholder="พิมพ์เลขคดี หรือ ที่ตั้งส่งหมาย..." class="flex-1 bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition">
-          <button type="button" id="btnRefreshMobileSearch" class="px-3.5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow flex items-center gap-1.5 transition cursor-pointer" title="รีเฟรชตรวจสอบข้อมูลใหม่">
-            <i class="fa-solid fa-rotate-right" id="iconRefreshMobileSearch"></i>
-            <span>รีเฟรช</span>
-          </button>
+      <div class="text-left space-y-2 pt-0">
+        <!-- ช่องค้นหาเลขคดี + ปุ่มรีเฟรชข้อมูล (บีบระยะห่างชิดด้านบนตามข้อ 1) -->
+        <div class="flex gap-1.5 items-center">
+          <input type="text" id="mobileSearchInput" value="${initialQuery || ''}" placeholder="พิมพ์เลขคดี หรือ ที่ตั้งส่งหมาย..." class="flex-1 bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition">
+          ${isOnline ? `
+            <button type="button" id="btnRefreshMobileSearch" class="px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow flex items-center gap-1.5 transition cursor-pointer" title="รีเฟรชตรวจสอบข้อมูลใหม่">
+              <i class="fa-solid fa-rotate-right" id="iconRefreshMobileSearch"></i>
+              <span>รีเฟรช</span>
+            </button>
+          ` : `
+            <button type="button" id="btnRefreshMobileSearch" disabled class="px-3 py-2 bg-gray-200 text-gray-400 font-bold rounded-xl text-xs flex items-center gap-1.5 opacity-60 cursor-not-allowed border border-gray-300" title="อุปกรณ์ออฟไลน์ (ใช้งานข้อมูลล่าสุดในเครื่อง)">
+              <i class="fa-solid fa-cloud-slash text-[11px]" id="iconRefreshMobileSearch"></i>
+              <span>ออฟไลน์</span>
+            </button>
+          `}
         </div>
 
-        <div class="flex items-center justify-between text-xs text-gray-500 px-1">
+        <div class="flex items-center justify-between text-[11px] text-gray-500 px-0.5">
           <span id="mobileSearchResultCountText">แสดงรายการล่าสุด</span>
         </div>
 
-        <!-- รายการคดีแบบ ListView สำหรับจอมือถือ -->
-        <div id="mobileSearchResultsContainer" class="max-h-[60vh] overflow-y-auto space-y-3 pr-0.5">
+        <!-- รายการคดีแบบ ListView สำหรับจอมือถือ (ขยายพื้นที่ความสูงให้แสดงผลได้เต็มตา) -->
+        <div id="mobileSearchResultsContainer" class="max-h-[68vh] max-h-[68dvh] overflow-y-auto space-y-2.5 pr-0.5">
           <!-- Injected by JS -->
         </div>
       </div>
     `,
-    width: '95%',
+    width: '96%',
     showCloseButton: false,
     showConfirmButton: false,
     allowOutsideClick: false,
@@ -4296,12 +4289,12 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
       const container = document.getElementById('mobileSearchResultsContainer');
       const countTxt = document.getElementById('mobileSearchResultCountText');
 
-      // ข้อ 3: เรียกใช้งานแป้นพิมพ์ทันทีเมื่อเปิด เพื่อความสะดวกในการพิมพ์
+      // เรียกใช้งานแป้นพิมพ์ทันทีเมื่อเปิด เพื่อความสะดวกในการพิมพ์
       if (searchInput) {
         setTimeout(() => {
           searchInput.focus();
           try { searchInput.select(); } catch(e) {}
-        }, 250);
+        }, 200);
       }
 
       const renderList = (query = '') => {
@@ -4352,21 +4345,21 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
           const hasMultiple = records.length > 1;
 
           const card = document.createElement('div');
-          card.className = 'bg-white rounded-2xl border border-gray-200 p-4 shadow-sm space-y-2.5 text-left transition hover:border-blue-300';
+          card.className = 'bg-white rounded-2xl border border-gray-200 p-3.5 shadow-sm space-y-2 text-left transition hover:border-blue-300';
           
           card.innerHTML = `
-            <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-2">
+            <div class="flex items-start justify-between gap-2 border-b border-gray-100 pb-1.5">
               <div>
                 <span class="font-bold text-gray-900 text-sm text-blue-700">${caseNo}</span>
                 <p class="text-[11px] text-gray-500 font-mono mt-0.5"><i class="fa-regular fa-calendar-check mr-1 text-blue-500"></i>${formattedDate}</p>
               </div>
               <div class="flex items-center gap-1">
                 ${hasMultiple ? `
-                  <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
                     <i class="fa-solid fa-layer-group mr-0.5"></i> ${records.length} รายการ
                   </span>
                 ` : `
-                  <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold ${hasImage ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}">
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${hasImage ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}">
                     ${hasImage ? 'มีภาพถ่าย' : 'ไม่มีภาพ'}
                   </span>
                 `}
@@ -4379,8 +4372,8 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
 
             ${hasMultiple ? `
               <!-- ปุ่มดูรายการย่อยทั้งหมดสำหรับคดีที่มีประวัติมากกว่า 1 รายการ -->
-              <div class="pt-1">
-                <button type="button" onclick="window.pushMobileModalState(() => openMobileCaseSearchModal(document.getElementById('mobileSearchInput') ? document.getElementById('mobileSearchInput').value : '')); openMobileSubRecordsModal('${caseNo.replace(/'/g, "\\'")}')" class="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-98 text-white font-bold rounded-xl text-xs shadow-sm flex items-center justify-center gap-2 transition cursor-pointer">
+              <div class="pt-0.5">
+                <button type="button" onclick="window.pushMobileModalState(() => openMobileCaseSearchModal(document.getElementById('mobileSearchInput') ? document.getElementById('mobileSearchInput').value : '')); openMobileSubRecordsModal('${caseNo.replace(/'/g, "\\'")}')" class="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-98 text-white font-bold rounded-xl text-xs shadow-sm flex items-center justify-center gap-2 transition cursor-pointer">
                   <i class="fa-solid fa-layer-group"></i>
                   <span>ดูรายการย่อย (${records.length} รายการ)</span>
                   <i class="fa-solid fa-chevron-right text-[10px]"></i>
@@ -4388,22 +4381,22 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
               </div>
             ` : `
               <!-- สำหรับคดีที่มี 1 รายการ แสดงปุ่ม: 2.1 เลขคดี, 2.2 พิกัด, 2.3 ดูภาพ (ถ้ามี) -->
-              <div class="flex items-center gap-1.5 flex-wrap pt-1">
+              <div class="flex items-center gap-1.5 flex-wrap pt-0.5">
                 <!-- 2.1 ปุ่มเลขคดี -->
-                <button type="button" class="px-2.5 py-1.5 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
+                <button type="button" class="px-2 py-1 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
                   <i class="fa-solid fa-scale-balanced text-blue-600"></i>
                   <span>${caseNo}</span>
                 </button>
 
                 <!-- 2.2 ปุ่มพิกัด -->
                 ${lat && lng ? `
-                  <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-sm inline-flex items-center gap-1 transition cursor-pointer" title="คัดลอกพิกัด">
+                  <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-sm inline-flex items-center gap-1 transition cursor-pointer" title="คัดลอกพิกัด">
                     <i class="fa-solid fa-location-crosshairs text-emerald-600"></i>
                     <span>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</span>
                   </button>
 
                   <!-- ปุ่มเปิดใน Google Maps -->
-                  <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-sm inline-flex items-center gap-1 active:scale-95 transition" title="เปิดดูตำแหน่งใน Google Maps">
+                  <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-sm inline-flex items-center gap-1 active:scale-95 transition" title="เปิดดูตำแหน่งใน Google Maps">
                     <i class="fa-solid fa-map-location-dot text-rose-600"></i>
                     <span>Google Maps</span>
                   </a>
@@ -4411,7 +4404,7 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
 
                 <!-- 2.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะเมื่อมีภาพในระบบ) -->
                 ${hasImage ? `
-                  <button type="button" onclick="window.pushMobileModalState(() => openMobileCaseSearchModal(document.getElementById('mobileSearchInput') ? document.getElementById('mobileSearchInput').value : '')); viewPhotoModal('${imgUrl}', '${caseNo}', '${loc.replace(/'/g, "\\'")}', '${formattedDate}', '${lat}', '${lng}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm inline-flex items-center gap-1 active:scale-95 transition cursor-pointer">
+                  <button type="button" onclick="window.pushMobileModalState(() => openMobileCaseSearchModal(document.getElementById('mobileSearchInput') ? document.getElementById('mobileSearchInput').value : '')); viewPhotoModal('${imgUrl}', '${caseNo}', '${loc.replace(/'/g, "\\'")}', '${formattedDate}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm inline-flex items-center gap-1 active:scale-95 transition cursor-pointer">
                     <i class="fa-solid fa-image"></i>
                     <span>ดูภาพ</span>
                   </button>
@@ -4424,97 +4417,59 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
         });
       };
 
+      // แสดงรายการเดิมที่มีอยู่ทันทีก่อน
       renderList(initialQuery || '');
       searchInput.addEventListener('input', (e) => renderList(e.target.value));
 
-      // การทำงานของปุ่มรีเฟรชตามข้อ 3
-      if (refreshBtn) {
-        refreshBtn.addEventListener('click', async () => {
-          if (!navigator.onLine) {
-            Swal.fire({
-              toast: true,
-              position: 'top',
-              icon: 'warning',
-              title: 'อยู่ในโหมดออฟไลน์',
-              text: `กำลังใช้งานข้อมูลที่มีในเครื่อง (${(state.allSheetRows || []).length} รายการ)`,
-              timer: 2500,
-              showConfirmButton: false
+      /**
+       * ฟังก์ชันอัปเดตข้อมูลเบื้องหลังอัตโนมัติ (Silent Background Update ตามข้อ 2)
+       * - ไม่แสดงแจ้งเตือนรบกวนผู้ใช้ แค่อัปเดตในเบื้องหลัง
+       * - บันทึกลงเครื่อง (localStorage) เพื่อให้พร้อมใช้งานในโหมดออฟไลน์
+       */
+      const performSilentBackgroundUpdate = async () => {
+        if (!navigator.onLine) return;
+        if (refreshIcon) refreshIcon.classList.add('fa-spin');
+        if (refreshBtn) refreshBtn.disabled = true;
+
+        try {
+          const now = Date.now();
+          const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${now}`;
+          const freshRows = await new Promise((resolve, reject) => {
+            Papa.parse(csvFetchUrl, {
+              download: true,
+              header: true,
+              skipEmptyLines: true,
+              complete: (results) => resolve(results.data || []),
+              error: (err) => reject(err)
             });
-            return;
+          });
+
+          if (freshRows && freshRows.length > 0) {
+            state.allSheetRows = freshRows;
+            // บันทึกลงหน่วยความจำเครื่องไว้ให้ใช้งานในโหมดออฟไลน์ได้
+            try {
+              localStorage.setItem('slts_cached_sheet_data', JSON.stringify(freshRows));
+            } catch (errCache) {}
+            // อัปเดตรายการที่แสดงผลอยู่ให้เป็นปัจจุบันทันที
+            renderList(searchInput ? searchInput.value : '');
           }
+        } catch (err) {
+          console.warn('Silent background search update error:', err);
+        } finally {
+          if (refreshIcon) refreshIcon.classList.remove('fa-spin');
+          if (refreshBtn && navigator.onLine) refreshBtn.disabled = false;
+        }
+      };
 
-          if (refreshIcon) refreshIcon.classList.add('fa-spin');
-          refreshBtn.disabled = true;
+      // ข้อ 2: หากระบบออนไลน์ ให้ทำการอัปเดตอัตโนมัติเบื้องหลังทันทีเมื่อมีการเข้าใช้งานค้นหาข้อมูลหมาย
+      if (navigator.onLine) {
+        performSilentBackgroundUpdate();
+      }
 
-          try {
-            const now = Date.now();
-            const csvFetchUrl = `${state.googleSheetCsvUrl}&_t=${now}`;
-            const freshRows = await new Promise((resolve, reject) => {
-              Papa.parse(csvFetchUrl, {
-                download: true,
-                header: true,
-                skipEmptyLines: true,
-                complete: (results) => resolve(results.data || []),
-                error: (err) => reject(err)
-              });
-            });
-
-            const currentRows = state.allSheetRows || [];
-            
-            // ตรวจสอบว่ามีข้อมูลใหม่เข้ามากี่รายการ โดยเทียบกับที่มีในปัจจุบัน
-            const existingSignatures = new Set(
-              currentRows.map(r => `${(r['เลขคดี'] || '').trim()}__${(r['วัน-เวลาบันทึก'] || r['Timestamp'] || '').trim()}__${(r['ที่ตั้งส่งหมาย'] || '').trim()}`)
-            );
-
-            let newItemsCount = 0;
-            freshRows.forEach(r => {
-              const sig = `${(r['เลขคดี'] || '').trim()}__${(r['วัน-เวลาบันทึก'] || r['Timestamp'] || '').trim()}__${(r['ที่ตั้งส่งหมาย'] || '').trim()}`;
-              if (!existingSignatures.has(sig)) {
-                newItemsCount++;
-              }
-            });
-
-            // ถ้าข้อมูลตรงกันเป็นปัจจุบันแล้ว ไม่ต้องทำการอัปเดตเข้ามาใหม่
-            if (newItemsCount === 0 && freshRows.length === currentRows.length) {
-              Swal.fire({
-                toast: true,
-                position: 'top',
-                icon: 'info',
-                title: 'ข้อมูลเป็นปัจจุบันแล้ว',
-                text: `ไม่มีรายการใหม่เพิ่มเติม (มีทั้งหมด ${currentRows.length} รายการ)`,
-                timer: 2500,
-                showConfirmButton: false
-              });
-            } else {
-              // มีข้อมูลใหม่ หรือจำนวนแถวเปลี่ยนแปลง
-              state.allSheetRows = freshRows;
-              renderList(searchInput ? searchInput.value : '');
-
-              Swal.fire({
-                toast: true,
-                position: 'top',
-                icon: 'success',
-                title: newItemsCount > 0 ? `พบข้อมูลใหม่ ${newItemsCount} รายการ` : 'อัปเดตข้อมูลล่าสุดเรียบร้อย',
-                text: `รวมข้อมูลทั้งหมด ${freshRows.length} รายการ`,
-                timer: 2500,
-                showConfirmButton: false
-              });
-            }
-          } catch (err) {
-            console.warn('Refresh mobile search data error:', err);
-            Swal.fire({
-              toast: true,
-              position: 'top',
-              icon: 'error',
-              title: 'ไม่สามารถดึงข้อมูลได้',
-              text: 'โปรดตรวจสอบสัญญาณอินเทอร์เน็ต',
-              timer: 2500,
-              showConfirmButton: false
-            });
-          } finally {
-            if (refreshIcon) refreshIcon.classList.remove('fa-spin');
-            if (refreshBtn) refreshBtn.disabled = false;
-          }
+      // เมื่อผู้ใช้กดปุ่มรีเฟรชด้วยตนเอง (หากออนไลน์)
+      if (refreshBtn && navigator.onLine) {
+        refreshBtn.addEventListener('click', () => {
+          performSilentBackgroundUpdate();
         });
       }
     }
@@ -4539,8 +4494,8 @@ window.openMobileSubRecordsModal = function(caseNumber) {
     const hasImage = imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http');
 
     cardsHtml += `
-      <div class="bg-gray-50/90 rounded-2xl border border-gray-200 p-3.5 space-y-2.5 text-left shadow-sm">
-        <div class="flex items-center justify-between border-b border-gray-200 pb-1.5">
+      <div class="bg-gray-50/90 rounded-2xl border border-gray-200 p-3 space-y-2 text-left shadow-sm">
+        <div class="flex items-center justify-between border-b border-gray-200 pb-1">
           <span class="text-xs font-bold text-gray-800 flex items-center gap-1.5">
             <span class="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">${records.length - idx}</span>
             <span>รายการส่งหมายครั้งที่ ${records.length - idx}</span>
@@ -4553,22 +4508,22 @@ window.openMobileSubRecordsModal = function(caseNumber) {
         </p>
 
         <!-- Action Buttons: 2.1 เลขคดี, 2.2 พิกัด, 2.3 ดูภาพ (ถ้ามี) -->
-        <div class="flex items-center gap-1.5 flex-wrap pt-1">
+        <div class="flex items-center gap-1.5 flex-wrap pt-0.5">
           <!-- 2.1 ปุ่มเลขคดี -->
-          <button type="button" class="px-2.5 py-1.5 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
+          <button type="button" class="px-2 py-1 bg-blue-50 text-blue-800 rounded-lg text-xs font-bold border border-blue-200 shadow-sm inline-flex items-center gap-1">
             <i class="fa-solid fa-scale-balanced text-blue-600"></i>
             <span>${caseNumber}</span>
           </button>
 
           <!-- 2.2 ปุ่มพิกัด -->
           ${lat && lng ? `
-            <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-sm inline-flex items-center gap-1 transition cursor-pointer" title="คัดลอกพิกัด">
+            <button type="button" onclick="copyCoordinates('${lat}', '${lng}')" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-200 shadow-sm inline-flex items-center gap-1 transition cursor-pointer" title="คัดลอกพิกัด">
               <i class="fa-solid fa-location-crosshairs text-emerald-600"></i>
               <span>${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</span>
             </button>
 
             <!-- ปุ่มเปิดใน Google Maps -->
-            <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-sm inline-flex items-center gap-1 active:scale-95 transition" title="เปิดดูตำแหน่งใน Google Maps">
+            <a href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 shadow-sm inline-flex items-center gap-1 active:scale-95 transition" title="เปิดดูตำแหน่งใน Google Maps">
               <i class="fa-solid fa-map-location-dot text-rose-600"></i>
               <span>Google Maps</span>
             </a>
@@ -4576,7 +4531,7 @@ window.openMobileSubRecordsModal = function(caseNumber) {
 
           <!-- 2.3 ปุ่มดูภาพที่อัปโหลด (แสดงเฉพาะเมื่อมีภาพในระบบ) -->
           ${hasImage ? `
-            <button type="button" onclick="window.pushMobileModalState(() => openMobileSubRecordsModal('${caseNumber.replace(/'/g, "\\'")}')); viewPhotoModal('${imgUrl}', '${caseNumber}', '${loc.replace(/'/g, "\\'")}', '${formattedDate}', '${lat}', '${lng}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm inline-flex items-center gap-1 active:scale-95 transition cursor-pointer">
+            <button type="button" onclick="window.pushMobileModalState(() => openMobileSubRecordsModal('${caseNumber.replace(/'/g, "\\'")}')); viewPhotoModal('${imgUrl}', '${caseNumber}', '${loc.replace(/'/g, "\\'")}', '${formattedDate}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm inline-flex items-center gap-1 active:scale-95 transition cursor-pointer">
               <i class="fa-solid fa-image"></i>
               <span>ดูภาพ</span>
             </button>
@@ -4587,31 +4542,36 @@ window.openMobileSubRecordsModal = function(caseNumber) {
   });
 
   Swal.fire({
+    position: 'top',
+    customClass: {
+      container: 'slts-mobile-search-container',
+      popup: 'slts-mobile-search-popup rounded-2xl shadow-xl'
+    },
     title: `
-      <div class="flex items-center justify-between w-full pr-1 text-gray-900 font-bold text-base">
+      <div class="flex items-center justify-between w-full pr-0.5 text-gray-900 font-bold text-sm">
         <!-- ปุ่มย้อนกลับตามข้อ 1 -->
-        <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ">
+        <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ">
           <i class="fa-solid fa-arrow-left"></i>
         </button>
         <div class="flex items-center gap-1.5 truncate px-2">
-          <i class="fa-solid fa-layer-group text-blue-600"></i>
+          <i class="fa-solid fa-layer-group text-blue-600 text-xs"></i>
           <span class="truncate">รายการย่อย: ${caseNumber}</span>
         </div>
         <!-- ปุ่มกากบาท (ถ้ามีหน้าก่อนหน้าให้ย้อนกลับ ถ้าไม่มีให้ปิด) ตามข้อ 1 -->
-        <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ/ปิด">
+        <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ/ปิด">
           <i class="fa-solid fa-xmark text-sm"></i>
         </button>
       </div>
     `,
     html: `
-      <div class="text-left text-xs text-gray-500 mb-2.5">
+      <div class="text-left text-xs text-gray-500 mb-2">
         <span>พบรายการประวัติทั้งหมด <b>${records.length}</b> ครั้ง</span>
       </div>
-      <div class="max-h-[60vh] overflow-y-auto space-y-3 pr-0.5">
+      <div class="max-h-[68vh] max-h-[68dvh] overflow-y-auto space-y-2.5 pr-0.5">
         ${cardsHtml}
       </div>
     `,
-    width: '95%',
+    width: '96%',
     showCloseButton: false,
     showConfirmButton: false,
     allowOutsideClick: false
