@@ -1398,6 +1398,15 @@ table.dataTable tbody td {
   }
 }
 
+/* ซ่อนแถบสีฟ้า "กำลังอัพโหลดเบื้องหลัง" ที่มุมขวาล่างบนหน้าจอมือถือ (< 768px) ถาวรเพื่อไม่ให้บดบัง */
+@media (max-width: 767px) {
+  #floatingBgQueueWidget {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+}
+
 
 
 

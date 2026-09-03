@@ -243,30 +243,56 @@ async function syncOfflineQueue(isManual = false) {
 // =========================================================================
 const BG_UPLOAD_QUEUE_KEY = 'slts_bg_upload_queue';
 let isBgQueueWorkerRunning = false;
+let bgQueueWorkerStartTime = 0;
 let bgQueueProgressInterval = null;
 let bgQueueModalTimer = null;
+let memoryBgQueue = null;
 window.currentActiveItemProgress = 0;
 window.sessionCompletedTasks = [];
 
 function getBackgroundQueue() {
-  try {
-    return JSON.parse(localStorage.getItem(BG_UPLOAD_QUEUE_KEY) || '[]');
-  } catch (e) {
-    return [];
+  if (memoryBgQueue === null) {
+    try {
+      memoryBgQueue = JSON.parse(localStorage.getItem(BG_UPLOAD_QUEUE_KEY) || '[]');
+    } catch (e) {
+      memoryBgQueue = [];
+    }
   }
+  return memoryBgQueue;
 }
 
 function saveBackgroundQueue(queue) {
+  memoryBgQueue = queue;
   try {
     localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(queue));
   } catch (e) {
-    console.error('[BgQueue] Save error:', e);
+    console.warn('[BgQueue] LocalStorage quota reached, clearing old sheet cache and retrying...');
+    try {
+      localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+      localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+      localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(queue));
+    } catch (e2) {
+      console.warn('[BgQueue] LocalStorage still full, queue safely maintained in application memory:', e2);
+    }
   }
   updateBackgroundQueueUI();
 }
 
 function enqueueBackgroundUpload(taskData) {
   const queue = getBackgroundQueue();
+
+  // ป้องกันการอัปโหลดซ้ำซ้อนของเลขคดีเดียวกันจากการกดรัวหรือบั๊กซ้ำ (Deduplication Check)
+  const isDuplicate = queue.some(item => 
+    item.caseNumber && 
+    taskData.caseNumber && 
+    String(item.caseNumber).trim() === String(taskData.caseNumber).trim() &&
+    (Date.now() - new Date(item.createdAt || 0).getTime()) < 45000
+  );
+  if (isDuplicate) {
+    console.warn('[BgQueue] Suppressed duplicate enqueue for case:', taskData.caseNumber);
+    return null;
+  }
+
   const item = {
     id: 'bg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
     createdAt: new Date().toISOString(),
@@ -343,7 +369,7 @@ function updateBackgroundQueueUI() {
 
   const total = queue.length;
 
-  // 1. Header Badge
+  // 1. Header Badge (Desktop / Top Header)
   if (headerBtn && headerBadge) {
     if (total > 0) {
       headerBtn.classList.remove('hidden');
@@ -355,24 +381,26 @@ function updateBackgroundQueueUI() {
     }
   }
 
-  // 2. Floating Widget
-  if (!widget) return;
-
-  if (total === 0) {
-    widget.classList.add('opacity-0', 'pointer-events-none');
-    setTimeout(() => {
-      if (getBackgroundQueue().length === 0) {
-        widget.classList.add('hidden');
-        widget.classList.remove('opacity-0', 'pointer-events-none');
+  // 2. Floating Widget: ข้อกำหนด: ในหน้าจอความกว้างน้อยกว่า 768 pixel ไม่ต้องแสดงแถบสีฟ้าที่มุมขวาล่าง เพราะมันบดบังให้ปิดไปเลย
+  if (widget) {
+    if (window.innerWidth < 768) {
+      widget.classList.add('hidden', 'pointer-events-none');
+    } else if (total === 0) {
+      widget.classList.add('opacity-0', 'pointer-events-none');
+      setTimeout(() => {
+        if (getBackgroundQueue().length === 0) {
+          widget.classList.add('hidden');
+          widget.classList.remove('opacity-0', 'pointer-events-none');
+        }
+      }, 400);
+    } else {
+      widget.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+      if (floatCount) {
+        floatCount.textContent = total;
       }
-    }, 400);
-    return;
+    }
   }
 
-  widget.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
-  if (floatCount) {
-    floatCount.textContent = total;
-  }
   updateCameraTopBarUI();
 }
 
@@ -634,7 +662,15 @@ function renderBackgroundQueueModalContent() {
 }
 
 async function processBackgroundQueue() {
-  if (isBgQueueWorkerRunning) return;
+  // Watchdog: หาก worker ติดค้างนานเกิน 75 วินาที ให้รีเซ็ต lock เพื่อให้คิวทำงานต่อได้
+  if (isBgQueueWorkerRunning) {
+    if (bgQueueWorkerStartTime && (Date.now() - bgQueueWorkerStartTime > 75000)) {
+      console.warn('[BgQueue] Worker timed out (>75s), auto-resetting lock...');
+      isBgQueueWorkerRunning = false;
+    } else {
+      return;
+    }
+  }
 
   const queue = getBackgroundQueue();
   if (queue.length === 0) {
@@ -650,6 +686,7 @@ async function processBackgroundQueue() {
   }
 
   isBgQueueWorkerRunning = true;
+  bgQueueWorkerStartTime = Date.now();
   updateBackgroundQueueUI();
 
   const currentItem = queue[0];
@@ -669,15 +706,21 @@ async function processBackgroundQueue() {
   }, 300);
 
   const targetUrl = getSanitizedAppsScriptUrl();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    try { controller.abort(); } catch (e) {}
+  }, 60000); // 60s timeout
 
   try {
     const response = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(currentItem.payload),
-      redirect: 'follow'
+      redirect: 'follow',
+      signal: controller.signal
     });
 
+    clearTimeout(timeoutId);
     clearInterval(bgQueueProgressInterval);
     window.currentActiveItemProgress = 100;
 
@@ -687,7 +730,11 @@ async function processBackgroundQueue() {
       resJson = JSON.parse(rawText);
     } catch (parseErr) {
       console.warn('[BgQueue] Non-JSON response:', rawText);
-      throw new Error('การตอบกลับจาก Google Apps Script ไม่ถูกต้อง');
+      if (rawText && (rawText.includes('success') || rawText.includes('drive.google.com') || rawText.includes('เรียบร้อยแล้ว'))) {
+        resJson = { status: 'success' };
+      } else {
+        throw new Error('การตอบกลับจาก Google Apps Script ไม่ถูกต้อง');
+      }
     }
 
     if (resJson && resJson.status === 'error') {
@@ -706,6 +753,7 @@ async function processBackgroundQueue() {
     localStorage.removeItem(CACHE_KEY_SHEET_TIME);
 
   } catch (err) {
+    clearTimeout(timeoutId);
     clearInterval(bgQueueProgressInterval);
     console.error('[BgQueue] Upload error for item:', currentItem.caseNumber, err);
 
@@ -734,10 +782,11 @@ async function processBackgroundQueue() {
         q[0].retryCount = currentItem.retryCount;
         saveBackgroundQueue(q);
       }
-      await new Promise(res => setTimeout(res, 3000));
+      await new Promise(res => setTimeout(res, 2500));
     }
   } finally {
     isBgQueueWorkerRunning = false;
+    bgQueueWorkerStartTime = 0;
     window.currentActiveItemProgress = 0;
     const remainingQueue = getBackgroundQueue();
     if (remainingQueue.length > 0) {
@@ -10208,53 +10257,67 @@ async function startCameraStream() {
   }
 }
 
+let isCaptureInProgress = false;
+
 async function captureAndProcessPhoto() {
-  if (typeof isUserOutsideAssignedProvince === 'function' && isUserOutsideAssignedProvince()) {
-    Swal.fire({
-      icon: 'warning',
-      title: 'แจ้งเตือนพื้นที่รับผิดชอบ',
-      text: 'การเปลี่ยนจังหวัดของคุณไม่ตรงกับพื้นที่จังหวัดที่รับผิดชอบส่งหมาย คุณจะใช้งานได้เพียงการค้นหาข้อมูลหมายเท่านั้น',
-      confirmButtonText: 'ปิด',
-      confirmButtonColor: '#2563eb',
-      allowOutsideClick: false,
-      allowEscapeKey: false
-    }).then(() => {
-      openMobileCaseSearchModal('', true);
-    });
+  if (isCaptureInProgress) {
+    console.warn('[Camera] Capture already in progress, duplicate tap ignored.');
     return;
   }
+  isCaptureInProgress = true;
 
-  if (!isFormValidForCapture()) {
-    Swal.fire({
-      icon: 'warning',
-      title: 'ยังไม่ได้กรอกข้อมูลส่งหมาย',
-      text: 'กรุณากดปุ่ม "ฟอร์มข้อมูล" ด้านบน เพื่อระบุข้อมูลเลขคดีและสถานที่ส่งหมายให้ครบถ้วนก่อนถ่ายภาพ',
-      confirmButtonText: 'เปิดฟอร์มข้อมูล',
-      confirmButtonColor: '#2563eb',
-      showCancelButton: true,
-      cancelButtonText: 'ปิด'
-    }).then((res) => {
-      if (res.isConfirmed) {
-        showMobileSummonsFormModal(true);
-      }
-    });
-    return;
+  const btnCap = elements.btnCapture || document.getElementById('btnCapture');
+  if (btnCap) {
+    btnCap.disabled = true;
+    btnCap.classList.add('pointer-events-none', 'opacity-40');
   }
-
-  if (!elements.videoPreview.videoWidth) {
-    Swal.fire({
-      icon: 'error',
-      title: 'ข้อผิดพลาด',
-      text: 'กล้องยังไม่พร้อมใช้งาน',
-      showCloseButton: true,
-      allowOutsideClick: false
-    });
-    return;
-  }
-
-  showCustomLoading('กำลังสร้างภาพถ่ายพร้อมลายน้ำ...', 'กำลังประมวลผลแผนที่ เข็มทิศ และข้อมูลส่งหมาย');
 
   try {
+    if (typeof isUserOutsideAssignedProvince === 'function' && isUserOutsideAssignedProvince()) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'แจ้งเตือนพื้นที่รับผิดชอบ',
+        text: 'การเปลี่ยนจังหวัดของคุณไม่ตรงกับพื้นที่จังหวัดที่รับผิดชอบส่งหมาย คุณจะใช้งานได้เพียงการค้นหาข้อมูลหมายเท่านั้น',
+        confirmButtonText: 'ปิด',
+        confirmButtonColor: '#2563eb',
+        allowOutsideClick: false,
+        allowEscapeKey: false
+      }).then(() => {
+        openMobileCaseSearchModal('', true);
+      });
+      return;
+    }
+
+    if (!isFormValidForCapture()) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'ยังไม่ได้กรอกข้อมูลส่งหมาย',
+        text: 'กรุณากดปุ่ม "ฟอร์มข้อมูล" ด้านบน เพื่อระบุข้อมูลเลขคดีและสถานที่ส่งหมายให้ครบถ้วนก่อนถ่ายภาพ',
+        confirmButtonText: 'เปิดฟอร์มข้อมูล',
+        confirmButtonColor: '#2563eb',
+        showCancelButton: true,
+        cancelButtonText: 'ปิด'
+      }).then((res) => {
+        if (res.isConfirmed) {
+          showMobileSummonsFormModal(true);
+        }
+      });
+      return;
+    }
+
+    if (!elements.videoPreview.videoWidth) {
+      Swal.fire({
+        icon: 'error',
+        title: 'ข้อผิดพลาด',
+        text: 'กล้องยังไม่พร้อมใช้งาน',
+        showCloseButton: true,
+        allowOutsideClick: false
+      });
+      return;
+    }
+
+    showCustomLoading('กำลังสร้างภาพถ่ายพร้อมลายน้ำ...', 'กำลังประมวลผลแผนที่ เข็มทิศ และข้อมูลส่งหมาย');
+
     const caseNumber = getFormattedCaseNumber();
     const locationText = getFullLocationText();
     const currentHeading = window.compassManager ? window.compassManager.getHeading() : 0;
@@ -10279,11 +10342,7 @@ async function captureAndProcessPhoto() {
     
     hideCustomLoading();
 
-    // 1. นำคำสั่ง triggerDownload ออก เพื่อป้องกันไม่ให้ Google Chrome แสดงแจ้งเตือนดาวน์โหลดไฟล์รบกวนหน้ากล้อง
-    // ข้อมูลและภาพถูกจัดเก็บอย่างปลอดภัยใน Background Queue / Offline Queue / Google Drive & Sheet แล้ว
-    // (เตรียมกล้องให้พร้อมถ่ายภาพต่อเนื่องได้ตลอดเวลา 100%)
-
-    // 2. ปรับลดขนาดรูปภาพให้ <= 1MB
+    // ปรับลดขนาดรูปภาพให้ <= 1MB
     const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
 
     const uploadPayload = {
@@ -10292,26 +10351,26 @@ async function captureAndProcessPhoto() {
       imageBase64: compressedImageBase64
     };
 
-    // 3. จัดการคิวตามสถานะ ออนไลน์ vs ออฟไลน์ (ข้อ 5: ทำงานเบื้องหลังทั้งหมด 100% โดยไม่ต้องมี Pop Up แจ้งเตือน)
+    // จัดการคิวตามสถานะ ออนไลน์ vs ออฟไลน์ (ทำงานเบื้องหลัง 100%)
     if (!navigator.onLine) {
-      // โหมดออฟไลน์: บันทึกเข้า Offline Queue รอซิงค์เมื่อกลับมาออนไลน์
       addToOfflineQueue(uploadPayload);
     } else {
-      // โหมดออนไลน์: เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
-      enqueueBackgroundUpload({
+      const enqueued = enqueueBackgroundUpload({
         caseNumber: caseNumber,
         courtType: payloadData.courtType,
         locationText: locationText,
         fileName: imageFilename,
         payload: uploadPayload
       });
-      processBackgroundQueue();
+      if (enqueued) {
+        processBackgroundQueue();
+      }
     }
 
-    // 4. รีเซ็ตฟอร์มให้พร้อมสำหรับกรอกหมายถัดไปทันที (Instant Form Release)
+    // รีเซ็ตฟอร์มให้พร้อมสำหรับกรอกหมายถัดไปทันที (Instant Form Release)
     resetFormForNextCase();
 
-    // 5. อัปเดตตัวเลขนับจำนวนทำงานเบื้องหลังบนหน้ากล้องทันที (ข้อ 5)
+    // อัปเดตตัวเลขนับจำนวนทำงานเบื้องหลังบนหน้ากล้องทันที
     updateCameraTopBarUI();
 
     // สั่นตอบสนองเบาๆ (Haptic Feedback) ให้ทราบว่าถ่ายภาพสำเร็จ
@@ -10328,6 +10387,15 @@ async function captureAndProcessPhoto() {
     const imageFilename = baseFilename + '.jpg';
     showGasUploadErrorModal(error, uploadPayload, imageFilename, caseNumber);
     resetFormForNextCase();
+  } finally {
+    setTimeout(() => {
+      isCaptureInProgress = false;
+      const b = elements.btnCapture || document.getElementById('btnCapture');
+      if (b) {
+        b.classList.remove('pointer-events-none');
+        updateCaptureButtonState();
+      }
+    }, 800);
   }
 }
 
@@ -10390,14 +10458,16 @@ async function handleFallbackFile(e) {
       addToOfflineQueue(uploadPayload);
     } else {
       // โหมดออนไลน์: เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
-      enqueueBackgroundUpload({
+      const enqueued = enqueueBackgroundUpload({
         caseNumber: caseNumber,
         courtType: payloadData.courtType,
         locationText: locationText,
         fileName: imageFilename,
         payload: uploadPayload
       });
-      processBackgroundQueue();
+      if (enqueued) {
+        processBackgroundQueue();
+      }
     }
 
     // 4. รีเซ็ตฟอร์มสำหรับหมายถัดไปทันที (Instant Form Release)
