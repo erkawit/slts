@@ -412,14 +412,14 @@ window.openBackgroundQueueModal = function() {
         </button>
       </div>
     `,
-    width: '580px',
+    width: window.innerWidth < 640 ? '94%' : '580px',
     showConfirmButton: true,
     confirmButtonText: '<i class="fa-solid fa-xmark mr-1"></i> ปิดหน้าต่าง',
     confirmButtonColor: '#2563eb',
     showCloseButton: true,
     allowOutsideClick: true,
     customClass: {
-      popup: 'rounded-3xl p-5'
+      popup: 'rounded-3xl p-4 sm:p-5 max-w-full'
     },
     didOpen: () => {
       renderBackgroundQueueModalContent();
@@ -1837,12 +1837,20 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
     }
   }
 
-  // บนหน้าจอความกว้างมากกว่า 768 pixel ไม่ต้องแสดงหน้าต่างโหลด ให้ทำงานในเบื้องหลังเท่านั้น
-  const isDesktop = window.innerWidth > 768;
-  const shouldShowLoading = !silent && !isDesktop;
+  // ทั้งหน้าจอ Desktop (> 768px) และ Mobile (<= 768px) ไม่ต้องแสดงหน้าต่าง Pop Up โหลดข้อมูล ให้ทำงานในเบื้องหลังเท่านั้น
+  const isMobile = window.innerWidth <= 768;
+  const shouldShowLoading = false;
 
-  if (shouldShowLoading) {
-    showCustomLoading('กำลังดึงข้อมูลประวัติการส่งหมาย...', 'กำลังเชื่อมต่อ Google Apps Script');
+  // บนหน้าจอมือถือ หากมีการสั่งโหลดข้อมูลสด (forceRefresh) ให้แสดงเป็น Toast เล็กๆ แจ้งสถานะแบบไม่บล็อกหน้าจอ
+  if (isMobile && forceRefresh && !silent) {
+    Swal.fire({
+      toast: true,
+      position: 'top',
+      icon: 'info',
+      title: 'กำลังซิงค์ประวัติหมายในเบื้องหลัง...',
+      timer: 2000,
+      showConfirmButton: false
+    });
   } else if (elements.cacheStatusBadge) {
     elements.cacheStatusBadge.className = 'text-blue-700 font-medium bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200 animate-pulse';
     elements.cacheStatusBadge.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1 text-blue-600"></i>กำลังซิงค์ข้อมูล...`;
@@ -1913,6 +1921,17 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
     const timeStr = new Date().toLocaleTimeString('th-TH');
     updateCacheBadgeUI(false, timeStr);
     renderDataTable(rows);
+
+    if (isMobile && forceRefresh && !silent) {
+      Swal.fire({
+        toast: true,
+        position: 'top',
+        icon: 'success',
+        title: 'อัปเดตประวัติหมายเรียบร้อยแล้ว',
+        timer: 2000,
+        showConfirmButton: false
+      });
+    }
     return;
   }
 
@@ -1926,7 +1945,7 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
 
       const Toast = Swal.mixin({
         toast: true,
-        position: 'top-end',
+        position: isMobile ? 'top' : 'top-end',
         showConfirmButton: false,
         timer: 3500,
         timerProgressBar: true
@@ -1940,32 +1959,15 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
   }
 
   // 4. หากไม่มีแคชเลย และดึงข้อมูลไม่สำเร็จ
-  if (shouldShowLoading) {
-    Swal.fire({
-      icon: 'warning',
-      title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
-      html: `
-        <div class="text-left text-xs space-y-2 text-gray-600 leading-relaxed">
-          <p>เนื่องจาก Google Sheet ถูกตั้งเป็นส่วนตัว (Private) ต้องอาศัย Google Apps Script ในการดึงข้อมูล</p>
-          <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 font-medium">
-            <strong>วิธีแก้ไข:</strong> กรุณาเปิด Apps Script บน Google Sheet > กด <u>Deploy (ทำให้ใช้งานได้)</u> > <u>Manage deployments (จัดการการทำให้ใช้งานได้)</u> > แก้ไขเป็น <strong>"New version (เวอร์ชันใหม่)"</strong>
-          </div>
-        </div>
-      `,
-      confirmButtonText: 'รับทราบ',
-      confirmButtonColor: '#2563eb'
-    });
-  } else {
-    Swal.fire({
-      toast: true,
-      position: 'top-end',
-      icon: 'warning',
-      title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
-      text: 'ระบบจะลองดึงข้อมูลใหม่อีกครั้งในรอบถัดไป',
-      timer: 3000,
-      showConfirmButton: false
-    });
-  }
+  Swal.fire({
+    toast: true,
+    position: isMobile ? 'top' : 'top-end',
+    icon: 'warning',
+    title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
+    text: 'ระบบจะลองดึงข้อมูลใหม่อีกครั้งในรอบถัดไป',
+    timer: 3000,
+    showConfirmButton: false
+  });
 };
 
 function updateCacheBadgeUI(isFromCache, timeStr) {
@@ -8883,55 +8885,74 @@ async function captureAndProcessPhoto() {
       imageBase64: compressedImageBase64
     };
 
-    // 3. ตรวจสอบสถานะการเชื่อมต่ออินเทอร์เน็ต
-    if (!navigator.onLine) {
-      // โหมดออฟไลน์: จัดเก็บเข้า Offline Queue
-      addToOfflineQueue({
-        payload: uploadPayload,
-        fileName: imageFilename,
-        caseNumber: caseNumber
-      });
+    // 3. เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
+    enqueueBackgroundUpload({
+      caseNumber: caseNumber,
+      courtType: payloadData.courtType,
+      locationText: locationText,
+      fileName: imageFilename,
+      payload: uploadPayload
+    });
 
-      Swal.fire({
-        icon: 'info',
-        title: 'บันทึกสำเร็จ (โหมดออฟไลน์)',
-        html: `
-          <div class="text-left text-xs space-y-2 text-gray-700">
-            <p>บันทึกภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงในเครื่องเรียบร้อยแล้ว 📷</p>
-            <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800">
-              <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-600"></i>
-              <b>แจ้งเตือน:</b> เนื่องจากขณะนี้ไม่มีสัญญาณอินเทอร์เน็ต ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์</b> ในเครื่องไว้แล้ว และจะทำการอัปโหลดขึ้น Google Drive & Sheet ให้โดยอัตโนมัติเมื่อท่านเชื่อมต่ออินเทอร์เน็ต
-            </div>
-          </div>
-        `,
-        confirmButtonText: 'ตกลง',
-        confirmButtonColor: '#2563eb',
-        showCloseButton: true,
-        allowOutsideClick: false
-      }).then(() => {
-        resetFormForNextCase();
-      });
-      return;
-    }
+    // 4. รีเซ็ตฟอร์มให้พร้อมสำหรับกรอกหมายถัดไปทันที (Instant Form Release)
+    resetFormForNextCase();
 
-    // อัปโหลดขึ้น Google Drive ทันทีพร้อมบันทึกข้อมูลเข้า Google Sheet (Single Step) พร้อม Progress Bar
-    const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
+    // 5. สั่งเริ่มการทำงานของ Background Worker ในเบื้องหลัง
+    processBackgroundQueue();
 
-    // เคลียร์แคช
-    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
-    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
-
+    // 6. แสดง Pop Up แจ้งว่า "อยู่ในคิวนำขึ้นข้อมูลแล้ว" พร้อม Cooldown 2 วินาที (ปรับขนาดให้เหมาะกับจอมือถือ)
+    let cooldownTimer;
     Swal.fire({
       icon: 'success',
-      title: 'บันทึกสำเร็จ!',
-      html: `<p class="text-gray-700">บันทึกภาพถ่ายและอัปโหลดขึ้น Google Drive เลขคดี <b>${caseNumber}</b> เรียบร้อยแล้ว</p>
-             ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
-      confirmButtonText: 'ตกลง',
+      title: '<div class="text-sm sm:text-base font-bold text-gray-900"><i class="fa-solid fa-list-check text-blue-600 mr-1.5"></i> อยู่ในคิวนำขึ้นข้อมูลแล้ว</div>',
+      html: `
+        <div class="text-left text-xs space-y-2.5 p-1 select-none text-gray-700">
+          <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
+            <div class="flex items-center justify-between font-bold">
+              <span class="text-blue-700 font-mono text-sm"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i> ${caseNumber}</span>
+              <span class="text-gray-600 text-[11px]">${payloadData.courtType}</span>
+            </div>
+            <div class="text-gray-600 text-[11px] truncate">
+              <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i> ${locationText}
+            </div>
+          </div>
+
+          <div class="p-2.5 bg-emerald-50 border-2 border-emerald-300 rounded-xl text-center space-y-0.5">
+            <div class="text-emerald-800 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-circle-check text-emerald-600 text-sm sm:text-base"></i>
+              <span>ท่านสามารถทำรายการต่อไปได้ทันที</span>
+            </div>
+            <p class="text-[10px] sm:text-[11px] text-emerald-700 font-medium">รูปภาพกำลังดำเนินการอัปโหลดในเบื้องหลัง</p>
+          </div>
+
+          <div class="pt-0.5 text-[10px] sm:text-[11px] text-gray-400 flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
+            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalMobileCameraCooldown" class="text-blue-600 font-bold text-xs sm:text-sm">2</b> วินาที</span>
+          </div>
+        </div>
+      `,
+      timer: 2000,
+      timerProgressBar: true,
+      width: window.innerWidth < 640 ? '92%' : '440px',
+      showConfirmButton: true,
+      confirmButtonText: '<i class="fa-solid fa-pen-to-square mr-1"></i> ทำรายการต่อไปทันที',
       confirmButtonColor: '#2563eb',
-      showCloseButton: true,
-      allowOutsideClick: false
-    }).then(() => {
-      resetFormForNextCase();
+      allowOutsideClick: true,
+      customClass: {
+        popup: 'rounded-2xl p-4'
+      },
+      didOpen: () => {
+        const cdEl = document.getElementById('swalMobileCameraCooldown');
+        cooldownTimer = setInterval(() => {
+          if (cdEl && Swal.getTimerLeft()) {
+            const secLeft = Math.ceil(Swal.getTimerLeft() / 1000);
+            cdEl.textContent = secLeft;
+          }
+        }, 200);
+      },
+      willClose: () => {
+        clearInterval(cooldownTimer);
+      }
     });
 
   } catch (error) {
@@ -8998,45 +9019,74 @@ async function handleFallbackFile(e) {
       imageBase64: compressedImageBase64
     };
 
-    if (!navigator.onLine) {
-      addToOfflineQueue({
-        payload: uploadPayload,
-        fileName: imageFilename,
-        caseNumber: caseNumber
-      });
+    // 3. เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
+    enqueueBackgroundUpload({
+      caseNumber: caseNumber,
+      courtType: payloadData.courtType,
+      locationText: locationText,
+      fileName: imageFilename,
+      payload: uploadPayload
+    });
 
-      Swal.fire({
-        icon: 'info',
-        title: 'บันทึกสำเร็จ (โหมดออฟไลน์)',
-        html: `<p class="text-gray-700">บันทึกภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงในเครื่องเรียบร้อยแล้ว</p>
-               <p class="text-xs text-amber-600 font-semibold mt-2"><i class="fa-solid fa-cloud-arrow-up mr-1"></i>ระบบได้เก็บเข้าคิวออฟไลน์ไว้แล้ว และจะทำการอัปโหลดขึ้น Google Drive & Sheet ให้อัตโนมัติเมื่อเชื่อมต่ออินเทอร์เน็ต</p>`,
-        confirmButtonText: 'ตกลง',
-        confirmButtonColor: '#2563eb',
-        showCloseButton: true,
-        allowOutsideClick: false
-      }).then(() => {
-        resetFormForNextCase();
-      });
-      return;
-    }
+    // 4. รีเซ็ตฟอร์มสำหรับหมายถัดไปทันที (Instant Form Release)
+    resetFormForNextCase();
 
-    // อัปโหลดขึ้น Google Drive ทันทีพร้อมบันทึกข้อมูลเข้า Google Sheet (Single Step) พร้อม Progress Bar
-    const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
+    // 5. สั่งเริ่ม Background Worker ในเบื้องหลัง
+    processBackgroundQueue();
 
-    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
-    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
-
+    // 6. แสดง Pop Up แจ้งว่า "อยู่ในคิวนำขึ้นข้อมูลแล้ว" พร้อม Cooldown 2 วินาที (ปรับขนาดให้เหมาะกับจอมือถือ)
+    let fallbackCooldownTimer;
     Swal.fire({
       icon: 'success',
-      title: 'บันทึกสำเร็จ!',
-      html: `<p class="text-gray-700">บันทึกภาพถ่ายและอัปโหลดขึ้น Google Drive เลขคดี <b>${caseNumber}</b> เรียบร้อยแล้ว</p>
-             ${resJson.fileUrl ? `<a href="${resJson.fileUrl}" target="_blank" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">เปิดดูรูปใน Google Drive</a>` : ''}`,
-      confirmButtonText: 'ตกลง',
+      title: '<div class="text-sm sm:text-base font-bold text-gray-900"><i class="fa-solid fa-list-check text-blue-600 mr-1.5"></i> อยู่ในคิวนำขึ้นข้อมูลแล้ว</div>',
+      html: `
+        <div class="text-left text-xs space-y-2.5 p-1 select-none text-gray-700">
+          <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
+            <div class="flex items-center justify-between font-bold">
+              <span class="text-blue-700 font-mono text-sm"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i> ${caseNumber}</span>
+              <span class="text-gray-600 text-[11px]">${payloadData.courtType}</span>
+            </div>
+            <div class="text-gray-600 text-[11px] truncate">
+              <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i> ${locationText}
+            </div>
+          </div>
+
+          <div class="p-2.5 bg-emerald-50 border-2 border-emerald-300 rounded-xl text-center space-y-0.5">
+            <div class="text-emerald-800 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-circle-check text-emerald-600 text-sm sm:text-base"></i>
+              <span>ท่านสามารถทำรายการต่อไปได้ทันที</span>
+            </div>
+            <p class="text-[10px] sm:text-[11px] text-emerald-700 font-medium">รูปภาพกำลังดำเนินการอัปโหลดในเบื้องหลัง</p>
+          </div>
+
+          <div class="pt-0.5 text-[10px] sm:text-[11px] text-gray-400 flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
+            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalMobileFallbackCooldown" class="text-blue-600 font-bold text-xs sm:text-sm">2</b> วินาที</span>
+          </div>
+        </div>
+      `,
+      timer: 2000,
+      timerProgressBar: true,
+      width: window.innerWidth < 640 ? '92%' : '440px',
+      showConfirmButton: true,
+      confirmButtonText: '<i class="fa-solid fa-pen-to-square mr-1"></i> ทำรายการต่อไปทันที',
       confirmButtonColor: '#2563eb',
-      showCloseButton: true,
-      allowOutsideClick: false
-    }).then(() => {
-      resetFormForNextCase();
+      allowOutsideClick: true,
+      customClass: {
+        popup: 'rounded-2xl p-4'
+      },
+      didOpen: () => {
+        const cdEl = document.getElementById('swalMobileFallbackCooldown');
+        fallbackCooldownTimer = setInterval(() => {
+          if (cdEl && Swal.getTimerLeft()) {
+            const secLeft = Math.ceil(Swal.getTimerLeft() / 1000);
+            cdEl.textContent = secLeft;
+          }
+        }, 200);
+      },
+      willClose: () => {
+        clearInterval(fallbackCooldownTimer);
+      }
     });
 
   } catch (err) {
