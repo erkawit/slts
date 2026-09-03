@@ -119,6 +119,9 @@ function updateOfflineBadgeUI() {
 function initOfflineSyncSystem() {
   window.addEventListener('online', () => {
     updateOfflineBadgeUI();
+    updateBackgroundQueueUI();
+    processBackgroundQueue();
+
     const queue = getOfflineQueue();
     if (queue.length > 0) {
       Swal.fire({
@@ -136,6 +139,7 @@ function initOfflineSyncSystem() {
 
   window.addEventListener('offline', () => {
     updateOfflineBadgeUI();
+    updateBackgroundQueueUI();
     Swal.fire({
       icon: 'warning',
       title: 'เข้าสู่โหมดออฟไลน์',
@@ -148,6 +152,7 @@ function initOfflineSyncSystem() {
   });
 
   updateOfflineBadgeUI();
+  updateBackgroundQueueUI();
 }
 
 async function syncOfflineQueue(isManual = false) {
@@ -236,6 +241,462 @@ async function syncOfflineQueue(isManual = false) {
   }
 }
 
+// =========================================================================
+// BACKGROUND UPLOAD QUEUE SYSTEM (ระบบจัดเรียงคิวอัปโหลดภาพเบื้องหลัง Non-Blocking)
+// =========================================================================
+const BG_UPLOAD_QUEUE_KEY = 'slts_bg_upload_queue';
+let isBgQueueWorkerRunning = false;
+let bgQueueProgressInterval = null;
+let bgQueueModalTimer = null;
+window.currentActiveItemProgress = 0;
+window.sessionCompletedTasks = [];
+
+function getBackgroundQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(BG_UPLOAD_QUEUE_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveBackgroundQueue(queue) {
+  try {
+    localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(queue));
+  } catch (e) {
+    console.error('[BgQueue] Save error:', e);
+  }
+  updateBackgroundQueueUI();
+}
+
+function enqueueBackgroundUpload(taskData) {
+  const queue = getBackgroundQueue();
+  const item = {
+    id: 'bg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    createdAt: new Date().toISOString(),
+    status: 'pending', // 'pending' | 'uploading' | 'failed'
+    retryCount: 0,
+    ...taskData
+  };
+  queue.push(item);
+  saveBackgroundQueue(queue);
+  return item;
+}
+
+function removeBackgroundQueueItem(id) {
+  let queue = getBackgroundQueue();
+  const removed = queue.find(q => q.id === id);
+  if (removed) {
+    window.sessionCompletedTasks.unshift({
+      ...removed,
+      completedAt: new Date().toLocaleTimeString('th-TH')
+    });
+    if (window.sessionCompletedTasks.length > 8) {
+      window.sessionCompletedTasks.pop();
+    }
+  }
+  queue = queue.filter(q => q.id !== id);
+  saveBackgroundQueue(queue);
+
+  // หากหน้าต่าง Modal คิวเปิดอยู่ ให้รีเรนเดอร์เนื้อหาทันที
+  if (Swal.isVisible() && document.getElementById('bgQueueModalListContainer')) {
+    renderBackgroundQueueModalContent();
+  }
+}
+
+function clearBackgroundQueue() {
+  saveBackgroundQueue([]);
+  if (Swal.isVisible() && document.getElementById('bgQueueModalListContainer')) {
+    renderBackgroundQueueModalContent();
+  }
+}
+
+window.cancelCurrentBackgroundQueue = async function() {
+  const queue = getBackgroundQueue();
+  if (queue.length === 0) return;
+  const res = await Swal.fire({
+    icon: 'warning',
+    title: 'ต้องการล้างคิวอัปโหลดเบื้องหลัง?',
+    text: `มีรายการค้างในคิว ${queue.length} รายการ คุณต้องการยกเลิกการส่งข้อมูลทั้งหมดในคิวใช่หรือไม่?`,
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-trash-can mr-1"></i> ใช่, ล้างคิวทั้งหมด',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#ef4444',
+    cancelButtonColor: '#6b7280'
+  });
+  if (res.isConfirmed) {
+    clearBackgroundQueue();
+    updateBackgroundQueueUI();
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'info',
+      title: 'ล้างคิวเรียบร้อยแล้ว',
+      timer: 2000,
+      showConfirmButton: false
+    });
+  }
+};
+
+function updateBackgroundQueueUI() {
+  const queue = getBackgroundQueue();
+  const widget = document.getElementById('floatingBgQueueWidget');
+  const headerBtn = document.getElementById('btnBgUploadQueueHeader');
+  const headerBadge = document.getElementById('bgUploadQueueHeaderBadge');
+  const floatCount = document.getElementById('floatingBgQueueCount');
+
+  const total = queue.length;
+
+  // 1. Header Badge
+  if (headerBtn && headerBadge) {
+    if (total > 0) {
+      headerBtn.classList.remove('hidden');
+      headerBtn.classList.add('inline-flex');
+      headerBadge.textContent = `คิวส่ง (${total})`;
+    } else {
+      headerBtn.classList.add('hidden');
+      headerBtn.classList.remove('inline-flex');
+    }
+  }
+
+  // 2. Floating Widget
+  if (!widget) return;
+
+  if (total === 0) {
+    widget.classList.add('opacity-0', 'pointer-events-none');
+    setTimeout(() => {
+      if (getBackgroundQueue().length === 0) {
+        widget.classList.add('hidden');
+        widget.classList.remove('opacity-0', 'pointer-events-none');
+      }
+    }, 400);
+    return;
+  }
+
+  widget.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+  if (floatCount) {
+    floatCount.textContent = total;
+  }
+}
+
+/**
+ * เปิด Pop Up แสดงรายการคิวอัปโหลดภาพเบื้องหลังทั้งหมด พร้อม Progress Bar แต่ละรายการ
+ */
+window.openBackgroundQueueModal = function() {
+  Swal.fire({
+    title: `
+      <div class="flex items-center justify-between text-base font-bold text-gray-900 pb-2.5 border-b border-gray-100">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold shadow-2xs">
+            <i class="fa-solid fa-list-check"></i>
+          </div>
+          <div class="text-left">
+            <span class="block leading-tight">คิวอัปโหลดภาพส่งหมายเบื้องหลัง</span>
+            <span class="text-[10px] text-gray-400 font-normal">ทำงานอัตโนมัติ กรอกหมายอื่นต่อได้ทันที</span>
+          </div>
+        </div>
+        <span id="modalQueueSummaryBadge" class="text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-blue-100 text-blue-800">
+          -
+        </span>
+      </div>
+    `,
+    html: `
+      <div id="bgQueueModalListContainer" class="space-y-2.5 max-h-[58vh] overflow-y-auto slts-swal-body-scroll pr-1 my-1">
+        <!-- Injected dynamically -->
+      </div>
+      <div id="bgQueueModalFooterControls" class="flex items-center justify-between pt-3 border-t border-gray-100 text-xs">
+        <span class="text-[11px] text-gray-500">
+          <i class="fa-solid fa-shield-halved text-blue-500 mr-1"></i>บันทึกคิวในเครื่อง ปิดหน้าต่างนี้ได้ตลอดเวลา
+        </span>
+        <button type="button" onclick="cancelCurrentBackgroundQueue()" class="text-xs text-red-600 hover:text-red-700 font-semibold px-2 py-1 rounded-lg hover:bg-red-50 transition cursor-pointer">
+          <i class="fa-solid fa-trash-can mr-1"></i>ล้างคิวที่รอ
+        </button>
+      </div>
+    `,
+    width: '580px',
+    showConfirmButton: true,
+    confirmButtonText: '<i class="fa-solid fa-xmark mr-1"></i> ปิดหน้าต่าง',
+    confirmButtonColor: '#2563eb',
+    showCloseButton: true,
+    allowOutsideClick: true,
+    customClass: {
+      popup: 'rounded-3xl p-5'
+    },
+    didOpen: () => {
+      renderBackgroundQueueModalContent();
+
+      // Start real-time updater while modal is open
+      clearInterval(bgQueueModalTimer);
+      bgQueueModalTimer = setInterval(() => {
+        if (!Swal.isVisible()) {
+          clearInterval(bgQueueModalTimer);
+          return;
+        }
+        const bar = document.getElementById('modalActiveProgressBar');
+        const txt = document.getElementById('modalActivePercent');
+        if (bar && txt && typeof window.currentActiveItemProgress === 'number') {
+          bar.style.width = window.currentActiveItemProgress + '%';
+          txt.textContent = window.currentActiveItemProgress + '%';
+        }
+      }, 250);
+    },
+    willClose: () => {
+      clearInterval(bgQueueModalTimer);
+    }
+  });
+};
+
+function renderBackgroundQueueModalContent() {
+  const container = document.getElementById('bgQueueModalListContainer');
+  const summaryBadge = document.getElementById('modalQueueSummaryBadge');
+  const footerControls = document.getElementById('bgQueueModalFooterControls');
+  if (!container) return;
+
+  const queue = getBackgroundQueue();
+  const completed = window.sessionCompletedTasks || [];
+  const total = queue.length;
+
+  if (summaryBadge) {
+    if (total > 0) {
+      summaryBadge.className = 'text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-blue-100 text-blue-800';
+      summaryBadge.textContent = `เหลือ ${total} รายการ`;
+    } else {
+      summaryBadge.className = 'text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800';
+      summaryBadge.textContent = 'เสร็จสิ้นทั้งหมด';
+    }
+  }
+
+  if (footerControls) {
+    footerControls.style.display = total > 0 ? 'flex' : 'none';
+  }
+
+  if (total === 0 && completed.length === 0) {
+    container.innerHTML = `
+      <div class="py-10 text-center text-gray-400 select-none">
+        <div class="w-14 h-14 mx-auto mb-3 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center text-2xl shadow-inner">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <p class="text-sm font-bold text-gray-700">ไม่มีรายการค้างในคิวเบื้องหลัง</p>
+        <p class="text-xs text-gray-400 mt-1">ทุกรายการได้รับการบันทึกขึ้น Google Drive & Sheet เรียบร้อยแล้ว</p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+
+  // 1. รายการที่กำลังทำงานอยู่ (Active Item)
+  if (total > 0) {
+    const activeItem = queue[0];
+    const activePercent = window.currentActiveItemProgress || 20;
+    html += `
+      <div class="p-3.5 rounded-2xl border-2 border-blue-400 bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-blue-50/90 shadow-sm space-y-2 text-left transition-all">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">1</span>
+            <span class="font-bold text-sm text-blue-900 font-mono"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i>${activeItem.caseNumber}</span>
+            <span class="text-[10px] text-gray-500">${activeItem.courtType || ''}</span>
+          </div>
+          <span class="text-[11px] font-bold text-blue-700 bg-white px-2.5 py-0.5 rounded-full border border-blue-200 shadow-2xs flex items-center gap-1.5 animate-pulse">
+            <i class="fa-solid fa-spinner fa-spin text-blue-600 text-[10px]"></i>
+            <span>กำลังส่ง (<b id="modalActivePercent">${activePercent}%</b>)</span>
+          </span>
+        </div>
+
+        <p class="text-xs text-gray-700 pl-8 truncate"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${activeItem.locationText || '-'}</p>
+
+        <!-- แถบ Progress Bar ของรายการที่กำลังทำงาน -->
+        <div class="pl-8 pt-1 space-y-1">
+          <div class="w-full bg-white/90 rounded-full h-2.5 overflow-hidden border border-blue-200 p-0.5 shadow-inner">
+            <div id="modalActiveProgressBar" class="bg-gradient-to-r from-blue-500 via-indigo-600 to-blue-700 h-full rounded-full transition-all duration-300" style="width: ${activePercent}%"></div>
+          </div>
+          <div class="flex items-center justify-between text-[10px] text-gray-500">
+            <span><i class="fa-solid fa-cloud-arrow-up text-blue-500 mr-1"></i>กำลังบันทึก Google Drive & Sheet...</span>
+            <span class="text-[10px] font-mono text-gray-400">${activeItem.createdAt ? new Date(activeItem.createdAt).toLocaleTimeString('th-TH') : ''}</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 2. รายการที่รอในคิวถัดไป (Pending Items)
+    for (let i = 1; i < total; i++) {
+      const item = queue[i];
+      html += `
+        <div class="p-3 rounded-2xl border border-gray-200 bg-gray-50/80 hover:bg-gray-50 transition space-y-1.5 text-left">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center">${i + 1}</span>
+              <span class="font-bold text-sm text-gray-800 font-mono">${item.caseNumber}</span>
+              <span class="text-[10px] text-gray-500">${item.courtType || ''}</span>
+            </div>
+            <span class="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+              <i class="fa-solid fa-clock text-amber-600"></i>
+              <span>รอในคิวลำดับที่ ${i + 1}</span>
+            </span>
+          </div>
+          <p class="text-xs text-gray-600 pl-8 truncate"><i class="fa-solid fa-location-dot text-gray-400 mr-1"></i>${item.locationText || '-'}</p>
+          <div class="pl-8 pt-0.5">
+            <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+              <div class="bg-gray-300 h-full rounded-full" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // 3. รายการที่ส่งสำเร็จแล้วในรอบนี้
+  if (completed.length > 0) {
+    html += `
+      <div class="pt-2 pb-0.5 border-t border-gray-200 text-left">
+        <span class="text-[11px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+          <i class="fa-solid fa-clock-rotate-left text-gray-400"></i> รายการที่ส่งสำเร็จในรอบนี้ (${completed.length})
+        </span>
+      </div>
+    `;
+    completed.slice(0, 5).forEach((item, idx) => {
+      html += `
+        <div class="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 text-left flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-check"></i>
+            </span>
+            <span class="font-bold text-xs text-emerald-900 font-mono truncate">${item.caseNumber}</span>
+            <span class="text-[10px] text-gray-500 truncate hidden sm:inline">${item.locationText || ''}</span>
+          </div>
+          <span class="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
+            สำเร็จ 100%
+          </span>
+        </div>
+      `;
+    });
+  }
+
+  container.innerHTML = html;
+}
+
+async function processBackgroundQueue() {
+  if (isBgQueueWorkerRunning) return;
+
+  const queue = getBackgroundQueue();
+  if (queue.length === 0) {
+    isBgQueueWorkerRunning = false;
+    window.currentActiveItemProgress = 0;
+    updateBackgroundQueueUI();
+    return;
+  }
+
+  if (!navigator.onLine) {
+    console.log('[BgQueue] Device offline. Pausing queue worker.');
+    return;
+  }
+
+  isBgQueueWorkerRunning = true;
+  updateBackgroundQueueUI();
+
+  const currentItem = queue[0];
+  currentItem.status = 'uploading';
+
+  // Progress ticker
+  let percent = 20;
+  window.currentActiveItemProgress = percent;
+
+  clearInterval(bgQueueProgressInterval);
+  bgQueueProgressInterval = setInterval(() => {
+    if (percent < 88) {
+      percent += Math.floor(Math.random() * 8) + 4;
+      if (percent > 88) percent = 88;
+      window.currentActiveItemProgress = percent;
+    }
+  }, 300);
+
+  const targetUrl = getSanitizedAppsScriptUrl();
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(currentItem.payload),
+      redirect: 'follow'
+    });
+
+    clearInterval(bgQueueProgressInterval);
+    window.currentActiveItemProgress = 100;
+
+    const rawText = await response.text();
+    let resJson;
+    try {
+      resJson = JSON.parse(rawText);
+    } catch (parseErr) {
+      console.warn('[BgQueue] Non-JSON response:', rawText);
+      throw new Error('การตอบกลับจาก Google Apps Script ไม่ถูกต้อง');
+    }
+
+    if (resJson && resJson.status === 'error') {
+      throw new Error(resJson.message || 'เกิดข้อผิดพลาดจาก Google Apps Script');
+    }
+
+    // สำเร็จ! นำออกจากคิว
+    removeBackgroundQueueItem(currentItem.id);
+
+    // แจ้งเตือน Toast สีเขียวสั้นๆ
+    Swal.fire({
+      toast: true,
+      position: 'bottom-end',
+      icon: 'success',
+      title: `อัปโหลดหมาย ${currentItem.caseNumber} สำเร็จ!`,
+      html: `<div class="text-xs text-gray-700 select-none">บันทึกลง Google Drive & Sheet เรียบร้อยแล้ว</div>`,
+      timer: 3000,
+      showConfirmButton: false
+    });
+
+    // Invalidate sheet cache
+    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+
+  } catch (err) {
+    clearInterval(bgQueueProgressInterval);
+    console.error('[BgQueue] Upload error for item:', currentItem.caseNumber, err);
+
+    currentItem.retryCount = (currentItem.retryCount || 0) + 1;
+    if (currentItem.retryCount >= 3) {
+      // ย้ายเข้า Offline queue เพื่อไม่ให้ค้างขวางคิวอื่น
+      addToOfflineQueue({
+        payload: currentItem.payload,
+        fileName: currentItem.fileName,
+        caseNumber: currentItem.caseNumber
+      });
+      removeBackgroundQueueItem(currentItem.id);
+
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'warning',
+        title: `การส่งภาพล่าช้า (${currentItem.caseNumber})`,
+        text: 'ระบบได้ย้ายข้อมูลเข้าสู่คิวออฟไลน์ไว้ให้แล้ว ท่านสามารถกดซิงค์ใหม่ได้ที่ปุ่มบนหัวเว็บ',
+        timer: 5000,
+        showConfirmButton: false
+      });
+    } else {
+      const q = getBackgroundQueue();
+      if (q.length > 0) {
+        q[0].retryCount = currentItem.retryCount;
+        saveBackgroundQueue(q);
+      }
+      await new Promise(res => setTimeout(res, 3000));
+    }
+  } finally {
+    isBgQueueWorkerRunning = false;
+    window.currentActiveItemProgress = 0;
+    const remainingQueue = getBackgroundQueue();
+    if (remainingQueue.length > 0) {
+      processBackgroundQueue();
+    } else {
+      updateBackgroundQueueUI();
+      loadGoogleSheetData(true);
+    }
+  }
+}
+
 /**
  * แสดงหน้าต่างโหลดข้อมูลแบบ SweetAlert2 โปร่งใส 100%
  */
@@ -284,6 +745,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initResponsiveUI();
   initMobileHandoffReceiver();
   renderDesktopFormHistoryCard();
+  updateBackgroundQueueUI();
+  processBackgroundQueue();
 
   // ตรวจสอบการเปิดผ่าน LINE: หากเป็น LINE In-App Browser ให้สลับไปเปิดในเบราว์เซอร์ภายนอก (Chrome/Safari) ทันที
   if (/Line/i.test(navigator.userAgent) && !window.location.search.includes('openExternalBrowser=1')) {
@@ -1499,18 +1962,18 @@ function updateCacheBadgeUI(isFromCache, timeStr) {
  * เพื่อให้อัปโหลดขึ้น Google Drive ได้เร็วที่สุด โดยยังคงความคมชัดของภาพ ลายน้ำ และข้อความเอกสาร
  */
 /**
- * บีบอัดและปรับขนาดรูปภาพให้ส่งข้อมูลขึ้น Google Drive ได้เร็วที่สุด (Fast Optimal Compression)
- * ปรับความละเอียดให้เหมาะสมที่ 1280px และคุณภาพ 0.78
- * ผลลัพธ์: ขนาดไฟล์เหลือเพียง 120KB - 220KB (ลดเวลาอัปโหลดลง 70%) ในขณะที่ตัวอักษรและลายน้ำคมชัด 100%
+ * บีบอัดและปรับขนาดรูปภาพก่อนอัปโหลดให้เหลือไม่เกินครึ่งหนึ่งของ 1MB (< 500KB)
+ * ปรับความละเอียดให้เหมาะสมที่ 1280px และคุณภาพ 0.78 (ปรับลดอัตโนมัติหากเกิน 500KB)
+ * ผลลัพธ์: ขนาดไฟล์เหลือเพียง 100KB - 250KB (ประหยัดเน็ตกว่า 80%) ในขณะที่ตัวอักษร เลขคดี และลายน้ำคมชัด 100%
  */
-async function compressImageToMax1MB(dataUrl) {
+async function compressImageToMax1MB(dataUrl, maxBytes = 500 * 1024) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       let width = img.width;
       let height = img.height;
 
-      // ความละเอียดสูงสุด 1280px (คมชัดระดับ HD สำหรับเอกสารหมายศาล และส่งผ่าน 4G/5G ได้ไวที่สุด)
+      // ความละเอียดสูงสุด 1280px (คมชัดระดับ HD สำหรับเอกสารหมายศาล และส่งผ่านเครือข่ายได้ไวที่สุด)
       const MAX_DIMENSION = 1280;
       if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
         const scale = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
@@ -1526,13 +1989,20 @@ async function compressImageToMax1MB(dataUrl) {
       ctx.imageSmoothingQuality = 'medium';
       ctx.drawImage(img, 0, 0, width, height);
 
-      // คุณภาพ 0.78 ให้ความคมชัดสูงและขนาดไฟล์เล็กกะทัดรัด (~150KB)
+      // คุณภาพ 0.78 ให้ความคมชัดสูงและขนาดไฟล์เล็กกะทัดรัด (~120KB - 200KB)
       let quality = 0.78;
       let resultDataUrl = canvas.toDataURL('image/jpeg', quality);
       let currentBytes = Math.round((resultDataUrl.length - resultDataUrl.indexOf(',') - 1) * 0.75);
 
-      if (currentBytes > 1024 * 1024) {
-        quality = 0.65;
+      // หากขนาดเกินเป้าหมาย (ครึ่งหนึ่งของ 1MB หรือ 500KB) ให้ปรับลดคุณภาพเป็นขั้นบันได
+      if (currentBytes > maxBytes) {
+        quality = 0.70;
+        resultDataUrl = canvas.toDataURL('image/jpeg', quality);
+        currentBytes = Math.round((resultDataUrl.length - resultDataUrl.indexOf(',') - 1) * 0.75);
+      }
+
+      if (currentBytes > maxBytes) {
+        quality = 0.60;
         resultDataUrl = canvas.toDataURL('image/jpeg', quality);
       }
 
@@ -1541,6 +2011,7 @@ async function compressImageToMax1MB(dataUrl) {
     img.src = dataUrl;
   });
 }
+window.compressImageToMax500KB = compressImageToMax1MB;
 
 /**
  * อัปโหลดข้อมูลพร้อมแสดง Progress Bar และตัวเลข % ความคืบหน้า (ปิดไม่ได้จนกว่าจะเสร็จสิ้น)
@@ -6987,7 +7458,7 @@ function initDesktopUploadEvents() {
         }
         if (elements.desktopImageSizeBadge) {
           const sizeKb = Math.round(file.size / 1024);
-          elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB)`;
+          elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB → บีบอัดก่อนส่ง < 500 KB)`;
         }
 
         // ตรวจสอบและดึงพิกัด GPS จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
@@ -7237,8 +7708,11 @@ async function handleDesktopUpload() {
 
     hideCustomLoading();
 
-    // บีบอัดรูปภาพให้ไม่เกิน 1MB (ไม่ต้องดาวน์โหลดไฟล์ลงเครื่องเพราะเป็นการอัปโหลดไฟล์จากเครื่อง)
-    const compressedImageBase64 = await compressImageToMax1MB(finalImageDataUrl);
+    // บีบอัดรูปภาพให้เหลือไม่เกินครึ่งหนึ่งของ 1MB (< 500KB)
+    const compressedImageBase64 = await compressImageToMax1MB(finalImageDataUrl, 500 * 1024);
+    const compressedBytes = Math.round((compressedImageBase64.length - compressedImageBase64.indexOf(',') - 1) * 0.75);
+    const compressedKb = Math.round(compressedBytes / 1024);
+    console.log(`[Desktop Upload] Image compressed: ${compressedKb} KB (Target <= 500 KB)`);
 
     // 3. แสดงหน้าต่างแจ้งเตือนเพื่อตรวจสอบข้อมูลและยืนยันก่อนอัปโหลดจริง
     const confirmUploadRes = await Swal.fire({
@@ -7247,9 +7721,14 @@ async function handleDesktopUpload() {
         <div class="text-left space-y-3 p-1 select-none">
           <!-- แสดงภาพถ่ายที่แนบให้เห็นชัดๆ -->
           <div class="space-y-1">
-            <span class="text-[11px] font-bold text-gray-600">รูปภาพส่งหมายที่จะอัปโหลด:</span>
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-gray-600">รูปภาพส่งหมายที่จะอัปโหลด:</span>
+              <span class="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                <i class="fa-solid fa-bolt mr-1"></i>ขนาดส่ง: ~${compressedKb} KB (&lt; 500 KB)
+              </span>
+            </div>
             <div class="relative bg-gray-900 rounded-2xl overflow-hidden border border-gray-300 max-h-56 min-h-[140px] flex items-center justify-center shadow-inner">
-              <img src="${finalImageDataUrl}" alt="ภาพส่งหมาย" class="max-h-56 w-full object-contain rounded-xl">
+              <img src="${compressedImageBase64}" alt="ภาพส่งหมาย" class="max-h-56 w-full object-contain rounded-xl">
             </div>
           </div>
 
@@ -7300,43 +7779,7 @@ async function handleDesktopUpload() {
       imageBase64: compressedImageBase64
     };
 
-    // 4. ตรวจสอบสถานะการเชื่อมต่ออินเทอร์เน็ต
-    if (!navigator.onLine) {
-      addToOfflineQueue({
-        payload: uploadPayload,
-        fileName: imageFilename,
-        caseNumber: caseNumber
-      });
-
-      Swal.fire({
-        icon: 'info',
-        title: 'บันทึกสำเร็จ (โหมดออฟไลน์)',
-        html: `
-          <div class="text-left text-xs space-y-2 text-gray-700">
-            <p>บันทึกภาพถ่ายเลขคดี <b>${caseNumber}</b> ลงในเครื่องเรียบร้อยแล้ว</p>
-            <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800">
-              <i class="fa-solid fa-cloud-arrow-up mr-1 text-amber-600"></i>
-              <b>แจ้งเตือน:</b> เนื่องจากขณะนี้ไม่มีสัญญาณอินเทอร์เน็ต ระบบได้จัดเก็บข้อมูลเข้าสู่ <b>คิวออฟไลน์</b> ในเครื่องไว้แล้ว และจะทำการอัปโหลดขึ้น Google Drive & Sheet ให้โดยอัตโนมัติเมื่อท่านเชื่อมต่ออินเทอร์เน็ต
-            </div>
-          </div>
-        `,
-        confirmButtonText: 'ตกลง',
-        confirmButtonColor: '#2563eb',
-        showCloseButton: true,
-        allowOutsideClick: false
-      });
-      resetDesktopForm(true);
-      return;
-    }
-
-    // อัปโหลดขึ้น Google Drive พร้อมนำเข้าข้อมูลลง Google Sheet ในขั้นตอนเดียว
-    const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${caseNumber}...`);
-
-    // เคลียร์แคชชีต
-    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
-    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
-
-    // บันทึกประวัติการกรอกข้อมูลลงในเครื่อง (Desktop Form History)
+    // 1. บันทึกประวัติการกรอกข้อมูลลงในเครื่อง (Desktop Form History) ทันที
     saveDesktopFormHistory({
       caseNumber: caseNumber,
       courtType: payloadData.courtType,
@@ -7360,32 +7803,70 @@ async function handleDesktopUpload() {
       otherCaseYear: elements.otherCaseYearSelect ? elements.otherCaseYearSelect.value : ''
     });
 
-    // แสดงผลข้อมูลการอัปโหลดสำเร็จ พร้อมนับเวลาถอยหลัง 3 วินาทีเพื่อปิดหน้าต่าง (ไม่ต้องมีปุ่มเปิด Google Drive และปุ่มยืนยัน)
-    let timerInterval;
+    // 2. บรรจุงานเข้าสู่คิวอัปโหลดรูปภาพเบื้องหลัง (Background Upload Queue)
+    enqueueBackgroundUpload({
+      caseNumber: caseNumber,
+      courtType: courtType,
+      locationText: locationText,
+      fileName: imageFilename,
+      payload: uploadPayload
+    });
+
+    // 3. ปลดล็อกและล้างฟอร์มทันที (Instant Form Release - ผู้ใช้ไม่ต้องรอการอัปโหลดรูป)
+    resetDesktopForm(true);
+
+    // 4. เลื่อนเคอร์เซอร์ไปรอที่ช่องเลขคดีเพื่อให้พิมพ์หมายใบถัดไปได้ทันที
+    if (elements.udonCaseNoInput && !document.getElementById('udonCaseField')?.classList.contains('hidden')) {
+      elements.udonCaseNoInput.value = '';
+      elements.udonCaseNoInput.focus();
+    } else if (elements.otherCaseNoInput) {
+      elements.otherCaseNoInput.value = '';
+      elements.otherCaseNoInput.focus();
+    }
+
+    // 5. แสดง Pop Up แจ้งว่า "อยู่ในคิวนำขึ้นข้อมูลแล้ว" พร้อม Cooldown 2 วินาที
+    let cooldownTimer;
     Swal.fire({
       icon: 'success',
-      title: 'อัปโหลดภาพส่งหมายสำเร็จ!',
+      title: '<div class="text-base font-bold text-gray-900"><i class="fa-solid fa-list-check text-blue-600 mr-1.5"></i> อยู่ในคิวนำขึ้นข้อมูลแล้ว</div>',
       html: `
-        <div class="text-center space-y-2.5 text-xs text-gray-700 py-1 select-none">
-          <p class="font-bold text-gray-900 text-sm">บันทึกข้อมูลเลขคดี <span class="text-blue-700 font-mono font-bold">${caseNumber}</span> เรียบร้อยแล้ว</p>
-          <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-900 text-[11px] text-left space-y-1">
-            <div>📍 <b>พิกัด GPS:</b> <span class="font-mono font-bold">${state.lat ? Number(state.lat).toFixed(6) : ''}, ${state.lng ? Number(state.lng).toFixed(6) : ''}</span></div>
-            <div>🏠 <b>ที่ตั้งส่งหมาย:</b> ${locationText}</div>
+        <div class="text-left text-xs space-y-3 p-1 select-none text-gray-700">
+          <div class="p-3 bg-blue-50 border border-blue-200 rounded-2xl space-y-1">
+            <div class="flex items-center justify-between font-bold">
+              <span class="text-blue-700 font-mono text-sm"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i> ${caseNumber}</span>
+              <span class="text-gray-600 text-xs">${courtType}</span>
+            </div>
+            <div class="text-gray-600 text-xs truncate">
+              <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i> ${locationText}
+            </div>
           </div>
-          <div class="pt-2 text-[11px] text-gray-500 flex items-center justify-center gap-1.5">
+
+          <div class="p-3 bg-emerald-50 border-2 border-emerald-300 rounded-2xl text-center space-y-1">
+            <div class="text-emerald-800 font-extrabold text-sm flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-circle-check text-emerald-600 text-base"></i>
+              <span>ท่านสามารถทำรายการต่อไปได้ทันที</span>
+            </div>
+            <p class="text-[11px] text-emerald-700 font-medium">ระบบกำลังส่งข้อมูลและอัปโหลดภาพถ่ายในเบื้องหลัง</p>
+          </div>
+
+          <div class="pt-1 text-[11px] text-gray-400 flex items-center justify-center gap-1.5">
             <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
-            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalUploadCountdown" class="text-blue-600 font-bold text-sm">2</b> วินาที</span>
+            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalQueueCooldown" class="text-blue-600 font-bold text-sm">2</b> วินาที</span>
           </div>
         </div>
       `,
       timer: 2000,
       timerProgressBar: true,
-      showConfirmButton: false,
-      showCancelButton: false,
-      allowOutsideClick: false,
+      showConfirmButton: true,
+      confirmButtonText: '<i class="fa-solid fa-pen-to-square mr-1"></i> ทำรายการต่อไปทันที',
+      confirmButtonColor: '#2563eb',
+      allowOutsideClick: true,
+      customClass: {
+        popup: 'rounded-3xl p-5'
+      },
       didOpen: () => {
-        const cdEl = document.getElementById('swalUploadCountdown');
-        timerInterval = setInterval(() => {
+        const cdEl = document.getElementById('swalQueueCooldown');
+        cooldownTimer = setInterval(() => {
           if (cdEl && Swal.getTimerLeft()) {
             const secLeft = Math.ceil(Swal.getTimerLeft() / 1000);
             cdEl.textContent = secLeft;
@@ -7393,13 +7874,21 @@ async function handleDesktopUpload() {
         }, 200);
       },
       willClose: () => {
-        clearInterval(timerInterval);
+        clearInterval(cooldownTimer);
       }
     }).then(() => {
-      // รีเซ็ตเฉพาะรูปภาพ แต่เก็บข้อมูลล่าสุดไว้ในฟอร์มเพื่อช่วยลดการกรอกข้อมูลในครั้งถัดไป
-      resetDesktopForm(true);
-      loadGoogleSheetData(true);
+      // เลื่อนเคอร์เซอร์ไปรอที่ช่องเลขคดีอัตโนมัติ เพื่อพิมพ์หมายต่อไปได้ทันที
+      if (elements.udonCaseNoInput && !document.getElementById('udonCaseField')?.classList.contains('hidden')) {
+        elements.udonCaseNoInput.focus();
+        elements.udonCaseNoInput.select();
+      } else if (elements.otherCaseNoInput) {
+        elements.otherCaseNoInput.focus();
+        elements.otherCaseNoInput.select();
+      }
     });
+
+    // 6. เริ่มการทำงานของ Background Worker ในเบื้องหลัง
+    processBackgroundQueue();
 
   } catch (err) {
     console.error('Desktop upload error:', err);

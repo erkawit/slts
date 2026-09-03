@@ -4,6 +4,7 @@
   "description": "**สำหรับเจ้าพนักงานศาลจังหวัดอุดรธานี**",
   "main": "index.js",
   "scripts": {
+    "build": "node build-public.js",
     "sync-public": "node build-public.js",
     "cap:sync": "node build-public.js && npx cap sync",
     "cap:open": "node build-public.js && npx cap sync && npx cap open android",
