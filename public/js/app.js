@@ -1259,11 +1259,6 @@ window.handleGlobalClick = function(e) {
 
 window.openLoginModal = function(isForced = false) {
   if (!elements.loginModal) return;
-  if (typeof window.freezeCameraStream === 'function') {
-    if (state.cameraStream && state.cameraStream.active) {
-      window.freezeCameraStream();
-    }
-  }
   elements.loginModal.classList.remove('hidden');
   elements.loginModal.classList.add('flex');
   const closeBtn = elements.loginModal.querySelector('button[onclick="closeLoginModal()"]');
@@ -1285,15 +1280,9 @@ window.closeLoginModal = function() {
 
   if (window.innerWidth < 768) {
     const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
-    if (isLoggedIn) {
-      if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
-        openCameraModal().catch(e => console.warn(e));
-      } else if (typeof window.resumeCameraStream === 'function') {
-        window.resumeCameraStream();
-      }
+    if (isLoggedIn && elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
+      openCameraModal().catch(e => console.warn(e));
     }
-  } else if (typeof window.resumeCameraStream === 'function') {
-    window.resumeCameraStream();
   }
 };
 
@@ -1321,8 +1310,8 @@ function handleLogin(e) {
     initMobileHandoffReceiver();
 
     if (deviceMode === 'mobile' || window.innerWidth < 768) {
-      if (typeof window.resumeCameraStream === 'function') {
-        window.resumeCameraStream();
+      if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
+        openCameraModal().catch(e => console.warn(e));
       }
     }
 
@@ -7189,7 +7178,7 @@ function initLocationService() {
     // บนมือถือ (<= 768px): ดึงพิกัดและเริ่ม interval ตรวจจับพิกัดสด
     // บน Desktop (> 768px): ไม่รัน interval อัปเดตพิกัดอัตโนมัติ เพื่อให้ผู้ใช้พิมพ์แก้ไขหรือรับพิกัดจากรูปภาพได้โดยไม่ถูกเขียนทับ
     if (window.innerWidth <= 768) {
-      fetchCurrentLocation(false);
+      fetchCurrentLocation(true);
       startLocationInterval();
     }
   }
@@ -7201,17 +7190,32 @@ function startLocationInterval() {
   if (state.locationIntervalId) {
     clearInterval(state.locationIntervalId);
   }
-  // รันเฉพาะบนอุปกรณ์หน้าจอขนาดเล็ก (Mobile <= 768px) เท่านั้น - ตรวจสอบพิกัดเบื้องหลังทุก 3 วินาที
+  // รันเฉพาะบนอุปกรณ์หน้าจอขนาดเล็ก (Mobile <= 768px) เท่านั้น - ตรวจสอบพิกัดเบื้องหลังทุก 5 วินาทีเพื่อประหยัดแบตเตอรี่
   if (window.innerWidth <= 768) {
     state.locationIntervalId = setInterval(() => {
       fetchCurrentLocation(false);
-    }, 3000);
+    }, 5000);
   }
 }
 
 function fetchCurrentLocation(isManual = false) {
   if (!navigator.geolocation) {
     return;
+  }
+
+  // โหลดค่าพิกัดล่าสุดที่เคยบันทึกไว้ขึ้นมาแสดงผลทันทีก่อน เพื่อให้หน้ากล้องมีพิกัดทันทีตั้งแต่วินาทีแรก
+  if (!state.lat || !state.lng) {
+    try {
+      const cachedLat = localStorage.getItem('slts_last_known_lat');
+      const cachedLng = localStorage.getItem('slts_last_known_lng');
+      if (cachedLat && cachedLng) {
+        state.lat = Number(parseFloat(cachedLat).toFixed(6));
+        state.lng = Number(parseFloat(cachedLng).toFixed(6));
+        if (elements.coordinatesInput && !elements.coordinatesInput.value) {
+          elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+        }
+      }
+    } catch (e) {}
   }
 
   // ป้องกันการยิง Geolocation ซ้อนทับกันกรณีฮาร์ดแวร์ GPS ยังคืนค่าไม่เสร็จ
@@ -7232,6 +7236,11 @@ function fetchCurrentLocation(isManual = false) {
       state.lng = Number(position.coords.longitude.toFixed(6));
       state.accuracy = Math.round(position.coords.accuracy);
       state.lastLocationTime = new Date();
+
+      try {
+        localStorage.setItem('slts_last_known_lat', String(state.lat));
+        localStorage.setItem('slts_last_known_lng', String(state.lng));
+      } catch (e) {}
 
       if (position.coords.heading !== null && !isNaN(position.coords.heading)) {
         if (window.compassManager) {
@@ -7280,7 +7289,7 @@ function fetchCurrentLocation(isManual = false) {
     },
     {
       enableHighAccuracy: true,
-      timeout: 6000,
+      timeout: 10000,
       maximumAge: 2000
     }
   );
@@ -8663,10 +8672,13 @@ function updateCaptureButtonState() {
 window.updateCaptureButtonState = updateCaptureButtonState;
 
 async function openCameraModal() {
-  // เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
-  setCaptureOrientation('landscape');
+  // 1. ดึงพิกัด Latitude, Longitude ทันทีเป็นอันดับต้นที่สุดเสมอเมื่อเข้าสู่โหมดกล้อง
+  if (typeof fetchCurrentLocation === 'function') {
+    fetchCurrentLocation(true);
+  }
 
-  state.isCameraFrozen = false;
+  // 2. เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
+  setCaptureOrientation('landscape');
 
   if (elements.cameraModal) {
     elements.cameraModal.classList.remove('hidden');
@@ -8674,21 +8686,21 @@ async function openCameraModal() {
   }
   updateCaptureButtonState();
 
+  // 3. เริ่มต้นกล้องหรือใช้สตรีมที่ทำงานอยู่แล้ว โดยไม่ตัดสตรีมซ้ำซ้อน
   const isStreamLive = state.cameraStream && state.cameraStream.active && state.cameraStream.getVideoTracks().some(t => t.readyState === 'live');
   if (isStreamLive) {
-    try {
-      state.cameraStream.getVideoTracks().forEach(track => { track.enabled = true; });
-      if (elements.videoPreview) {
-        if (!elements.videoPreview.srcObject) {
-          elements.videoPreview.srcObject = state.cameraStream;
-        }
-        if (elements.videoPreview.paused) {
+    if (elements.videoPreview) {
+      if (!elements.videoPreview.srcObject) {
+        elements.videoPreview.srcObject = state.cameraStream;
+      }
+      if (elements.videoPreview.paused) {
+        try {
           await elements.videoPreview.play();
+        } catch (e) {
+          console.warn('Reusing stream error, restarting camera:', e);
+          await startCameraStream();
         }
       }
-    } catch (e) {
-      console.warn('Reusing stream error, restarting camera:', e);
-      await startCameraStream();
     }
   } else {
     await startCameraStream();
@@ -8696,11 +8708,6 @@ async function openCameraModal() {
 
   startLiveCameraHUD();
   updateCameraTopBarUI();
-
-  // ข้อ 2: เมื่อเข้าสู่โหมดกล้อง ต้องทำการเช็คพิกัดทันทีเป็นอันดับต้นเสมอ
-  if (window.innerWidth < 768 && typeof fetchCurrentLocation === 'function') {
-    fetchCurrentLocation(true);
-  }
 }
 
 function closeCameraModal() {
@@ -8713,50 +8720,94 @@ function closeCameraModal() {
   elements.cameraModal.classList.remove('flex');
 }
 
+/**
+ * ปรับปรุงการวาด Live Camera HUD และเข็มทิศเพื่อลดการกินทรัพยากรเครื่อง (CPU / GPU / Battery):
+ * 1. ข้ามการคำนวณและวาด Canvas ขณะมี Modal หรือ SweetAlert เปิดบังหน้าจอ
+ * 2. วาดเข็มทิศเฉพาะเมื่อองศาทิศเปลี่ยนตั้งแต่ 1 องศาขึ้นไป
+ * 3. อัปเดตข้อความวันที่-เวลาต่อวินาที (1 วินาที) ไม่รันถี่ยิบเกินจำเป็น
+ */
 function startLiveCameraHUD() {
   stopLiveCameraHUD();
   updateLiveMapHUD();
 
+  let lastDrawnHeading = -999;
+  let lastSecondKey = '';
+
   const updateHUD = () => {
     if (!elements.cameraModal || elements.cameraModal.classList.contains('hidden')) return;
 
-    if (elements.liveCompassCanvas && window.compassManager) {
+    // การลดการกินทรัพยากร: หากมี SweetAlert หรือ Login Modal เปิดบังหน้าจอ ให้ข้ามการวาด Canvas และอัปเดต DOM
+    if (document.body.classList.contains('swal2-shown') || (elements.loginModal && !elements.loginModal.classList.contains('hidden'))) {
+      return;
+    }
+
+    const curHeading = window.compassManager ? window.compassManager.getHeading() : 0;
+
+    // วาดเข็มทิศเฉพาะเมื่อองศาทิศเปลี่ยนจริง (>= 1 องศา) เพื่อลดภาระ GPU Canvas Clear/Stroke ซ้ำซ้อน
+    if (elements.liveCompassCanvas && window.compassManager && Math.abs(curHeading - lastDrawnHeading) >= 1) {
+      lastDrawnHeading = curHeading;
       const ctx = elements.liveCompassCanvas.getContext('2d');
       ctx.clearRect(0, 0, 84, 84);
       window.compassManager.drawCompass(ctx, 42, 42, 34);
     }
 
-    const dateStr = WatermarkEngine.formatThaiDateTime(new Date());
-    const latFormatted = state.lat ? `${Math.abs(state.lat).toFixed(4)}°${state.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
-    const lngFormatted = state.lng ? `${Math.abs(state.lng).toFixed(4)}°${state.lng >= 0 ? 'E' : 'W'}` : '102.7882°E';
-    const headingDeg = window.compassManager ? window.compassManager.getHeading() : 0;
-    const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
+    // อัปเดตข้อมูลข้อความ วัน-เวลา และพิกัด
+    const now = new Date();
+    const secondKey = `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`;
+    const headingChanged = Math.abs(curHeading - lastDrawnHeading) >= 1;
 
-    const caseNum = getFormattedCaseNumber();
-    const locText = getFullLocationText();
-    const isReady = isFormValidForCapture();
+    if (secondKey !== lastSecondKey || headingChanged) {
+      lastSecondKey = secondKey;
+      const dateStr = WatermarkEngine.formatThaiDateTime(now);
+      const latFormatted = state.lat ? `${Math.abs(state.lat).toFixed(4)}°${state.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
+      const lngFormatted = state.lng ? `${Math.abs(state.lng).toFixed(4)}°${state.lng >= 0 ? 'E' : 'W'}` : '102.7882°E';
+      const dirText = window.compassManager ? window.compassManager.getDirectionText(curHeading) : 'N';
 
-    if (elements.liveBadgeDate) elements.liveBadgeDate.textContent = `📅  ${dateStr}`;
-    if (elements.liveBadgeCoords) elements.liveBadgeCoords.textContent = `📍  ${latFormatted} ${lngFormatted} ${headingDeg}° ${dirText}`;
-    if (elements.liveBadgeLocation) {
-      elements.liveBadgeLocation.textContent = isReady && locText ? `🏠  ${locText}` : (locText || `🏠  (กด "ฟอร์มข้อมูล" เพื่อระบุสถานที่)`);
+      const caseNum = getFormattedCaseNumber();
+      const locText = getFullLocationText();
+      const isReady = isFormValidForCapture();
+
+      if (elements.liveBadgeDate) elements.liveBadgeDate.textContent = `📅  ${dateStr}`;
+      if (elements.liveBadgeCoords) elements.liveBadgeCoords.textContent = `📍  ${latFormatted} ${lngFormatted} ${curHeading}° ${dirText}`;
+      if (elements.liveBadgeLocation) {
+        elements.liveBadgeLocation.textContent = isReady && locText ? `🏠  ${locText}` : (locText || `🏠  (กด "ฟอร์มข้อมูล" เพื่อระบุสถานที่)`);
+      }
+      if (elements.liveBadgeCase) {
+        elements.liveBadgeCase.textContent = isReady && caseNum ? `⚖️  เลขคดี: ${caseNum}` : `⚖️  เลขคดี: (กด "ฟอร์มข้อมูล")`;
+      }
+
+      updateCaptureButtonState();
     }
-    if (elements.liveBadgeCase) {
-      elements.liveBadgeCase.textContent = isReady && caseNum ? `⚖️  เลขคดี: ${caseNum}` : `⚖️  เลขคดี: (กด "ฟอร์มข้อมูล")`;
-    }
-
-    updateCaptureButtonState();
   };
 
   updateHUD();
-  state.hudIntervalId = setInterval(updateHUD, 200);
+  state.hudIntervalId = setInterval(updateHUD, 250);
 }
 
+let lastMapSnapshotLat = null;
+let lastMapSnapshotLng = null;
+
 async function updateLiveMapHUD() {
-  if (elements.liveMapCanvas && window.mapSnapshotManager && state.lat && state.lng) {
+  if (!elements.liveMapCanvas || !window.mapSnapshotManager || !state.lat || !state.lng) return;
+
+  // ลดการกินทรัพยากร: โหลดแผนที่ย่อเฉพาะเมื่อพิกัดเปลี่ยนไปมากกว่า ~30 เมตร
+  if (lastMapSnapshotLat !== null && lastMapSnapshotLng !== null) {
+    const dLat = Math.abs(state.lat - lastMapSnapshotLat);
+    const dLng = Math.abs(state.lng - lastMapSnapshotLng);
+    if (dLat < 0.0003 && dLng < 0.0003) return;
+  }
+
+  lastMapSnapshotLat = state.lat;
+  lastMapSnapshotLng = state.lng;
+
+  try {
     const ctx = elements.liveMapCanvas.getContext('2d');
     const mapImg = await window.mapSnapshotManager.getMapImage(state.lat, state.lng, 100, 75);
-    ctx.drawImage(mapImg, 0, 0, 100, 75);
+    if (mapImg) {
+      ctx.drawImage(mapImg, 0, 0, 100, 75);
+    }
+  } catch (e) {
+    console.warn('Map HUD render error:', e);
   }
 }
 
@@ -8768,98 +8819,19 @@ function stopLiveCameraHUD() {
 }
 
 /**
- * Freeze โหมดกล้องชั่วคราวเมื่อเปิด Pop Up / SweetAlert เพื่อลดการกินทรัพยากรเครื่อง (CPU / GPU / Battery)
- * ใช้วิธีปิดการส่งภาพจากแทร็กฮาร์ดแวร์เพื่อไม่ให้ติดบั๊ก pause() บน Chromium มือถือ
+ * ยกเลิกการ freeze โหมดกล้องทุกกรณีตามคำสั่ง เพื่อให้กล้องทำงานสดและราบรื่น 100% ตลอดเวลา
+ * ฟังก์ชันต่อไปนี้คงไว้เป็น Safe No-Op เพื่อความเข้ากันได้ของระบบ
  */
 window.freezeCameraStream = function() {
-  state.isCameraFrozen = true;
-  stopLiveCameraHUD();
-  if (state.cameraStream) {
-    try {
-      state.cameraStream.getVideoTracks().forEach(track => {
-        track.enabled = false;
-      });
-    } catch (e) {}
-  }
+  // ยกเลิกการ freeze โหมดกล้องทุกกรณี
 };
 
-/**
- * ปลด Freeze และกลับมาเรนเดอร์กล้องตามปกติเมื่อปิด Pop Up / SweetAlert
- */
-window.resumeCameraStream = async function() {
-  state.isCameraFrozen = false;
-
-  // หากยังมี Modal อื่นๆ หรือ SweetAlert ค้างอยู่ หรือยังไม่ปิด ห้ามปลด Freeze
-  if (document.body.classList.contains('swal2-shown')) return;
-  if (elements.loginModal && !elements.loginModal.classList.contains('hidden')) return;
-
-  if (window.innerWidth < 768) {
-    // หาก cameraModal ถูกซ่อนอยู่ ให้เปิดกลับขึ้นมา
-    if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
-      const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
-      if (isLoggedIn) {
-        await openCameraModal();
-        return;
-      }
-    }
-
-    const isStreamLive = state.cameraStream && state.cameraStream.active && state.cameraStream.getVideoTracks().some(t => t.readyState === 'live');
-    if (isStreamLive) {
-      state.cameraStream.getVideoTracks().forEach(track => {
-        track.enabled = true;
-      });
-      if (elements.videoPreview) {
-        if (!elements.videoPreview.srcObject) {
-          elements.videoPreview.srcObject = state.cameraStream;
-        }
-        if (elements.videoPreview.paused) {
-          try {
-            await elements.videoPreview.play();
-          } catch (pErr) {
-            console.warn('Video preview play retry on resume:', pErr);
-            await startCameraStream();
-          }
-        }
-      }
-    } else {
-      await startCameraStream();
-    }
-
-    startLiveCameraHUD();
-    updateCameraTopBarUI();
-
-    // ข้อ 2: เมื่อกลับมาใช้งานโหมดกล้องทุกครั้ง ต้องทำการเช็คพิกัดทันทีเป็นอันดับต้นเสมอ
-    if (typeof fetchCurrentLocation === 'function') {
-      fetchCurrentLocation(true);
-    }
-  } else {
-    state.isCameraFrozen = false;
+window.resumeCameraStream = function() {
+  // ยกเลิกการ freeze โหมดกล้องทุกกรณี
+  if (typeof fetchCurrentLocation === 'function') {
+    fetchCurrentLocation(true);
   }
 };
-
-// ตรวจสอบการเปิด-ปิด SweetAlert2 บน body อัตโนมัติ เพื่อ Freeze/Resume กล้องแบบครอบคลุมทุกฟังก์ชั่น (ตามข้อ 2)
-if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
-  const swalCameraFreezeObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      if (mutation.attributeName === 'class') {
-        if (document.body.classList.contains('swal2-shown')) {
-          window.freezeCameraStream();
-        } else {
-          setTimeout(() => {
-            window.resumeCameraStream();
-          }, 60);
-        }
-      }
-    }
-  });
-  if (document.body) {
-    swalCameraFreezeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-  } else {
-    document.addEventListener('DOMContentLoaded', () => {
-      swalCameraFreezeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-    });
-  }
-}
 
 /**
  * ตรวจสอบว่าเปิดผ่าน In-App Browser (WebView เช่น LINE, Facebook, IG, ฯลฯ) หรือไม่
@@ -9036,16 +9008,21 @@ window.handleCameraAccessError = function(err) {
 async function startCameraStream() {
   if (state.cameraStream) {
     state.cameraStream.getTracks().forEach(track => track.stop());
+    state.cameraStream = null;
   }
 
-  elements.cameraStatus.textContent = 'กำลังเปิดกล้อง...';
+  if (elements.cameraStatus) {
+    elements.cameraStatus.textContent = 'กำลังเปิดกล้อง...';
+  }
 
   try {
+    const isMobile = window.innerWidth < 768;
     const constraints = {
       video: {
-        facingMode: { ideal: state.facingMode },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+        facingMode: { ideal: state.facingMode || 'environment' },
+        // บนมือถือ (< 768px) ปรับขนาดพรีวิว 1280x720 เพื่อลดการกินทรัพยากรเครื่องและความร้อนลงอย่างมาก
+        width: { ideal: isMobile ? 1280 : 1920, max: 1920 },
+        height: { ideal: isMobile ? 720 : 1080, max: 1080 }
       },
       audio: false
     };
@@ -9056,9 +9033,17 @@ async function startCameraStream() {
 
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     state.cameraStream = stream;
-    elements.videoPreview.srcObject = stream;
-    await elements.videoPreview.play();
-    elements.cameraStatus.textContent = 'พร้อมถ่ายภาพ';
+    if (elements.videoPreview) {
+      elements.videoPreview.srcObject = stream;
+      try {
+        await elements.videoPreview.play();
+      } catch (pErr) {
+        console.warn('Video preview play error:', pErr);
+      }
+    }
+    if (elements.cameraStatus) {
+      elements.cameraStatus.textContent = 'พร้อมถ่ายภาพ';
+    }
   } catch (err) {
     console.error('Camera access error:', err);
     handleCameraAccessError(err);
