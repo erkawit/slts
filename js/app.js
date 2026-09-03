@@ -834,6 +834,9 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
         openLoginModal(true);
       }, 350);
+    } else {
+      // ต่อให้ปิดแอปไปก็ต้องกลับมาเปิดหน้าต่างค้นหาข้อมูลหมาย หากจังหวัดที่เลือกไม่ตรงกับจังหวัดรับผิดชอบ
+      enforceProvinceBoundaryOnStartup();
     }
   } else {
     // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
@@ -1056,12 +1059,18 @@ async function fetchUsersFromGasApi(showNotification = false) {
     if (data && data.status === 'success' && Array.isArray(data.users)) {
       let sheetUsers = data.users.filter(r => (r.username || '').trim() !== '');
 
+      sheetUsers = sheetUsers.map(u => ({
+        ...u,
+        assignedProvince: u.assignedProvince || u['จังหวัดรับผิดชอบ'] || u['จังหวัด'] || 'อุดรธานี'
+      }));
+
       // ตรวจสอบความปลอดภัย: ให้มี admin หลักเสมอ
       if (!sheetUsers.some(u => u.username.toLowerCase() === 'admin')) {
         sheetUsers.unshift({
           username: 'admin',
           password: 'caogikojt02',
           role: 'admin',
+          assignedProvince: 'อุดรธานี',
           name: 'ผู้ดูแลระบบ (Admin)',
           createdAt: '25/08/2569'
         });
@@ -1299,7 +1308,8 @@ function handleLogin(e) {
     state.currentUser = {
       username: matched.username.toLowerCase(),
       name: matched.name || matched.username,
-      role: matched.role
+      role: matched.role,
+      assignedProvince: matched.assignedProvince || 'อุดรธานี'
     };
     localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
     localStorage.setItem('slts_last_auth_action', 'login');
@@ -1313,6 +1323,7 @@ function handleLogin(e) {
       if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
         openCameraModal().catch(e => console.warn(e));
       }
+      enforceProvinceBoundaryOnStartup();
     }
 
     if (state.dataTableInstance) {
@@ -1472,6 +1483,7 @@ function handleCreateUser(e) {
   const fullName = document.getElementById('newFullName').value.trim();
   const password = document.getElementById('newPassword').value.trim();
   const role = document.getElementById('newRole').value;
+  const assignedProvince = document.getElementById('newAssignedProvince')?.value.trim() || 'อุดรธานี';
 
   if (!username || !password) return;
 
@@ -1487,6 +1499,7 @@ function handleCreateUser(e) {
     username: username,
     password: password,
     role: role,
+    assignedProvince: assignedProvince,
     name: fullName || (role === 'admin' ? `Admin (${username})` : `เจ้าหน้าที่ (${username})`),
     createdAt: dateNow
   };
@@ -1494,6 +1507,9 @@ function handleCreateUser(e) {
   users.push(newUser);
   localStorage.setItem('slts_users', JSON.stringify(users));
   document.getElementById('addUserForm').reset();
+  if (document.getElementById('newAssignedProvince')) {
+    document.getElementById('newAssignedProvince').value = 'อุดรธานี';
+  }
   renderUserList();
 
   // ซิงค์ผู้ใช้ใหม่ไปยัง Google Sheet (Tab: users)
@@ -1502,7 +1518,7 @@ function handleCreateUser(e) {
   Swal.fire({
     icon: 'success',
     title: 'เพิ่มผู้ใช้งานสำเร็จ',
-    text: `สร้างผู้ใช้ "${username}" และบันทึกลง Google Sheet เรียบร้อยแล้ว`,
+    text: `สร้างผู้ใช้ "${username}" (จ.${assignedProvince}) เรียบร้อยแล้ว`,
     timer: 1800,
     showConfirmButton: false
   });
@@ -1523,6 +1539,7 @@ function renderUserList() {
       : `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">User</span>`;
 
     const isPrimaryAdmin = u.username === 'admin';
+    const userProvince = u.assignedProvince || 'อุดรธานี';
     
     let actionButtons = '';
     if (state.currentUser && state.currentUser.role === 'admin') {
@@ -1556,6 +1573,12 @@ function renderUserList() {
         </div>
       </td>
       <td class="py-3 px-4">${roleBadge}</td>
+      <td class="py-3 px-4">
+        <span class="inline-flex items-center gap-1 bg-blue-50 text-blue-800 border border-blue-200 px-2.5 py-0.5 rounded-full text-xs font-semibold">
+          <i class="fa-solid fa-location-dot text-rose-500 text-[10px]"></i>
+          <span>จ.${userProvince}</span>
+        </span>
+      </td>
       <td class="py-3 px-4 text-xs text-gray-500 font-mono">${formatThaiDateDisplay(u.createdAt) || '-'}</td>
       <td class="py-3 px-4 text-right">${actionButtons}</td>
     `;
@@ -1570,6 +1593,14 @@ window.editUserModal = function(username) {
   if (!user) return;
 
   const isPrimary = username === 'admin';
+  const currentAssigned = user.assignedProvince || 'อุดรธานี';
+
+  let provinceOptionsHtml = '';
+  if (typeof THAILAND_PROVINCES !== 'undefined') {
+    THAILAND_PROVINCES.forEach(p => {
+      provinceOptionsHtml += `<option value="${p.name}" ${p.name === currentAssigned ? 'selected' : ''}>${p.name}</option>`;
+    });
+  }
 
   Swal.fire({
     title: `แก้ไขข้อมูลผู้ใช้ (@${username})`,
@@ -1577,18 +1608,49 @@ window.editUserModal = function(username) {
       <div class="text-left space-y-3 pt-2">
         <div>
           <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อ-นามสกุล / ชื่อแสดง *</label>
-          <input type="text" id="swalEditName" value="${user.name || user.username}" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm">
+          <input type="text" id="swalEditName" value="${user.name || user.username}" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
         </div>
         <div>
           <label class="block text-xs font-bold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) *</label>
-          <select id="swalEditRole" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm" ${isPrimary ? 'disabled' : ''}>
+          <select id="swalEditRole" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500" ${isPrimary ? 'disabled' : ''}>
             <option value="user" ${user.role === 'user' ? 'selected' : ''}>User (เจ้าหน้าที่ทั่วไป)</option>
             <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin (ผู้ดูแลระบบ)</option>
           </select>
           ${isPrimary ? '<p class="text-[11px] text-gray-400 mt-1">ผู้ดูแลระบบหลักไม่สามารถเปลี่ยน Role ได้</p>' : ''}
         </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1">จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *</label>
+          <div class="space-y-1.5">
+            <div class="relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-xs text-gray-400"></i>
+              <input type="text" id="swalFilterProvinceInput" placeholder="พิมพ์ค้นหาจังหวัด..." class="w-full bg-gray-50 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:bg-white focus:border-blue-500">
+            </div>
+            <select id="swalEditAssignedProvince" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
+              ${provinceOptionsHtml}
+            </select>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-1">กำหนดพื้นที่จังหวัดที่เจ้าหน้าที่คนนี้ได้รับมอบหมายให้ปฏิบัติงาน</p>
+        </div>
       </div>
     `,
+    didOpen: () => {
+      const filterInput = document.getElementById('swalFilterProvinceInput');
+      const selectEl = document.getElementById('swalEditAssignedProvince');
+      if (filterInput && selectEl) {
+        filterInput.addEventListener('input', (e) => {
+          const val = e.target.value.trim().toLowerCase();
+          let firstMatch = null;
+          Array.from(selectEl.options).forEach(opt => {
+            const matches = opt.text.toLowerCase().includes(val);
+            opt.style.display = matches ? '' : 'none';
+            if (matches && !firstMatch) firstMatch = opt;
+          });
+          if (firstMatch && val) {
+            selectEl.value = firstMatch.value;
+          }
+        });
+      }
+    },
     showCancelButton: true,
     confirmButtonText: 'บันทึกการแก้ไข',
     cancelButtonText: 'ยกเลิก',
@@ -1596,22 +1658,25 @@ window.editUserModal = function(username) {
     preConfirm: () => {
       const name = document.getElementById('swalEditName').value.trim();
       const role = document.getElementById('swalEditRole').value;
+      const assignedProvince = document.getElementById('swalEditAssignedProvince').value;
       if (!name) {
         Swal.showValidationMessage('กรุณาระบุชื่อ-นามสกุล');
         return false;
       }
-      return { name, role };
+      return { name, role, assignedProvince };
     }
   }).then((res) => {
     if (res.isConfirmed && res.value) {
       user.name = res.value.name;
       if (!isPrimary) user.role = res.value.role;
+      user.assignedProvince = res.value.assignedProvince || 'อุดรธานี';
       localStorage.setItem('slts_users', JSON.stringify(users));
 
       // ถ้าแก้ไขบัญชีที่ล็อกอินอยู่ ให้ sync session ด้วย
       if (state.currentUser && state.currentUser.username === username) {
         state.currentUser.name = user.name;
         state.currentUser.role = user.role;
+        state.currentUser.assignedProvince = user.assignedProvince;
         localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
       }
 
@@ -1620,7 +1685,7 @@ window.editUserModal = function(username) {
       // ซิงค์ไปยัง Google Sheet (Tab: users)
       syncUserToGoogleSheet('save_user', user);
 
-      Swal.fire('สำเร็จ', `อัปเดตข้อมูลผู้ใช้ @${username} ใน Google Sheet เรียบร้อยแล้ว`, 'success');
+      Swal.fire('สำเร็จ', `อัปเดตข้อมูลผู้ใช้ @${username} (จ.${user.assignedProvince}) เรียบร้อยแล้ว`, 'success');
     }
   });
 };
@@ -4205,6 +4270,10 @@ window.handleMobileModalBackOrClose = function() {
       return true;
     }
   }
+  // หากไม่อยู่ในพื้นที่รับผิดชอบส่งหมาย ไม่สามารถปิดหน้าต่างค้นหาได้
+  if (typeof isUserOutsideAssignedProvince === 'function' && isUserOutsideAssignedProvince()) {
+    return false;
+  }
   window.mobileModalStack = [];
   Swal.close();
   return false;
@@ -4219,8 +4288,11 @@ window.handleMobileModalBackOrClose = function() {
  *    - เมื่ออัปเดตเสร็จ จะบันทึกลงเครื่องเพื่อให้นำไปใช้ในโหมดออฟไลน์ได้
  *    - หากออฟไลน์ ปุ่มรีเฟรชจะถูก Disable กดไม่ได้ แต่สามารถค้นหาข้อมูลล่าสุดที่มีในเครื่องได้ตามปกติ
  * 4. รองรับการย้อนกลับไป-มาใน Pop Up อย่างราบรื่น
+ * 5. เมื่อจังหวัดที่เลือกไม่ตรงกับจังหวัดที่รับผิดชอบส่งหมาย:
+ *    - ล็อกให้อยู่ในหน้านี้เท่านั้น ไม่สามารถปิดได้
+ *    - แสดงปุ่ม "เปลี่ยนจังหวัด" เพื่อให้เปลี่ยนกลับไปยังจังหวัดที่รับผิดชอบได้ตลอดเวลา
  */
-window.openMobileCaseSearchModal = async function(initialQuery = '') {
+window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock = false) {
   // 1. โหลดข้อมูลเดิมจาก memory หรือ cache ในเครื่องทันทีก่อน เพื่อให้เปิดหน้าต่างได้เร็วที่สุดโดยไม่ต้องรอโหลด
   if (!state.allSheetRows || state.allSheetRows.length === 0) {
     try {
@@ -4231,6 +4303,9 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
     } catch (e) {}
   }
 
+  const isOutside = (typeof isUserOutsideAssignedProvince === 'function' && isUserOutsideAssignedProvince()) || forceLock;
+  const currentProv = (state.selectedProvince || 'อุดรธานี').trim();
+  const assignedProv = (typeof getUserAssignedProvince === 'function') ? getUserAssignedProvince() : 'อุดรธานี';
   const isOnline = navigator.onLine;
 
   Swal.fire({
@@ -4239,7 +4314,19 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
       container: 'slts-mobile-search-container',
       popup: 'slts-mobile-search-popup rounded-2xl shadow-xl'
     },
-    title: `
+    title: isOutside ? `
+      <div class="flex items-center justify-between w-full pr-0.5 text-gray-900 font-bold text-sm">
+        <div class="flex items-center gap-1.5 truncate">
+          <i class="fa-solid fa-magnifying-glass text-blue-600 text-xs"></i>
+          <span class="truncate">ค้นหาข้อมูลหมาย (จ.${currentProv})</span>
+        </div>
+        <!-- ปุ่มเปลี่ยนจังหวัด ในหน้านี้เมื่อพบว่าจังหวัดที่ใช้งานไม่ตรงกับจังหวัดที่รับผิดชอบอยู่ -->
+        <button type="button" onclick="showProvinceSelectorModal(true)" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-sm transition shrink-0 cursor-pointer" title="เปลี่ยนจังหวัดปฏิบัติงาน">
+          <i class="fa-solid fa-map-location-dot text-[11px]"></i>
+          <span>เปลี่ยนจังหวัด</span>
+        </button>
+      </div>
+    ` : `
       <div class="flex items-center justify-between w-full pr-0.5 text-gray-900 font-bold text-sm">
         <div class="flex items-center gap-1.5">
           <i class="fa-solid fa-magnifying-glass text-blue-600 text-xs"></i>
@@ -4252,6 +4339,16 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
     `,
     html: `
       <div class="text-left space-y-2 pt-0">
+        ${isOutside ? `
+          <!-- แถบแจ้งเตือนเมื่อจังหวัดไม่ตรงกับพื้นที่รับผิดชอบ -->
+          <div class="p-2 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 flex items-start gap-1.5">
+            <i class="fa-solid fa-triangle-exclamation text-amber-600 mt-0.5 shrink-0 text-xs"></i>
+            <div class="flex-1 leading-snug">
+              <span class="font-bold">จำกัดการใช้งาน:</span> การเลือก จ.<b>${currentProv}</b> ไม่ตรงกับพื้นที่รับผิดชอบส่งหมาย (จ.<b>${assignedProv}</b>) คุณจะใช้งานได้เพียงการค้นหาข้อมูลหมายเท่านั้น
+            </div>
+          </div>
+        ` : ''}
+
         <!-- ช่องค้นหาเลขคดี + ปุ่มรีเฟรชข้อมูล (บีบระยะห่างชิดด้านบนตามข้อ 1) -->
         <div class="flex gap-1.5 items-center">
           <input type="text" id="mobileSearchInput" value="${initialQuery || ''}" placeholder="พิมพ์เลขคดี หรือ ที่ตั้งส่งหมาย..." class="flex-1 bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition">
@@ -4281,7 +4378,8 @@ window.openMobileCaseSearchModal = async function(initialQuery = '') {
     width: '96%',
     showCloseButton: false,
     showConfirmButton: false,
-    allowOutsideClick: false,
+    allowOutsideClick: !isOutside,
+    allowEscapeKey: !isOutside,
     didOpen: () => {
       // บีบพื้นที่ส่วนหัวในกรอบสี่เหลี่ยมสีแดงขึ้นชิดขอบบนทันที กำจัด padding/margin ส่วนเกินทั้งหมด
       const titleEl = Swal.getTitle();
@@ -4978,6 +5076,17 @@ function initProvinceSystem() {
     });
   }
 
+  // เติมรายชื่อ 77 จังหวัดลงใน datalist ของฟอร์มเพิ่มผู้ใช้งาน
+  const datalist = document.getElementById('assignedProvinceDatalist');
+  if (datalist && typeof THAILAND_PROVINCES !== 'undefined') {
+    datalist.innerHTML = '';
+    THAILAND_PROVINCES.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      datalist.appendChild(opt);
+    });
+  }
+
   updateDistricts(state.selectedProvince);
   updateFloatingProvinceBadge();
 
@@ -4986,6 +5095,45 @@ function initProvinceSystem() {
   const savedCustom = localStorage.getItem('slts_desktop_court_custom_name') || '';
   setDesktopCourtType(savedCat, savedCustom, state.selectedProvince);
 }
+
+// =========================================================================
+// 🏢 การตรวจสอบพื้นที่รับผิดชอบส่งหมาย (Assigned Province Boundary Enforcement)
+// =========================================================================
+
+window.getUserAssignedProvince = function() {
+  if (state.currentUser && state.currentUser.assignedProvince) {
+    return (state.currentUser.assignedProvince || '').trim();
+  }
+  if (state.currentUser && state.currentUser.username) {
+    const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+    const matched = users.find(u => (u.username || '').toLowerCase() === (state.currentUser.username || '').toLowerCase());
+    if (matched && matched.assignedProvince) {
+      state.currentUser.assignedProvince = matched.assignedProvince.trim();
+      localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+      return state.currentUser.assignedProvince;
+    }
+  }
+  return 'อุดรธานี';
+};
+
+window.isUserOutsideAssignedProvince = function() {
+  if (window.innerWidth >= 768) return false;
+  if (!state.currentUser || state.currentUser.role === 'guest' || !state.currentUser.username) return false;
+
+  const currentProv = (state.selectedProvince || 'อุดรธานี').trim();
+  const assignedProv = getUserAssignedProvince();
+  return currentProv !== assignedProv;
+};
+
+window.enforceProvinceBoundaryOnStartup = function() {
+  if (window.innerWidth < 768 && state.currentUser && state.currentUser.role !== 'guest' && !!state.currentUser.username) {
+    if (isUserOutsideAssignedProvince()) {
+      setTimeout(() => {
+        openMobileCaseSearchModal('', true);
+      }, 350);
+    }
+  }
+};
 
 function setProvince(provinceName) {
   state.selectedProvince = provinceName;
@@ -5059,6 +5207,9 @@ function updateSubdistricts(provinceName, districtName, selectSubdistrict = null
 // -------------------------------------------------------------------------
 window.showProvinceSelectorModal = function(force = false) {
   let provincesHtml = '';
+  const isLocked = isUserOutsideAssignedProvince();
+  const canDismiss = !force && !isLocked && !!state.selectedProvince;
+
   if (typeof THAILAND_PROVINCES !== 'undefined') {
     THAILAND_PROVINCES.forEach(p => {
       const isSelected = p.name === state.selectedProvince;
@@ -5076,7 +5227,7 @@ window.showProvinceSelectorModal = function(force = false) {
       <div class="slts-province-modal">
         <!-- Header -->
         <div class="slts-modal-header">
-          ${!force && state.selectedProvince ? `
+          ${canDismiss ? `
             <button type="button" onclick="showMobileSummonsFormModal(true)" class="slts-back-header-btn" title="กลับไปฟอร์ม">
               <i class="fa-solid fa-arrow-left"></i>
               <span>กลับ</span>
@@ -5086,9 +5237,9 @@ window.showProvinceSelectorModal = function(force = false) {
               <i class="fa-solid fa-map-location-dot"></i>
             </div>
           `}
-          <div class="flex-1 ${!force && state.selectedProvince ? 'text-center pr-8' : ''}">
+          <div class="flex-1 ${canDismiss ? 'text-center pr-8' : ''}">
             <h2 class="slts-modal-title">เลือกจังหวัดปฏิบัติงาน</h2>
-            <p class="slts-modal-subtitle">ระบบจะบันทึกจังหวัดไว้สำหรับการใช้งานครั้งต่อไป</p>
+            <p class="slts-modal-subtitle">${isLocked ? 'กรุณาเลือกจังหวัดที่เป็นพื้นที่รับผิดชอบส่งหมายของคุณ' : 'ระบบจะบันทึกจังหวัดไว้สำหรับการใช้งานครั้งต่อไป'}</p>
           </div>
         </div>
         <!-- Search -->
@@ -5105,8 +5256,8 @@ window.showProvinceSelectorModal = function(force = false) {
     `,
     position: 'top',
     showConfirmButton: false,
-    showCloseButton: !force && !!state.selectedProvince,
-    allowOutsideClick: !force && !!state.selectedProvince,
+    showCloseButton: canDismiss,
+    allowOutsideClick: canDismiss,
     customClass: {
       container: 'slts-swal-top-container',
       popup: 'slts-swal-fullscreen-80 slts-swal-no-padding',
@@ -5167,7 +5318,41 @@ window.filterProvinceList = function(query) {
 window.selectProvinceAndProceed = function(provinceName) {
   setProvince(provinceName);
   Swal.close();
-  
+
+  const isMobile = window.innerWidth < 768;
+
+  if (isMobile) {
+    // ในหน้าจอ < 768 pixel:
+    // เมื่อเปลี่ยนจังหวัดเสร็จแล้วไม่ต้องแสดงการแจ้งเตือนให้ทราบว่าดำเนินการเปลี่ยนจังหวัดเสร็จแล้ว
+    // และไม่ต้องแสดงฟอร์มบันทึกข้อมูลส่งหมายทันที ให้แสดงหน้าโหมดกล้องตามปกติเหมือนพร้อมใช้งาน
+    
+    // ตรวจสอบว่าผู้ใช้งานอยู่ในพื้นที่จังหวัดที่รับผิดชอบส่งหมายหรือไม่
+    if (isUserOutsideAssignedProvince()) {
+      // แสดงข้อความแจ้งเตือนตามที่กำหนด
+      Swal.fire({
+        icon: 'warning',
+        title: 'แจ้งเตือนพื้นที่รับผิดชอบ',
+        text: 'การเปลี่ยนจังหวัดของคุณไม่ตรงกับพื้นที่จังหวัดที่รับผิดชอบส่งหมาย คุณจะใช้งานได้เพียงการค้นหาข้อมูลหมายเท่านั้น',
+        confirmButtonText: 'ปิด',
+        confirmButtonColor: '#2563eb',
+        allowOutsideClick: false,
+        allowEscapeKey: false
+      }).then(() => {
+        // เมื่อกดปุ่มปิดให้แสดงหน้าต่างค้นหาข้อมูลหมายได้เท่านั้น
+        openMobileCaseSearchModal('', true);
+      });
+      return;
+    }
+
+    // หากเลือกจังหวัดที่เป็นพื้นที่รับผิดชอบส่งหมาย ให้กลับมาใช้งานฟังก์ชันต่างๆ ได้ตามปกติ
+    if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
+      openCameraModal().catch(e => console.warn(e));
+    }
+    updateCaptureButtonState();
+    return;
+  }
+
+  // บนคอมพิวเตอร์ (> 768px):
   const Toast = Swal.mixin({
     toast: true,
     position: 'top-end',
@@ -5180,7 +5365,6 @@ window.selectProvinceAndProceed = function(provinceName) {
     title: `ตั้งค่า จ.${provinceName} เรียบร้อยแล้ว`
   });
 
-  // ทั้ง Mobile (< 768px) และ Desktop (> 768px): เมื่อเลือกจังหวัดแล้ว ให้แสดงหน้าต่าง "เลือกประเภทศาล" ทันที
   setTimeout(() => {
     showCourtTypeSelectorModal(provinceName, false);
   }, 250);
@@ -8802,6 +8986,11 @@ window.checkAndRequestCameraPermission = checkAndRequestCameraPermission;
  * - สถานที่ส่งหมาย (หมายบ้าน: บ้านเลขที่ | อื่นๆ: ระบุสถานที่ | ท้องถิ่น: ชื่อหน่วยงาน)
  */
 function isFormValidForCapture() {
+  // ตรวจสอบพื้นที่จังหวัดรับผิดชอบส่งหมาย หากไม่อยู่ในพื้นที่รับผิดชอบส่งหมายจะไม่สามารถถ่ายภาพได้
+  if (typeof isUserOutsideAssignedProvince === 'function' && isUserOutsideAssignedProvince()) {
+    return false;
+  }
+
   const courtCategory = state.selectedCourtCategory || state.desktopCourtCategory || (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || 'ศาลจังหวัด';
   const isOther = courtCategory === 'ศาลอื่น' || courtCategory === 'หมายศาลอื่น';
 
@@ -8841,6 +9030,13 @@ window.isFormValidForCapture = isFormValidForCapture;
 function updateCaptureButtonState() {
   const btnCapture = elements.btnCapture || document.getElementById('btnCapture');
   if (!btnCapture) return;
+
+  if (typeof isUserOutsideAssignedProvince === 'function' && isUserOutsideAssignedProvince()) {
+    btnCapture.disabled = true;
+    btnCapture.classList.add('opacity-40', 'cursor-not-allowed', 'filter', 'grayscale');
+    btnCapture.setAttribute('title', 'ไม่อยู่ในพื้นที่รับผิดชอบส่งหมาย (ใช้งานได้เฉพาะค้นหาข้อมูลหมาย)');
+    return;
+  }
 
   const isValid = isFormValidForCapture();
   if (isValid) {
@@ -9237,6 +9433,21 @@ async function startCameraStream() {
 }
 
 async function captureAndProcessPhoto() {
+  if (typeof isUserOutsideAssignedProvince === 'function' && isUserOutsideAssignedProvince()) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'แจ้งเตือนพื้นที่รับผิดชอบ',
+      text: 'การเปลี่ยนจังหวัดของคุณไม่ตรงกับพื้นที่จังหวัดที่รับผิดชอบส่งหมาย คุณจะใช้งานได้เพียงการค้นหาข้อมูลหมายเท่านั้น',
+      confirmButtonText: 'ปิด',
+      confirmButtonColor: '#2563eb',
+      allowOutsideClick: false,
+      allowEscapeKey: false
+    }).then(() => {
+      openMobileCaseSearchModal('', true);
+    });
+    return;
+  }
+
   if (!isFormValidForCapture()) {
     Swal.fire({
       icon: 'warning',

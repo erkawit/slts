@@ -855,6 +855,16 @@
                 <option value="admin">Admin (ผู้ดูแลระบบ)</option>
               </select>
             </div>
+            <div>
+              <label class="block text-xs font-bold text-gray-700 mb-1">จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *</label>
+              <div class="relative">
+                <input type="text" id="newAssignedProvince" list="assignedProvinceDatalist" required placeholder="เลือกหรือพิมพ์ค้นหาจังหวัด..." value="อุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                <datalist id="assignedProvinceDatalist">
+                  <!-- Populated dynamically with 77 provinces -->
+                </datalist>
+              </div>
+              <p class="text-[11px] text-gray-400 mt-1">พิมพ์ค้นหาหรือคลิกเลือกรายชื่อจังหวัด</p>
+            </div>
             <div class="pt-2">
               <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl transition shadow-md shadow-blue-200 text-sm">
                 <i class="fa-solid fa-plus mr-1"></i> เพิ่มผู้ใช้งาน
@@ -899,6 +909,7 @@
                 <tr class="bg-gray-50 border-b border-gray-200 text-gray-600 font-bold text-xs uppercase">
                   <th class="py-3 px-4">ชื่อผู้ใช้ / ชื่อแสดง</th>
                   <th class="py-3 px-4">สิทธิ์ (Role)</th>
+                  <th class="py-3 px-4">จังหวัดที่ส่งหมาย</th>
                   <th class="py-3 px-4">วันที่สร้าง</th>
                   <th class="py-3 px-4 text-right">การจัดการ</th>
                 </tr>
@@ -1184,17 +1195,17 @@
   </aside>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260903_16"></script>
-  <script src="js/compass.js?v=20260903_16"></script>
-  <script src="js/map.js?v=20260903_16"></script>
-  <script src="js/watermark.js?v=20260903_16"></script>
-  <script src="js/app.js?v=20260903_16"></script>
+  <script src="js/data.js?v=20260903_17"></script>
+  <script src="js/compass.js?v=20260903_17"></script>
+  <script src="js/map.js?v=20260903_17"></script>
+  <script src="js/watermark.js?v=20260903_17"></script>
+  <script src="js/app.js?v=20260903_17"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260903_16')
+        navigator.serviceWorker.register('./sw.js?v=20260903_17')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
