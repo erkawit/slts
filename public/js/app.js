@@ -4421,8 +4421,17 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
 
       const renderList = (query = '') => {
         const q = query.trim().toLowerCase();
-        const rows = state.allSheetRows || [];
-        const filtered = rows.filter(r => {
+        const activeProv = (state.selectedProvince || 'อุดรธานี').trim();
+        const allRows = state.allSheetRows || [];
+
+        // 1. กรองเป็นข้อมูลของจังหวัดนั้นเท่านั้น เพื่อลดการดึงข้อมูลทั้งหมด
+        const provRows = allRows.filter(r => {
+          const rProv = r._resolvedProvince || getRowProvince(r);
+          return rProv === activeProv;
+        });
+
+        // 2. กรองการค้นหาเฉพาะจังหวัดนั้นเท่านั้น
+        const filtered = provRows.filter(r => {
           const c = (r['เลขคดี'] || '').toLowerCase();
           const d = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').toLowerCase();
           return !q || c.includes(q) || d.includes(q);
@@ -4439,14 +4448,19 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
         });
 
         const uniqueCases = Array.from(groupMap.keys());
-        countTxt.textContent = q ? `พบเลขคดีทั้งหมด ${uniqueCases.length} คดี (${filtered.length} รายการส่งหมาย)` : `แสดง ${Math.min(uniqueCases.length, 20)} เลขคดีล่าสุด`;
+        if (countTxt) {
+          countTxt.innerHTML = q 
+            ? `<span>ค้นหาใน จ.<b>${activeProv}</b>: พบ <b>${uniqueCases.length}</b> คดี (${filtered.length} รายการหมาย)</span>` 
+            : `<span>ข้อมูล จ.<b>${activeProv}</b> (แสดง ${Math.min(uniqueCases.length, 20)} เลขคดีล่าสุด / ทั้งหมด ${uniqueCases.length} คดี)</span>`;
+        }
         container.innerHTML = '';
 
         if (uniqueCases.length === 0) {
           container.innerHTML = `
             <div class="p-6 text-center text-gray-400 bg-gray-50 rounded-2xl border border-gray-200">
               <i class="fa-solid fa-folder-open text-3xl mb-2 text-gray-300"></i>
-              <p class="text-xs">ไม่พบข้อมูลเลขคดีที่ค้นหา</p>
+              <p class="text-xs font-semibold text-gray-600">ไม่พบข้อมูลหมายใน จ.${activeProv}</p>
+              ${q ? `<p class="text-[11px] text-gray-400 mt-1">คำค้นหา "${query}" ไม่พบในข้อมูล จ.${activeProv}</p>` : `<p class="text-[11px] text-gray-400 mt-1">ยังไม่มีข้อมูลบันทึกส่งหมายในพื้นที่จังหวัดนี้</p>`}
             </div>
           `;
           return;
@@ -4603,7 +4617,12 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
  * รองรับการย้อนกลับไปหน้าค้นหาตามข้อ 1
  */
 window.openMobileSubRecordsModal = function(caseNumber) {
-  const records = (state.allSheetRows || []).filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim());
+  const activeProv = (state.selectedProvince || 'อุดรธานี').trim();
+  const records = (state.allSheetRows || []).filter(r => {
+    const isMatchCase = (r['เลขคดี'] || '').trim() === caseNumber.trim();
+    const rProv = r._resolvedProvince || getRowProvince(r);
+    return isMatchCase && rProv === activeProv;
+  });
 
   let cardsHtml = '';
   records.forEach((rec, idx) => {
@@ -4677,7 +4696,7 @@ window.openMobileSubRecordsModal = function(caseNumber) {
         </button>
         <div class="flex items-center gap-1.5 truncate px-2">
           <i class="fa-solid fa-layer-group text-blue-600 text-xs"></i>
-          <span class="truncate">รายการย่อย: ${caseNumber}</span>
+          <span class="truncate">รายการย่อย: ${caseNumber} (จ.${activeProv})</span>
         </div>
         <!-- ปุ่มกากบาท (ถ้ามีหน้าก่อนหน้าให้ย้อนกลับ ถ้าไม่มีให้ปิด) ตามข้อ 1 -->
         <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ/ปิด">
@@ -4687,7 +4706,7 @@ window.openMobileSubRecordsModal = function(caseNumber) {
     `,
     html: `
       <div class="text-left text-xs text-gray-500 mb-2">
-        <span>พบรายการประวัติทั้งหมด <b>${records.length}</b> ครั้ง</span>
+        <span>พบรายการประวัติใน จ.<b>${activeProv}</b> ทั้งหมด <b>${records.length}</b> ครั้ง</span>
       </div>
       <div class="max-h-[68vh] max-h-[68dvh] overflow-y-auto space-y-2.5 pr-0.5">
         ${cardsHtml}
