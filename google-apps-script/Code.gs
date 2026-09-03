@@ -219,12 +219,24 @@ function doPost(e) {
       const usersList = [];
       for (let i = 1; i < uData.length; i++) {
         if (uData[i][0]) {
+          const courtCat = String(uData[i][5] || 'ศาลจังหวัด').trim();
+          let courtName = String(uData[i][6] || '').trim();
+          const prov = String(uData[i][7] || 'อุดรธานี').trim();
+          if (!courtName) {
+            if (courtCat === 'ศาลไม่สังกัดภาค') courtName = 'ศาลแพ่ง';
+            else if (courtCat === 'ศาลแขวง') courtName = 'ศาลแขวง' + prov;
+            else if (courtCat === 'ศาลเยาวชนและครอบครัว') courtName = 'ศาลเยาวชนและครอบครัวจังหวัด' + prov;
+            else courtName = 'ศาลจังหวัด' + prov;
+          }
           usersList.push({
             username: String(uData[i][0] || '').trim(),
             password: String(uData[i][1] || '').trim(),
             role: String(uData[i][2] || 'user').trim(),
             name: String(uData[i][3] || uData[i][0]).trim(),
-            createdAt: String(uData[i][4] || '').trim()
+            createdAt: String(uData[i][4] || '').trim(),
+            courtCategory: courtCat,
+            assignedCourt: courtName,
+            assignedProvince: prov
           });
         }
       }
@@ -251,12 +263,18 @@ function doPost(e) {
       }
 
       const dateNow = data.createdAt || Utilities.formatDate(new Date(), "Asia/Bangkok", "dd/MM/yyyy");
+      const courtCat = String(data.courtCategory || data['ประเภทศาล'] || 'ศาลจังหวัด').trim();
+      const courtName = String(data.assignedCourt || data['ศาลที่สังกัด'] || data['ชื่อศาล'] || '').trim();
+      const prov = String(data.assignedProvince || data['จังหวัดรับผิดชอบ'] || data['จังหวัด'] || 'อุดรธานี').trim();
 
       if (foundRow !== -1) {
         // อัปเดตข้อมูลผู้ใช้เดิม
         if (data.password) usersSheet.getRange(foundRow, 2).setValue(String(data.password));
         if (data.role && targetUsername !== 'admin') usersSheet.getRange(foundRow, 3).setValue(String(data.role));
         if (data.name) usersSheet.getRange(foundRow, 4).setValue(String(data.name));
+        if (courtCat) usersSheet.getRange(foundRow, 6).setValue(courtCat);
+        if (courtName) usersSheet.getRange(foundRow, 7).setValue(courtName);
+        if (prov) usersSheet.getRange(foundRow, 8).setValue(prov);
       } else {
         // เพิ่มผู้ใช้ใหม่
         usersSheet.appendRow([
@@ -264,7 +282,10 @@ function doPost(e) {
           String(data.password || '123456'),
           String(data.role || 'user'),
           String(data.name || targetUsername),
-          dateNow
+          dateNow,
+          courtCat,
+          courtName || (prov ? `ศาลจังหวัด${prov}` : 'ศาลจังหวัดอุดรธานี'),
+          prov
         ]);
       }
 
@@ -315,12 +336,18 @@ function doPost(e) {
       data.users.forEach(u => {
         const uName = String(u.username || '').trim();
         if (uName && !existingUsernames.has(uName.toLowerCase())) {
+          const prov = String(u.assignedProvince || 'อุดรธานี').trim();
+          const courtCat = String(u.courtCategory || 'ศาลจังหวัด').trim();
+          const courtName = String(u.assignedCourt || (prov ? `ศาลจังหวัด${prov}` : 'ศาลจังหวัดอุดรธานี')).trim();
           usersSheet.appendRow([
             uName,
             String(u.password || '123456'),
             String(u.role || 'user'),
             String(u.name || uName),
-            String(u.createdAt || Utilities.formatDate(new Date(), "Asia/Bangkok", "dd/MM/yyyy"))
+            String(u.createdAt || Utilities.formatDate(new Date(), "Asia/Bangkok", "dd/MM/yyyy")),
+            courtCat,
+            courtName,
+            prov
           ]);
         }
       });
@@ -722,11 +749,11 @@ function getUsersSheet(spreadsheet) {
   }
 
   if (sheet.getLastRow() === 0) {
-    const headers = ["username", "password", "role", "name", "createdAt"];
+    const headers = ["username", "password", "role", "name", "createdAt", "courtCategory", "assignedCourt", "assignedProvince"];
     sheet.appendRow(headers);
     
     // สร้างผู้ดูแลระบบตั้งต้น (admin / caogikojt02)
-    sheet.appendRow(["admin", "caogikojt02", "admin", "ผู้ดูแลระบบ (Admin)", "25/08/2569"]);
+    sheet.appendRow(["admin", "caogikojt02", "admin", "ผู้ดูแลระบบ (Admin)", "25/08/2569", "ศาลจังหวัด", "ศาลจังหวัดอุดรธานี", "อุดรธานี"]);
 
     const headerRange = sheet.getRange(1, 1, 1, headers.length);
     headerRange.setBackground("#7c3aed");
@@ -734,9 +761,43 @@ function getUsersSheet(spreadsheet) {
     headerRange.setFontWeight("bold");
     headerRange.setHorizontalAlignment("center");
     sheet.setFrozenRows(1);
+  } else {
+    // อัปเกรดหัวตารางอัตโนมัติหากยังไม่มีคอลัมน์ศาลและจังหวัด
+    ensureUsersSheetHeaders(sheet);
   }
 
   return sheet;
+}
+
+function ensureUsersSheetHeaders(sheet) {
+  try {
+    const lastCol = sheet.getLastColumn();
+    const headers = lastCol > 0 ? sheet.getRange(1, 1, 1, Math.max(lastCol, 8)).getValues()[0].map(h => String(h || '').trim()) : [];
+    
+    let changed = false;
+    if (headers.length < 6 || !headers[5]) {
+      sheet.getRange(1, 6).setValue("courtCategory");
+      changed = true;
+    }
+    if (headers.length < 7 || !headers[6]) {
+      sheet.getRange(1, 7).setValue("assignedCourt");
+      changed = true;
+    }
+    if (headers.length < 8 || !headers[7]) {
+      sheet.getRange(1, 8).setValue("assignedProvince");
+      changed = true;
+    }
+
+    if (changed) {
+      const headerRange = sheet.getRange(1, 1, 1, 8);
+      headerRange.setBackground("#7c3aed");
+      headerRange.setFontColor("#ffffff");
+      headerRange.setFontWeight("bold");
+      headerRange.setHorizontalAlignment("center");
+    }
+  } catch (err) {
+    Logger.log("ensureUsersSheetHeaders error: " + err);
+  }
 }
 
 /**
@@ -793,12 +854,24 @@ function doGet(e) {
         const usersList = [];
         for (let i = 1; i < uData.length; i++) {
           if (uData[i][0]) {
+            const courtCat = String(uData[i][5] || 'ศาลจังหวัด').trim();
+            let courtName = String(uData[i][6] || '').trim();
+            const prov = String(uData[i][7] || 'อุดรธานี').trim();
+            if (!courtName) {
+              if (courtCat === 'ศาลไม่สังกัดภาค') courtName = 'ศาลแพ่ง';
+              else if (courtCat === 'ศาลแขวง') courtName = 'ศาลแขวง' + prov;
+              else if (courtCat === 'ศาลเยาวชนและครอบครัว') courtName = 'ศาลเยาวชนและครอบครัวจังหวัด' + prov;
+              else courtName = 'ศาลจังหวัด' + prov;
+            }
             usersList.push({
               username: String(uData[i][0] || '').trim(),
               password: String(uData[i][1] || '').trim(),
               role: String(uData[i][2] || 'user').trim(),
               name: String(uData[i][3] || uData[i][0]).trim(),
-              createdAt: String(uData[i][4] || '').trim()
+              createdAt: String(uData[i][4] || '').trim(),
+              courtCategory: courtCat,
+              assignedCourt: courtName,
+              assignedProvince: prov
             });
           }
         }

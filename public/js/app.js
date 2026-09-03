@@ -1059,10 +1059,21 @@ async function fetchUsersFromGasApi(showNotification = false) {
     if (data && data.status === 'success' && Array.isArray(data.users)) {
       let sheetUsers = data.users.filter(r => (r.username || '').trim() !== '');
 
+      const localUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
+
       sheetUsers = sheetUsers.map(u => {
-        const prov = u.assignedProvince || u['จังหวัดรับผิดชอบ'] || u['จังหวัด'] || 'อุดรธานี';
-        const courtCat = u.courtCategory || u['ประเภทศาล'] || 'ศาลจังหวัด';
-        let courtName = u.assignedCourt || u['ศาลที่สังกัด'] || u['ชื่อศาล'] || '';
+        const localMatch = localUsers.find(lu => (lu.username || '').toLowerCase() === (u.username || '').toLowerCase());
+
+        // ตรวจสอบค่าจาก Google Sheet (รองรับทั้ง key ภาษาอังกฤษและภาษาไทย)
+        const rawProv = (u.assignedProvince || u['จังหวัดรับผิดชอบ'] || u['จังหวัด'] || '').trim();
+        const rawCourtCat = (u.courtCategory || u['ประเภทศาล'] || '').trim();
+        const rawCourtName = (u.assignedCourt || u['ศาลที่สังกัด'] || u['ชื่อศาล'] || '').trim();
+
+        // ดึงค่า: หาก Sheet มีข้อมูลให้ใช้ของ Sheet แต่หาก Sheet ยังว่าง (กรณีคอลัมน์เพิ่งสร้าง) ให้อ้างอิงจาก Local เดิม
+        const prov = rawProv || (localMatch && localMatch.assignedProvince) || 'อุดรธานี';
+        const courtCat = rawCourtCat || (localMatch && localMatch.courtCategory) || 'ศาลจังหวัด';
+        let courtName = rawCourtName || (localMatch && localMatch.assignedCourt) || '';
+
         if (!courtName) {
           if (courtCat === 'ศาลไม่สังกัดภาค') courtName = 'ศาลแพ่ง';
           else if (courtCat === 'ศาลแขวง') courtName = `ศาลแขวง${prov}`;
@@ -1117,13 +1128,18 @@ async function fetchUsersFromGasApi(showNotification = false) {
 async function syncUserToGoogleSheet(action, payload) {
   if (!state.appsScriptUrl || !navigator.onLine) return;
   try {
+    const fullPayload = {
+      action: action,
+      ...payload
+    };
+    if (payload.courtCategory) fullPayload['ประเภทศาล'] = payload.courtCategory;
+    if (payload.assignedCourt) fullPayload['ศาลที่สังกัด'] = payload.assignedCourt;
+    if (payload.assignedProvince) fullPayload['จังหวัดรับผิดชอบ'] = payload.assignedProvince;
+
     await fetch(state.appsScriptUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: action,
-        ...payload
-      })
+      body: JSON.stringify(fullPayload)
     });
   } catch (err) {
     console.warn('syncUserToGoogleSheet error:', err);
