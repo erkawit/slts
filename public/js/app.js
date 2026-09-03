@@ -5243,17 +5243,28 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
   }
 
   const hasBackStack = window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0;
+  let backActionHandled = false;
+  const executeSafeBack = () => {
+    if (backActionHandled) return;
+    backActionHandled = true;
+    if (hasBackStack) {
+      window.handleMobileModalBackOrClose();
+    } else {
+      Swal.close();
+    }
+  };
+  window._currentPhotoModalBack = executeSafeBack;
 
   Swal.fire({
     title: `
       <div class="flex items-center justify-between w-full pr-1 text-gray-900 font-bold text-base">
         ${hasBackStack ? `
-          <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ">
+          <button type="button" onclick="window._currentPhotoModalBack && window._currentPhotoModalBack()" class="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ">
             <i class="fa-solid fa-arrow-left"></i>
           </button>
         ` : '<div></div>'}
         <span class="truncate px-2">เลขคดี: ${caseNumber}</span>
-        <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ/ปิด">
+        <button type="button" onclick="window._currentPhotoModalBack && window._currentPhotoModalBack()" class="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ/ปิด">
           <i class="fa-solid fa-xmark text-sm"></i>
         </button>
       </div>
@@ -5286,15 +5297,30 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
   }).then((res) => {
     if (res.isConfirmed) {
       window.open(imgUrl, '_blank');
-    } else if (res.isDismissed) {
+      // หากเปิดภาพใน Drive เสร็จแล้วบนจอมือถือ ให้ย้อนกลับคืนหน้าต่างค้นหาเดิมอัตโนมัติ
       if (hasBackStack) {
-        window.handleMobileModalBackOrClose();
+        setTimeout(() => {
+          executeSafeBack();
+        }, 300);
       }
+    } else {
+      executeSafeBack();
     }
   });
 };
 
 window.openFullScreenImage = function(imgSrc, originalUrl = '', caseNo = '', loc = '', time = '', lat = '', lng = '') {
+  let fsBackHandled = false;
+  const executeFsBack = () => {
+    if (fsBackHandled) return;
+    fsBackHandled = true;
+    if (window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0) {
+      window.handleMobileModalBackOrClose();
+    } else {
+      Swal.close();
+    }
+  };
+
   if (originalUrl && caseNo) {
     window.pushMobileModalState(() => window.viewPhotoModal(originalUrl, caseNo, loc, time, lat, lng));
   }
@@ -5312,9 +5338,7 @@ window.openFullScreenImage = function(imgSrc, originalUrl = '', caseNo = '', loc
       image: 'slts-preview-image-constrained'
     }
   }).then(() => {
-    if (window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0) {
-      window.handleMobileModalBackOrClose();
-    }
+    executeFsBack();
   });
 };
 
@@ -10603,15 +10627,23 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
 
   const cleanC = (caseNumber || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
 
-  // 1. ตรวจสอบเลขคดีตรงกัน (Exact Case Match)
+  // 1. ตรวจสอบเลขคดีตรงกัน (Exact Case Match) ภายใต้ขอบเขตพื้นที่ที่ระบุ
   if (cleanC) {
     matched = allRows.find(r => {
+      const rProv = getRowProvince(r);
+      if (province && rProv && rProv !== province) return false;
+      const rDist = (r['อำเภอ'] || '').trim();
+      if (district && rDist && rDist !== district) return false;
+      const rSub = (r['ตำบล'] || '').trim();
+      if (subdistrict && rSub && rSub !== subdistrict && !rSub.includes(subdistrict) && !subdistrict.includes(rSub)) return false;
+
       const rowC = (r['เลขคดี'] || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
-      return rowC && (rowC === cleanC || rowC.includes(cleanC) || cleanC.includes(rowC));
+      const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
+      return rowC && (rowC === cleanC || rowC.includes(cleanC) || cleanC.includes(rowC)) && !isNaN(lat) && lat > 0;
     });
     if (matched) {
       matchType = 'exact';
-      matchNote = 'ตรงกับประวัติ (พบพิกัดจริง)';
+      matchNote = 'ตรงกับประวัติ (พบพิกัดจริงจากเลขคดี)';
     }
   }
 
@@ -10627,11 +10659,12 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
       const rMoo = (r['หมู่'] || '').trim();
       const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
 
-      const subMatch = rSub && (rSub.includes(subdistrict) || subdistrict.includes(rSub));
+      const subMatch = rSub && (rSub === subdistrict || rSub.includes(subdistrict) || subdistrict.includes(rSub));
       const houseMatch = rHouse === houseNo || rLoc.includes(houseNo);
       const mooMatch = !moo || rMoo === moo || rLoc.includes(`ม.${moo}`) || rLoc.includes(`หมู่ ${moo}`) || rLoc.includes(`หมู่ที่ ${moo}`);
+      const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
 
-      return subMatch && houseMatch && mooMatch;
+      return subMatch && houseMatch && mooMatch && !isNaN(lat) && lat > 0;
     });
 
     if (matched) {
@@ -10640,10 +10673,31 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
     }
   }
 
-  // 3. ถ้ายังไม่พบ: ตรวจสอบหาหมุดที่ใกล้เคียงจากข้อมูลหมู่ที่, ตำบลและอำเภอที่ตรงกัน (Near Match)
+  // 3. ถ้ายังไม่พบ: ตรวจสอบหาหมุดที่ใกล้เคียงจากข้อมูลใน ตำบล + อำเภอ + จังหวัด เดียวกัน (Strict Scope Filter)
   if (!matched && subdistrict) {
-    // 3.1 ค้นหาจาก หมู่ที่ + ตำบล + อำเภอ ที่ตรงกัน
-    if (moo) {
+    // 3.1 แนะนำหมุดที่เป็น "ที่ทำการปกครองส่วนท้องถิ่น" เป็นอันดับต้น กรณีไม่พบบ้านเลขที่ตรงกัน
+    matched = allRows.find(r => {
+      const rProv = getRowProvince(r);
+      if (province && rProv && rProv !== province) return false;
+      const rDist = (r['อำเภอ'] || '').trim();
+      if (district && rDist && rDist !== district) return false;
+      const rSub = (r['ตำบล'] || '').trim();
+      if (!rSub || (rSub !== subdistrict && !rSub.includes(subdistrict) && !subdistrict.includes(rSub))) return false;
+
+      const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
+      const isLocalAdmin = rLoc.includes('ที่ทำการ') || rLoc.includes('อบต') || rLoc.includes('เทศบาล') || rLoc.includes('ที่ว่าการ') || rLoc.includes('กำนัน') || rLoc.includes('ผู้ใหญ่บ้าน') || rLoc.includes('ทต.') || rLoc.includes('อบจ');
+      const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
+
+      return isLocalAdmin && !isNaN(lat) && lat > 0;
+    });
+
+    if (matched) {
+      matchType = 'near';
+      matchNote = `แนะนำ: ที่ทำการปกครองส่วนท้องถิ่น (ต.${subdistrict})`;
+    }
+
+    // 3.2 ถ้าไม่พบที่ทำการปกครองส่วนท้องถิ่น ให้ค้นหาจาก หมู่ที่ + ตำบล เดียวกัน
+    if (!matched && moo) {
       matched = allRows.find(r => {
         const rProv = getRowProvince(r);
         if (province && rProv && rProv !== province) return false;
@@ -10653,7 +10707,7 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
         const rMoo = (r['หมู่'] || '').trim();
         const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
 
-        const subMatch = rSub && (rSub.includes(subdistrict) || subdistrict.includes(rSub));
+        const subMatch = rSub && (rSub === subdistrict || rSub.includes(subdistrict) || subdistrict.includes(rSub));
         const mooMatch = rMoo === moo || rLoc.includes(`ม.${moo}`) || rLoc.includes(`หมู่ ${moo}`) || rLoc.includes(`หมู่ที่ ${moo}`);
         const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
         return subMatch && mooMatch && !isNaN(lat) && lat > 0;
@@ -10665,7 +10719,7 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
       }
     }
 
-    // 3.2 ถ้ายังไม่พบในหมู่เดียวกัน หรือไม่ได้ระบุหมู่ ให้หาจาก ตำบล + อำเภอ เดียวกัน
+    // 3.3 ถ้ายังไม่พบ ให้หาจากหมุดอื่นๆ ใน ตำบล + อำเภอ + จังหวัด เดียวกัน
     if (!matched) {
       matched = allRows.find(r => {
         const rProv = getRowProvince(r);
@@ -10674,7 +10728,7 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
         if (district && rDist && rDist !== district) return false;
         const rSub = (r['ตำบล'] || '').trim();
         const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
-        return rSub && (rSub.includes(subdistrict) || subdistrict.includes(rSub)) && !isNaN(lat) && lat > 0;
+        return rSub && (rSub === subdistrict || rSub.includes(subdistrict) || subdistrict.includes(rSub)) && !isNaN(lat) && lat > 0;
       });
 
       if (matched) {
@@ -11008,7 +11062,42 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
         </div>
       </div>
 
-      <!-- 4. Inline Court Picker Overlay (ไม่ปิด Modal หลัก ไม่เด้งออก) -->
+      <!-- 4. ตรวจสอบความใกล้เคียงของข้อมูลจากการอ้างอิง (หมุดอ้างอิงในพื้นที่) -->
+      <div class="bg-gradient-to-br from-gray-50 to-blue-50/40 p-3 rounded-xl border border-gray-200 space-y-2.5" id="${prefix}refPinsSection">
+        <div class="flex items-center justify-between">
+          <label class="block font-bold text-gray-800 text-xs flex items-center gap-1.5">
+            <i class="fa-solid fa-location-crosshairs text-blue-600"></i>
+            <span>หมุดอ้างอิงความใกล้เคียงในพื้นที่</span>
+          </label>
+          <span class="text-[10px] text-gray-500 font-semibold truncate max-w-[240px]" id="${prefix}refPinsScopeBadge">เฉพาะใน ต. อ. จ. ที่เลือก</span>
+        </div>
+
+        <!-- กล่องแสดงหมุดที่ผู้ใช้เลือก -->
+        <div id="${prefix}selectedPinPreview" class="${initialData.lat && initialData.lng ? 'flex' : 'hidden'} p-2 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 font-semibold items-center justify-between shadow-2xs">
+          <div class="flex items-center gap-1.5 min-w-0">
+            <i class="fa-solid fa-circle-check text-emerald-600 shrink-0"></i>
+            <span class="truncate" id="${prefix}selectedPinLabel">ใช้หมุดอ้างอิง: ${initialData.locationText || 'มีพิกัดจริง'}</span>
+          </div>
+          <button type="button" onclick="clearSelectedRefPin('${prefix}')" class="text-[11px] text-rose-600 hover:text-rose-800 px-1.5 py-0.5 rounded cursor-pointer font-bold shrink-0" title="ยกเลิกการเลือกหมุดนี้">
+            <i class="fa-solid fa-xmark mr-0.5"></i>ยกเลิก
+          </button>
+        </div>
+
+        <input type="hidden" id="${prefix}selectedLat" value="${initialData.lat || ''}">
+        <input type="hidden" id="${prefix}selectedLng" value="${initialData.lng || ''}">
+        <input type="hidden" id="${prefix}selectedRefText" value="${initialData.locationText || ''}">
+        <input type="hidden" id="${prefix}selectedRefImg" value="${initialData.imageUrl || ''}">
+        <input type="hidden" id="${prefix}selectedRefNote" value="${initialData.matchNote || ''}">
+
+        <!-- รายการหมุดให้เลือก -->
+        <div id="${prefix}refPinsListContainer" class="max-h-48 overflow-y-auto space-y-1.5 pr-1 slts-swal-body-scroll text-xs">
+          <div class="p-3 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-200">
+            <i class="fa-solid fa-spinner fa-spin text-blue-500 mr-1"></i> กำลังค้นหาหมุดอ้างอิงในพื้นที่...
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. Inline Court Picker Overlay (ไม่ปิด Modal หลัก ไม่เด้งออก) -->
       <div id="${prefix}courtPickerOverlay" class="hidden absolute inset-0 bg-white/95 backdrop-blur-xs z-50 rounded-2xl p-4 flex flex-col shadow-2xl border-2 border-blue-500 transition-all">
         <div class="flex items-center justify-between pb-2.5 border-b border-gray-200 mb-2 flex-shrink-0">
           <div class="flex items-center gap-2">
@@ -11064,12 +11153,28 @@ window.handleScheduleLocationTypeChange = function(prefix, value) {
 };
 
 /**
- * ผูก Event อำเภอ/ตำบลของแบบฟอร์ม
+ * ผูก Event อำเภอ/ตำบลของแบบฟอร์ม และตรวจสอบหมุดอ้างอิงความใกล้เคียง
  */
 function bindScheduleFormEvents(prefix = 'modal_') {
   const provEl = document.getElementById(`${prefix}province`);
   const distEl = document.getElementById(`${prefix}district`);
   const subEl = document.getElementById(`${prefix}subdistrict`);
+  const houseEl = document.getElementById(`${prefix}houseNo`);
+  const mooEl = document.getElementById(`${prefix}moo`);
+  const udonCaseEl = document.getElementById(`${prefix}udonCaseNo`);
+  const otherCaseEl = document.getElementById(`${prefix}otherCaseNo`);
+  const prefixEl = document.getElementById(`${prefix}udonPrefix`);
+  const udonYearEl = document.getElementById(`${prefix}udonCaseYear`);
+  const otherYearEl = document.getElementById(`${prefix}otherCaseYear`);
+  const locTypeEl = document.getElementById(`${prefix}locationType`);
+  const adminNameEl = document.getElementById(`${prefix}localAdminName`);
+  const otherNameEl = document.getElementById(`${prefix}customOtherLocationName`);
+
+  const refreshSuggestions = () => {
+    if (typeof window.updateRefPinsSuggestions === 'function') {
+      window.updateRefPinsSuggestions(prefix);
+    }
+  };
 
   if (provEl && distEl && subEl) {
     provEl.addEventListener('change', (e) => {
@@ -11079,6 +11184,8 @@ function bindScheduleFormEvents(prefix = 'modal_') {
       const firstD = dists[0] || '';
       const subs = firstD ? getSubdistrictsByDistrict(p, firstD) : [];
       subEl.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('');
+      window.clearSelectedRefPin(prefix);
+      refreshSuggestions();
     });
 
     distEl.addEventListener('change', (e) => {
@@ -11086,9 +11193,279 @@ function bindScheduleFormEvents(prefix = 'modal_') {
       const d = e.target.value;
       const subs = d ? getSubdistrictsByDistrict(p, d) : [];
       subEl.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('');
+      window.clearSelectedRefPin(prefix);
+      refreshSuggestions();
+    });
+
+    subEl.addEventListener('change', () => {
+      window.clearSelectedRefPin(prefix);
+      refreshSuggestions();
     });
   }
+
+  if (houseEl) houseEl.addEventListener('input', refreshSuggestions);
+  if (mooEl) mooEl.addEventListener('input', refreshSuggestions);
+  if (udonCaseEl) udonCaseEl.addEventListener('input', refreshSuggestions);
+  if (otherCaseEl) otherCaseEl.addEventListener('input', refreshSuggestions);
+  if (prefixEl) prefixEl.addEventListener('input', refreshSuggestions);
+  if (udonYearEl) udonYearEl.addEventListener('change', refreshSuggestions);
+  if (otherYearEl) otherYearEl.addEventListener('change', refreshSuggestions);
+  if (locTypeEl) locTypeEl.addEventListener('change', refreshSuggestions);
+  if (adminNameEl) adminNameEl.addEventListener('input', refreshSuggestions);
+  if (otherNameEl) otherNameEl.addEventListener('input', refreshSuggestions);
+
+  // เริ่มค้นหาหมุดอ้างอิงทันทีเมื่อเปิดแบบฟอร์ม
+  setTimeout(refreshSuggestions, 120);
 }
+
+/**
+ * ฟังก์ชันค้นหาและจัดอันดับหมุดอ้างอิงความใกล้เคียงในพื้นที่ (ต. อ. จ. เดียวกันเท่านั้น)
+ */
+window.updateRefPinsSuggestions = function(prefix = 'quick_') {
+  const provEl = document.getElementById(`${prefix}province`);
+  const distEl = document.getElementById(`${prefix}district`);
+  const subEl = document.getElementById(`${prefix}subdistrict`);
+  const houseEl = document.getElementById(`${prefix}houseNo`);
+  const mooEl = document.getElementById(`${prefix}moo`);
+  const caseNoEl = document.getElementById(`${prefix}udonCaseNo`) || document.getElementById(`${prefix}otherCaseNo`);
+  const prefixEl = document.getElementById(`${prefix}udonPrefix`);
+  const yearEl = document.getElementById(`${prefix}udonCaseYear`) || document.getElementById(`${prefix}otherCaseYear`);
+  const listContainer = document.getElementById(`${prefix}refPinsListContainer`);
+  const scopeBadge = document.getElementById(`${prefix}refPinsScopeBadge`);
+  const selLatEl = document.getElementById(`${prefix}selectedLat`);
+
+  if (!listContainer) return;
+
+  const province = provEl?.value?.trim() || '';
+  const district = distEl?.value?.trim() || '';
+  const subdistrict = subEl?.value?.trim() || '';
+  const houseNo = houseEl?.value?.trim() || '';
+  const moo = mooEl?.value?.trim() || '';
+  const enteredCase = `${prefixEl?.value?.trim() || ''}${caseNoEl?.value?.trim() || ''}/${yearEl?.value?.trim() || ''}`.trim();
+  const cleanEnteredCase = enteredCase.replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+
+  if (scopeBadge) {
+    scopeBadge.textContent = subdistrict ? `เฉพาะใน ต.${subdistrict} อ.${district} จ.${province}` : 'กรุณาเลือกตำบล';
+  }
+
+  if (!subdistrict || !district || !province) {
+    listContainer.innerHTML = `
+      <div class="p-3 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-200 text-xs">
+        <i class="fa-solid fa-map-location-dot text-gray-300 text-base mb-1 block"></i>
+        กรุณาเลือกจังหวัด อำเภอ และตำบลเพื่อค้นหาหมุดอ้างอิง
+      </div>
+    `;
+    return;
+  }
+
+  const allRows = state.allSheetRows || [];
+  
+  // 1. กำหนดขอบเขตตัวกรอง: ต้องอยู่ในเขตจังหวัด อำเภอ และตำบลเดียวกันเท่านั้น ห้ามนำข้อมูลที่ไม่เกี่ยวข้องเข้ามาแสดงผล
+  const scopedRows = allRows.filter(r => {
+    const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
+    const lng = parseFloat(r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || 0);
+    if (isNaN(lat) || isNaN(lng) || lat <= 0 || lng <= 0) return false;
+
+    const rProv = (getRowProvince(r) || '').trim();
+    if (rProv !== province) return false;
+
+    const rDist = (r['อำเภอ'] || '').trim();
+    if (rDist !== district) return false;
+
+    const rSub = (r['ตำบล'] || '').trim();
+    if (rSub !== subdistrict) return false;
+
+    return true;
+  });
+
+  if (scopedRows.length === 0) {
+    listContainer.innerHTML = `
+      <div class="p-3 text-center text-gray-500 bg-white rounded-xl border border-dashed border-gray-300 text-xs">
+        <i class="fa-solid fa-circle-exclamation text-amber-500 text-sm mb-1 block"></i>
+        ไม่พบข้อมูลหมุดประวัติเดิมใน ต.<b>${subdistrict}</b> อ.<b>${district}</b> จ.<b>${province}</b>
+      </div>
+    `;
+    return;
+  }
+
+  // 2. ให้คะแนนและจัดลำดับความใกล้เคียง:
+  // - เลขคดีตรงกัน
+  // - บ้านเลขที่ + หมู่ ตรงกัน
+  // - บ้านเลขที่ตรงกัน
+  // - ที่ทำการปกครองส่วนท้องถิ่น (เป็นอันดับต้นกรณีไม่พบบ้านเลขที่ตรงกัน)
+  // - หมู่ที่เดียวกัน
+  // - หมุดอื่นๆ ในตำบล
+  const evaluated = [];
+  const seenCoords = new Set();
+
+  scopedRows.forEach(r => {
+    const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด']);
+    const lng = parseFloat(r['ลองจิจูด (Lng)'] || r['ลองจิจูด']);
+    const coordKey = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    if (seenCoords.has(coordKey)) return;
+    seenCoords.add(coordKey);
+
+    const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
+    const rHouse = (r['บ้านเลขที่'] || '').trim();
+    const rMoo = (r['หมู่'] || '').trim();
+    const rCase = (r['เลขคดี'] || '').trim();
+    const cleanRCase = rCase.replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+    const rDate = formatThaiDateDisplay(r['วัน-เวลาบันทึก'] || r['Timestamp'] || '');
+    const rImg = extractRowImageUrl(r);
+
+    const isLocalAdmin = rLoc.includes('ที่ทำการ') || rLoc.includes('อบต') || rLoc.includes('เทศบาล') || rLoc.includes('ที่ว่าการ') || rLoc.includes('กำนัน') || rLoc.includes('ผู้ใหญ่บ้าน') || rLoc.includes('ทต.') || rLoc.includes('อบจ');
+
+    let score = 50;
+    let badgeText = `หมุดใน ต.${subdistrict}`;
+    let badgeClass = 'bg-gray-100 text-gray-700 border-gray-200';
+    let icon = 'fa-location-dot';
+
+    const caseMatch = cleanEnteredCase && cleanRCase && (cleanRCase === cleanEnteredCase || cleanRCase.includes(cleanEnteredCase) || cleanEnteredCase.includes(cleanRCase));
+    const houseMatch = houseNo && (rHouse === houseNo || rLoc.includes(houseNo));
+    const mooMatch = moo && (rMoo === moo || rLoc.includes(`ม.${moo}`) || rLoc.includes(`หมู่ ${moo}`) || rLoc.includes(`หมู่ที่ ${moo}`));
+
+    if (caseMatch) {
+      score = 1000;
+      badgeText = 'เลขคดีตรงกันในระบบ';
+      badgeClass = 'bg-blue-100 text-blue-800 border-blue-300 font-bold';
+      icon = 'fa-scale-balanced';
+    } else if (houseMatch && mooMatch) {
+      score = 500;
+      badgeText = 'บ้านเลขที่และหมู่ตรงกัน';
+      badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold';
+      icon = 'fa-house-circle-check';
+    } else if (houseMatch) {
+      score = 400;
+      badgeText = 'บ้านเลขที่ตรงกัน';
+      badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold';
+      icon = 'fa-house';
+    } else if (isLocalAdmin) {
+      score = 300;
+      badgeText = '⭐ แนะนำ: ที่ทำการปกครองส่วนท้องถิ่น (ศูนย์กลางตำบล)';
+      badgeClass = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
+      icon = 'fa-landmark';
+    } else if (mooMatch) {
+      score = 200;
+      badgeText = `ม.${moo} ตำบลเดียวกัน`;
+      badgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold';
+      icon = 'fa-map-pin';
+    }
+
+    evaluated.push({
+      row: r,
+      lat,
+      lng,
+      locationText: rLoc || `ต.${subdistrict} อ.${district}`,
+      caseNumber: rCase,
+      dateTime: rDate,
+      imageUrl: rImg,
+      score,
+      badgeText,
+      badgeClass,
+      icon,
+      isLocalAdmin
+    });
+  });
+
+  // เรียงลำดับจากคะแนนมากไปหาน้อย
+  evaluated.sort((a, b) => b.score - a.score);
+
+  const currentSelLat = parseFloat(selLatEl?.value || '0');
+  const currentSelLng = parseFloat(document.getElementById(`${prefix}selectedLng`)?.value || '0');
+
+  // Render cards
+  listContainer.innerHTML = evaluated.map((item) => {
+    const isSelected = (currentSelLat && currentSelLng && Math.abs(currentSelLat - item.lat) < 0.0001 && Math.abs(currentSelLng - item.lng) < 0.0001);
+    const safeLoc = item.locationText.replace(/'/g, "\\'");
+    const safeImg = item.imageUrl.replace(/'/g, "\\'");
+    const safeNote = item.badgeText.replace(/'/g, "\\'");
+
+    return `
+      <div 
+        onclick="selectRefPinChoice('${prefix}', ${item.lat}, ${item.lng}, '${safeLoc}', '${safeImg}', '${safeNote}')"
+        class="p-2.5 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2.5 ${isSelected ? 'bg-emerald-50/90 border-emerald-500 ring-2 ring-emerald-400/30 shadow-xs' : 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50/40'}"
+      >
+        <div class="flex items-start gap-2.5 min-w-0 flex-1">
+          <div class="w-8 h-8 rounded-xl ${isSelected ? 'bg-emerald-600 text-white' : (item.isLocalAdmin ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700')} flex items-center justify-center text-xs shrink-0 mt-0.5 shadow-2xs">
+            <i class="fa-solid ${item.icon}"></i>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5 flex-wrap mb-1">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-md border ${item.badgeClass}">
+                ${item.badgeText}
+              </span>
+              ${item.caseNumber ? `<span class="text-[10px] text-gray-500 font-mono"><i class="fa-solid fa-scale-balanced mr-0.5"></i>${item.caseNumber}</span>` : ''}
+            </div>
+            <p class="font-bold text-gray-900 text-xs truncate leading-snug">${item.locationText}</p>
+            <div class="text-[10px] text-gray-500 flex items-center gap-2 mt-0.5 font-mono">
+              <span><i class="fa-solid fa-location-crosshairs mr-0.5 text-gray-400"></i>${item.lat.toFixed(4)}, ${item.lng.toFixed(4)}</span>
+              ${item.dateTime ? `<span>• ${item.dateTime}</span>` : ''}
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          ${item.imageUrl ? `
+            <img src="${item.imageUrl}" alt="ภาพ" class="w-10 h-10 object-cover rounded-lg border border-gray-200 shrink-0" onerror="this.style.display='none'">
+          ` : ''}
+          <button 
+            type="button" 
+            class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${isSelected ? 'bg-emerald-600 text-white' : 'bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-200'}"
+          >
+            ${isSelected ? '<i class="fa-solid fa-check"></i> เลือกอยู่' : '<i class="fa-solid fa-location-arrow"></i> เลือกหมุดนี้'}
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+};
+
+window.selectRefPinChoice = function(prefix, lat, lng, refText, refImg, refNote) {
+  const latEl = document.getElementById(`${prefix}selectedLat`);
+  const lngEl = document.getElementById(`${prefix}selectedLng`);
+  const textEl = document.getElementById(`${prefix}selectedRefText`);
+  const imgEl = document.getElementById(`${prefix}selectedRefImg`);
+  const noteEl = document.getElementById(`${prefix}selectedRefNote`);
+  const previewBox = document.getElementById(`${prefix}selectedPinPreview`);
+  const previewLabel = document.getElementById(`${prefix}selectedPinLabel`);
+
+  if (latEl) latEl.value = lat;
+  if (lngEl) lngEl.value = lng;
+  if (textEl) textEl.value = refText || '';
+  if (imgEl) imgEl.value = refImg || '';
+  if (noteEl) noteEl.value = refNote || '';
+
+  if (previewBox && previewLabel) {
+    previewLabel.textContent = `ใช้หมุดอ้างอิง: ${refText} (${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)})`;
+    previewBox.classList.remove('hidden');
+    previewBox.classList.add('flex');
+  }
+
+  // Refresh selection in list
+  window.updateRefPinsSuggestions(prefix);
+};
+
+window.clearSelectedRefPin = function(prefix) {
+  const latEl = document.getElementById(`${prefix}selectedLat`);
+  const lngEl = document.getElementById(`${prefix}selectedLng`);
+  const textEl = document.getElementById(`${prefix}selectedRefText`);
+  const imgEl = document.getElementById(`${prefix}selectedRefImg`);
+  const noteEl = document.getElementById(`${prefix}selectedRefNote`);
+  const previewBox = document.getElementById(`${prefix}selectedPinPreview`);
+
+  if (latEl) latEl.value = '';
+  if (lngEl) lngEl.value = '';
+  if (textEl) textEl.value = '';
+  if (imgEl) imgEl.value = '';
+  if (noteEl) noteEl.value = '';
+
+  if (previewBox) {
+    previewBox.classList.add('hidden');
+    previewBox.classList.remove('flex');
+  }
+
+  window.updateRefPinsSuggestions(prefix);
+};
 
 /**
  * เปิด Inline Overlay เลือกประเภทศาลสำหรับแบบฟอร์มจัดตาราง (ไม่เรียก Swal.fire เพื่อไม่ให้ Modal เด้งออก)
@@ -11220,6 +11597,14 @@ function extractSummonsFormData(prefix = 'modal_') {
 
   const locationText = buildFullLocationText(locationType, houseNo, moo, localAdminName, customOtherLocationName, subdistrict, district, province);
 
+  const rawLat = parseFloat(document.getElementById(`${prefix}selectedLat`)?.value || '');
+  const rawLng = parseFloat(document.getElementById(`${prefix}selectedLng`)?.value || '');
+  const selectedLat = (!isNaN(rawLat) && rawLat > 0) ? rawLat : null;
+  const selectedLng = (!isNaN(rawLng) && rawLng > 0) ? rawLng : null;
+  const selectedRefText = (document.getElementById(`${prefix}selectedRefText`)?.value || '').trim();
+  const selectedRefImg = (document.getElementById(`${prefix}selectedRefImg`)?.value || '').trim();
+  const selectedRefNote = (document.getElementById(`${prefix}selectedRefNote`)?.value || '').trim();
+
   return {
     province,
     district,
@@ -11235,7 +11620,12 @@ function extractSummonsFormData(prefix = 'modal_') {
     moo,
     localAdminName,
     customOtherLocationName,
-    locationText
+    locationText,
+    selectedLat,
+    selectedLng,
+    selectedRefText,
+    selectedRefImg,
+    selectedRefNote
   };
 }
 
@@ -12379,7 +12769,7 @@ window.openAddRouteStopModal = function(editIndex = null) {
         ${getSummonsFormHtml('quick_', initialData)}
       </div>
     `,
-    width: '640px',
+    width: '680px',
     customClass: { popup: 'rounded-2xl p-4 sm:p-5' },
     showCancelButton: true,
     confirmButtonText: isEditing ? 'บันทึกการแก้ไข' : 'เพิ่มรายการ',
@@ -12399,15 +12789,30 @@ window.openAddRouteStopModal = function(editIndex = null) {
   }).then((res) => {
     if (res.isConfirmed && res.value) {
       const data = res.value;
-      const matchRes = matchSingleCaseWithHistory(
-        data.caseNumber,
-        data.houseNo,
-        data.subdistrict,
-        data.district,
-        data.locationText,
-        data.moo,
-        data.province
-      );
+
+      let lat = data.selectedLat;
+      let lng = data.selectedLng;
+      let matchType = (lat && lng) ? 'exact' : 'none';
+      let matchNote = data.selectedRefNote || 'หมุดอ้างอิงที่เลือก';
+      let imageUrl = data.selectedRefImg || '';
+
+      // หากผู้ใช้ไม่ได้คลิกเลือกหมุดอ้างอิงเอง ให้ประมวลผลหมุดอ้างอิงตามลำดับความใกล้เคียงในพื้นที่เดียวกัน
+      if (!lat || !lng) {
+        const matchRes = matchSingleCaseWithHistory(
+          data.caseNumber,
+          data.houseNo,
+          data.subdistrict,
+          data.district,
+          data.locationText,
+          data.moo,
+          data.province
+        );
+        lat = matchRes.lat;
+        lng = matchRes.lng;
+        matchType = matchRes.matchType;
+        matchNote = matchRes.matchNote;
+        imageUrl = matchRes.imageUrl || '';
+      }
 
       const stopItem = {
         id: isEditing ? state.currentRouteStops[editIndex].id : ('stop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6)),
@@ -12426,14 +12831,14 @@ window.openAddRouteStopModal = function(editIndex = null) {
         subdistrict: data.subdistrict,
         district: data.district,
         province: data.province,
-        lat: matchRes.lat,
-        lng: matchRes.lng,
-        imageUrl: matchRes.imageUrl || '',
-        dateTime: matchRes.dateTime || '',
-        matchType: matchRes.matchType,
-        matchNote: matchRes.matchNote,
-        isMatched: matchRes.matchType === 'exact',
-        hasCoords: Boolean(matchRes.lat && matchRes.lng)
+        lat: lat,
+        lng: lng,
+        imageUrl: imageUrl,
+        dateTime: data.dateTime || '',
+        matchType: matchType,
+        matchNote: matchNote,
+        isMatched: Boolean(lat && lng),
+        hasCoords: Boolean(lat && lng)
       };
 
       if (isEditing) {
