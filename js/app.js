@@ -120,6 +120,7 @@ function initOfflineSyncSystem() {
   window.addEventListener('online', () => {
     updateOfflineBadgeUI();
     updateBackgroundQueueUI();
+    updateCameraTopBarUI();
     processBackgroundQueue();
 
     const queue = getOfflineQueue();
@@ -140,19 +141,13 @@ function initOfflineSyncSystem() {
   window.addEventListener('offline', () => {
     updateOfflineBadgeUI();
     updateBackgroundQueueUI();
-    Swal.fire({
-      icon: 'warning',
-      title: 'เข้าสู่โหมดออฟไลน์',
-      text: 'ระบบจะจัดเก็บภาพถ่ายและข้อมูลลงในเครื่องให้อัตโนมัติ',
-      timer: 3000,
-      toast: true,
-      position: 'top-end',
-      showConfirmButton: false
-    });
+    updateCameraTopBarUI();
+    // ตัดการแจ้งเตือน "เข้าสู่โหมดออฟไลน์" ออกไปตามข้อ 4 (ใช้จุดกระพริบสีแดงแทน)
   });
 
   updateOfflineBadgeUI();
   updateBackgroundQueueUI();
+  updateCameraTopBarUI();
 }
 
 async function syncOfflineQueue(isManual = false) {
@@ -376,7 +371,69 @@ function updateBackgroundQueueUI() {
   if (floatCount) {
     floatCount.textContent = total;
   }
+  updateCameraTopBarUI();
 }
+
+/**
+ * อัปเดตแถบควบคุมด้านบนของหน้ากล้องมือถือ (< 768px):
+ * 4.1 สถานะออนไลน์/ออฟไลน์ (จุดกระพริบเขียว/แดง)
+ * 5. ปุ่มนับจำนวนทำงานเบื้องหลัง (สีเขียวเมื่อออนไลน์ / สีส้มเมื่อออฟไลน์)
+ * 4.5 ไอคอนสถานะการล็อกอิน
+ */
+window.updateCameraTopBarUI = function() {
+  const isOnline = navigator.onLine;
+  const bgQueue = getBackgroundQueue();
+  const offlineQueue = getOfflineQueue();
+
+  // 1. จุดกระพริบสถานะออนไลน์/ออฟไลน์ (4.1)
+  const dotPing = document.getElementById('cameraStatusDotPing');
+  const dot = document.getElementById('cameraStatusDot');
+  const ind = document.getElementById('cameraNetworkStatusIndicator');
+
+  if (dotPing && dot) {
+    if (isOnline) {
+      dotPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-80';
+      dot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-sm shadow-emerald-400';
+      if (ind) ind.title = 'สถานะการเชื่อมต่อ: ออนไลน์ (พร้อมนำส่งข้อมูลขึ้นคลาวด์)';
+    } else {
+      dotPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-80';
+      dot.className = 'relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500 shadow-sm shadow-rose-400';
+      if (ind) ind.title = 'สถานะการเชื่อมต่อ: ออฟไลน์ (บันทึกลงเครื่องและรอซิงค์เมื่อออนไลน์)';
+    }
+  }
+
+  // 2. ปุ่มนับจำนวนทำงานเบื้องหลัง (ข้อ 5)
+  const bgBtn = document.getElementById('btnCameraBgQueue');
+  const bgIcon = document.getElementById('iconCameraBgQueue');
+  const bgTxt = document.getElementById('txtCameraBgQueueCount');
+
+  if (bgBtn && bgTxt) {
+    if (!isOnline) {
+      // โหมดออฟไลน์: ปุ่มสีส้ม แสดงจำนวนที่รอซิงค์
+      bgBtn.className = 'px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap cursor-pointer';
+      bgBtn.title = `โหมดออฟไลน์: มี ${offlineQueue.length} รายการรออัปโหลดเมื่อกลับมาออนไลน์`;
+      if (bgIcon) {
+        bgIcon.className = offlineQueue.length > 0 ? 'fa-solid fa-cloud text-xs animate-pulse' : 'fa-solid fa-cloud text-xs';
+      }
+      bgTxt.textContent = offlineQueue.length;
+    } else {
+      // โหมดออนไลน์: ปุ่มสีเขียว แสดงจำนวนงานที่กำลังทำในเบื้องหลัง
+      bgBtn.className = 'px-2.5 py-1.5 bg-emerald-600/95 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-emerald-400/50 shadow-md whitespace-nowrap cursor-pointer';
+      bgBtn.title = `โหมดออนไลน์: กำลังทำงานเบื้องหลัง ${bgQueue.length} รายการ`;
+      if (bgIcon) {
+        bgIcon.className = bgQueue.length > 0 ? 'fa-solid fa-cloud-arrow-up text-xs animate-pulse' : 'fa-solid fa-cloud-arrow-up text-xs';
+      }
+      bgTxt.textContent = bgQueue.length;
+    }
+  }
+
+  // 3. ไอคอนปุ่ม Auth (4.5)
+  const authIcon = document.getElementById('iconCameraAuth');
+  const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+  if (authIcon) {
+    authIcon.className = isLoggedIn ? 'fa-solid fa-right-from-bracket text-xs sm:text-sm' : 'fa-solid fa-right-to-bracket text-xs sm:text-sm text-amber-300';
+  }
+};
 
 /**
  * เปิด Pop Up แสดงรายการคิวอัปโหลดภาพเบื้องหลังทั้งหมด พร้อม Progress Bar แต่ละรายการ
@@ -769,15 +826,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest' && !!state.currentUser.username;
 
   if (window.innerWidth < 768) {
-    // จอมือถือ (< 768px):
+    // จอมือถือ (< 768px): เมื่อเปิดเข้าใช้งานให้เข้าสู่โหมดกล้องทันทีเสมอ (ตามข้อ 1)
+    openCameraModal().catch(e => console.warn('Camera open error:', e));
+
+    // หากไม่ได้อยู่ในสถานะล็อกอินอยู่ ให้มี Pop Up บังคับให้ล็อกอินไว้ด้านบนเสมอ (ตามข้อ 1)
     if (!isLoggedIn) {
-      // หากยังไม่ได้ล็อกอิน ให้เด้งหน้าต่างล็อกอินขึ้นมาบังทันทีเพื่อความปลอดภัย
       setTimeout(() => {
         openLoginModal(true);
-      }, 250);
-    } else {
-      // หากมีการล็อกอินอยู่แล้ว ให้เข้าใช้งานหน้ากล้องถ่ายภาพได้ทันที
-      openCameraModal().catch(e => console.warn('Camera open error:', e));
+      }, 350);
     }
   } else {
     // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
@@ -1110,16 +1166,17 @@ function updateAuthUI() {
   const cameraAuthBtn = document.getElementById('btnCameraAuth');
   if (cameraAuthBtn) {
     if (isLoggedIn) {
-      cameraAuthBtn.className = 'px-2.5 py-1.5 bg-rose-600/95 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-rose-400/50 shadow-md whitespace-nowrap cursor-pointer';
+      cameraAuthBtn.className = 'w-8 h-8 sm:w-9 sm:h-9 bg-rose-600/95 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center transition border border-rose-400/50 shadow-md cursor-pointer';
       cameraAuthBtn.title = `ออกจากระบบ (${state.currentUser.displayName || state.currentUser.name || state.currentUser.username})`;
-      cameraAuthBtn.innerHTML = `<i class="fa-solid fa-right-from-bracket text-xs"></i><span class="whitespace-nowrap">ออกระบบ</span>`;
+      cameraAuthBtn.innerHTML = `<i class="fa-solid fa-right-from-bracket text-xs sm:text-sm"></i>`;
     } else {
-      cameraAuthBtn.className = 'px-2.5 py-1.5 bg-blue-600/95 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-blue-400/50 shadow-md whitespace-nowrap cursor-pointer';
+      cameraAuthBtn.className = 'w-8 h-8 sm:w-9 sm:h-9 bg-slate-700/95 hover:bg-slate-800 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center transition border border-slate-500/50 shadow-md cursor-pointer';
       cameraAuthBtn.title = 'เข้าสู่ระบบ';
-      cameraAuthBtn.innerHTML = `<i class="fa-solid fa-right-to-bracket text-xs"></i><span class="whitespace-nowrap">เข้าสู่ระบบ</span>`;
+      cameraAuthBtn.innerHTML = `<i class="fa-solid fa-right-to-bracket text-xs sm:text-sm text-amber-300"></i>`;
     }
   }
 
+  updateCameraTopBarUI();
   renderUserList();
 }
 
@@ -1202,6 +1259,9 @@ window.handleGlobalClick = function(e) {
 
 window.openLoginModal = function(isForced = false) {
   if (!elements.loginModal) return;
+  if (typeof window.freezeCameraStream === 'function') {
+    window.freezeCameraStream();
+  }
   elements.loginModal.classList.remove('hidden');
   elements.loginModal.classList.add('flex');
   const closeBtn = elements.loginModal.querySelector('button[onclick="closeLoginModal()"]');
@@ -1220,6 +1280,9 @@ window.closeLoginModal = function() {
   if (!elements.loginModal) return;
   elements.loginModal.classList.add('hidden');
   elements.loginModal.classList.remove('flex');
+  if (typeof window.resumeCameraStream === 'function') {
+    window.resumeCameraStream();
+  }
 };
 
 function handleLogin(e) {
@@ -6264,19 +6327,13 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
       <div class="slts-form-modal">
         <!-- Header -->
         <div class="slts-modal-header">
-          <!-- ปุ่มค้นหาข้อมูลประวัติส่งหมาย ที่มุมซ้ายบนแทนสัญลักษณ์เดิม (Disabled เมื่อออฟไลน์) -->
+          <!-- ปุ่มค้นหาข้อมูลประวัติส่งหมาย ที่มุมซ้ายบน (Disabled เมื่อออฟไลน์) -->
           <div class="flex items-center gap-1">
             ${searchBtnHtml}
-            ${(state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest') ? `
-              <button type="button" onclick="saveTempModalFormState(); showMobileRouteMapModal();" class="slts-header-search-icon-btn bg-rose-500/20 text-rose-200 border-rose-400/30 hover:bg-rose-500/30" title="เปิดแผนที่และเส้นทางส่งหมาย">
-                <i class="fa-solid fa-map-location-dot"></i>
-              </button>
-            ` : ''}
           </div>
           <div class="flex-1 ${isOnline ? 'cursor-pointer' : ''}" ${headerTitleAction}>
             <h2 class="slts-modal-title flex items-center gap-1.5">
               <span>${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</span>
-              ${searchBadge}
             </h2>
             <p class="slts-modal-subtitle">📍 จังหวัด${prov}</p>
           </div>
@@ -8558,6 +8615,7 @@ async function openCameraModal() {
   updateCaptureButtonState();
   await startCameraStream();
   startLiveCameraHUD();
+  updateCameraTopBarUI();
 }
 
 function closeCameraModal() {
@@ -8621,6 +8679,57 @@ function stopLiveCameraHUD() {
   if (state.hudIntervalId) {
     clearInterval(state.hudIntervalId);
     state.hudIntervalId = null;
+  }
+}
+
+/**
+ * Freeze โหมดกล้องชั่วคราวเมื่อเปิด Pop Up / SweetAlert เพื่อลดการกินทรัพยากรเครื่อง (CPU / GPU / Battery) ตามข้อ 2
+ */
+window.freezeCameraStream = function() {
+  if (state.isCameraFrozen) return;
+  state.isCameraFrozen = true;
+  if (elements.videoPreview && !elements.videoPreview.paused) {
+    try { elements.videoPreview.pause(); } catch (e) {}
+  }
+  stopLiveCameraHUD();
+};
+
+/**
+ * ปลด Freeze และกลับมาเรนเดอร์กล้องตามปกติเมื่อปิด Pop Up / SweetAlert
+ */
+window.resumeCameraStream = function() {
+  if (!state.isCameraFrozen) return;
+  // หากยังมี Modal อื่นๆ หรือ SweetAlert ค้างอยู่ ห้ามปลด Freeze
+  if (document.body.classList.contains('swal2-shown')) return;
+  if (elements.loginModal && !elements.loginModal.classList.contains('hidden')) return;
+  if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) return;
+
+  state.isCameraFrozen = false;
+  if (elements.videoPreview && elements.videoPreview.srcObject) {
+    try { elements.videoPreview.play().catch(() => {}); } catch (e) {}
+  }
+  startLiveCameraHUD();
+};
+
+// ตรวจสอบการเปิด-ปิด SweetAlert2 บน body อัตโนมัติ เพื่อ Freeze/Resume กล้องแบบครอบคลุมทุกฟังก์ชั่น (ตามข้อ 2)
+if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+  const swalCameraFreezeObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.attributeName === 'class') {
+        if (document.body.classList.contains('swal2-shown')) {
+          window.freezeCameraStream();
+        } else {
+          window.resumeCameraStream();
+        }
+      }
+    }
+  });
+  if (document.body) {
+    swalCameraFreezeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  } else {
+    document.addEventListener('DOMContentLoaded', () => {
+      swalCameraFreezeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    });
   }
 }
 
@@ -8882,7 +8991,6 @@ async function captureAndProcessPhoto() {
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
     
-    closeCameraModal();
     hideCustomLoading();
 
     // 1. นำคำสั่ง triggerDownload ออก เพื่อป้องกันไม่ให้ Google Chrome แสดงแจ้งเตือนดาวน์โหลดไฟล์รบกวนหน้ากล้อง
@@ -8898,75 +9006,32 @@ async function captureAndProcessPhoto() {
       imageBase64: compressedImageBase64
     };
 
-    // 3. เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
-    enqueueBackgroundUpload({
-      caseNumber: caseNumber,
-      courtType: payloadData.courtType,
-      locationText: locationText,
-      fileName: imageFilename,
-      payload: uploadPayload
-    });
+    // 3. จัดการคิวตามสถานะ ออนไลน์ vs ออฟไลน์ (ข้อ 5: ทำงานเบื้องหลังทั้งหมด 100% โดยไม่ต้องมี Pop Up แจ้งเตือน)
+    if (!navigator.onLine) {
+      // โหมดออฟไลน์: บันทึกเข้า Offline Queue รอซิงค์เมื่อกลับมาออนไลน์
+      addToOfflineQueue(uploadPayload);
+    } else {
+      // โหมดออนไลน์: เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
+      enqueueBackgroundUpload({
+        caseNumber: caseNumber,
+        courtType: payloadData.courtType,
+        locationText: locationText,
+        fileName: imageFilename,
+        payload: uploadPayload
+      });
+      processBackgroundQueue();
+    }
 
     // 4. รีเซ็ตฟอร์มให้พร้อมสำหรับกรอกหมายถัดไปทันที (Instant Form Release)
     resetFormForNextCase();
 
-    // 5. สั่งเริ่มการทำงานของ Background Worker ในเบื้องหลัง
-    processBackgroundQueue();
+    // 5. อัปเดตตัวเลขนับจำนวนทำงานเบื้องหลังบนหน้ากล้องทันที (ข้อ 5)
+    updateCameraTopBarUI();
 
-    // 6. แสดง Pop Up แจ้งว่า "อยู่ในคิวนำขึ้นข้อมูลแล้ว" พร้อม Cooldown 2 วินาที (ปรับขนาดให้เหมาะกับจอมือถือ)
-    let cooldownTimer;
-    Swal.fire({
-      icon: 'success',
-      title: '<div class="text-sm sm:text-base font-bold text-gray-900"><i class="fa-solid fa-list-check text-blue-600 mr-1.5"></i> อยู่ในคิวนำขึ้นข้อมูลแล้ว</div>',
-      html: `
-        <div class="text-left text-xs space-y-2.5 p-1 select-none text-gray-700">
-          <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
-            <div class="flex items-center justify-between font-bold">
-              <span class="text-blue-700 font-mono text-sm"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i> ${caseNumber}</span>
-              <span class="text-gray-600 text-[11px]">${payloadData.courtType}</span>
-            </div>
-            <div class="text-gray-600 text-[11px] truncate">
-              <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i> ${locationText}
-            </div>
-          </div>
-
-          <div class="p-2.5 bg-emerald-50 border-2 border-emerald-300 rounded-xl text-center space-y-0.5">
-            <div class="text-emerald-800 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5">
-              <i class="fa-solid fa-circle-check text-emerald-600 text-sm sm:text-base"></i>
-              <span>ท่านสามารถทำรายการต่อไปได้ทันที</span>
-            </div>
-            <p class="text-[10px] sm:text-[11px] text-emerald-700 font-medium">รูปภาพกำลังดำเนินการอัปโหลดในเบื้องหลัง</p>
-          </div>
-
-          <div class="pt-0.5 text-[10px] sm:text-[11px] text-gray-400 flex items-center justify-center gap-1.5">
-            <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
-            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalMobileCameraCooldown" class="text-blue-600 font-bold text-xs sm:text-sm">2</b> วินาที</span>
-          </div>
-        </div>
-      `,
-      timer: 2000,
-      timerProgressBar: true,
-      width: window.innerWidth < 640 ? '92%' : '440px',
-      showConfirmButton: true,
-      confirmButtonText: '<i class="fa-solid fa-pen-to-square mr-1"></i> ทำรายการต่อไปทันที',
-      confirmButtonColor: '#2563eb',
-      allowOutsideClick: true,
-      customClass: {
-        popup: 'rounded-2xl p-4'
-      },
-      didOpen: () => {
-        const cdEl = document.getElementById('swalMobileCameraCooldown');
-        cooldownTimer = setInterval(() => {
-          if (cdEl && Swal.getTimerLeft()) {
-            const secLeft = Math.ceil(Swal.getTimerLeft() / 1000);
-            cdEl.textContent = secLeft;
-          }
-        }, 200);
-      },
-      willClose: () => {
-        clearInterval(cooldownTimer);
-      }
-    });
+    // สั่นตอบสนองเบาๆ (Haptic Feedback) ให้ทราบว่าถ่ายภาพสำเร็จ
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(40);
+    }
 
   } catch (error) {
     console.error('Capture/Upload error:', error);
@@ -9033,76 +9098,31 @@ async function handleFallbackFile(e) {
       imageBase64: compressedImageBase64
     };
 
-    // 3. เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
-    enqueueBackgroundUpload({
-      caseNumber: caseNumber,
-      courtType: payloadData.courtType,
-      locationText: locationText,
-      fileName: imageFilename,
-      payload: uploadPayload
-    });
+    // 3. จัดการคิวตามสถานะ ออนไลน์ vs ออฟไลน์ (ข้อ 5: ทำงานเบื้องหลังทั้งหมด 100% โดยไม่ต้องมี Pop Up แจ้งเตือน)
+    if (!navigator.onLine) {
+      // โหมดออฟไลน์: บันทึกเข้า Offline Queue รอซิงค์เมื่อกลับมาออนไลน์
+      addToOfflineQueue(uploadPayload);
+    } else {
+      // โหมดออนไลน์: เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
+      enqueueBackgroundUpload({
+        caseNumber: caseNumber,
+        courtType: payloadData.courtType,
+        locationText: locationText,
+        fileName: imageFilename,
+        payload: uploadPayload
+      });
+      processBackgroundQueue();
+    }
 
     // 4. รีเซ็ตฟอร์มสำหรับหมายถัดไปทันที (Instant Form Release)
     resetFormForNextCase();
 
-    // 5. สั่งเริ่ม Background Worker ในเบื้องหลัง
-    processBackgroundQueue();
+    // 5. อัปเดตตัวเลขนับจำนวนทำงานเบื้องหลังบนหน้ากล้องทันที (ข้อ 5)
+    updateCameraTopBarUI();
 
-    // 6. แสดง Pop Up แจ้งว่า "อยู่ในคิวนำขึ้นข้อมูลแล้ว" พร้อม Cooldown 2 วินาที (ปรับขนาดให้เหมาะกับจอมือถือ)
-    let fallbackCooldownTimer;
-    Swal.fire({
-      icon: 'success',
-      title: '<div class="text-sm sm:text-base font-bold text-gray-900"><i class="fa-solid fa-list-check text-blue-600 mr-1.5"></i> อยู่ในคิวนำขึ้นข้อมูลแล้ว</div>',
-      html: `
-        <div class="text-left text-xs space-y-2.5 p-1 select-none text-gray-700">
-          <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
-            <div class="flex items-center justify-between font-bold">
-              <span class="text-blue-700 font-mono text-sm"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i> ${caseNumber}</span>
-              <span class="text-gray-600 text-[11px]">${payloadData.courtType}</span>
-            </div>
-            <div class="text-gray-600 text-[11px] truncate">
-              <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i> ${locationText}
-            </div>
-          </div>
-
-          <div class="p-2.5 bg-emerald-50 border-2 border-emerald-300 rounded-xl text-center space-y-0.5">
-            <div class="text-emerald-800 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5">
-              <i class="fa-solid fa-circle-check text-emerald-600 text-sm sm:text-base"></i>
-              <span>ท่านสามารถทำรายการต่อไปได้ทันที</span>
-            </div>
-            <p class="text-[10px] sm:text-[11px] text-emerald-700 font-medium">รูปภาพกำลังดำเนินการอัปโหลดในเบื้องหลัง</p>
-          </div>
-
-          <div class="pt-0.5 text-[10px] sm:text-[11px] text-gray-400 flex items-center justify-center gap-1.5">
-            <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
-            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalMobileFallbackCooldown" class="text-blue-600 font-bold text-xs sm:text-sm">2</b> วินาที</span>
-          </div>
-        </div>
-      `,
-      timer: 2000,
-      timerProgressBar: true,
-      width: window.innerWidth < 640 ? '92%' : '440px',
-      showConfirmButton: true,
-      confirmButtonText: '<i class="fa-solid fa-pen-to-square mr-1"></i> ทำรายการต่อไปทันที',
-      confirmButtonColor: '#2563eb',
-      allowOutsideClick: true,
-      customClass: {
-        popup: 'rounded-2xl p-4'
-      },
-      didOpen: () => {
-        const cdEl = document.getElementById('swalMobileFallbackCooldown');
-        fallbackCooldownTimer = setInterval(() => {
-          if (cdEl && Swal.getTimerLeft()) {
-            const secLeft = Math.ceil(Swal.getTimerLeft() / 1000);
-            cdEl.textContent = secLeft;
-          }
-        }, 200);
-      },
-      willClose: () => {
-        clearInterval(fallbackCooldownTimer);
-      }
-    });
-
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(40);
+    }
   } catch (err) {
     console.error(err);
     hideCustomLoading();

@@ -921,7 +921,7 @@
   </footer>
 
   <!-- Modal: ล็อกอินเข้าสู่ระบบ (Login Modal) -->
-  <div id="loginModal" class="fixed inset-0 bg-black/70 z-50 hidden items-center justify-center p-4">
+  <div id="loginModal" class="fixed inset-0 bg-black/70 z-[60] hidden items-center justify-center p-4">
     <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in relative">
       
       <button type="button" onclick="closeLoginModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-1">
@@ -1015,40 +1015,45 @@
 
   <!-- Modal: กล้องถ่ายภาพสด (Camera Live Viewfinder Modal พร้อม Live Watermark HUD & Manual Orientation Switcher) -->
   <div id="cameraModal" class="fixed inset-0 bg-black/95 z-50 hidden flex-col justify-between select-none">
-    <!-- Top Bar -->
-    <div class="p-3 sm:p-4 flex items-center justify-between text-white bg-gradient-to-b from-black/90 to-transparent z-10">
-      <!-- Status Blinking Dot Only (ไม่มีข้อความ) -->
-      <div class="flex items-center" title="กล้องพร้อมทำงาน">
-        <span class="relative flex h-3.5 w-3.5 items-center justify-center">
-          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-80"></span>
-          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-sm shadow-emerald-400"></span>
-        </span>
-        <span id="cameraStatus" class="hidden"></span>
+    <!-- Top Bar (เรียงปุ่มตามสเปก 4.1-4.5 และข้อ 5) -->
+    <div class="p-2.5 sm:p-3.5 flex items-center justify-between text-white bg-gradient-to-b from-black/95 via-black/70 to-transparent z-10">
+      <!-- 4.1: โหมดออนไลน์/ออฟไลน์ (จุดกระพริบเขียวเมื่อออนไลน์ / แดงเมื่อออฟไลน์) พร้อมปุ่มนับจำนวนทำงานเบื้องหลัง (ข้อ 5) -->
+      <div class="flex items-center gap-1.5 sm:gap-2">
+        <div id="cameraNetworkStatusIndicator" class="flex items-center pl-1 cursor-default" title="สถานะการเชื่อมต่อ: ออนไลน์">
+          <span class="relative flex h-3 w-3 items-center justify-center">
+            <span id="cameraStatusDotPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-80"></span>
+            <span id="cameraStatusDot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-sm shadow-emerald-400"></span>
+          </span>
+        </div>
+
+        <!-- 5: ปุ่มนับจำนวนทำงานเบื้องหลัง (เปลี่ยนจากปุ่มแนวนอน/แนวตั้งเดิม): สีเขียวเมื่อออนไลน์ / สีส้มเมื่อออฟไลน์ -->
+        <button id="btnCameraBgQueue" type="button" onclick="openBackgroundQueueModal()" class="px-2.5 py-1.5 bg-emerald-600/95 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-emerald-400/50 shadow-md whitespace-nowrap cursor-pointer" title="คลิกเพื่อดูคิวงานเบื้องหลัง">
+          <i id="iconCameraBgQueue" class="fa-solid fa-cloud-arrow-up text-xs animate-pulse"></i>
+          <span id="txtCameraBgQueueCount" class="font-mono text-xs font-bold">0</span>
+        </button>
       </div>
-      
-      <div class="flex items-center gap-1.5 flex-nowrap overflow-x-auto">
-        <!-- ปุ่มเปิดแผนที่และเส้นทางส่งหมายที่ส่งมาจากคอมพิวเตอร์ -->
-        <button id="btnCameraRouteMap" type="button" onclick="showMobileRouteMapModal()" class="px-2.5 py-1.5 bg-emerald-600/95 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-emerald-400/50 shadow-md whitespace-nowrap cursor-pointer" title="เปิดดูแผนที่และเส้นทางส่งหมาย">
-          <i class="fa-solid fa-map-location-dot text-xs"></i>
-          <span id="txtCameraRouteMapCount" class="whitespace-nowrap">แผนที่</span>
+
+      <!-- Right Buttons (ใช้สัญลักษณ์ไอคอนแทนข้อความ ตามข้อ 5) -->
+      <div class="flex items-center gap-1.5 flex-nowrap">
+        <!-- 4.2: ฟอร์มแก้ไขข้อมูลส่งหมาย -->
+        <button id="btnEditMobileForm" type="button" onclick="showMobileSummonsFormModal(true)" class="w-8 h-8 sm:w-9 sm:h-9 bg-blue-600/95 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center transition border border-blue-400/50 shadow-md cursor-pointer" title="ฟอร์มแก้ไขข้อมูลส่งหมาย">
+          <i class="fa-solid fa-file-pen text-xs sm:text-sm"></i>
         </button>
 
-        <!-- ปุ่มเปิดฟอร์มกรอกข้อมูลส่งหมาย (Single-Line Compact) -->
-        <button id="btnEditMobileForm" type="button" onclick="showMobileSummonsFormModal(true)" class="px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap cursor-pointer" title="คลิกเพื่อกรอก/แก้ไขข้อมูลส่งหมาย">
-          <i class="fa-solid fa-file-pen text-xs"></i>
-          <span class="whitespace-nowrap">ฟอร์ม</span>
+        <!-- 4.3: ปุ่มค้นหาข้อมูล (ซ่อนเมื่อหน้าจอกว้างไม่พอ) -->
+        <button id="btnCameraCaseSearch" type="button" onclick="openMobileCaseSearchModal()" class="hidden min-[360px]:flex w-8 h-8 sm:w-9 sm:h-9 bg-indigo-600/95 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-xs font-bold items-center justify-center transition border border-indigo-400/50 shadow-md cursor-pointer" title="ค้นหาข้อมูลส่งหมาย">
+          <i class="fa-solid fa-magnifying-glass text-xs sm:text-sm"></i>
         </button>
 
-        <!-- ปุ่มสลับมุมมอง แนวนอน 4:3 / แนวตั้ง 3:4 (Single-Line Compact) -->
-        <button id="btnToggleOrientation" type="button" class="px-2.5 py-1.5 bg-blue-600/95 hover:bg-blue-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-blue-400/50 shadow-md whitespace-nowrap" title="คลิกเพื่อสลับ แนวนอน 4:3 / แนวตั้ง 3:4">
-          <i class="fa-solid fa-arrows-rotate text-xs"></i>
-          <span id="txtOrientationMode" class="whitespace-nowrap">4:3</span>
+        <!-- 4.4: ปุ่มแผนที่ -->
+        <button id="btnCameraRouteMap" type="button" onclick="showMobileRouteMapModal()" class="h-8 sm:h-9 px-2.5 bg-teal-600/95 hover:bg-teal-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1 justify-center transition border border-teal-400/50 shadow-md whitespace-nowrap cursor-pointer" title="เปิดดูแผนที่และเส้นทางส่งหมาย">
+          <i class="fa-solid fa-map-location-dot text-xs sm:text-sm"></i>
+          <span id="txtCameraRouteMapCount" class="hidden text-[10px] font-mono font-bold bg-white/25 px-1.5 py-0.5 rounded-full"></span>
         </button>
 
-        <!-- ปุ่มเข้าสู่ระบบ / ออกจากระบบ (สลับตามสถานะการล็อกอิน) -->
-        <button id="btnCameraAuth" type="button" onclick="handleMobileCameraAuthAction()" class="px-2.5 py-1.5 bg-blue-600/95 hover:bg-blue-600 active:scale-95 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-blue-400/50 shadow-md whitespace-nowrap cursor-pointer" title="เข้าสู่ระบบ">
-          <i class="fa-solid fa-right-to-bracket text-xs"></i>
-          <span id="txtCameraAuthBtn" class="whitespace-nowrap">เข้าสู่ระบบ</span>
+        <!-- 4.5: ปุ่มออกจากระบบ / เข้าสู่ระบบ -->
+        <button id="btnCameraAuth" type="button" onclick="handleMobileCameraAuthAction()" class="w-8 h-8 sm:w-9 sm:h-9 bg-slate-700/95 hover:bg-slate-800 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center transition border border-slate-500/50 shadow-md cursor-pointer" title="ออกจากระบบ / เข้าสู่ระบบ">
+          <i id="iconCameraAuth" class="fa-solid fa-right-from-bracket text-xs sm:text-sm"></i>
         </button>
       </div>
     </div>
@@ -1170,17 +1175,17 @@
   </aside>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260903_07"></script>
-  <script src="js/compass.js?v=20260903_07"></script>
-  <script src="js/map.js?v=20260903_07"></script>
-  <script src="js/watermark.js?v=20260903_07"></script>
-  <script src="js/app.js?v=20260903_07"></script>
+  <script src="js/data.js?v=20260903_08"></script>
+  <script src="js/compass.js?v=20260903_08"></script>
+  <script src="js/map.js?v=20260903_08"></script>
+  <script src="js/watermark.js?v=20260903_08"></script>
+  <script src="js/app.js?v=20260903_08"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260903_07')
+        navigator.serviceWorker.register('./sw.js?v=20260903_08')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
