@@ -638,16 +638,18 @@ async function processBackgroundQueue() {
     // สำเร็จ! นำออกจากคิว
     removeBackgroundQueueItem(currentItem.id);
 
-    // แจ้งเตือน Toast สีเขียวสั้นๆ
-    Swal.fire({
-      toast: true,
-      position: 'bottom-end',
-      icon: 'success',
-      title: `อัปโหลดหมาย ${currentItem.caseNumber} สำเร็จ!`,
-      html: `<div class="text-xs text-gray-700 select-none">บันทึกลง Google Drive & Sheet เรียบร้อยแล้ว</div>`,
-      timer: 3000,
-      showConfirmButton: false
-    });
+    // บนหน้าจอความกว้างมากกว่า 768 pixel (Desktop) ไม่ต้องแสดงหน้าต่างแจ้งเตือนเมื่ออัปโหลดเสร็จ ให้ตัดออกไปเลย
+    const isDesktop = window.innerWidth > 768;
+    if (!isDesktop) {
+      Swal.fire({
+        toast: true,
+        position: 'top',
+        icon: 'success',
+        title: `อัปโหลดหมาย ${currentItem.caseNumber} สำเร็จ!`,
+        timer: 2000,
+        showConfirmButton: false
+      });
+    }
 
     // Invalidate sheet cache
     localStorage.removeItem(CACHE_KEY_SHEET_DATA);
