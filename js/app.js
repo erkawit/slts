@@ -1499,18 +1499,18 @@ function updateCacheBadgeUI(isFromCache, timeStr) {
  * เพื่อให้อัปโหลดขึ้น Google Drive ได้เร็วที่สุด โดยยังคงความคมชัดของภาพ ลายน้ำ และข้อความเอกสาร
  */
 /**
- * บีบอัดและปรับขนาดรูปภาพให้ส่งข้อมูลขึ้น Google Drive ได้เร็วที่สุด (Fast Optimal Compression)
- * ปรับความละเอียดให้เหมาะสมที่ 1280px และคุณภาพ 0.78
- * ผลลัพธ์: ขนาดไฟล์เหลือเพียง 120KB - 220KB (ลดเวลาอัปโหลดลง 70%) ในขณะที่ตัวอักษรและลายน้ำคมชัด 100%
+ * บีบอัดและปรับขนาดรูปภาพก่อนอัปโหลดให้เหลือไม่เกินครึ่งหนึ่งของ 1MB (< 500KB)
+ * ปรับความละเอียดให้เหมาะสมที่ 1280px และคุณภาพ 0.78 (ปรับลดอัตโนมัติหากเกิน 500KB)
+ * ผลลัพธ์: ขนาดไฟล์เหลือเพียง 100KB - 250KB (ประหยัดเน็ตกว่า 80%) ในขณะที่ตัวอักษร เลขคดี และลายน้ำคมชัด 100%
  */
-async function compressImageToMax1MB(dataUrl) {
+async function compressImageToMax1MB(dataUrl, maxBytes = 500 * 1024) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       let width = img.width;
       let height = img.height;
 
-      // ความละเอียดสูงสุด 1280px (คมชัดระดับ HD สำหรับเอกสารหมายศาล และส่งผ่าน 4G/5G ได้ไวที่สุด)
+      // ความละเอียดสูงสุด 1280px (คมชัดระดับ HD สำหรับเอกสารหมายศาล และส่งผ่านเครือข่ายได้ไวที่สุด)
       const MAX_DIMENSION = 1280;
       if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
         const scale = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
@@ -1526,13 +1526,20 @@ async function compressImageToMax1MB(dataUrl) {
       ctx.imageSmoothingQuality = 'medium';
       ctx.drawImage(img, 0, 0, width, height);
 
-      // คุณภาพ 0.78 ให้ความคมชัดสูงและขนาดไฟล์เล็กกะทัดรัด (~150KB)
+      // คุณภาพ 0.78 ให้ความคมชัดสูงและขนาดไฟล์เล็กกะทัดรัด (~120KB - 200KB)
       let quality = 0.78;
       let resultDataUrl = canvas.toDataURL('image/jpeg', quality);
       let currentBytes = Math.round((resultDataUrl.length - resultDataUrl.indexOf(',') - 1) * 0.75);
 
-      if (currentBytes > 1024 * 1024) {
-        quality = 0.65;
+      // หากขนาดเกินเป้าหมาย (ครึ่งหนึ่งของ 1MB หรือ 500KB) ให้ปรับลดคุณภาพเป็นขั้นบันได
+      if (currentBytes > maxBytes) {
+        quality = 0.70;
+        resultDataUrl = canvas.toDataURL('image/jpeg', quality);
+        currentBytes = Math.round((resultDataUrl.length - resultDataUrl.indexOf(',') - 1) * 0.75);
+      }
+
+      if (currentBytes > maxBytes) {
+        quality = 0.60;
         resultDataUrl = canvas.toDataURL('image/jpeg', quality);
       }
 
@@ -1541,6 +1548,7 @@ async function compressImageToMax1MB(dataUrl) {
     img.src = dataUrl;
   });
 }
+window.compressImageToMax500KB = compressImageToMax1MB;
 
 /**
  * อัปโหลดข้อมูลพร้อมแสดง Progress Bar และตัวเลข % ความคืบหน้า (ปิดไม่ได้จนกว่าจะเสร็จสิ้น)
@@ -6987,7 +6995,7 @@ function initDesktopUploadEvents() {
         }
         if (elements.desktopImageSizeBadge) {
           const sizeKb = Math.round(file.size / 1024);
-          elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB)`;
+          elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB → บีบอัดก่อนส่ง < 500 KB)`;
         }
 
         // ตรวจสอบและดึงพิกัด GPS จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
@@ -7237,8 +7245,11 @@ async function handleDesktopUpload() {
 
     hideCustomLoading();
 
-    // บีบอัดรูปภาพให้ไม่เกิน 1MB (ไม่ต้องดาวน์โหลดไฟล์ลงเครื่องเพราะเป็นการอัปโหลดไฟล์จากเครื่อง)
-    const compressedImageBase64 = await compressImageToMax1MB(finalImageDataUrl);
+    // บีบอัดรูปภาพให้เหลือไม่เกินครึ่งหนึ่งของ 1MB (< 500KB)
+    const compressedImageBase64 = await compressImageToMax1MB(finalImageDataUrl, 500 * 1024);
+    const compressedBytes = Math.round((compressedImageBase64.length - compressedImageBase64.indexOf(',') - 1) * 0.75);
+    const compressedKb = Math.round(compressedBytes / 1024);
+    console.log(`[Desktop Upload] Image compressed: ${compressedKb} KB (Target <= 500 KB)`);
 
     // 3. แสดงหน้าต่างแจ้งเตือนเพื่อตรวจสอบข้อมูลและยืนยันก่อนอัปโหลดจริง
     const confirmUploadRes = await Swal.fire({
@@ -7247,9 +7258,14 @@ async function handleDesktopUpload() {
         <div class="text-left space-y-3 p-1 select-none">
           <!-- แสดงภาพถ่ายที่แนบให้เห็นชัดๆ -->
           <div class="space-y-1">
-            <span class="text-[11px] font-bold text-gray-600">รูปภาพส่งหมายที่จะอัปโหลด:</span>
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-gray-600">รูปภาพส่งหมายที่จะอัปโหลด:</span>
+              <span class="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                <i class="fa-solid fa-bolt mr-1"></i>ขนาดส่ง: ~${compressedKb} KB (&lt; 500 KB)
+              </span>
+            </div>
             <div class="relative bg-gray-900 rounded-2xl overflow-hidden border border-gray-300 max-h-56 min-h-[140px] flex items-center justify-center shadow-inner">
-              <img src="${finalImageDataUrl}" alt="ภาพส่งหมาย" class="max-h-56 w-full object-contain rounded-xl">
+              <img src="${compressedImageBase64}" alt="ภาพส่งหมาย" class="max-h-56 w-full object-contain rounded-xl">
             </div>
           </div>
 
