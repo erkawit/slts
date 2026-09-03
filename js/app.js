@@ -1001,6 +1001,17 @@ function initAuthSystem() {
   if (savedUser) {
     try {
       state.currentUser = JSON.parse(savedUser);
+      // ซิงค์ข้อมูลศาลและจังหวัดล่าสุดจาก slts_users เพื่อป้องกันข้อมูลเก่าค้าง
+      const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+      const matched = users.find(u => (u.username || '').toLowerCase() === (state.currentUser.username || '').toLowerCase());
+      if (matched) {
+        state.currentUser.role = matched.role || state.currentUser.role;
+        state.currentUser.name = matched.name || state.currentUser.name;
+        state.currentUser.courtCategory = matched.courtCategory || state.currentUser.courtCategory || 'ศาลจังหวัด';
+        state.currentUser.assignedCourt = matched.assignedCourt || state.currentUser.assignedCourt || '';
+        state.currentUser.assignedProvince = matched.assignedProvince || state.currentUser.assignedProvince || 'อุดรธานี';
+        localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+      }
     } catch (e) {
       state.currentUser = null;
     }
@@ -1065,7 +1076,7 @@ async function fetchUsersFromGasApi(showNotification = false) {
         const localMatch = localUsers.find(lu => (lu.username || '').toLowerCase() === (u.username || '').toLowerCase());
 
         // ตรวจสอบค่าจาก Google Sheet (รองรับทั้ง key ภาษาอังกฤษและภาษาไทย)
-        const rawProv = (u.assignedProvince || u['จังหวัดรับผิดชอบ'] || u['จังหวัด'] || '').trim();
+        const rawProv = (u.assignedProvince || u['จังหวัดที่ส่งหมาย'] || u['จังหวัดรับผิดชอบ'] || u['จังหวัด'] || '').trim();
         const rawCourtCat = (u.courtCategory || u['ประเภทศาล'] || '').trim();
         const rawCourtName = (u.assignedCourt || u['ศาลที่สังกัด'] || u['ชื่อศาล'] || '').trim();
 
@@ -1084,7 +1095,10 @@ async function fetchUsersFromGasApi(showNotification = false) {
           ...u,
           assignedProvince: prov,
           courtCategory: courtCat,
-          assignedCourt: courtName
+          assignedCourt: courtName,
+          'ประเภทศาล': courtCat,
+          'ศาลที่สังกัด': courtName,
+          'จังหวัดที่ส่งหมาย': prov
         };
       });
 
@@ -1104,6 +1118,19 @@ async function fetchUsersFromGasApi(showNotification = false) {
 
       if (sheetUsers.length > 0) {
         localStorage.setItem('slts_users', JSON.stringify(sheetUsers));
+        // ซิงค์เซสชัน state.currentUser กับข้อมูลสดจาก Google Sheet
+        if (state.currentUser) {
+          const matchedCurrent = sheetUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser.username || '').toLowerCase());
+          if (matchedCurrent) {
+            state.currentUser.role = matchedCurrent.role || state.currentUser.role;
+            state.currentUser.name = matchedCurrent.name || state.currentUser.name;
+            state.currentUser.courtCategory = matchedCurrent.courtCategory || state.currentUser.courtCategory;
+            state.currentUser.assignedCourt = matchedCurrent.assignedCourt || state.currentUser.assignedCourt;
+            state.currentUser.assignedProvince = matchedCurrent.assignedProvince || state.currentUser.assignedProvince;
+            localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+            updateAuthUI();
+          }
+        }
         renderUserList();
       }
 
@@ -1134,7 +1161,11 @@ async function syncUserToGoogleSheet(action, payload) {
     };
     if (payload.courtCategory) fullPayload['ประเภทศาล'] = payload.courtCategory;
     if (payload.assignedCourt) fullPayload['ศาลที่สังกัด'] = payload.assignedCourt;
-    if (payload.assignedProvince) fullPayload['จังหวัดรับผิดชอบ'] = payload.assignedProvince;
+    if (payload.assignedProvince) {
+      fullPayload['จังหวัดที่ส่งหมาย'] = payload.assignedProvince;
+      fullPayload['จังหวัดรับผิดชอบ'] = payload.assignedProvince;
+      fullPayload['จังหวัด'] = payload.assignedProvince;
+    }
 
     await fetch(state.appsScriptUrl, {
       method: 'POST',
@@ -1145,6 +1176,100 @@ async function syncUserToGoogleSheet(action, payload) {
     console.warn('syncUserToGoogleSheet error:', err);
   }
 }
+
+/**
+ * ซิงค์โครงสร้างคอลัมน์ (ประเภทศาล, ศาลที่สังกัด, จังหวัดที่ส่งหมาย) และข้อมูลผู้ใช้ทั้งหมดไปยัง Google Sheet (Tab: users)
+ */
+window.syncAllUsersStructureToGoogleSheet = async function() {
+  if (!state.appsScriptUrl || !navigator.onLine) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ไม่สามารถเชื่อมต่อได้',
+      text: 'กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตหรือตั้งค่า Apps Script URL'
+    });
+    return;
+  }
+
+  const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  if (users.length === 0) {
+    Swal.fire('แจ้งเตือน', 'ไม่พบข้อมูลผู้ใช้งานในระบบ', 'info');
+    return;
+  }
+
+  Swal.fire({
+    title: 'กำลังซิงค์โครงสร้างชีต users...',
+    html: `
+      <div class="space-y-2 text-xs text-gray-600 text-left p-2">
+        <p><i class="fa-solid fa-spinner fa-spin text-purple-600 mr-1.5"></i> ตรวจสอบและสร้างคอลัมน์ <b>ประเภทศาล</b>, <b>ศาลที่สังกัด</b>, <b>จังหวัดที่ส่งหมาย</b></p>
+        <p><i class="fa-solid fa-cloud-arrow-up text-blue-600 mr-1.5"></i> กำลังอัปเดตข้อมูลผู้ใช้งาน ${users.length} บัญชีไปยังแท็บชีต users...</p>
+      </div>
+    `,
+    allowOutsideClick: false,
+    showConfirmButton: false,
+    didOpen: () => {
+      Swal.showLoading();
+    }
+  });
+
+  try {
+    const enrichedUsers = users.map(u => {
+      const prov = (u.assignedProvince || 'อุดรธานี').trim();
+      const courtCat = (u.courtCategory || 'ศาลจังหวัด').trim();
+      let courtName = (u.assignedCourt || '').trim();
+      if (!courtName) {
+        if (courtCat === 'ศาลไม่สังกัดภาค') courtName = 'ศาลแพ่ง';
+        else if (courtCat === 'ศาลแขวง') courtName = `ศาลแขวง${prov}`;
+        else if (courtCat === 'ศาลเยาวชนและครอบครัว') courtName = `ศาลเยาวชนและครอบครัวจังหวัด${prov}`;
+        else courtName = `ศาลจังหวัด${prov}`;
+      }
+      return {
+        ...u,
+        courtCategory: courtCat,
+        assignedCourt: courtName,
+        assignedProvince: prov,
+        'ประเภทศาล': courtCat,
+        'ศาลที่สังกัด': courtName,
+        'จังหวัดที่ส่งหมาย': prov,
+        'จังหวัดรับผิดชอบ': prov,
+        'จังหวัด': prov
+      };
+    });
+
+    const resp = await fetch(state.appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'sync_all_users',
+        users: enrichedUsers
+      })
+    });
+    const result = await resp.json();
+
+    if (result && result.status === 'success') {
+      Swal.fire({
+        icon: 'success',
+        title: 'ซิงค์ชีต users สำเร็จ!',
+        html: `
+          <div class="text-xs text-gray-600 space-y-1.5 text-left p-1">
+            <p><i class="fa-solid fa-circle-check text-emerald-600 mr-1"></i> เพิ่มและตรวจสอบคอลัมน์ <b>ประเภทศาล</b>, <b>ศาลที่สังกัด</b>, <b>จังหวัดที่ส่งหมาย</b> เรียบร้อย</p>
+            <p><i class="fa-solid fa-circle-check text-emerald-600 mr-1"></i> ซิงค์ข้อมูลผู้ใช้จำนวน <b>${enrichedUsers.length}</b> บัญชีเรียบร้อย</p>
+          </div>
+        `,
+        confirmButtonColor: '#7c3aed'
+      });
+      loadUsersData(false);
+    } else {
+      throw new Error(result?.message || 'การซิงค์ข้อมูลไม่สำเร็จ');
+    }
+  } catch (err) {
+    console.error('syncAllUsersStructureToGoogleSheet error:', err);
+    Swal.fire({
+      icon: 'error',
+      title: 'ซิงค์ข้อมูลไม่สำเร็จ',
+      text: err.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ Google Apps Script'
+    });
+  }
+};
 
 function updateAuthUI() {
   const isDesktop = window.innerWidth > 768;
@@ -1208,8 +1333,41 @@ function updateAuthUI() {
   const resetPassCard = document.getElementById('defaultResetPassConfigCard');
 
   if (isLocalAdvisor) {
-    const prov = (state.currentUser.assignedProvince || 'อุดรธานี').trim();
-    const court = (state.currentUser.assignedCourt || `ศาลจังหวัด${prov}`).trim();
+    // ดึงข้อมูลโปรไฟล์ล่าสุดของ Local Advisor จากฐานข้อมูลเพื่อความถูกต้องแม่นยำ
+    const allUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
+    const advisorProfile = allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser;
+    const prov = (advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+    const courtCat = (advisorProfile?.courtCategory || state.currentUser?.courtCategory || 'ศาลจังหวัด').trim();
+    let court = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || '').trim();
+    if (!court) {
+      if (courtCat === 'ศาลไม่สังกัดภาค') court = 'ศาลแพ่ง';
+      else if (courtCat === 'ศาลแขวง') court = `ศาลแขวง${prov}`;
+      else if (courtCat === 'ศาลเยาวชนและครอบครัว') court = `ศาลเยาวชนและครอบครัวจังหวัด${prov}`;
+      else court = `ศาลจังหวัด${prov}`;
+    }
+
+    // อัปเดตเซสชันให้ตรงกัน
+    if (state.currentUser) {
+      state.currentUser.assignedCourt = court;
+      state.currentUser.assignedProvince = prov;
+      state.currentUser.courtCategory = courtCat;
+      localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+    }
+
+    // กำหนดค่าในช่องฟอร์มให้ตรงกับศาลและจังหวัดของ Local Advisor โดยอัตโนมัติ
+    if (document.getElementById('newAssignedProvince')) {
+      document.getElementById('newAssignedProvince').value = prov;
+    }
+    if (document.getElementById('newCourtCategory')) {
+      document.getElementById('newCourtCategory').value = courtCat;
+    }
+    if (document.getElementById('newGeneratedCourtNamePreview')) {
+      document.getElementById('newGeneratedCourtNamePreview').value = court;
+    }
+    if (document.getElementById('newCustomCourtName')) {
+      document.getElementById('newCustomCourtName').value = court;
+    }
+
     if (courtAndProvSection) courtAndProvSection.classList.add('hidden');
     if (noticeContainer) {
       noticeContainer.classList.remove('hidden');
@@ -1222,7 +1380,7 @@ function updateAuthUI() {
       roleSelect.disabled = true;
     }
     if (usersListTitle) usersListTitle.textContent = `รายชื่อผู้ใช้งาน (${court})`;
-    if (usersListSub) usersListSub.textContent = `แสดงเฉพาะผู้ใช้งานในสังกัด ${court}`;
+    if (usersListSub) usersListSub.textContent = `แสดงเฉพาะผู้ใช้งานในสังกัด ${court} (จ.${prov})`;
     if (resetPassCard) resetPassCard.classList.add('hidden');
   } else if (isAdmin) {
     if (courtAndProvSection) courtAndProvSection.classList.remove('hidden');
@@ -1661,12 +1819,23 @@ function handleCreateUser(e) {
   let assignedProvince = 'อุดรธานี';
   let assignedCourt = 'ศาลจังหวัดอุดรธานี';
 
+  const allUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
+
   // หากเป็น Local Advisor: เพิ่มผู้ใช้งานได้เฉพาะศาลตนเองเท่านั้น และสร้างได้เฉพาะ Role => User
   if (isLocalAdvisor) {
     role = 'user';
-    assignedCourt = (state.currentUser.assignedCourt || `ศาลจังหวัด${state.currentUser.assignedProvince || 'อุดรธานี'}`).trim();
-    assignedProvince = (state.currentUser.assignedProvince || 'อุดรธานี').trim();
-    courtCategory = state.currentUser.courtCategory || 'ศาลจังหวัด';
+    const advisorProfile = allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser.username || '').toLowerCase()) || state.currentUser;
+
+    assignedProvince = (advisorProfile.assignedProvince || state.currentUser.assignedProvince || 'อุดรธานี').trim();
+    courtCategory = advisorProfile.courtCategory || state.currentUser.courtCategory || 'ศาลจังหวัด';
+    assignedCourt = (advisorProfile.assignedCourt || state.currentUser.assignedCourt || '').trim();
+
+    if (!assignedCourt) {
+      if (courtCategory === 'ศาลไม่สังกัดภาค') assignedCourt = 'ศาลแพ่ง';
+      else if (courtCategory === 'ศาลแขวง') assignedCourt = `ศาลแขวง${assignedProvince}`;
+      else if (courtCategory === 'ศาลเยาวชนและครอบครัว') assignedCourt = `ศาลเยาวชนและครอบครัวจังหวัด${assignedProvince}`;
+      else assignedCourt = `ศาลจังหวัด${assignedProvince}`;
+    }
   } else {
     // หากเป็น Admin: สามารถเพิ่มได้ทุก Role และได้ทุกศาล ทุกจังหวัด
     courtCategory = document.getElementById('newCourtCategory')?.value || 'ศาลจังหวัด';
@@ -1682,8 +1851,7 @@ function handleCreateUser(e) {
 
   if (!username || !password) return;
 
-  const users = JSON.parse(localStorage.getItem('slts_users') || '[]');
-  if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
+  if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) {
     Swal.fire('ข้อผิดพลาด', 'ชื่อผู้ใช้นี้มีในระบบแล้ว กรุณาใช้ชื่ออื่น', 'warning');
     return;
   }
@@ -1697,12 +1865,15 @@ function handleCreateUser(e) {
     courtCategory: courtCategory,
     assignedCourt: assignedCourt,
     assignedProvince: assignedProvince,
+    'ประเภทศาล': courtCategory,
+    'ศาลที่สังกัด': assignedCourt,
+    'จังหวัดที่ส่งหมาย': assignedProvince,
     name: fullName || (role === 'admin' ? `Admin (${username})` : (role === 'local_advisor' ? `Local Advisor (${username})` : `เจ้าหน้าที่ (${username})`)),
     createdAt: dateNow
   };
 
-  users.push(newUser);
-  localStorage.setItem('slts_users', JSON.stringify(users));
+  allUsers.push(newUser);
+  localStorage.setItem('slts_users', JSON.stringify(allUsers));
   document.getElementById('addUserForm').reset();
   if (document.getElementById('newAssignedProvince')) {
     document.getElementById('newAssignedProvince').value = isLocalAdvisor ? assignedProvince : 'อุดรธานี';
@@ -1727,14 +1898,17 @@ function renderUserList() {
   const allUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
-  const advisorCourt = (state.currentUser?.assignedCourt || `ศาลจังหวัด${state.currentUser?.assignedProvince || 'อุดรธานี'}`).trim();
+  const advisorProfile = isLocalAdvisor ? (allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser) : state.currentUser;
+  const advisorCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || `ศาลจังหวัด${advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี'}`).trim();
+  const advisorProv = (advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี').trim();
 
   // หากเป็น Local Advisor: กรองแสดงเฉพาะผู้ใช้งานที่สังกัดศาลตนเองเท่านั้น
   let users = allUsers;
   if (isLocalAdvisor) {
     users = allUsers.filter(u => {
       const uCourt = (u.assignedCourt || `ศาลจังหวัด${u.assignedProvince || 'อุดรธานี'}`).trim();
-      return uCourt === advisorCourt;
+      const uProv = (u.assignedProvince || 'อุดรธานี').trim();
+      return uCourt === advisorCourt || (advisorProv && uProv === advisorProv && u.role === 'user');
     });
   }
 

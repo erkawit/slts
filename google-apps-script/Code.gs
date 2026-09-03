@@ -236,7 +236,10 @@ function doPost(e) {
             createdAt: String(uData[i][4] || '').trim(),
             courtCategory: courtCat,
             assignedCourt: courtName,
-            assignedProvince: prov
+            assignedProvince: prov,
+            'ประเภทศาล': courtCat,
+            'ศาลที่สังกัด': courtName,
+            'จังหวัดที่ส่งหมาย': prov
           });
         }
       }
@@ -265,7 +268,7 @@ function doPost(e) {
       const dateNow = data.createdAt || Utilities.formatDate(new Date(), "Asia/Bangkok", "dd/MM/yyyy");
       const courtCat = String(data.courtCategory || data['ประเภทศาล'] || 'ศาลจังหวัด').trim();
       const courtName = String(data.assignedCourt || data['ศาลที่สังกัด'] || data['ชื่อศาล'] || '').trim();
-      const prov = String(data.assignedProvince || data['จังหวัดรับผิดชอบ'] || data['จังหวัด'] || 'อุดรธานี').trim();
+      const prov = String(data.assignedProvince || data['จังหวัดที่ส่งหมาย'] || data['จังหวัดรับผิดชอบ'] || data['จังหวัด'] || 'อุดรธานี').trim();
 
       if (foundRow !== -1) {
         // อัปเดตข้อมูลผู้ใช้เดิม
@@ -328,17 +331,19 @@ function doPost(e) {
     if (data.action === "sync_all_users" && Array.isArray(data.users)) {
       const usersSheet = getUsersSheet(spreadsheet);
       const uData = usersSheet.getDataRange().getValues();
-      const existingUsernames = new Set();
+      const existingUserMap = new Map();
       for (let i = 1; i < uData.length; i++) {
-        existingUsernames.add(String(uData[i][0] || '').trim().toLowerCase());
+        existingUserMap.set(String(uData[i][0] || '').trim().toLowerCase(), i + 1);
       }
 
       data.users.forEach(u => {
         const uName = String(u.username || '').trim();
-        if (uName && !existingUsernames.has(uName.toLowerCase())) {
-          const prov = String(u.assignedProvince || 'อุดรธานี').trim();
-          const courtCat = String(u.courtCategory || 'ศาลจังหวัด').trim();
-          const courtName = String(u.assignedCourt || (prov ? `ศาลจังหวัด${prov}` : 'ศาลจังหวัดอุดรธานี')).trim();
+        if (!uName) return;
+        const prov = String(u.assignedProvince || u['จังหวัดที่ส่งหมาย'] || u['จังหวัดรับผิดชอบ'] || u['จังหวัด'] || 'อุดรธานี').trim();
+        const courtCat = String(u.courtCategory || u['ประเภทศาล'] || 'ศาลจังหวัด').trim();
+        const courtName = String(u.assignedCourt || u['ศาลที่สังกัด'] || (prov ? `ศาลจังหวัด${prov}` : 'ศาลจังหวัดอุดรธานี')).trim();
+
+        if (!existingUserMap.has(uName.toLowerCase())) {
           usersSheet.appendRow([
             uName,
             String(u.password || '123456'),
@@ -349,12 +354,17 @@ function doPost(e) {
             courtName,
             prov
           ]);
+        } else {
+          const rowIdx = existingUserMap.get(uName.toLowerCase());
+          if (courtCat) usersSheet.getRange(rowIdx, 6).setValue(courtCat);
+          if (courtName) usersSheet.getRange(rowIdx, 7).setValue(courtName);
+          if (prov) usersSheet.getRange(rowIdx, 8).setValue(prov);
         }
       });
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
-        message: "ซิงค์รายชื่อผู้ใช้งานกับ Google Sheet สำเร็จ"
+        message: "ซิงค์รายชื่อผู้ใช้งานและคอลัมน์ศาล/จังหวัดกับ Google Sheet สำเร็จ"
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -749,7 +759,7 @@ function getUsersSheet(spreadsheet) {
   }
 
   if (sheet.getLastRow() === 0) {
-    const headers = ["username", "password", "role", "name", "createdAt", "courtCategory", "assignedCourt", "assignedProvince"];
+    const headers = ["username", "password", "role", "name", "createdAt", "ประเภทศาล", "ศาลที่สังกัด", "จังหวัดที่ส่งหมาย"];
     sheet.appendRow(headers);
     
     // สร้างผู้ดูแลระบบตั้งต้น (admin / caogikojt02)
@@ -775,16 +785,19 @@ function ensureUsersSheetHeaders(sheet) {
     const headers = lastCol > 0 ? sheet.getRange(1, 1, 1, Math.max(lastCol, 8)).getValues()[0].map(h => String(h || '').trim()) : [];
     
     let changed = false;
-    if (headers.length < 6 || !headers[5]) {
-      sheet.getRange(1, 6).setValue("courtCategory");
+    // คอลัมน์ 6: ประเภทศาล
+    if (headers.length < 6 || !headers[5] || headers[5] === 'courtCategory') {
+      sheet.getRange(1, 6).setValue("ประเภทศาล");
       changed = true;
     }
-    if (headers.length < 7 || !headers[6]) {
-      sheet.getRange(1, 7).setValue("assignedCourt");
+    // คอลัมน์ 7: ศาลที่สังกัด
+    if (headers.length < 7 || !headers[6] || headers[6] === 'assignedCourt') {
+      sheet.getRange(1, 7).setValue("ศาลที่สังกัด");
       changed = true;
     }
-    if (headers.length < 8 || !headers[7]) {
-      sheet.getRange(1, 8).setValue("assignedProvince");
+    // คอลัมน์ 8: จังหวัดที่ส่งหมาย
+    if (headers.length < 8 || !headers[7] || headers[7] === 'assignedProvince') {
+      sheet.getRange(1, 8).setValue("จังหวัดที่ส่งหมาย");
       changed = true;
     }
 
@@ -794,6 +807,31 @@ function ensureUsersSheetHeaders(sheet) {
       headerRange.setFontColor("#ffffff");
       headerRange.setFontWeight("bold");
       headerRange.setHorizontalAlignment("center");
+    }
+
+    // เติมข้อมูลตั้งต้นให้ผู้ใช้เดิมในชีต หากคอลัมน์ 6, 7, 8 ยังว่างอยู่
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      const rows = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+      for (let i = 0; i < rows.length; i++) {
+        const uName = String(rows[i][0] || '').trim().toLowerCase();
+        let cat = String(rows[i][5] || '').trim();
+        let court = String(rows[i][6] || '').trim();
+        let prov = String(rows[i][7] || '').trim();
+
+        if (!cat) {
+          cat = 'ศาลจังหวัด';
+          sheet.getRange(i + 2, 6).setValue(cat);
+        }
+        if (!prov) {
+          prov = (uName === 'artorn') ? 'ขอนแก่น' : 'อุดรธานี';
+          sheet.getRange(i + 2, 8).setValue(prov);
+        }
+        if (!court) {
+          court = (cat === 'ศาลไม่สังกัดภาค') ? 'ศาลแพ่ง' : (cat === 'ศาลแขวง' ? ('ศาลแขวง' + prov) : (cat === 'ศาลเยาวชนและครอบครัว' ? ('ศาลเยาวชนและครอบครัวจังหวัด' + prov) : ('ศาลจังหวัด' + prov)));
+          sheet.getRange(i + 2, 7).setValue(court);
+        }
+      }
     }
   } catch (err) {
     Logger.log("ensureUsersSheetHeaders error: " + err);
@@ -871,7 +909,10 @@ function doGet(e) {
               createdAt: String(uData[i][4] || '').trim(),
               courtCategory: courtCat,
               assignedCourt: courtName,
-              assignedProvince: prov
+              assignedProvince: prov,
+              'ประเภทศาล': courtCat,
+              'ศาลที่สังกัด': courtName,
+              'จังหวัดที่ส่งหมาย': prov
             });
           }
         }
