@@ -247,6 +247,9 @@ async function syncOfflineQueue(isManual = false) {
 const BG_UPLOAD_QUEUE_KEY = 'slts_bg_upload_queue';
 let isBgQueueWorkerRunning = false;
 let bgQueueProgressInterval = null;
+let bgQueueModalTimer = null;
+window.currentActiveItemProgress = 0;
+window.sessionCompletedTasks = [];
 
 function getBackgroundQueue() {
   try {
@@ -281,12 +284,30 @@ function enqueueBackgroundUpload(taskData) {
 
 function removeBackgroundQueueItem(id) {
   let queue = getBackgroundQueue();
+  const removed = queue.find(q => q.id === id);
+  if (removed) {
+    window.sessionCompletedTasks.unshift({
+      ...removed,
+      completedAt: new Date().toLocaleTimeString('th-TH')
+    });
+    if (window.sessionCompletedTasks.length > 8) {
+      window.sessionCompletedTasks.pop();
+    }
+  }
   queue = queue.filter(q => q.id !== id);
   saveBackgroundQueue(queue);
+
+  // หากหน้าต่าง Modal คิวเปิดอยู่ ให้รีเรนเดอร์เนื้อหาทันที
+  if (Swal.isVisible() && document.getElementById('bgQueueModalListContainer')) {
+    renderBackgroundQueueModalContent();
+  }
 }
 
 function clearBackgroundQueue() {
   saveBackgroundQueue([]);
+  if (Swal.isVisible() && document.getElementById('bgQueueModalListContainer')) {
+    renderBackgroundQueueModalContent();
+  }
 }
 
 window.cancelCurrentBackgroundQueue = async function() {
@@ -316,50 +337,12 @@ window.cancelCurrentBackgroundQueue = async function() {
   }
 };
 
-window.minimizeFloatingBgQueueWidget = function(minimize) {
-  const card = document.getElementById('bgQueueExpandedCard');
-  const pill = document.getElementById('bgQueueMinimizedPill');
-  if (!card || !pill) return;
-  if (minimize) {
-    card.classList.add('hidden');
-    pill.classList.remove('hidden');
-    pill.classList.add('inline-flex');
-    localStorage.setItem('slts_bg_queue_minimized', 'true');
-  } else {
-    pill.classList.add('hidden');
-    pill.classList.remove('inline-flex');
-    card.classList.remove('hidden');
-    localStorage.setItem('slts_bg_queue_minimized', 'false');
-  }
-};
-
-window.toggleFloatingBgQueueWidget = function() {
-  const widget = document.getElementById('floatingBgQueueWidget');
-  if (!widget) return;
-  if (widget.classList.contains('hidden')) {
-    widget.classList.remove('hidden');
-    window.minimizeFloatingBgQueueWidget(false);
-  } else {
-    const card = document.getElementById('bgQueueExpandedCard');
-    if (card && !card.classList.contains('hidden')) {
-      window.minimizeFloatingBgQueueWidget(true);
-    } else {
-      window.minimizeFloatingBgQueueWidget(false);
-    }
-  }
-};
-
 function updateBackgroundQueueUI() {
   const queue = getBackgroundQueue();
   const widget = document.getElementById('floatingBgQueueWidget');
   const headerBtn = document.getElementById('btnBgUploadQueueHeader');
   const headerBadge = document.getElementById('bgUploadQueueHeaderBadge');
-
-  const countPill = document.getElementById('bgQueueCountPill');
-  const currentCase = document.getElementById('bgQueueCurrentCase');
-  const currentLocation = document.getElementById('bgQueueCurrentLocation');
-  const waitingCount = document.getElementById('bgQueueWaitingCount');
-  const miniText = document.getElementById('bgQueueMiniText');
+  const floatCount = document.getElementById('floatingBgQueueCount');
 
   const total = queue.length;
 
@@ -390,16 +373,205 @@ function updateBackgroundQueueUI() {
   }
 
   widget.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+  if (floatCount) {
+    floatCount.textContent = total;
+  }
+}
 
-  const isMinimized = localStorage.getItem('slts_bg_queue_minimized') === 'true';
-  window.minimizeFloatingBgQueueWidget(isMinimized);
+/**
+ * เปิด Pop Up แสดงรายการคิวอัปโหลดภาพเบื้องหลังทั้งหมด พร้อม Progress Bar แต่ละรายการ
+ */
+window.openBackgroundQueueModal = function() {
+  Swal.fire({
+    title: `
+      <div class="flex items-center justify-between text-base font-bold text-gray-900 pb-2.5 border-b border-gray-100">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold shadow-2xs">
+            <i class="fa-solid fa-list-check"></i>
+          </div>
+          <div class="text-left">
+            <span class="block leading-tight">คิวอัปโหลดภาพส่งหมายเบื้องหลัง</span>
+            <span class="text-[10px] text-gray-400 font-normal">ทำงานอัตโนมัติ กรอกหมายอื่นต่อได้ทันที</span>
+          </div>
+        </div>
+        <span id="modalQueueSummaryBadge" class="text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-blue-100 text-blue-800">
+          -
+        </span>
+      </div>
+    `,
+    html: `
+      <div id="bgQueueModalListContainer" class="space-y-2.5 max-h-[58vh] overflow-y-auto slts-swal-body-scroll pr-1 my-1">
+        <!-- Injected dynamically -->
+      </div>
+      <div id="bgQueueModalFooterControls" class="flex items-center justify-between pt-3 border-t border-gray-100 text-xs">
+        <span class="text-[11px] text-gray-500">
+          <i class="fa-solid fa-shield-halved text-blue-500 mr-1"></i>บันทึกคิวในเครื่อง ปิดหน้าต่างนี้ได้ตลอดเวลา
+        </span>
+        <button type="button" onclick="cancelCurrentBackgroundQueue()" class="text-xs text-red-600 hover:text-red-700 font-semibold px-2 py-1 rounded-lg hover:bg-red-50 transition cursor-pointer">
+          <i class="fa-solid fa-trash-can mr-1"></i>ล้างคิวที่รอ
+        </button>
+      </div>
+    `,
+    width: '580px',
+    showConfirmButton: true,
+    confirmButtonText: '<i class="fa-solid fa-xmark mr-1"></i> ปิดหน้าต่าง',
+    confirmButtonColor: '#2563eb',
+    showCloseButton: true,
+    allowOutsideClick: true,
+    customClass: {
+      popup: 'rounded-3xl p-5'
+    },
+    didOpen: () => {
+      renderBackgroundQueueModalContent();
 
-  const activeItem = queue[0];
-  if (countPill) countPill.textContent = `1/${total}`;
-  if (currentCase) currentCase.textContent = activeItem.caseNumber || 'กำลังอัปโหลด...';
-  if (currentLocation) currentLocation.textContent = activeItem.locationText ? `📍 ${activeItem.locationText}` : '-';
-  if (waitingCount) waitingCount.textContent = Math.max(0, total - 1);
-  if (miniText) miniText.textContent = `กำลังส่งภาพเบื้องหลัง (${total})`;
+      // Start real-time updater while modal is open
+      clearInterval(bgQueueModalTimer);
+      bgQueueModalTimer = setInterval(() => {
+        if (!Swal.isVisible()) {
+          clearInterval(bgQueueModalTimer);
+          return;
+        }
+        const bar = document.getElementById('modalActiveProgressBar');
+        const txt = document.getElementById('modalActivePercent');
+        if (bar && txt && typeof window.currentActiveItemProgress === 'number') {
+          bar.style.width = window.currentActiveItemProgress + '%';
+          txt.textContent = window.currentActiveItemProgress + '%';
+        }
+      }, 250);
+    },
+    willClose: () => {
+      clearInterval(bgQueueModalTimer);
+    }
+  });
+};
+
+function renderBackgroundQueueModalContent() {
+  const container = document.getElementById('bgQueueModalListContainer');
+  const summaryBadge = document.getElementById('modalQueueSummaryBadge');
+  const footerControls = document.getElementById('bgQueueModalFooterControls');
+  if (!container) return;
+
+  const queue = getBackgroundQueue();
+  const completed = window.sessionCompletedTasks || [];
+  const total = queue.length;
+
+  if (summaryBadge) {
+    if (total > 0) {
+      summaryBadge.className = 'text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-blue-100 text-blue-800';
+      summaryBadge.textContent = `เหลือ ${total} รายการ`;
+    } else {
+      summaryBadge.className = 'text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800';
+      summaryBadge.textContent = 'เสร็จสิ้นทั้งหมด';
+    }
+  }
+
+  if (footerControls) {
+    footerControls.style.display = total > 0 ? 'flex' : 'none';
+  }
+
+  if (total === 0 && completed.length === 0) {
+    container.innerHTML = `
+      <div class="py-10 text-center text-gray-400 select-none">
+        <div class="w-14 h-14 mx-auto mb-3 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center text-2xl shadow-inner">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <p class="text-sm font-bold text-gray-700">ไม่มีรายการค้างในคิวเบื้องหลัง</p>
+        <p class="text-xs text-gray-400 mt-1">ทุกรายการได้รับการบันทึกขึ้น Google Drive & Sheet เรียบร้อยแล้ว</p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+
+  // 1. รายการที่กำลังทำงานอยู่ (Active Item)
+  if (total > 0) {
+    const activeItem = queue[0];
+    const activePercent = window.currentActiveItemProgress || 20;
+    html += `
+      <div class="p-3.5 rounded-2xl border-2 border-blue-400 bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-blue-50/90 shadow-sm space-y-2 text-left transition-all">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">1</span>
+            <span class="font-bold text-sm text-blue-900 font-mono"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i>${activeItem.caseNumber}</span>
+            <span class="text-[10px] text-gray-500">${activeItem.courtType || ''}</span>
+          </div>
+          <span class="text-[11px] font-bold text-blue-700 bg-white px-2.5 py-0.5 rounded-full border border-blue-200 shadow-2xs flex items-center gap-1.5 animate-pulse">
+            <i class="fa-solid fa-spinner fa-spin text-blue-600 text-[10px]"></i>
+            <span>กำลังส่ง (<b id="modalActivePercent">${activePercent}%</b>)</span>
+          </span>
+        </div>
+
+        <p class="text-xs text-gray-700 pl-8 truncate"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${activeItem.locationText || '-'}</p>
+
+        <!-- แถบ Progress Bar ของรายการที่กำลังทำงาน -->
+        <div class="pl-8 pt-1 space-y-1">
+          <div class="w-full bg-white/90 rounded-full h-2.5 overflow-hidden border border-blue-200 p-0.5 shadow-inner">
+            <div id="modalActiveProgressBar" class="bg-gradient-to-r from-blue-500 via-indigo-600 to-blue-700 h-full rounded-full transition-all duration-300" style="width: ${activePercent}%"></div>
+          </div>
+          <div class="flex items-center justify-between text-[10px] text-gray-500">
+            <span><i class="fa-solid fa-cloud-arrow-up text-blue-500 mr-1"></i>กำลังบันทึก Google Drive & Sheet...</span>
+            <span class="text-[10px] font-mono text-gray-400">${activeItem.createdAt ? new Date(activeItem.createdAt).toLocaleTimeString('th-TH') : ''}</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 2. รายการที่รอในคิวถัดไป (Pending Items)
+    for (let i = 1; i < total; i++) {
+      const item = queue[i];
+      html += `
+        <div class="p-3 rounded-2xl border border-gray-200 bg-gray-50/80 hover:bg-gray-50 transition space-y-1.5 text-left">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center">${i + 1}</span>
+              <span class="font-bold text-sm text-gray-800 font-mono">${item.caseNumber}</span>
+              <span class="text-[10px] text-gray-500">${item.courtType || ''}</span>
+            </div>
+            <span class="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+              <i class="fa-solid fa-clock text-amber-600"></i>
+              <span>รอในคิวลำดับที่ ${i + 1}</span>
+            </span>
+          </div>
+          <p class="text-xs text-gray-600 pl-8 truncate"><i class="fa-solid fa-location-dot text-gray-400 mr-1"></i>${item.locationText || '-'}</p>
+          <div class="pl-8 pt-0.5">
+            <div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+              <div class="bg-gray-300 h-full rounded-full" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // 3. รายการที่ส่งสำเร็จแล้วในรอบนี้
+  if (completed.length > 0) {
+    html += `
+      <div class="pt-2 pb-0.5 border-t border-gray-200 text-left">
+        <span class="text-[11px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+          <i class="fa-solid fa-clock-rotate-left text-gray-400"></i> รายการที่ส่งสำเร็จในรอบนี้ (${completed.length})
+        </span>
+      </div>
+    `;
+    completed.slice(0, 5).forEach((item, idx) => {
+      html += `
+        <div class="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 text-left flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-check"></i>
+            </span>
+            <span class="font-bold text-xs text-emerald-900 font-mono truncate">${item.caseNumber}</span>
+            <span class="text-[10px] text-gray-500 truncate hidden sm:inline">${item.locationText || ''}</span>
+          </div>
+          <span class="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
+            สำเร็จ 100%
+          </span>
+        </div>
+      `;
+    });
+  }
+
+  container.innerHTML = html;
 }
 
 async function processBackgroundQueue() {
@@ -408,17 +580,13 @@ async function processBackgroundQueue() {
   const queue = getBackgroundQueue();
   if (queue.length === 0) {
     isBgQueueWorkerRunning = false;
+    window.currentActiveItemProgress = 0;
     updateBackgroundQueueUI();
     return;
   }
 
   if (!navigator.onLine) {
     console.log('[BgQueue] Device offline. Pausing queue worker.');
-    const statusBadge = document.getElementById('bgQueueStatusBadge');
-    if (statusBadge) {
-      statusBadge.className = 'text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1 shadow-2xs shrink-0';
-      statusBadge.innerHTML = '<i class="fa-solid fa-wifi text-amber-600"></i><span>รอเน็ต</span>';
-    }
     return;
   }
 
@@ -428,30 +596,16 @@ async function processBackgroundQueue() {
   const currentItem = queue[0];
   currentItem.status = 'uploading';
 
-  const progressBar = document.getElementById('bgQueueProgressBar');
-  const progressPercent = document.getElementById('bgQueueProgressPercent');
-  const speedTxt = document.getElementById('bgQueueSpeedTxt');
-  const statusBadge = document.getElementById('bgQueueStatusBadge');
-
-  if (statusBadge) {
-    statusBadge.className = 'text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1 shadow-2xs shrink-0';
-    statusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-blue-600"></i><span>กำลังส่ง</span>';
-  }
-
   // Progress ticker
   let percent = 20;
-  if (progressBar) progressBar.style.width = '20%';
-  if (progressPercent) progressPercent.textContent = '20%';
-  if (speedTxt) speedTxt.textContent = 'เชื่อมต่อ Google Apps Script...';
+  window.currentActiveItemProgress = percent;
 
   clearInterval(bgQueueProgressInterval);
   bgQueueProgressInterval = setInterval(() => {
     if (percent < 88) {
       percent += Math.floor(Math.random() * 8) + 4;
       if (percent > 88) percent = 88;
-      if (progressBar) progressBar.style.width = percent + '%';
-      if (progressPercent) progressPercent.textContent = percent + '%';
-      if (percent > 60 && speedTxt) speedTxt.textContent = 'บันทึก Google Drive & Sheet...';
+      window.currentActiveItemProgress = percent;
     }
   }, 300);
 
@@ -466,10 +620,7 @@ async function processBackgroundQueue() {
     });
 
     clearInterval(bgQueueProgressInterval);
-
-    if (progressBar) progressBar.style.width = '100%';
-    if (progressPercent) progressPercent.textContent = '100%';
-    if (speedTxt) speedTxt.textContent = 'สำเร็จ!';
+    window.currentActiveItemProgress = 100;
 
     const rawText = await response.text();
     let resJson;
@@ -484,16 +635,16 @@ async function processBackgroundQueue() {
       throw new Error(resJson.message || 'เกิดข้อผิดพลาดจาก Google Apps Script');
     }
 
-    // Success! Remove from queue
+    // สำเร็จ! นำออกจากคิว
     removeBackgroundQueueItem(currentItem.id);
 
-    // Show non-blocking success toast
+    // แจ้งเตือน Toast สีเขียวสั้นๆ
     Swal.fire({
       toast: true,
       position: 'bottom-end',
       icon: 'success',
-      title: `อัปโหลดสำเร็จ!`,
-      html: `<div class="text-xs text-gray-700 select-none">บันทึกภาพถ่ายหมาย <b>${currentItem.caseNumber}</b> ลงระบบเรียบร้อยแล้ว</div>`,
+      title: `อัปโหลดหมาย ${currentItem.caseNumber} สำเร็จ!`,
+      html: `<div class="text-xs text-gray-700 select-none">บันทึกลง Google Drive & Sheet เรียบร้อยแล้ว</div>`,
       timer: 3000,
       showConfirmButton: false
     });
@@ -508,7 +659,7 @@ async function processBackgroundQueue() {
 
     currentItem.retryCount = (currentItem.retryCount || 0) + 1;
     if (currentItem.retryCount >= 3) {
-      // Fallback to offline queue
+      // ย้ายเข้า Offline queue เพื่อไม่ให้ค้างขวางคิวอื่น
       addToOfflineQueue({
         payload: currentItem.payload,
         fileName: currentItem.fileName,
@@ -535,6 +686,7 @@ async function processBackgroundQueue() {
     }
   } finally {
     isBgQueueWorkerRunning = false;
+    window.currentActiveItemProgress = 0;
     const remainingQueue = getBackgroundQueue();
     if (remainingQueue.length > 0) {
       processBackgroundQueue();
@@ -7672,24 +7824,67 @@ async function handleDesktopUpload() {
       elements.otherCaseNoInput.focus();
     }
 
-    // 5. แสดงการแจ้งเตือนแบบ Toast มุมขวาบน (ไม่บดบังหน้าจอการทำงาน)
+    // 5. แสดง Pop Up แจ้งว่า "อยู่ในคิวนำขึ้นข้อมูลแล้ว" พร้อม Cooldown 2 วินาที
+    let cooldownTimer;
     Swal.fire({
-      toast: true,
-      position: 'top-end',
       icon: 'success',
-      title: 'นำเข้าข้อมูลเข้าสู่คิวอัปโหลดแล้ว',
+      title: '<div class="text-base font-bold text-gray-900"><i class="fa-solid fa-list-check text-blue-600 mr-1.5"></i> อยู่ในคิวนำขึ้นข้อมูลแล้ว</div>',
       html: `
-        <div class="text-left text-xs space-y-1 select-none text-gray-700">
-          <div>หมายเลขคดี <b class="text-blue-700 font-mono">${caseNumber}</b> กำลังส่งในเบื้องหลัง</div>
-          <div class="text-emerald-700 font-bold flex items-center gap-1">
-            <i class="fa-solid fa-circle-check text-emerald-600"></i>
-            <span>คุณสามารถพิมพ์กรอกหมายถัดไปได้ทันที</span>
+        <div class="text-left text-xs space-y-3 p-1 select-none text-gray-700">
+          <div class="p-3 bg-blue-50 border border-blue-200 rounded-2xl space-y-1">
+            <div class="flex items-center justify-between font-bold">
+              <span class="text-blue-700 font-mono text-sm"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i> ${caseNumber}</span>
+              <span class="text-gray-600 text-xs">${courtType}</span>
+            </div>
+            <div class="text-gray-600 text-xs truncate">
+              <i class="fa-solid fa-location-dot text-rose-500 mr-1"></i> ${locationText}
+            </div>
+          </div>
+
+          <div class="p-3 bg-emerald-50 border-2 border-emerald-300 rounded-2xl text-center space-y-1">
+            <div class="text-emerald-800 font-extrabold text-sm flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-circle-check text-emerald-600 text-base"></i>
+              <span>ท่านสามารถทำรายการต่อไปได้ทันที</span>
+            </div>
+            <p class="text-[11px] text-emerald-700 font-medium">ระบบกำลังส่งข้อมูลและอัปโหลดภาพถ่ายในเบื้องหลัง</p>
+          </div>
+
+          <div class="pt-1 text-[11px] text-gray-400 flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-hourglass-half text-blue-600 animate-spin"></i>
+            <span>หน้าต่างนี้จะปิดอัตโนมัติใน <b id="swalQueueCooldown" class="text-blue-600 font-bold text-sm">2</b> วินาที</span>
           </div>
         </div>
       `,
-      showConfirmButton: false,
-      timer: 3500,
-      timerProgressBar: true
+      timer: 2000,
+      timerProgressBar: true,
+      showConfirmButton: true,
+      confirmButtonText: '<i class="fa-solid fa-pen-to-square mr-1"></i> ทำรายการต่อไปทันที',
+      confirmButtonColor: '#2563eb',
+      allowOutsideClick: true,
+      customClass: {
+        popup: 'rounded-3xl p-5'
+      },
+      didOpen: () => {
+        const cdEl = document.getElementById('swalQueueCooldown');
+        cooldownTimer = setInterval(() => {
+          if (cdEl && Swal.getTimerLeft()) {
+            const secLeft = Math.ceil(Swal.getTimerLeft() / 1000);
+            cdEl.textContent = secLeft;
+          }
+        }, 200);
+      },
+      willClose: () => {
+        clearInterval(cooldownTimer);
+      }
+    }).then(() => {
+      // เลื่อนเคอร์เซอร์ไปรอที่ช่องเลขคดีอัตโนมัติ เพื่อพิมพ์หมายต่อไปได้ทันที
+      if (elements.udonCaseNoInput && !document.getElementById('udonCaseField')?.classList.contains('hidden')) {
+        elements.udonCaseNoInput.focus();
+        elements.udonCaseNoInput.select();
+      } else if (elements.otherCaseNoInput) {
+        elements.otherCaseNoInput.focus();
+        elements.otherCaseNoInput.select();
+      }
     });
 
     // 6. เริ่มการทำงานของ Background Worker ในเบื้องหลัง
