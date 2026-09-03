@@ -836,10 +836,23 @@
           </div>
 
           <!-- Local Advisor notice box (shown dynamically when logged in as Local Advisor) -->
-          <div id="localAdvisorNoticeContainer" class="hidden mb-3.5 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
-            <i class="fa-solid fa-shield-halved text-amber-600 mt-0.5 shrink-0 text-sm"></i>
-            <div class="leading-snug">
-              <span class="font-bold">สิทธิ์ Local Advisor:</span> สามารถสร้างและจัดการผู้ใช้งาน Role => User ในพื้นที่ <b id="localAdvisorProvinceText" class="text-amber-800 underline">จ.อุดรธานี</b> เท่านั้น
+          <div id="localAdvisorNoticeContainer" class="hidden mb-3.5 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 space-y-2 shadow-xs">
+            <div class="flex items-center gap-2 font-bold text-amber-800 border-b border-amber-200/70 pb-1.5">
+              <i class="fa-solid fa-shield-halved text-amber-600 text-sm"></i>
+              <span>สิทธิ์ผู้ดูแลระดับ Local Advisor</span>
+            </div>
+            <div class="space-y-1 text-[11px] leading-relaxed">
+              <div class="flex items-center gap-1.5">
+                <i class="fa-solid fa-building-columns text-blue-600"></i>
+                <span>สังกัดศาล: <b id="localAdvisorCourtText" class="text-blue-900 font-bold underline">ศาลจังหวัดอุดรธานี</b></span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <i class="fa-solid fa-location-dot text-rose-500"></i>
+                <span>จังหวัดที่รับผิดชอบ: <b id="localAdvisorProvinceText" class="text-gray-800 font-bold">จ.อุดรธานี</b></span>
+              </div>
+              <p class="text-amber-700 pt-1">
+                <i class="fa-solid fa-circle-info mr-1"></i>คุณสามารถสร้างและจัดการผู้ใช้งานได้เฉพาะ <b>Role => User</b> ในสังกัดศาลตนเองเท่านั้น
+              </p>
             </div>
           </div>
 
@@ -864,17 +877,48 @@
                 <option value="admin">Admin (ผู้ดูแลระบบ)</option>
               </select>
             </div>
-            <!-- หมวดหมู่จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) * (ซ่อนเมื่อเป็น Local Advisor) -->
-            <div id="newAssignedProvinceContainer">
-              <label class="block text-xs font-bold text-gray-700 mb-1">จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *</label>
-              <div class="relative">
-                <input type="text" id="newAssignedProvince" list="assignedProvinceDatalist" required placeholder="เลือกหรือพิมพ์ค้นหาจังหวัด..." value="อุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                <datalist id="assignedProvinceDatalist">
-                  <!-- Populated dynamically with 77 provinces -->
-                </datalist>
+
+            <!-- หมวดหมู่การระบุชื่อศาลและสังกัด (ซ่อนเมื่อเป็น Local Advisor) -->
+            <div id="newCourtAndProvinceSection" class="space-y-3 border-t border-gray-100 pt-3">
+              <div>
+                <label class="block text-xs font-bold text-gray-700 mb-1">ประเภทศาลที่สังกัด *</label>
+                <select id="newCourtCategory" onchange="handleNewCourtCategoryChange()" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  <option value="ศาลจังหวัด">ศาลจังหวัด</option>
+                  <option value="ศาลแขวง">ศาลแขวง</option>
+                  <option value="ศาลเยาวชนและครอบครัว">ศาลเยาวชนและครอบครัว</option>
+                  <option value="ศาลไม่สังกัดภาค">ศาลไม่สังกัดภาค</option>
+                </select>
               </div>
-              <p class="text-[11px] text-gray-400 mt-1">พิมพ์ค้นหาหรือคลิกเลือกรายชื่อจังหวัด</p>
+
+              <!-- 1. กรณี ศาลไม่สังกัดภาค: เปิดกล่องข้อความให้พิมพ์ได้ โดยเติมคำว่า "ศาล" เอาไว้เลย -->
+              <div id="newCustomCourtContainer" class="hidden">
+                <label class="block text-xs font-bold text-gray-700 mb-1">ระบุชื่อศาล (พิมพ์ต่อจากคำว่า "ศาล") *</label>
+                <div class="relative">
+                  <input type="text" id="newCustomCourtName" value="ศาล" placeholder="เช่น ศาลแพ่ง, ศาลอาญา, ศาลล้มละลายกลาง" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                </div>
+                <p class="text-[11px] text-gray-400 mt-1">สามารถพิมพ์ชื่อศาลที่ต้องการได้ตามจริง</p>
+              </div>
+
+              <!-- 2. กรณี ศาลจังหวัด, ศาลแขวง, ศาลเยาวชนและครอบครัว: เลือกจังหวัด + แสดงกล่องข้อความ disabled -->
+              <div id="newStandardCourtContainer" class="space-y-2.5">
+                <div>
+                  <label class="block text-xs font-bold text-gray-700 mb-1">จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *</label>
+                  <div class="relative">
+                    <input type="text" id="newAssignedProvince" list="assignedProvinceDatalist" oninput="updateGeneratedCourtNamePreview()" required placeholder="เลือกหรือพิมพ์ค้นหาจังหวัด..." value="อุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                    <datalist id="assignedProvinceDatalist">
+                      <!-- Populated dynamically with 77 provinces -->
+                    </datalist>
+                  </div>
+                  <p class="text-[11px] text-gray-400 mt-1">พิมพ์ค้นหาหรือคลิกเลือกรายชื่อจังหวัด</p>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อศาลที่สังกัด (ระบบสร้างให้อัตโนมัติ) *</label>
+                  <input type="text" id="newGeneratedCourtNamePreview" disabled readonly value="ศาลจังหวัดอุดรธานี" class="w-full bg-gray-100 border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm font-bold text-blue-800 cursor-not-allowed select-none">
+                </div>
+              </div>
             </div>
+
             <div class="pt-2">
               <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl transition shadow-md shadow-blue-200 text-sm">
                 <i class="fa-solid fa-plus mr-1"></i> เพิ่มผู้ใช้งาน
@@ -919,6 +963,7 @@
                 <tr class="bg-gray-50 border-b border-gray-200 text-gray-600 font-bold text-xs uppercase">
                   <th class="py-3 px-4">ชื่อผู้ใช้ / ชื่อแสดง</th>
                   <th class="py-3 px-4">สิทธิ์ (Role)</th>
+                  <th class="py-3 px-4">ศาลที่สังกัด</th>
                   <th class="py-3 px-4">จังหวัดที่ส่งหมาย</th>
                   <th class="py-3 px-4">วันที่สร้าง</th>
                   <th class="py-3 px-4 text-right">การจัดการ</th>
@@ -1205,17 +1250,17 @@
   </aside>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260903_19"></script>
-  <script src="js/compass.js?v=20260903_19"></script>
-  <script src="js/map.js?v=20260903_19"></script>
-  <script src="js/watermark.js?v=20260903_19"></script>
-  <script src="js/app.js?v=20260903_19"></script>
+  <script src="js/data.js?v=20260903_20"></script>
+  <script src="js/compass.js?v=20260903_20"></script>
+  <script src="js/map.js?v=20260903_20"></script>
+  <script src="js/watermark.js?v=20260903_20"></script>
+  <script src="js/app.js?v=20260903_20"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260903_19')
+        navigator.serviceWorker.register('./sw.js?v=20260903_20')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
