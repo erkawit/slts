@@ -928,6 +928,24 @@ function doGet(e) {
       }
     }
 
+    if (e.parameter.action === "sync_all_users" || e.parameter.action === "sync_users_structure") {
+      try {
+        const folder = DriveApp.getFolderById(FOLDER_ID);
+        const ss = getTargetSpreadsheetFile(folder);
+        const uSheet = getUsersSheet(ss);
+        ensureUsersSheetHeaders(uSheet);
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          message: "ซิงค์โครงสร้างคอลัมน์ศาลและจังหวัดในแท็บชีต users สำเร็จเรียบร้อยแล้ว"
+        })).setMimeType(ContentService.MimeType.JSON);
+      } catch (err) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: err.toString()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     if (e.parameter.action === "get_pending_handoff" || e.parameter.action === "get_latest_handoff") {
       try {
         const folder = DriveApp.getFolderById(FOLDER_ID);

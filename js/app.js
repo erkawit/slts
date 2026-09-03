@@ -1181,7 +1181,8 @@ async function syncUserToGoogleSheet(action, payload) {
  * ซิงค์โครงสร้างคอลัมน์ (ประเภทศาล, ศาลที่สังกัด, จังหวัดที่ส่งหมาย) และข้อมูลผู้ใช้ทั้งหมดไปยัง Google Sheet (Tab: users)
  */
 window.syncAllUsersStructureToGoogleSheet = async function() {
-  if (!state.appsScriptUrl || !navigator.onLine) {
+  const targetUrl = typeof getSanitizedAppsScriptUrl === 'function' ? getSanitizedAppsScriptUrl() : (state.appsScriptUrl || localStorage.getItem('slts_apps_script_url') || '').trim();
+  if (!targetUrl || !navigator.onLine) {
     Swal.fire({
       icon: 'warning',
       title: 'ไม่สามารถเชื่อมต่อได้',
@@ -1235,15 +1236,42 @@ window.syncAllUsersStructureToGoogleSheet = async function() {
       };
     });
 
-    const resp = await fetch(state.appsScriptUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'sync_all_users',
-        users: enrichedUsers
-      })
-    });
-    const result = await resp.json();
+    let result = null;
+
+    // วิธีที่ 1: ส่งคำขอแบบ POST
+    try {
+      const resp = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'sync_all_users',
+          users: enrichedUsers
+        })
+      });
+      const rawText = await resp.text();
+      try {
+        result = JSON.parse(rawText);
+      } catch (pe) {
+        console.warn('POST response was not JSON, trying GET fallback...', rawText.substring(0, 100));
+      }
+    } catch (postErr) {
+      console.warn('POST sync_all_users failed, trying GET fallback...', postErr);
+    }
+
+    // วิธีที่ 2: หาก POST ไม่สำเร็จหรือได้ผลลัพธ์ไม่ใช่ JSON ให้ใช้ GET fallback
+    if (!result || result.status !== 'success') {
+      const getUrl = `${targetUrl}?action=sync_all_users&_t=${Date.now()}`;
+      const getResp = await fetch(getUrl, { cache: 'no-store' });
+      const getText = await getResp.text();
+      try {
+        result = JSON.parse(getText);
+      } catch (getPe) {
+        if (getText.includes('accounts.google.com') || getText.includes('ServiceLogin')) {
+          throw new Error('Google Apps Script ติดสิทธิ์การเข้าถึง (Permission): กรุณาไปที่ Apps Script แล้วกด Deploy โดยเลือก "Who has access" เป็น "Anyone (ทุกคน)"');
+        }
+        throw new Error('กรุณาอัปเดตไฟล์ Code.gs ใน Google Apps Script และกด Deploy เป็นเวอร์ชันใหม่ เพื่อเปิดใช้งานการซิงค์โครงสร้างตาราง');
+      }
+    }
 
     if (result && result.status === 'success') {
       Swal.fire({
@@ -10847,68 +10875,27 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
     }
   }
 
-  // 3. ถ้ายังไม่พบ: ตรวจสอบหาหมุดที่ใกล้เคียงจากข้อมูลใน ตำบล + อำเภอ + จังหวัด เดียวกัน (Strict Scope Filter)
-  if (!matched && subdistrict) {
-    // 3.1 แนะนำหมุดที่เป็น "ที่ทำการปกครองส่วนท้องถิ่น" เป็นอันดับต้น กรณีไม่พบบ้านเลขที่ตรงกัน
+  // 3. ถ้าไม่พบบ้านเลขที่ตรงกัน: ตรวจสอบจาก หมู่ที่ หรือชื่อหมู่บ้าน ใน ตำบล + อำเภอ + จังหวัด เดียวกันเท่านั้น
+  // (อย่างน้อยต้องอยู่ในอำเภอ ตำบล และหมู่บ้านเดียวกันเท่านั้น หากไม่พบไม่ต้องแสดงผลและไม่เลือกหมุดใดๆ ให้)
+  if (!matched && subdistrict && moo) {
     matched = allRows.find(r => {
       const rProv = getRowProvince(r);
       if (province && rProv && rProv !== province) return false;
       const rDist = (r['อำเภอ'] || '').trim();
       if (district && rDist && rDist !== district) return false;
       const rSub = (r['ตำบล'] || '').trim();
-      if (!rSub || (rSub !== subdistrict && !rSub.includes(subdistrict) && !subdistrict.includes(rSub))) return false;
-
+      const rMoo = (r['หมู่'] || '').trim();
       const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
-      const isLocalAdmin = rLoc.includes('ที่ทำการ') || rLoc.includes('อบต') || rLoc.includes('เทศบาล') || rLoc.includes('ที่ว่าการ') || rLoc.includes('กำนัน') || rLoc.includes('ผู้ใหญ่บ้าน') || rLoc.includes('ทต.') || rLoc.includes('อบจ');
-      const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
 
-      return isLocalAdmin && !isNaN(lat) && lat > 0;
+      const subMatch = rSub && (rSub === subdistrict || rSub.includes(subdistrict) || subdistrict.includes(rSub));
+      const mooMatch = rMoo === moo || rLoc.includes(`ม.${moo}`) || rLoc.includes(`หมู่ ${moo}`) || rLoc.includes(`หมู่ที่ ${moo}`) || (moo.length >= 2 && rLoc.includes(moo));
+      const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
+      return subMatch && mooMatch && !isNaN(lat) && lat > 0;
     });
 
     if (matched) {
       matchType = 'near';
-      matchNote = `แนะนำ: ที่ทำการปกครองส่วนท้องถิ่น (ต.${subdistrict})`;
-    }
-
-    // 3.2 ถ้าไม่พบที่ทำการปกครองส่วนท้องถิ่น ให้ค้นหาจาก หมู่ที่ + ตำบล เดียวกัน
-    if (!matched && moo) {
-      matched = allRows.find(r => {
-        const rProv = getRowProvince(r);
-        if (province && rProv && rProv !== province) return false;
-        const rDist = (r['อำเภอ'] || '').trim();
-        if (district && rDist && rDist !== district) return false;
-        const rSub = (r['ตำบล'] || '').trim();
-        const rMoo = (r['หมู่'] || '').trim();
-        const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
-
-        const subMatch = rSub && (rSub === subdistrict || rSub.includes(subdistrict) || subdistrict.includes(rSub));
-        const mooMatch = rMoo === moo || rLoc.includes(`ม.${moo}`) || rLoc.includes(`หมู่ ${moo}`) || rLoc.includes(`หมู่ที่ ${moo}`);
-        const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
-        return subMatch && mooMatch && !isNaN(lat) && lat > 0;
-      });
-
-      if (matched) {
-        matchType = 'near';
-        matchNote = `หมุดใกล้เคียง (ม.${moo} ต.${subdistrict})`;
-      }
-    }
-
-    // 3.3 ถ้ายังไม่พบ ให้หาจากหมุดอื่นๆ ใน ตำบล + อำเภอ + จังหวัด เดียวกัน
-    if (!matched) {
-      matched = allRows.find(r => {
-        const rProv = getRowProvince(r);
-        if (province && rProv && rProv !== province) return false;
-        const rDist = (r['อำเภอ'] || '').trim();
-        if (district && rDist && rDist !== district) return false;
-        const rSub = (r['ตำบล'] || '').trim();
-        const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
-        return rSub && (rSub === subdistrict || rSub.includes(subdistrict) || subdistrict.includes(rSub)) && !isNaN(lat) && lat > 0;
-      });
-
-      if (matched) {
-        matchType = 'near';
-        matchNote = `หมุดใกล้เคียง (ต.${subdistrict}${district ? ` อ.${district}` : ''})`;
-      }
+      matchNote = `หมุดใกล้เคียง (หมู่บ้าน/ม.${moo} ต.${subdistrict})`;
     }
   }
 
@@ -11489,14 +11476,20 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
 
     const isLocalAdmin = rLoc.includes('ที่ทำการ') || rLoc.includes('อบต') || rLoc.includes('เทศบาล') || rLoc.includes('ที่ว่าการ') || rLoc.includes('กำนัน') || rLoc.includes('ผู้ใหญ่บ้าน') || rLoc.includes('ทต.') || rLoc.includes('อบจ');
 
-    let score = 50;
-    let badgeText = `หมุดใน ต.${subdistrict}`;
-    let badgeClass = 'bg-gray-100 text-gray-700 border-gray-200';
-    let icon = 'fa-location-dot';
-
     const caseMatch = cleanEnteredCase && cleanRCase && (cleanRCase === cleanEnteredCase || cleanRCase.includes(cleanEnteredCase) || cleanEnteredCase.includes(cleanRCase));
     const houseMatch = houseNo && (rHouse === houseNo || rLoc.includes(houseNo));
-    const mooMatch = moo && (rMoo === moo || rLoc.includes(`ม.${moo}`) || rLoc.includes(`หมู่ ${moo}`) || rLoc.includes(`หมู่ที่ ${moo}`));
+    const mooMatch = moo && (rMoo === moo || rLoc.includes(`ม.${moo}`) || rLoc.includes(`หมู่ ${moo}`) || rLoc.includes(`หมู่ที่ ${moo}`) || (moo.length >= 2 && rLoc.includes(moo)));
+
+    // ข้อกำหนดสำคัญ: หากไม่มีบ้านเลขที่ตรงกัน หรือหมู่ที่/หมู่บ้านตรงกัน (และเลขคดีไม่ตรงกัน)
+    // ไม่ต้องนำเข้ามาแสดงผลเด็ดขาด เพราะข้อมูลจะไม่ถูกต้อง อย่างน้อยต้องอยู่ในอำเภอ ตำบล และหมู่บ้าน/หมู่ที่เดียวกันเท่านั้น
+    if (!caseMatch && !houseMatch && !mooMatch) {
+      return;
+    }
+
+    let score = 50;
+    let badgeText = `หมู่ที่/หมู่บ้านตรงกัน (ต.${subdistrict})`;
+    let badgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold';
+    let icon = 'fa-map-pin';
 
     if (caseMatch) {
       score = 1000;
@@ -11513,16 +11506,11 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
       badgeText = 'บ้านเลขที่ตรงกัน';
       badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 font-semibold';
       icon = 'fa-house';
-    } else if (isLocalAdmin) {
-      score = 300;
-      badgeText = '⭐ แนะนำ: ที่ทำการปกครองส่วนท้องถิ่น (ศูนย์กลางตำบล)';
-      badgeClass = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
-      icon = 'fa-landmark';
     } else if (mooMatch) {
       score = 200;
-      badgeText = `ม.${moo} ตำบลเดียวกัน`;
+      badgeText = `ม.${moo} / หมู่บ้านเดียวกัน`;
       badgeClass = 'bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold';
-      icon = 'fa-map-pin';
+      icon = 'fa-location-dot';
     }
 
     evaluated.push({
@@ -11540,6 +11528,17 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
       isLocalAdmin
     });
   });
+
+  if (evaluated.length === 0) {
+    listContainer.innerHTML = `
+      <div class="p-3 text-center text-gray-500 bg-white rounded-xl border border-dashed border-gray-300 text-xs">
+        <i class="fa-solid fa-circle-exclamation text-amber-500 text-sm mb-1 block"></i>
+        ไม่พบหมุดที่มีบ้านเลขที่ หรือหมู่บ้าน/หมู่ที่ตรงกันใน ต.<b>${subdistrict}</b> อ.<b>${district}</b><br>
+        <span class="text-[11px] text-gray-400 mt-1 block">(ระบบไม่แสดงผลและไม่เลือกหมุด เพื่อความถูกต้องของการนำส่งหมาย)</span>
+      </div>
+    `;
+    return;
+  }
 
   // เรียงลำดับจากคะแนนมากไปหาน้อย
   evaluated.sort((a, b) => b.score - a.score);
