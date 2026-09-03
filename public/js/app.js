@@ -28,6 +28,8 @@ const state = {
   currentUser: null,
   dataTableInstance: null,
   selectedProvince: localStorage.getItem('slts_selected_province') || null,
+  selectedDistrict: localStorage.getItem('slts_selected_district') || null,
+  selectedSubdistrict: localStorage.getItem('slts_selected_subdistrict') || null,
   stagedScheduleStops: [],
   lastScheduleFormData: (function() {
     try {
@@ -695,18 +697,9 @@ async function processBackgroundQueue() {
     // สำเร็จ! นำออกจากคิว
     removeBackgroundQueueItem(currentItem.id);
 
-    // บนหน้าจอความกว้างมากกว่า 768 pixel (Desktop) ไม่ต้องแสดงหน้าต่างแจ้งเตือนเมื่ออัปโหลดเสร็จ ให้ตัดออกไปเลย
-    const isDesktop = window.innerWidth > 768;
-    if (!isDesktop) {
-      Swal.fire({
-        toast: true,
-        position: 'top',
-        icon: 'success',
-        title: `อัปโหลดหมาย ${currentItem.caseNumber} สำเร็จ!`,
-        timer: 2000,
-        showConfirmButton: false
-      });
-    }
+    // ข้อกำหนด: ในหน้าจอความกว้างน้อยกว่า 768 pixel (และ Desktop)
+    // เมื่อกำลังอัปโหลดอยู่เบื้องหลัง ไม่ต้องมีการแจ้งเตือน Little Notification (Toast) ใดๆ ให้นำออกไปเลย เพื่อไม่ให้รบกวนหน้าต่างกรอกข้อมูลหมายถัดไป
+    // โดยสถานะการทำงานสามารถดูได้จากปุ่มคิวบน Top Bar หรือ Floating Queue เสมอ
 
     // Invalidate sheet cache
     localStorage.removeItem(CACHE_KEY_SHEET_DATA);
@@ -5865,7 +5858,14 @@ function setProvince(provinceName) {
   if (elements.provinceSelect && elements.provinceSelect.value !== provinceName) {
     elements.provinceSelect.value = provinceName;
   }
-  updateDistricts(provinceName);
+  const districts = getDistrictsByProvince(provinceName);
+  const curDist = state.selectedDistrict && districts.includes(state.selectedDistrict) ? state.selectedDistrict : (districts[0] || '');
+  state.selectedDistrict = curDist;
+  const subdistricts = getSubdistrictsByDistrict(provinceName, curDist);
+  const curSub = state.selectedSubdistrict && subdistricts.includes(state.selectedSubdistrict) ? state.selectedSubdistrict : (subdistricts[0] || '');
+  state.selectedSubdistrict = curSub;
+
+  updateDistricts(provinceName, curDist, curSub);
   updateFloatingProvinceBadge();
 
   // ปรับชื่อประเภทศาลบน Desktop ให้ตรงกับจังหวัดที่เลือก
@@ -5889,7 +5889,7 @@ function updateFloatingProvinceBadge() {
   }
 }
 
-function updateDistricts(provinceName, selectDistrict = null) {
+function updateDistricts(provinceName, selectDistrict = null, selectSubdistrict = null) {
   if (!elements.districtSelect) return;
   const districts = getDistrictsByProvince(provinceName);
   elements.districtSelect.innerHTML = '';
@@ -5903,10 +5903,12 @@ function updateDistricts(provinceName, selectDistrict = null) {
   const chosenDistrict = selectDistrict && districts.includes(selectDistrict) ? selectDistrict : (districts[0] || '');
   if (chosenDistrict) {
     elements.districtSelect.value = chosenDistrict;
+    state.selectedDistrict = chosenDistrict;
   }
-  updateSubdistricts(provinceName, chosenDistrict);
+  updateSubdistricts(provinceName, chosenDistrict, selectSubdistrict);
 
   elements.districtSelect.onchange = (e) => {
+    state.selectedDistrict = e.target.value;
     updateSubdistricts(state.selectedProvince || provinceName, e.target.value);
   };
 }
@@ -5921,8 +5923,10 @@ function updateSubdistricts(provinceName, districtName, selectSubdistrict = null
     opt.textContent = sub;
     elements.subdistrictSelect.appendChild(opt);
   });
-  if (selectSubdistrict && subdistricts.includes(selectSubdistrict)) {
-    elements.subdistrictSelect.value = selectSubdistrict;
+  const chosenSub = selectSubdistrict && subdistricts.includes(selectSubdistrict) ? selectSubdistrict : (subdistricts[0] || '');
+  if (chosenSub) {
+    elements.subdistrictSelect.value = chosenSub;
+    state.selectedSubdistrict = chosenSub;
   }
 }
 
@@ -6673,10 +6677,18 @@ window.setDesktopCourtType = function(category, customName = '', provinceName = 
   }
 };
 
-// -------------------------------------------------------------------------
-// Helper เก็บสถานะ Form ที่ผู้ใช้กำลังกรอกไว้ชั่วคราว
-// -------------------------------------------------------------------------
 window.saveTempModalFormState = function() {
+  const mDist = document.getElementById('m_district')?.value;
+  const mSub = document.getElementById('m_subdistrict')?.value;
+  if (mDist) {
+    state.selectedDistrict = mDist;
+    localStorage.setItem('slts_selected_district', mDist);
+  }
+  if (mSub) {
+    state.selectedSubdistrict = mSub;
+    localStorage.setItem('slts_selected_subdistrict', mSub);
+  }
+
   const cType = document.getElementById('m_courtType')?.value;
   const cName = document.getElementById('m_courtNameInput')?.value;
   const pref = document.getElementById('m_prefix')?.value;
@@ -6693,6 +6705,8 @@ window.saveTempModalFormState = function() {
   const coords = document.getElementById('m_coords')?.value;
 
   state.tempModalValues = {
+    district: mDist || state.tempModalValues?.district || state.selectedDistrict || elements.districtSelect?.value || '',
+    subdistrict: mSub || state.tempModalValues?.subdistrict || state.selectedSubdistrict || elements.subdistrictSelect?.value || '',
     courtCategory: cType !== undefined ? cType : (state.tempModalValues?.courtCategory || 'ศาลจังหวัด'),
     courtType: cType !== undefined ? cType : (state.tempModalValues?.courtType || 'ศาลจังหวัด'),
     courtName: cName !== undefined ? cName : (state.tempModalValues?.courtName || ''),
@@ -6822,14 +6836,23 @@ window.filterDistrictList = function(query) {
 
 window.selectDistrictAndReturn = function(districtName) {
   const prov = state.selectedProvince;
+  state.selectedDistrict = districtName;
+  localStorage.setItem('slts_selected_district', districtName);
+
+  const subdistricts = getSubdistrictsByDistrict(prov, districtName);
+  const firstSub = subdistricts[0] || '';
+  state.selectedSubdistrict = firstSub;
+  localStorage.setItem('slts_selected_subdistrict', firstSub);
+
+  if (!state.tempModalValues) state.tempModalValues = {};
+  state.tempModalValues.district = districtName;
+  state.tempModalValues.subdistrict = firstSub;
+
   if (elements.districtSelect) {
     elements.districtSelect.value = districtName;
   }
-  const subdistricts = getSubdistrictsByDistrict(prov, districtName);
-  const firstSub = subdistricts[0] || '';
-  if (elements.subdistrictSelect) {
-    updateSubdistricts(prov, districtName, firstSub);
-  }
+  updateSubdistricts(prov, districtName, firstSub);
+
   showMobileSummonsFormModal(true);
 };
 
@@ -6843,9 +6866,9 @@ window.showSubdistrictSelectorModal = function() {
     return;
   }
   const districts = getDistrictsByProvince(prov);
-  const curDistrict = elements.districtSelect?.value || districts[0] || '';
+  const curDistrict = state.tempModalValues?.district || state.selectedDistrict || elements.districtSelect?.value || districts[0] || '';
   const subdistricts = getSubdistrictsByDistrict(prov, curDistrict);
-  const curSubdistrict = elements.subdistrictSelect?.value || subdistricts[0] || '';
+  const curSubdistrict = state.tempModalValues?.subdistrict || state.selectedSubdistrict || elements.subdistrictSelect?.value || subdistricts[0] || '';
 
   let subdistrictsHtml = '';
   subdistricts.forEach(s => {
@@ -6945,9 +6968,22 @@ window.filterSubdistrictList = function(query) {
 };
 
 window.selectSubdistrictAndReturn = function(subdistrictName) {
+  const prov = state.selectedProvince;
+  state.selectedSubdistrict = subdistrictName;
+  localStorage.setItem('slts_selected_subdistrict', subdistrictName);
+
+  if (!state.tempModalValues) state.tempModalValues = {};
+  state.tempModalValues.subdistrict = subdistrictName;
+
+  const curDist = state.tempModalValues.district || state.selectedDistrict || elements.districtSelect?.value || '';
+  if (elements.districtSelect && curDist) {
+    elements.districtSelect.value = curDist;
+  }
+  updateSubdistricts(prov, curDist, subdistrictName);
   if (elements.subdistrictSelect) {
     elements.subdistrictSelect.value = subdistrictName;
   }
+
   showMobileSummonsFormModal(true);
 };
 
@@ -7377,10 +7413,17 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
   const isOnline = navigator.onLine;
   const prov = state.selectedProvince;
   const districts = getDistrictsByProvince(prov);
-  
-  const curDistrict = (elements.districtSelect?.value && districts.includes(elements.districtSelect.value)) ? elements.districtSelect.value : (districts[0] || '');
+  const curDistrict = state.tempModalValues?.district || state.selectedDistrict || ((elements.districtSelect?.value && districts.includes(elements.districtSelect.value)) ? elements.districtSelect.value : (districts[0] || ''));
+  state.selectedDistrict = curDistrict;
+
   const subdistricts = getSubdistrictsByDistrict(prov, curDistrict);
-  const curSubdistrict = (elements.subdistrictSelect?.value && subdistricts.includes(elements.subdistrictSelect.value)) ? elements.subdistrictSelect.value : (subdistricts[0] || '');
+  const curSubdistrict = state.tempModalValues?.subdistrict || state.selectedSubdistrict || ((elements.subdistrictSelect?.value && subdistricts.includes(elements.subdistrictSelect.value)) ? elements.subdistrictSelect.value : (subdistricts[0] || ''));
+  state.selectedSubdistrict = curSubdistrict;
+
+  if (elements.districtSelect) {
+    elements.districtSelect.value = curDistrict;
+  }
+  updateSubdistricts(prov, curDistrict, curSubdistrict);
 
   const curCategory = state.tempModalValues?.courtCategory || state.selectedCourtCategory || state.desktopCourtCategory || localStorage.getItem('slts_selected_court_category') || 'ศาลจังหวัด';
   let curCourtName = state.tempModalValues?.courtName || state.selectedCourtName || '';
@@ -7955,6 +7998,11 @@ function validateAndExtractModalForm() {
 function applyModalFormValues(val) {
   if (!val) return;
 
+  state.selectedDistrict = val.district;
+  state.selectedSubdistrict = val.subdistrict;
+  localStorage.setItem('slts_selected_district', val.district);
+  localStorage.setItem('slts_selected_subdistrict', val.subdistrict);
+
   if (elements.caseExtraInput) {
     elements.caseExtraInput.value = val.caseExtra || '';
   }
@@ -7962,6 +8010,9 @@ function applyModalFormValues(val) {
   if (elements.districtSelect) {
     elements.districtSelect.value = val.district;
     updateSubdistricts(state.selectedProvince, val.district, val.subdistrict);
+  }
+  if (elements.subdistrictSelect) {
+    elements.subdistrictSelect.value = val.subdistrict;
   }
 
   const isOther = val.courtCategory === 'ศาลอื่น' || val.courtCategory === 'หมายศาลอื่น' || val.courtType === 'ศาลอื่น';
@@ -8240,9 +8291,9 @@ function initFormEventListeners() {
 }
 
 function getFullLocationText() {
-  const province = elements.provinceSelect ? elements.provinceSelect.value : (state.selectedProvince || '');
-  const district = elements.districtSelect ? elements.districtSelect.value : '';
-  const subdistrict = elements.subdistrictSelect ? elements.subdistrictSelect.value : '';
+  const province = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '');
+  const district = state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : '');
+  const subdistrict = state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : '');
   const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
 
   const isBkk = province === 'กรุงเทพมหานคร';
@@ -10212,8 +10263,8 @@ async function captureAndProcessPhoto() {
       caseNumber: caseNumber,
       courtType: elements.courtTypeSelect.value,
       province: state.selectedProvince || 'อุดรธานี',
-      district: elements.districtSelect.value,
-      subdistrict: elements.subdistrictSelect.value,
+      district: state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : ''),
+      subdistrict: state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : ''),
       locationType: elements.locationTypeSelect.value,
       locationText: locationText,
       lat: state.lat,
@@ -10304,8 +10355,8 @@ async function handleFallbackFile(e) {
       caseNumber: caseNumber,
       courtType: elements.courtTypeSelect.value,
       province: state.selectedProvince || 'อุดรธานี',
-      district: elements.districtSelect.value,
-      subdistrict: elements.subdistrictSelect.value,
+      district: state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : ''),
+      subdistrict: state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : ''),
       locationType: elements.locationTypeSelect.value,
       locationText: locationText,
       lat: state.lat,
@@ -10501,12 +10552,19 @@ function resetFormForNextCase() {
     }
   }
   if (elements.caseExtraInput) elements.caseExtraInput.value = '';
-  if (state.tempModalValues) state.tempModalValues.caseExtra = '';
+  if (state.tempModalValues) {
+    state.tempModalValues.caseNo = '';
+    state.tempModalValues.otherCaseNo = '';
+    state.tempModalValues.caseExtra = '';
+    state.tempModalValues.houseNo = '';
+    state.tempModalValues.moo = '';
+    state.tempModalValues.otherLocName = '';
+  }
   if (elements.houseNoInput) elements.houseNoInput.value = '';
   if (elements.mooInput) elements.mooInput.value = '';
   if (elements.customOtherLocationName) elements.customOtherLocationName.value = '';
 
-  // บนจอมือถือ หากยังเปิดกล้องอยู่ ให้เด้งฟอร์มกรอกหมายถัดไปทันที
+  // บนจอมือถือ หากยังเปิดกล้องอยู่ ให้เด้งฟอร์มกรอกหมายถัดไปทันที โดยคงอำเภอและตำบลเดิมไว้เพื่อความสะดวกรวดเร็ว
   if (window.innerWidth < 768 && elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
     setTimeout(() => {
       showMobileSummonsFormModal(false);
