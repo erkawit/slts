@@ -147,6 +147,37 @@ function doPost(e) {
     }
 
     // ==========================================
+    // ACTION: SEARCH_PLACE / GEOCODE (ค้นหาสถานที่และพิกัดผ่าน Google Maps Geocoder)
+    // ==========================================
+    if (data.action === "search_place" || data.action === "geocode") {
+      const query = String(data.q || data.query || '').trim();
+      const results = [];
+      if (query) {
+        try {
+          const geocoder = Maps.newGeocoder().setLanguage('th');
+          const response = geocoder.geocode(query);
+          if (response && response.status === 'OK' && response.results) {
+            for (let i = 0; i < response.results.length; i++) {
+              const r = response.results[i];
+              results.push({
+                name: r.formatted_address ? r.formatted_address.split(',')[0].trim() : query,
+                formatted_address: r.formatted_address || '',
+                lat: r.geometry && r.geometry.location ? r.geometry.location.lat : null,
+                lng: r.geometry && r.geometry.location ? r.geometry.location.lng : null
+              });
+            }
+          }
+        } catch (geoErr) {
+          // fallback
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        results: results
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ==========================================
     // ACTION: LOG_ACTIVITY (บันทึกประวัติการนำเข้าและใช้งานแผนที่ลงไฟล์ Log บน Google Drive)
     // ==========================================
     if (data.action === "log_activity" || data.action === "log_map_action") {
@@ -1116,6 +1147,37 @@ function doGet(e) {
         return ContentService.createTextOutput(JSON.stringify({
           status: "success",
           data: rows
+        })).setMimeType(ContentService.MimeType.JSON);
+      } catch (err) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: err.toString()
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    if (e.parameter.action === "search_place" || e.parameter.action === "geocode") {
+      try {
+        const query = String(e.parameter.q || e.parameter.query || '').trim();
+        const results = [];
+        if (query) {
+          const geocoder = Maps.newGeocoder().setLanguage('th');
+          const response = geocoder.geocode(query);
+          if (response && response.status === 'OK' && response.results) {
+            for (let i = 0; i < response.results.length; i++) {
+              const r = response.results[i];
+              results.push({
+                name: r.formatted_address ? r.formatted_address.split(',')[0].trim() : query,
+                formatted_address: r.formatted_address || '',
+                lat: r.geometry && r.geometry.location ? r.geometry.location.lat : null,
+                lng: r.geometry && r.geometry.location ? r.geometry.location.lng : null
+              });
+            }
+          }
+        }
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "success",
+          results: results
         })).setMimeType(ContentService.MimeType.JSON);
       } catch (err) {
         return ContentService.createTextOutput(JSON.stringify({

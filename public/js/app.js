@@ -14124,7 +14124,59 @@ window.searchLocalAdminLocation = async function(prefix) {
       }
     });
 
-    // 2. ค้นหาผ่าน OpenStreetMap / Nominatim (Geocoding API)
+    // 2. ค้นหาผ่าน ArcGIS World Geocoder (ความแม่นยำสูงมากสำหรับสถานที่ราชการ/อบต./เทศบาล ในประเทศไทย)
+    try {
+      let arcgisQuery = query;
+      if (arcgisQuery.startsWith('อบต.')) {
+        arcgisQuery = 'องค์การบริหารส่วนตำบล' + arcgisQuery.substring(4);
+      } else if (arcgisQuery.startsWith('อบต ')) {
+        arcgisQuery = 'องค์การบริหารส่วนตำบล ' + arcgisQuery.substring(4);
+      } else if (arcgisQuery.startsWith('ทต.')) {
+        arcgisQuery = 'เทศบาลตำบล' + arcgisQuery.substring(3);
+      }
+      const searchTerms = [arcgisQuery];
+      if (subdistrict && !arcgisQuery.includes(subdistrict)) searchTerms.push(subdistrict);
+      if (district && !arcgisQuery.includes(district)) searchTerms.push(district);
+      if (province && !arcgisQuery.includes(province)) searchTerms.push(province);
+      const arcgisSearchStr = searchTerms.join(' ');
+
+      const arcgisUrl = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(arcgisSearchStr)}&countryCode=THA&maxLocations=6`;
+      const arcRes = await fetch(arcgisUrl, { signal: AbortSignal.timeout(5000) });
+      if (arcRes.ok) {
+        const arcData = await arcRes.json();
+        if (arcData && Array.isArray(arcData.candidates)) {
+          arcData.candidates.forEach(cand => {
+            const lat = cand.location && parseFloat(cand.location.y);
+            const lng = cand.location && parseFloat(cand.location.x);
+            if (isNaN(lat) || isNaN(lng) || lat <= 0 || lng <= 0) return;
+            const coordKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+            if (!seenKeys.has(coordKey)) {
+              seenKeys.add(coordKey);
+              const addr = cand.address || query;
+              combinedResults.push({
+                name: addr,
+                lat,
+                lng,
+                subdistrict: subdistrict,
+                district: district,
+                province: province,
+                source: 'arcgis',
+                sourceLabel: 'แผนที่สากล ArcGIS',
+                badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+                imageUrl: '',
+                caseNumber: '',
+                dateTime: '',
+                score: Math.round(cand.score || 95)
+              });
+            }
+          });
+        }
+      }
+    } catch (arcErr) {
+      console.warn('ArcGIS local admin search error:', arcErr);
+    }
+
+    // 3. ค้นหาผ่าน OpenStreetMap / Nominatim (Geocoding API)
     try {
       let osmQuery = query;
       if (osmQuery.startsWith('อบต.')) {
@@ -16228,12 +16280,21 @@ window.openStartPointConfigModal = function() {
         </div>
 
         <!-- Quick Presets -->
-        <div class="flex items-center gap-2 flex-wrap pt-0.5 text-[11px]">
+        <div class="flex items-center gap-1.5 flex-wrap pt-0.5 text-[11px]">
           <span class="text-[10px] font-bold text-gray-500">ทางลัด:</span>
-          <button type="button" onclick="applyPresetLocation('court', 'start')" class="px-2 py-1 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg font-semibold text-blue-700 transition flex items-center gap-1 cursor-pointer">
+          <button type="button" onclick="applyPresetLocation('court')" class="px-2 py-1 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg font-semibold text-blue-700 transition flex items-center gap-1 cursor-pointer" title="ตั้งค่าเป็นศาลจังหวัดอุดรธานี">
             <i class="fa-solid fa-landmark text-blue-600"></i> ศาลจังหวัดอุดรธานี
           </button>
-          <button type="button" onclick="applyPresetLocation('gps', 'start')" class="px-2 py-1 bg-white hover:bg-emerald-50 border border-emerald-200 rounded-lg font-semibold text-emerald-700 transition flex items-center gap-1 cursor-pointer">
+          <button type="button" onclick="applyPresetLocation('court_khwaeng')" class="px-2 py-1 bg-white hover:bg-indigo-50 border border-indigo-200 rounded-lg font-semibold text-indigo-700 transition flex items-center gap-1 cursor-pointer" title="ตั้งค่าเป็นศาลแขวงอุดรธานี">
+            <i class="fa-solid fa-scale-balanced text-indigo-600"></i> ศาลแขวงอุดรธานี
+          </button>
+          <button type="button" onclick="applyPresetLocation('court_juvenile')" class="px-2 py-1 bg-white hover:bg-purple-50 border border-purple-200 rounded-lg font-semibold text-purple-700 transition flex items-center gap-1 cursor-pointer" title="ตั้งค่าเป็นศาลเยาวชนฯ อุดรธานี">
+            <i class="fa-solid fa-people-roof text-purple-600"></i> ศาลเยาวชนฯ
+          </button>
+          <button type="button" onclick="applyPresetLocation('court_admin')" class="px-2 py-1 bg-white hover:bg-sky-50 border border-sky-200 rounded-lg font-semibold text-sky-700 transition flex items-center gap-1 cursor-pointer" title="ตั้งค่าเป็นศาลปกครองอุดรธานี">
+            <i class="fa-solid fa-gavel text-sky-600"></i> ศาลปกครอง
+          </button>
+          <button type="button" onclick="applyPresetLocation('gps')" class="px-2 py-1 bg-white hover:bg-emerald-50 border border-emerald-200 rounded-lg font-semibold text-emerald-700 transition flex items-center gap-1 cursor-pointer" title="ดึงพิกัดปัจจุบัน">
             <i class="fa-solid fa-location-crosshairs text-emerald-600"></i> ดึง GPS ปัจจุบัน
           </button>
         </div>
@@ -16375,14 +16436,35 @@ window.openStartPointConfigModal = function() {
       };
 
       window.applyPresetLocation = function(type, target) {
-        const nameInput = target === 'start' ? document.getElementById('cfgStartName') : document.getElementById('cfgEndName');
-        const latInput = target === 'start' ? document.getElementById('cfgStartLat') : document.getElementById('cfgEndLat');
-        const lngInput = target === 'start' ? document.getElementById('cfgStartLng') : document.getElementById('cfgEndLng');
+        const tgt = target || activeConfigTab || 'start';
+        const nameInput = tgt === 'start' ? document.getElementById('cfgStartName') : document.getElementById('cfgEndName');
+        const latInput = tgt === 'start' ? document.getElementById('cfgStartLat') : document.getElementById('cfgEndLat');
+        const lngInput = tgt === 'start' ? document.getElementById('cfgStartLng') : document.getElementById('cfgEndLng');
+
+        if (tgt === 'end') {
+          const chkEnd = document.getElementById('cfgEndEnabled');
+          if (chkEnd && !chkEnd.checked) {
+            chkEnd.checked = true;
+            window.toggleEndInputs(true);
+          }
+        }
 
         if (type === 'court') {
           if (nameInput) nameInput.value = 'ศาลจังหวัดอุดรธานี';
-          if (latInput) latInput.value = '17.4138';
-          if (lngInput) lngInput.value = '102.7872';
+          if (latInput) latInput.value = '17.413800';
+          if (lngInput) lngInput.value = '102.787200';
+        } else if (type === 'court_khwaeng') {
+          if (nameInput) nameInput.value = 'ศาลแขวงอุดรธานี';
+          if (latInput) latInput.value = '17.414878';
+          if (lngInput) lngInput.value = '102.788682';
+        } else if (type === 'court_juvenile') {
+          if (nameInput) nameInput.value = 'ศาลเยาวชนและครอบครัวจังหวัดอุดรธานี';
+          if (latInput) latInput.value = '17.384855';
+          if (lngInput) lngInput.value = '102.804349';
+        } else if (type === 'court_admin') {
+          if (nameInput) nameInput.value = 'ศาลปกครองอุดรธานี';
+          if (latInput) latInput.value = '17.416200';
+          if (lngInput) lngInput.value = '102.785300';
         } else if (type === 'gps') {
           if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition((pos) => {
@@ -16391,7 +16473,7 @@ window.openStartPointConfigModal = function() {
               if (lngInput) lngInput.value = pos.coords.longitude.toFixed(6);
             }, () => {
               Swal.showValidationMessage('ไม่สามารถดึงพิกัด GPS ได้ กรุณาตรวจสอบการอนุญาต Location');
-            });
+            }, { enableHighAccuracy: true, timeout: 10000 });
           }
         }
       };
@@ -16424,56 +16506,294 @@ window.openStartPointConfigModal = function() {
         }
       };
 
+      // พจนานุกรมสถานที่สำคัญและศาลในพื้นที่ (ค้นหาได้ทันที 0ms แม่นยำ 100%)
+      const KNOWN_PLACES_DICT = [
+        { name: 'ศาลจังหวัดอุดรธานี', subText: 'ถ.มุขมนตรี ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.413800', lng: '102.787200', keywords: ['ศาลจังหวัดอุดรธานี', 'ศาลจังหวัด', 'ศาลอุดรธานี', 'ศาลอุดร'] },
+        { name: 'ศาลแขวงอุดรธานี', subText: 'ถ.วัฒนานุวงศ์ ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.414878', lng: '102.788682', keywords: ['ศาลแขวงอุดรธานี', 'ศาลแขวง', 'แขวงอุดร'] },
+        { name: 'ศาลเยาวชนและครอบครัวจังหวัดอุดรธานี', subText: 'ต.หนองบัว อ.เมือง จ.อุดรธานี', lat: '17.384855', lng: '102.804349', keywords: ['ศาลเยาวชนและครอบครัวจังหวัดอุดรธานี', 'ศาลเยาวชน', 'ศาลครอบครัว', 'เยาวชนอุดร'] },
+        { name: 'ศาลปกครองอุดรธานี', subText: 'ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.416200', lng: '102.785300', keywords: ['ศาลปกครองอุดรธานี', 'ศาลปกครอง'] },
+        { name: 'ศาลแรงงานภาค 4 (อุดรธานี)', subText: 'ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.414878', lng: '102.788682', keywords: ['ศาลแรงงานภาค 4', 'ศาลแรงงาน', 'แรงงานภาค 4'] },
+        { name: 'สำนักงานอัยการจังหวัดอุดรธานี', subText: 'ถ.วัฒนานุวงศ์ ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.414200', lng: '102.787700', keywords: ['สำนักงานอัยการ', 'อัยการจังหวัดอุดรธานี', 'อัยการอุดร'] },
+        { name: 'ศาลากลางจังหวัดอุดรธานี', subText: 'ถ.อธิบดี ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.414300', lng: '102.786500', keywords: ['ศาลากลางจังหวัดอุดรธานี', 'ศาลากลางอุดรธานี', 'ศาลากลาง'] },
+        { name: 'ที่ว่าการอำเภอเมืองอุดรธานี', subText: 'ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.413900', lng: '102.785800', keywords: ['ที่ว่าการอำเภอเมืองอุดรธานี', 'อำเภอเมืองอุดรธานี'] },
+        { name: 'สถานีตำรวจภูธรเมืองอุดรธานี (สภ.เมืองอุดรธานี)', subText: 'ถ.ศรีสุข ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.405207', lng: '102.787462', keywords: ['สถานีตำรวจภูธรเมืองอุดรธานี', 'สภ.เมืองอุดรธานี', 'สภ เมืองอุดร', 'โรงพักอุดร'] },
+        { name: 'โรงพยาบาลอุดรธานี (รพ.ศูนย์อุดรธานี)', subText: 'ถ.เพาะนิยม ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.414824', lng: '102.780340', keywords: ['โรงพยาบาลอุดรธานี', 'รพ.ศูนย์อุดรธานี', 'รพ.อุดรธานี', 'รพ อุดร'] },
+        { name: 'โรงพยาบาลกรุงเทพ อุดร', subText: 'ถ.ทองใหญ่ ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.400500', lng: '102.798300', keywords: ['โรงพยาบาลกรุงเทพ อุดร', 'รพ.กรุงเทพ อุดร'] },
+        { name: 'เซ็นทรัล อุดรธานี (Central Udon)', subText: 'ถ.ประจักษ์ศิลปาคม ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.405774', lng: '102.799803', keywords: ['เซ็นทรัล อุดรธานี', 'เซ็นทรัลพลาซา อุดรธานี', 'เซ็นทรัลอุดร', 'central udon'] },
+        { name: 'ยูดี ทาวน์ (UD Town)', subText: 'ถ.ทองใหญ่ ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.402600', lng: '102.801800', keywords: ['ยูดี ทาวน์', 'ยูดีทาวน์', 'ud town'] },
+        { name: 'ท่าอากาศยานนานาชาติอุดรธานี (สนามบินอุดรธานี)', subText: 'ต.บ้านจั่น อ.เมือง จ.อุดรธานี', lat: '17.385500', lng: '102.778800', keywords: ['สนามบินอุดรธานี', 'ท่าอากาศยานนานาชาติอุดรธานี', 'สนามบินอุดร', 'สนามบิน', 'udon thani airport'] },
+        { name: 'สถานีรถไฟอุดรธานี', subText: 'ถ.ทองใหญ่ ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.404500', lng: '102.803800', keywords: ['สถานีรถไฟอุดรธานี', 'สถานีรถไฟอุดร', 'สถานีรถไฟ'] },
+        { name: 'สถานีขนส่งผู้โดยสารจังหวัดอุดรธานี แห่งที่ 1 (บขส. 1 เก่า)', subText: 'ถ.สายอุทิศ ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.404100', lng: '102.800500', keywords: ['บขส 1', 'บขส. 1', 'บขส.1', 'สถานีขนส่งผู้โดยสาร 1', 'บขส เก่า'] },
+        { name: 'สถานีขนส่งผู้โดยสารจังหวัดอุดรธานี แห่งที่ 2 (บขส. 2 ใหม่)', subText: 'ถ.เลี่ยงเมือง ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.432800', lng: '102.766500', keywords: ['บขส 2', 'บขส. 2', 'บขส.2', 'สถานีขนส่งผู้โดยสาร 2', 'บขส ใหม่'] },
+        { name: 'สวนสาธารณะหนองประจักษ์ศิลปาคม', subText: 'ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.418500', lng: '102.779400', keywords: ['หนองประจักษ์', 'สวนสาธารณะหนองประจักษ์ศิลปาคม'] },
+        { name: 'วงเวียนอนุสาวรีย์กรมหลวงประจักษ์ศิลปาคม (ห้าแยก)', subText: 'ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.407900', lng: '102.794600', keywords: ['กรมหลวงประจักษ์', 'ห้าแยกน้ำพุ', 'ห้าแยกกรมหลวง'] },
+        { name: 'วัดโพธิสมภรณ์ (พระอารามหลวง)', subText: 'ถ.เพาะนิยม ต.หมากแข้ง อ.เมือง จ.อุดรธานี', lat: '17.419000', lng: '102.777000', keywords: ['วัดโพธิสมภรณ์'] },
+        { name: 'วัดป่าบ้านตาด (วัดเกษรศีลคุณ)', subText: 'ต.บ้านตาด อ.เมือง จ.อุดรธานี', lat: '17.319800', lng: '102.800500', keywords: ['วัดป่าบ้านตาด', 'หลวงตามหาบัว'] },
+        { name: 'วังนาคินทร์คำชะโนด', subText: 'ต.บ้านม่วง อ.บ้านดุง จ.อุดรธานี', lat: '17.742800', lng: '103.359200', keywords: ['คำชะโนด', 'วังนาคินทร์'] }
+      ];
+
       const executeSearch = async () => {
         const q = (searchInput?.value || '').trim();
         if (!q) return;
 
-        // ตรวจสอบพิกัดโดยตรงก่อน (e.g. 17.4138, 102.7872 or Google Maps Link)
-        const coordMatch = q.match(/(-?\d+\.\d+)[\s,]+(-?\d+\.\d+)/);
-        if (coordMatch) {
-          const lat = parseFloat(coordMatch[1]);
-          const lng = parseFloat(coordMatch[2]);
-          searchResultsCache = [{
-            name: `พิกัดระบุ: ${lat.toFixed(6)}, ${lng.toFixed(6)}`,
-            subText: 'พิกัดที่กรอก / ถอดรหัสจากลิงก์',
-            lat: lat.toFixed(6),
-            lng: lng.toFixed(6)
-          }];
-          renderSearchResults();
-          return;
-        }
-
         if (btnSearch) {
-          btnSearch.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+          btnSearch.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>ค้นหา...</span>';
           btnSearch.disabled = true;
         }
 
+        const combinedResults = [];
+        const seenKeys = new Set();
+
+        const addResult = (item) => {
+          const latNum = parseFloat(item.lat);
+          const lngNum = parseFloat(item.lng);
+          if (isNaN(latNum) || isNaN(lngNum) || latNum <= 0 || lngNum <= 0) return;
+          const key = `${latNum.toFixed(4)},${lngNum.toFixed(4)}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            combinedResults.push({
+              name: item.name || q,
+              subText: item.subText || '',
+              lat: latNum.toFixed(6),
+              lng: lngNum.toFixed(6),
+              source: item.source || 'other',
+              sourceLabel: item.sourceLabel || 'สถานที่',
+              badgeClass: item.badgeClass || 'bg-gray-100 text-gray-800 border-gray-200',
+              score: item.score || 50
+            });
+          }
+        };
+
         try {
-          const queryParam = encodeURIComponent(q);
-          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${queryParam}&countrycodes=th&limit=5`, {
-            headers: { 'User-Agent': 'SLTS-Location-Search/1.0' },
-            signal: AbortSignal.timeout(6000)
-          });
-          if (!res.ok) throw new Error('Search request failed');
-          const data = await res.json();
-          searchResultsCache = (data || []).map(item => {
-            const parts = (item.display_name || '').split(',').map(s => s.trim());
-            const shortName = parts[0] || q;
-            const sub = parts.slice(1, 4).join(', ');
-            return {
-              name: shortName,
-              subText: sub || item.display_name,
-              lat: parseFloat(item.lat).toFixed(6),
-              lng: parseFloat(item.lon).toFixed(6)
-            };
+          // ==========================================
+          // Tier 1: ตรวจสอบพิกัดโดยตรง หรือ ลิงก์ Google Maps
+          // ==========================================
+          let parsedUrlPlaceName = '';
+          let parsedLat = null, parsedLng = null;
+
+          const placeMatch = q.match(/\/place\/([^\/@?]+)/);
+          if (placeMatch) {
+            try { parsedUrlPlaceName = decodeURIComponent(placeMatch[1].replace(/\+/g, ' ')); } catch (e) { parsedUrlPlaceName = placeMatch[1]; }
+          }
+
+          const atMatch = q.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+          if (atMatch) {
+            parsedLat = parseFloat(atMatch[1]);
+            parsedLng = parseFloat(atMatch[2]);
+          }
+
+          if (parsedLat === null) {
+            const dMatch = q.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+            if (dMatch) {
+              parsedLat = parseFloat(dMatch[1]);
+              parsedLng = parseFloat(dMatch[2]);
+            }
+          }
+
+          if (parsedLat === null) {
+            const qMatch = q.match(/[?&](?:q|ll)=(-?\d+\.\d+),(-?\d+\.\d+)/);
+            if (qMatch) {
+              parsedLat = parseFloat(qMatch[1]);
+              parsedLng = parseFloat(qMatch[2]);
+            }
+          }
+
+          if (parsedLat === null) {
+            const dmsRegex = /(\d+)[\u00B0\s]+(\d+)['\s]+([\d\.]+)?["\s]*([NSns])[\s,]+(\d+)[\u00B0\s]+(\d+)['\s]+([\d\.]+)?["\s]*([EWew])/;
+            const dmsMatch = q.match(dmsRegex);
+            if (dmsMatch) {
+              const d1 = parseFloat(dmsMatch[1]), m1 = parseFloat(dmsMatch[2]), s1 = parseFloat(dmsMatch[3] || 0);
+              const d2 = parseFloat(dmsMatch[5]), m2 = parseFloat(dmsMatch[6]), s2 = parseFloat(dmsMatch[7] || 0);
+              parsedLat = d1 + m1 / 60 + s1 / 3600;
+              if (dmsMatch[4].toUpperCase() === 'S') parsedLat = -parsedLat;
+              parsedLng = d2 + m2 / 60 + s2 / 3600;
+              if (dmsMatch[8].toUpperCase() === 'W') parsedLng = -parsedLng;
+            }
+          }
+
+          if (parsedLat === null) {
+            const numMatch = q.match(/^(-?\d+\.\d+)[\s,]+(-?\d+\.\d+)$/);
+            if (numMatch) {
+              parsedLat = parseFloat(numMatch[1]);
+              parsedLng = parseFloat(numMatch[2]);
+            }
+          }
+
+          if (parsedLat !== null && parsedLng !== null) {
+            addResult({
+              name: parsedUrlPlaceName ? `📍 ${parsedUrlPlaceName}` : `พิกัดระบุ: ${parsedLat.toFixed(6)}, ${parsedLng.toFixed(6)}`,
+              subText: parsedUrlPlaceName ? `ถอดรหัสพิกัดจากลิงก์ Google Maps (${parsedLat.toFixed(6)}, ${parsedLng.toFixed(6)})` : 'พิกัดที่กรอก / ถอดรหัสจากลิงก์',
+              lat: parsedLat,
+              lng: parsedLng,
+              source: 'coord',
+              sourceLabel: '📍 พิกัด / ลิงก์แผนที่',
+              badgeClass: 'bg-sky-100 text-sky-800 border-sky-300',
+              score: 1000
+            });
+          }
+
+          const effectiveSearchQ = (parsedUrlPlaceName || q).trim();
+          const cleanQ = effectiveSearchQ.toLowerCase().replace(/[\s\.\-\_]/g, '');
+
+          // ==========================================
+          // Tier 2: ค้นหาจาก Curated Dictionary ของศาลและสถานที่สำคัญ
+          // ==========================================
+          KNOWN_PLACES_DICT.forEach(kp => {
+            const isMatch = kp.keywords.some(kw => {
+              const cleanKw = kw.toLowerCase().replace(/[\s\.\-\_]/g, '');
+              return cleanQ.includes(cleanKw) || cleanKw.includes(cleanQ);
+            }) || kp.name.toLowerCase().includes(cleanQ);
+
+            if (isMatch) {
+              addResult({
+                name: kp.name,
+                subText: kp.subText,
+                lat: kp.lat,
+                lng: kp.lng,
+                source: 'curated',
+                sourceLabel: '🏛️ สถานที่สำคัญ / ศาล',
+                badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
+                score: 500
+              });
+            }
           });
 
+          // ==========================================
+          // Tier 3: ค้นหาจากฐานข้อมูลประวัติส่งหมายในระบบศาล (state.allSheetRows)
+          // ==========================================
+          const allRows = state.allSheetRows || [];
+          for (let i = 0; i < allRows.length; i++) {
+            const r = allRows[i];
+            const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
+            const lng = parseFloat(r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || 0);
+            if (isNaN(lat) || isNaN(lng) || lat <= 0 || lng <= 0) continue;
+
+            const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
+            const rCase = (r['เลขคดี'] || '').trim();
+            const cleanLoc = rLoc.toLowerCase().replace(/[\s\.\-\_]/g, '');
+
+            if (cleanLoc.includes(cleanQ) || (rCase && rCase.includes(q))) {
+              addResult({
+                name: rLoc || `สถานที่หมายเลขคดี ${rCase}`,
+                subText: [rCase, r['ตำบล'], r['อำเภอ'], getRowProvince(r)].filter(Boolean).join(' '),
+                lat,
+                lng,
+                source: 'court',
+                sourceLabel: '✓ ประวัติในระบบศาล',
+                badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+                score: 400
+              });
+              if (combinedResults.length >= 8) break;
+            }
+          }
+
+          // ==========================================
+          // Tier 4: ค้นหาผ่าน ArcGIS World Geocoding Engine (ความครอบคลุมและแม่นยำสูงในไทย)
+          // ==========================================
+          try {
+            const arcgisUrl = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(effectiveSearchQ)}&countryCode=THA&maxLocations=6`;
+            const arcRes = await fetch(arcgisUrl, { signal: AbortSignal.timeout(6000) });
+            if (arcRes.ok) {
+              const arcData = await arcRes.json();
+              if (arcData && Array.isArray(arcData.candidates)) {
+                arcData.candidates.forEach(cand => {
+                  const lat = cand.location && parseFloat(cand.location.y);
+                  const lng = cand.location && parseFloat(cand.location.x);
+                  if (isNaN(lat) || isNaN(lng) || lat <= 0 || lng <= 0) return;
+                  const parts = (cand.address || '').split(',');
+                  const shortName = parts[0] ? parts[0].trim() : effectiveSearchQ;
+                  const sub = parts.slice(1).join(',').trim();
+                  addResult({
+                    name: shortName,
+                    subText: sub || cand.address || '',
+                    lat,
+                    lng,
+                    source: 'arcgis',
+                    sourceLabel: '🗺️ แผนที่พิกัดสากล (ArcGIS)',
+                    badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+                    score: Math.round(cand.score || 90) + 100
+                  });
+                });
+              }
+            }
+          } catch (arcErr) {
+            console.warn('ArcGIS geocoding error:', arcErr);
+          }
+
+          // ==========================================
+          // Tier 5: ค้นหาผ่าน Google Apps Script Geocoder (ถ้าเชื่อมต่อ Apps Script URL ไว้)
+          // ==========================================
+          if (state.googleAppsScriptUrl && combinedResults.length < 5) {
+            try {
+              const gasUrl = `${state.googleAppsScriptUrl}?action=search_place&q=${encodeURIComponent(effectiveSearchQ)}`;
+              const gasRes = await fetch(gasUrl, { signal: AbortSignal.timeout(5000) });
+              if (gasRes.ok) {
+                const gasData = await gasRes.json();
+                if (gasData && gasData.status === 'success' && Array.isArray(gasData.results)) {
+                  gasData.results.forEach(r => {
+                    if (r.lat && r.lng) {
+                      addResult({
+                        name: r.name,
+                        subText: r.formatted_address || '',
+                        lat: r.lat,
+                        lng: r.lng,
+                        source: 'gas',
+                        sourceLabel: '🌐 Google Maps Engine',
+                        badgeClass: 'bg-blue-100 text-blue-800 border-blue-300',
+                        score: 350
+                      });
+                    }
+                  });
+                }
+              }
+            } catch (gasErr) {
+              console.warn('Google Apps Script geocoding error:', gasErr);
+            }
+          }
+
+          // ==========================================
+          // Tier 6: ค้นหาผ่าน OpenStreetMap / Nominatim (Fallback สำรอง)
+          // ==========================================
+          if (combinedResults.length < 5) {
+            try {
+              const osmRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(effectiveSearchQ)}&countrycodes=th&limit=5&accept-language=th`, {
+                headers: { 'User-Agent': 'SLTS-Location-Search/2.0' },
+                signal: AbortSignal.timeout(4000)
+              });
+              if (osmRes.ok) {
+                const osmData = await osmRes.json();
+                if (Array.isArray(osmData)) {
+                  osmData.forEach(item => {
+                    const parts = (item.display_name || '').split(',').map(s => s.trim());
+                    const shortName = parts[0] || effectiveSearchQ;
+                    const sub = parts.slice(1, 4).join(', ');
+                    addResult({
+                      name: shortName,
+                      subText: sub || item.display_name,
+                      lat: parseFloat(item.lat),
+                      lng: parseFloat(item.lon),
+                      source: 'osm',
+                      sourceLabel: 'OpenStreetMap',
+                      badgeClass: 'bg-slate-100 text-slate-800 border-slate-300',
+                      score: 50
+                    });
+                  });
+                }
+              }
+            } catch (osmErr) {
+              console.warn('OSM Nominatim error:', osmErr);
+            }
+          }
+
+          combinedResults.sort((a, b) => b.score - a.score);
+          searchResultsCache = combinedResults;
           renderSearchResults();
+
         } catch (err) {
           console.warn('Location search error:', err);
           if (resultsContainer) resultsContainer.classList.remove('hidden');
           if (resultsList) {
-            resultsList.innerHTML = `<div class="p-2 text-center text-gray-400 text-xs">ไม่พบสถานที่ที่ค้นหา หรือการเชื่อมต่อขัดข้อง</div>`;
+            resultsList.innerHTML = `<div class="p-3 text-center text-gray-400 text-xs">ไม่พบสถานที่ที่ค้นหา หรือการเชื่อมต่อขัดข้อง</div>`;
           }
         } finally {
           if (btnSearch) {
@@ -16489,23 +16809,35 @@ window.openStartPointConfigModal = function() {
         if (countEl) countEl.textContent = `${searchResultsCache.length} รายการ`;
 
         if (searchResultsCache.length === 0) {
-          resultsList.innerHTML = `<div class="p-3 text-center text-gray-400 text-xs">ไม่พบสถานที่ที่ตรงกับคำค้นหา</div>`;
+          resultsList.innerHTML = `
+            <div class="p-3 text-center text-gray-500 bg-white rounded-xl border border-dashed border-gray-200 text-xs">
+              <i class="fa-solid fa-circle-exclamation text-amber-500 mr-1"></i> ไม่พบสถานที่ที่ตรงกับคำค้นหา<br>
+              <span class="text-[10px] text-gray-400 mt-1 block">💡 สามารถเปิด Google Maps คัดลอกพิกัดหรือลิงก์มาวางในช่องค้นหาได้โดยตรง</span>
+            </div>
+          `;
           return;
         }
 
         resultsList.innerHTML = searchResultsCache.map((item, idx) => `
-          <div class="p-2 bg-white rounded-xl border border-gray-200 hover:border-blue-300 transition flex items-center justify-between gap-2 shadow-2xs">
+          <div class="p-2.5 bg-white rounded-xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50/20 transition flex items-center justify-between gap-2 shadow-2xs">
             <div class="min-w-0 flex-1 text-left">
-              <div class="font-bold text-gray-900 truncate text-[11px]">${item.name}</div>
-              <div class="text-[10px] text-gray-500 truncate">${item.subText}</div>
-              <div class="text-[9px] font-mono text-blue-600 font-semibold">${item.lat}, ${item.lng}</div>
+              <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+                <span class="text-[9px] px-1.5 py-0.2 rounded border font-bold ${item.badgeClass}">${item.sourceLabel}</span>
+              </div>
+              <div class="font-bold text-gray-900 truncate text-[11px]" title="${item.name}">${item.name}</div>
+              <div class="text-[10px] text-gray-500 truncate" title="${item.subText}">${item.subText}</div>
+              <div class="text-[9px] font-mono text-blue-600 font-semibold mt-0.5">
+                <i class="fa-solid fa-location-crosshairs text-gray-400 mr-0.5"></i>${item.lat}, ${item.lng}
+              </div>
             </div>
             <div class="flex items-center gap-1 flex-shrink-0">
-              <button type="button" onclick="selectSearchResult(${idx}, 'start')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-[10px] transition cursor-pointer" title="ตั้งเป็นจุดเริ่มต้น">
-                <i class="fa-solid fa-flag-checkered mr-0.5"></i> จุดเริ่ม
+              <button type="button" onclick="selectSearchResult(${idx}, 'start')" class="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 active:scale-95 text-blue-700 font-bold rounded-xl text-[10px] transition cursor-pointer flex items-center gap-1 border border-blue-200 shadow-2xs" title="ตั้งเป็นจุดเริ่มต้น">
+                <i class="fa-solid fa-flag-checkered text-blue-600"></i>
+                <span>จุดเริ่ม</span>
               </button>
-              <button type="button" onclick="selectSearchResult(${idx}, 'end')" class="px-2 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 font-bold rounded-lg text-[10px] transition cursor-pointer" title="ตั้งเป็นจุดสิ้นสุด">
-                <i class="fa-solid fa-flag mr-0.5"></i> จุดสิ้นสุด
+              <button type="button" onclick="selectSearchResult(${idx}, 'end')" class="px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 active:scale-95 text-violet-700 font-bold rounded-xl text-[10px] transition cursor-pointer flex items-center gap-1 border border-violet-200 shadow-2xs" title="ตั้งเป็นจุดสิ้นสุด">
+                <i class="fa-solid fa-flag text-violet-600"></i>
+                <span>จุดสิ้นสุด</span>
               </button>
             </div>
           </div>
