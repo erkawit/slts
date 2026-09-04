@@ -1237,9 +1237,50 @@ table.dataTable tbody td {
     max-width: 680px !important;
     width: 90% !important;
     overflow-y: auto !important;
-    padding: 1.5rem !important;
-  }
 }
+
+/* ========================================================= */
+/* Styling for Image Preview Popup & High-Visibility Close Button */
+/* ========================================================= */
+.swal2-popup.slts-image-preview-popup {
+  position: relative !important;
+  max-height: 90vh !important;
+  max-height: 90dvh !important;
+  max-width: 92vw !important;
+  width: auto !important;
+  overflow: hidden !important;
+}
+
+.swal2-popup.slts-image-preview-popup .swal2-close {
+  color: #ffffff !important;
+  background: rgba(0, 0, 0, 0.45) !important;
+  border-radius: 50% !important;
+  width: 36px !important;
+  height: 36px !important;
+  font-size: 1.5rem !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  top: 10px !important;
+  right: 10px !important;
+  transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+  z-index: 20 !important;
+}
+
+.swal2-popup.slts-image-preview-popup .swal2-close:hover {
+  color: #ffffff !important;
+  background: rgba(239, 68, 68, 0.85) !important;
+  transform: scale(1.1);
+}
+
+.slts-preview-image-constrained {
+  max-height: 80vh !important;
+  max-height: 80dvh !important;
+  max-width: 90vw !important;
+  object-fit: contain !important;
+  border-radius: 0.75rem;
+}
+
 
 /* ========================================================= */
 /* Mobile Case Search Modal Compact Top Styling (< 768px) */

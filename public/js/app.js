@@ -5827,16 +5827,16 @@ window.copyCoordinates = function(lat, lng) {
  */
 window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, lat, lng) {
   let directImgUrl = imgUrl;
-  const match = imgUrl.match(/id=([a-zA-Z0-9_-]+)/) || imgUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  const match = (imgUrl || '').match(/id=([a-zA-Z0-9_-]+)/) || (imgUrl || '').match(/\/d\/([a-zA-Z0-9_-]+)/);
   if (match && match[1]) {
     directImgUrl = `https://lh3.googleusercontent.com/d/${match[1]}=w1200`;
   }
 
   const hasBackStack = window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0;
-  let backActionHandled = false;
+  let isNavigatingToFullScreen = false;
+
   const executeSafeBack = () => {
-    if (backActionHandled) return;
-    backActionHandled = true;
+    if (isNavigatingToFullScreen) return;
     if (hasBackStack) {
       window.handleMobileModalBackOrClose();
     } else {
@@ -5844,6 +5844,12 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     }
   };
   window._currentPhotoModalBack = executeSafeBack;
+
+  // ฟังก์ชันคลิกเปิดดูภาพขนาดเต็ม (ป้องกันไม่ให้ .then ของ modal เดิมไปสั่ง Swal.close ทับ)
+  window._openFullScreenFromPhotoModal = function() {
+    isNavigatingToFullScreen = true;
+    window.openFullScreenImage(directImgUrl, imgUrl, caseNumber, locationFull, timestamp, lat, lng);
+  };
 
   Swal.fire({
     title: `
@@ -5865,7 +5871,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
         <p><b>🏠 ที่ตั้งส่งหมาย:</b> ${locationFull}</p>
         <p><b>📍 พิกัด GPS:</b> ${lat}, ${lng}</p>
       </div>
-      <div class="relative bg-gray-900 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center min-h-[180px] max-h-[55vh] max-h-[55dvh] cursor-pointer group" onclick="openFullScreenImage('${directImgUrl}', '${imgUrl}', '${caseNumber.replace(/'/g, "\\'")}', '${locationFull.replace(/'/g, "\\'")}', '${timestamp}', '${lat}', '${lng}')" title="คลิกที่ภาพเพื่อเปิดดูแบบเต็มหน้าจอ">
+      <div class="relative bg-gray-900 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center min-h-[180px] max-h-[55vh] max-h-[55dvh] cursor-pointer group" onclick="window._openFullScreenFromPhotoModal && window._openFullScreenFromPhotoModal()" title="คลิกที่ภาพเพื่อเปิดดูแบบเต็มหน้าจอ">
         <img src="${directImgUrl}" alt="${caseNumber}" class="max-w-full max-h-[52vh] max-h-[52dvh] object-contain rounded-lg shadow-md transition group-hover:scale-[1.01]" onerror="this.onerror=null; this.src='${imgUrl}';">
         <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5">
           <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
@@ -5885,35 +5891,38 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     confirmButtonColor: '#2563eb',
     cancelButtonColor: '#6b7280'
   }).then((res) => {
+    // หากเป็นการเปิดไปยังหน้าดูภาพขนาดเต็ม ปล่อยให้ openFullScreenImage แสดงผลอย่างต่อเนื่อง ไม่ปิดทับ
+    if (isNavigatingToFullScreen) {
+      return;
+    }
+
     if (res.isConfirmed) {
       window.open(imgUrl, '_blank');
-      // หากเปิดภาพใน Drive เสร็จแล้วบนจอมือถือ ให้ย้อนกลับคืนหน้าต่างค้นหาเดิมอัตโนมัติ
       if (hasBackStack) {
         setTimeout(() => {
-          executeSafeBack();
+          window.handleMobileModalBackOrClose();
         }, 300);
       }
     } else {
-      executeSafeBack();
+      if (hasBackStack) {
+        window.handleMobileModalBackOrClose();
+      }
     }
   });
 };
 
 window.openFullScreenImage = function(imgSrc, originalUrl = '', caseNo = '', loc = '', time = '', lat = '', lng = '') {
-  let fsBackHandled = false;
-  const executeFsBack = () => {
-    if (fsBackHandled) return;
-    fsBackHandled = true;
-    if (window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0) {
+  let isClosed = false;
+  const handleFsClose = () => {
+    if (isClosed) return;
+    isClosed = true;
+    // เมื่อปิดภาพขนาดเต็ม หากมีข้อมูลเดิม ให้เปิด viewPhotoModal คืนกลับมา ทั้งบน Desktop และ Mobile
+    if (originalUrl && caseNo) {
+      window.viewPhotoModal(originalUrl, caseNo, loc, time, lat, lng);
+    } else if (window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0) {
       window.handleMobileModalBackOrClose();
-    } else {
-      Swal.close();
     }
   };
-
-  if (originalUrl && caseNo) {
-    window.pushMobileModalState(() => window.viewPhotoModal(originalUrl, caseNo, loc, time, lat, lng));
-  }
 
   Swal.fire({
     imageUrl: imgSrc,
@@ -5926,9 +5935,10 @@ window.openFullScreenImage = function(imgSrc, originalUrl = '', caseNo = '', loc
     customClass: {
       popup: 'border-0 rounded-2xl slts-image-preview-popup',
       image: 'slts-preview-image-constrained'
-    }
+    },
+    allowOutsideClick: true
   }).then(() => {
-    executeFsBack();
+    handleFsClose();
   });
 };
 
