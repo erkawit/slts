@@ -923,6 +923,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initFormEventListeners();
   initLocationService();
   initCameraEvents();
+  initCameraResumeLifecycle();
   initDesktopUploadEvents();
   initSettings();
   initResponsiveUI();
@@ -3518,16 +3519,15 @@ function getRowProvince(row) {
 
 /**
  * นำเงื่อนไขการค้นหาแบบเจาะจงไปกรองข้อมูลและแสดงผลใน DataTables พร้อมบันทึกค่าล่าสุด
+ * และดึงข้อมูลจาก Server มาอัพเดทให้เป็นปัจจุบันทันทีเพื่อป้องกันข้อมูลไม่อัพเดท
  */
-window.applyTargetedFilter = function(criteria) {
+window.applyTargetedFilter = async function(criteria) {
   state.currentFilterCriteria = criteria;
   try {
     localStorage.setItem('slts_latest_target_search', JSON.stringify(criteria));
   } catch (e) {
     console.warn('[TargetSearch] Cannot save latest search criteria:', e);
   }
-
-  const rows = state.allSheetRows || [];
 
   if (criteria.type === 'province' || criteria.type === 'all') {
     if (criteria.province) {
@@ -3539,7 +3539,18 @@ window.applyTargetedFilter = function(criteria) {
     }
   }
 
+  // แสดงผลเบื้องต้นด้วยข้อมูลในเครื่องทันทีก่อน
+  const rows = state.allSheetRows || [];
   renderDataTable(rows, criteria);
+
+  // ดึงข้อมูลสดจาก Server มาอัปเดตให้เป็นปัจจุบันทันทีตามข้อกำหนด 1
+  if (typeof loadGoogleSheetData === 'function') {
+    try {
+      await loadGoogleSheetData(true, true);
+    } catch (err) {
+      console.warn('[TargetSearch] Server data sync error:', err);
+    }
+  }
 };
 
 /**
@@ -3549,14 +3560,23 @@ window.clearTargetedFilter = function() {
   state.currentFilterCriteria = null;
   localStorage.removeItem('slts_latest_target_search');
   renderDataTable(state.allSheetRows || [], { type: 'all', province: state.selectedProvince || 'อุดรธานี' });
+  if (typeof loadGoogleSheetData === 'function') {
+    loadGoogleSheetData(true, true);
+  }
 };
 
 /**
  * เปิด Pop Up ค้นหาข้อมูลเจาะจงในหน้าตารางประวัติส่งหมาย (เฉพาะ Desktop > 768px)
  * จดจำและดึงค่าล่าสุดที่มีการเลือกเพื่อค้นหาไว้เสมอ
+ * ดึงข้อมูลสดจาก Server ทันทีเมื่อเปิดหน้าต่างตามข้อกำหนด 1
  */
 window.openTargetSearchModal = function() {
   if (window.innerWidth <= 768) return;
+
+  // ดึงข้อมูลสดจาก Server ในเบื้องหลังทันทีที่กดปุ่มหรือหน้าต่างเด้งขึ้นมา
+  if (typeof loadGoogleSheetData === 'function') {
+    loadGoogleSheetData(true, true);
+  }
 
   const savedSearch = (function() {
     try {
@@ -9878,6 +9898,96 @@ function initCameraEvents() {
 }
 
 /**
+ * ระบบจัดการวงจรชีวิตกล้องเมื่อสลับแอพ/พักหน้าจอ (Camera Pause/Resume Lifecycle)
+ * - เมื่อพักหน้าจอหรือสลับไปแอพอื่น (hidden) ขณะเปิดกล้องอยู่ ให้จดจำเวลา
+ * - เมื่อกลับเข้ามาใช้งาน (visible) ให้ตรวจสอบว่าระบบกล้องหลุด/ค้าง หรือพักนานเกินไปหรือไม่
+ * - หากจำเป็น ให้ฟื้นฟู Camera Stream, พิกัด GPS, เข็มทิศ และ HUD ในเบื้องหลังแบบ Smooth
+ * - ป้องกันการรีเฟรชซ้ำซ้อนตอนเริ่มต้นเปิดแอพครั้งแรก (Cold Start)
+ */
+let _cameraPausedTimestamp = 0;
+let _cameraWasActiveWhenHidden = false;
+
+function initCameraResumeLifecycle() {
+  document.addEventListener('visibilitychange', async () => {
+    const isCameraOpen = elements.cameraModal && !elements.cameraModal.classList.contains('hidden');
+
+    if (document.visibilityState === 'hidden') {
+      if (isCameraOpen) {
+        _cameraWasActiveWhenHidden = true;
+        _cameraPausedTimestamp = Date.now();
+      } else {
+        _cameraWasActiveWhenHidden = false;
+        _cameraPausedTimestamp = 0;
+      }
+    } else if (document.visibilityState === 'visible') {
+      // หากไม่ได้เปิดกล้องค้างไว้ หรือเป็นการเข้าแอพครั้งแรก ให้ข้าม ไม่ทำอะไรรบกวน
+      if (!_cameraWasActiveWhenHidden || _cameraPausedTimestamp === 0) {
+        return;
+      }
+
+      const elapsed = Date.now() - _cameraPausedTimestamp;
+      _cameraWasActiveWhenHidden = false;
+      _cameraPausedTimestamp = 0;
+
+      // ตรวจสอบว่าหน้าต่างกล้องยังเปิดอยู่หรือไม่
+      if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
+        const tracks = state.cameraStream ? state.cameraStream.getVideoTracks() : [];
+        const isStreamDead = tracks.length === 0 || tracks.some(t => t.readyState === 'ended' || t.muted);
+        const isVideoPaused = elements.videoPreview && elements.videoPreview.paused;
+
+        // หากพักไปเกิน 1.5 วินาที หรือสตรีมกล้องหลุด/หยุดเล่น ให้ฟื้นฟูเบื้องหลัง
+        if (elapsed > 1500 || isStreamDead || isVideoPaused) {
+          try {
+            if (isStreamDead) {
+              await startCameraStream();
+            } else if (isVideoPaused && elements.videoPreview) {
+              try {
+                await elements.videoPreview.play();
+              } catch (pErr) {
+                console.warn('Video preview resume failed, restarting stream:', pErr);
+                await startCameraStream();
+              }
+            }
+          } catch (camErr) {
+            console.warn('Resume camera stream error:', camErr);
+          }
+
+          // รีเฟรชพิกัด GPS ล่าสุดในเบื้องหลัง
+          if (typeof fetchCurrentLocation === 'function') {
+            try {
+              fetchCurrentLocation(true);
+            } catch (gpsErr) {
+              console.warn('Resume GPS error:', gpsErr);
+            }
+          }
+
+          // ฟื้นฟู HUD และ Live Map
+          startLiveCameraHUD();
+          updateCameraTopBarUI();
+          if (typeof updateLiveMapHUD === 'function') {
+            updateLiveMapHUD();
+          }
+        }
+      }
+    }
+  });
+
+  // รองรับ bfcache (Back/Forward Cache) บนเบราว์เซอร์ iOS Safari
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+      if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
+        if (typeof fetchCurrentLocation === 'function') {
+          fetchCurrentLocation(true);
+        }
+        startCameraStream().catch(e => console.warn('Bfcache camera restart error:', e));
+        startLiveCameraHUD();
+        updateCameraTopBarUI();
+      }
+    }
+  });
+}
+
+/**
  * สกัดหาพิกัด GPS (Latitude, Longitude) จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
  * 1. ตรวจสอบ EXIF GPS Metadata จากไฟล์ภาพต้นฉบับ (เร็ว 0.01 วินาที)
  * 2. หากไม่พบ EXIF ให้ใช้ OCR สแกนข้อความบนภาพ (เน้นโซนล่างและลายน้ำ)
@@ -12021,12 +12131,7 @@ function resetFormForNextCase() {
   const similarCard = document.getElementById('desktopSimilarRecordsCard');
   if (similarCard) similarCard.classList.add('hidden');
 
-  // บนจอมือถือ หากยังเปิดกล้องอยู่ ให้เด้งฟอร์มกรอกหมายถัดไปทันที โดยคงอำเภอและตำบลเดิมไว้เพื่อความสะดวกรวดเร็ว
-  if (window.innerWidth < 768 && elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
-    setTimeout(() => {
-      showMobileSummonsFormModal(false);
-    }, 400);
-  }
+  // ข้อ 2: ยกเลิกการแสดง Pop Up "ฟอร์มบันทึกการส่งหมาย" เมื่อมีการถ่ายภาพแล้ว (พร้อมถ่ายภาพหมายถัดไปทันที)
 }
 
 function initSettings() {

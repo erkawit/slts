@@ -148,24 +148,24 @@ class WatermarkEngine {
     // 4. คำนวณ Scale Factor เพื่อให้ Element ขยายสมส่วน
     const scale = isPortrait ? (width / 1000) : (height / 1000);
 
-    // 5. [มุมซ้ายบน (Top-Left)]: ภาพแผนที่พิกัดปัจจุบัน
-    const mapWidth = 220 * scale;
-    const mapHeight = 160 * scale;
-    const mapX = 28 * scale;
-    const mapY = 28 * scale;
-    if (window.mapSnapshotManager && data.lat && data.lng) {
-      await window.mapSnapshotManager.drawMapOverlay(ctx, mapX, mapY, mapWidth, mapHeight, data.lat, data.lng);
-    }
-
-    // 6. [มุมขวาบน (Top-Right)]: เข็มทิศ (Compass Overlay)
+    // 5. [มุมซ้ายบน (Top-Left)]: เข็มทิศ (Compass Overlay) ตามตัวอย่างภาพที่ 1 และข้อ 4
     const compassRadius = 55 * scale;
-    const compassX = width - (28 * scale) - compassRadius;
-    const compassY = 28 * scale + compassRadius;
+    const compassX = (28 * scale) + compassRadius;
+    const compassY = (28 * scale) + compassRadius;
     if (window.compassManager) {
       window.compassManager.drawCompass(ctx, compassX, compassY, compassRadius);
     }
 
-    // 7. [มุมซ้ายล่าง (Bottom-Left)]: กล่องข้อมูลสีดำสนิทพร้อมไอคอน ชิดซ้าย ตามแบบ HUD ก่อนถ่ายภาพ (Image 2)
+    // 6. [มุมซ้ายล่าง (Bottom-Left)]: ภาพแผนที่พิกัดปัจจุบัน (Map View Card) ตามตัวอย่างภาพที่ 1 และข้อ 4
+    const mapWidth = 220 * scale;
+    const mapHeight = 160 * scale;
+    const mapX = 28 * scale;
+    const mapY = height - mapHeight - (28 * scale);
+    if (window.mapSnapshotManager && data.lat && data.lng) {
+      await window.mapSnapshotManager.drawMapOverlay(ctx, mapX, mapY, mapWidth, mapHeight, data.lat, data.lng);
+    }
+
+    // 7. [มุมขวาล่าง (Bottom-Right)]: กล่องข้อมูลสีดำสนิทพร้อมไอคอน ชิดขวาล่าง ตามตัวอย่างภาพที่ 1 และข้อ 4
     await this.drawInfoBadge(ctx, width, height, scale, data);
 
     // แปลงผลลัพธ์เป็น Data URL และ Blob (คุณภาพ 0.88 คมชัดสูงและประมวลผลเร็ว)
@@ -177,7 +177,7 @@ class WatermarkEngine {
   }
 
   /**
-   * วาดกล่องข้อความมุมซ้ายล่าง (สีดำสนิท + ขอบขาวมน + ไอคอนและข้อความชิดซ้าย ตามแบบ HUD ใน Image 2)
+   * วาดกล่องข้อความมุมขวาล่าง (สีดำสนิท + ขอบขาวมน + ไอคอนและข้อความชิดซ้ายในกล่อง ตามแบบในภาพที่ 1 และข้อ 4)
    */
   static async drawInfoBadge(ctx, canvasWidth, canvasHeight, scale, data) {
     const padding = 18 * scale;
@@ -224,8 +224,8 @@ class WatermarkEngine {
 
     const boxWidth = maxTextWidth + (padding * 2.2);
     const boxHeight = (lines.length * lineHeight) + (padding * 1.4);
-    // วางที่มุมซ้ายล่าง (Bottom-Left) ตามสเปก Image 2
-    const boxX = 28 * scale;
+    // วางที่มุมขวาล่าง (Bottom-Right) ตามสเปกภาพที่ 1 และข้อ 4
+    const boxX = canvasWidth - boxWidth - (28 * scale);
     const boxY = canvasHeight - boxHeight - (28 * scale);
 
     // วาดพื้นหลังกล่องดำสนิท (Solid Black) ขอบมนสวยงาม
