@@ -150,10 +150,10 @@ body.gyro-landscape-90 #liveMapWrapper {
   transform-origin: center center !important;
 }
 
-/* ย้ายกล่องข้อมูลสดไปยังตำแหน่งกรอบสี่เหลี่ยมสีขาว (ยกขึ้นจากแถบดำปุ่มชัตเตอร์ 6.5rem ไม่ให้ถูกบดบัง) */
+/* ย้ายกล่องข้อมูลสดไปยังตำแหน่งปลายลูกศรชี้ (ขยับลงมาที่มุมขวาล่างให้พอดีสวยงาม) */
 body.gyro-landscape-90 #liveBadgeWrapper {
-  bottom: 6.5rem !important;
-  left: 1.25rem !important;
+  bottom: 4.5rem !important;
+  left: -0.5rem !important;
   right: auto !important;
   top: auto !important;
   transform: rotate(90deg) !important;
@@ -201,10 +201,10 @@ body.gyro-landscape-270 #liveMapWrapper {
   transform-origin: center center !important;
 }
 
-/* ย้ายกล่องข้อมูลสดให้อยู่ต่ำลงมาจากแถบบาร์บน 6.5rem เพื่อความสมมาตรและไม่ถูกบดบัง */
+/* ย้ายกล่องข้อมูลสดให้อยู่ต่ำลงมาและชิดขอบให้สมมาตร */
 body.gyro-landscape-270 #liveBadgeWrapper {
-  top: 6.5rem !important;
-  right: 1.5rem !important;
+  top: 4.5rem !important;
+  right: -0.5rem !important;
   bottom: auto !important;
   left: auto !important;
   transform: rotate(-90deg) !important;
@@ -229,6 +229,85 @@ body.gyro-landscape-270 #btnEditMobileForm,
 body.gyro-landscape-270 #btnCameraCaseSearch,
 body.gyro-landscape-270 #btnCameraRouteMap {
   opacity: 0.55 !important;
+}
+
+/* ================================================================
+   Landscape Gyro Warning Toast Pop Up (แสดงผลในมุมมองแนวนอน เมื่อแตะปุ่มที่ disabled)
+   ================================================================ */
+.slts-gyro-toast-container-90 {
+  position: fixed !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  z-index: 99999 !important;
+  background: transparent !important;
+  display: block !important;
+}
+
+.slts-gyro-toast-container-90 .slts-gyro-toast-popup-90 {
+  position: absolute !important;
+  top: 50% !important;
+  right: 1.5rem !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: translateY(-50%) rotate(90deg) !important;
+  transform-origin: center center !important;
+  background: rgba(15, 23, 42, 0.96) !important;
+  color: #ffffff !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6) !important;
+  padding: 0.65rem 1.15rem !important;
+  pointer-events: auto !important;
+  white-space: nowrap !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.slts-gyro-toast-container-270 {
+  position: fixed !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  z-index: 99999 !important;
+  background: transparent !important;
+  display: block !important;
+}
+
+.slts-gyro-toast-container-270 .slts-gyro-toast-popup-270 {
+  position: absolute !important;
+  top: 50% !important;
+  left: 1.5rem !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: translateY(-50%) rotate(-90deg) !important;
+  transform-origin: center center !important;
+  background: rgba(15, 23, 42, 0.96) !important;
+  color: #ffffff !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6) !important;
+  padding: 0.65rem 1.15rem !important;
+  pointer-events: auto !important;
+  white-space: nowrap !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.slts-gyro-toast-popup-90 .swal2-title,
+.slts-gyro-toast-popup-270 .swal2-title,
+.slts-gyro-toast-title {
+  color: #ffffff !important;
+  font-size: 0.82rem !important;
+  font-weight: 600 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.slts-gyro-toast-popup-90 .swal2-icon,
+.slts-gyro-toast-popup-270 .swal2-icon {
+  margin: 0 !important;
+  transform: scale(0.75) !important;
 }
 
 .camera-live-frame::before, .camera-live-frame::after {

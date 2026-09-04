@@ -2759,15 +2759,23 @@ window.applyGyroOrientation = applyGyroOrientation;
  * หากอยู่แนวนอนและผู้ใช้กดฟังก์ชันที่ต้องพิมพ์หรือใช้พื้นที่มาก ให้แจ้งเตือนให้ถือแนวตั้งเพื่อ UX ที่ดีที่สุด
  */
 function checkGyroLandscapeAndWarn(actionName = 'ใช้งานฟังก์ชันนี้') {
-  if (document.body.classList.contains('gyro-landscape-90') || document.body.classList.contains('gyro-landscape-270')) {
+  const isLandscape90 = document.body.classList.contains('gyro-landscape-90');
+  const isLandscape270 = document.body.classList.contains('gyro-landscape-270');
+
+  if (isLandscape90 || isLandscape270) {
     if (typeof Swal !== 'undefined') {
       Swal.fire({
         toast: true,
-        position: 'top',
+        position: 'center',
+        customClass: {
+          container: isLandscape90 ? 'slts-gyro-toast-container-90' : 'slts-gyro-toast-container-270',
+          popup: isLandscape90 ? 'slts-gyro-toast-popup-90' : 'slts-gyro-toast-popup-270',
+          title: 'slts-gyro-toast-title'
+        },
         icon: 'info',
         title: `กรุณาถือโทรศัพท์ในแนวตั้ง เพื่อ${actionName}`,
         showConfirmButton: false,
-        timer: 2500,
+        timer: 2000,
         timerProgressBar: true
       });
     }
