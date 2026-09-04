@@ -13157,6 +13157,299 @@ function buildFullLocationText(locationType, houseNo, moo, localAdminName, custo
 }
 
 /**
+ * บีบอัดไฟล์ภาพฝั่ง Client เป็น Data URL ขนาดกะทัดรัด (สำหรับรูปภาพประกอบการวางแผนเส้นทาง)
+ */
+function compressImageFileToDataUrl(file, maxDimension = 900, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = (err) => reject(err);
+      img.src = e.target.result;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * อัปโหลดรูปภาพประกอบการวางแผนเส้นทางไปยัง Server เบื้องหลัง เพื่อจัดเก็บบน Google Drive
+ * และได้รับ URL ถาวรสำหรับส่งต่อให้มือถือเปิดดูภาพได้
+ */
+async function uploadRouteReferenceImageToServer(stopItem) {
+  if (!stopItem || !stopItem.imageUrl || !stopItem.imageUrl.startsWith('data:image/')) return;
+  const targetUrl = state.appsScriptUrl || (typeof API_URL !== 'undefined' ? API_URL : '');
+  if (!targetUrl || !navigator.onLine) return;
+
+  try {
+    const payload = {
+      action: 'upload_route_reference_image',
+      stopId: stopItem.id,
+      caseNumber: stopItem.caseNumber || '',
+      locationText: stopItem.locationText || '',
+      fileName: `route_ref_${(stopItem.caseNumber || 'stop').replace(/[^\w]/g, '_')}_${Date.now()}.jpg`,
+      imageBase64: stopItem.imageUrl
+    };
+
+    const res = await fetch(targetUrl, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    const json = await res.json();
+    if (json && json.status === 'success' && json.imageUrl) {
+      stopItem.imageUrl = json.imageUrl;
+      console.log('[Route Stop] Reference image uploaded to Server:', json.imageUrl);
+      if (typeof saveCurrentRouteStopsHistory === 'function') {
+        saveCurrentRouteStopsHistory();
+      }
+    }
+  } catch (err) {
+    console.warn('[Route Stop] Background image upload warning:', err);
+  }
+}
+
+/**
+ * ดึงพิกัดตำแหน่งปัจจุบันจากอุปกรณ์ (Manual GPS Fetch - ไม่ดึงอัตโนมัติ)
+ */
+window.handleScheduleFetchGps = function(prefix) {
+  const btn = document.getElementById(`${prefix}btnFetchGps`);
+  const statusHint = document.getElementById(`${prefix}gpsStatusHint`);
+  const noticeText = document.getElementById(`${prefix}gpsNoticeText`);
+  const coordsInput = document.getElementById(`${prefix}coordinates`);
+  const latEl = document.getElementById(`${prefix}selectedLat`);
+  const lngEl = document.getElementById(`${prefix}selectedLng`);
+
+  if (!navigator.geolocation) {
+    if (noticeText) noticeText.innerHTML = `<span class="text-rose-600 font-semibold"><i class="fa-solid fa-circle-exclamation mr-1"></i>อุปกรณ์นี้ไม่รองรับ Geolocation</span>`;
+    return;
+  }
+
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>กำลังดึง...</span>`;
+  }
+  if (noticeText) {
+    noticeText.innerHTML = `<span class="text-blue-600 font-semibold"><i class="fa-solid fa-spinner fa-spin mr-1"></i>กำลังเชื่อมต่อสัญญาณ GPS...</span>`;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const formatted = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      if (coordsInput) {
+        coordsInput.value = formatted;
+        coordsInput.classList.add('bg-emerald-50', 'border-emerald-500');
+        setTimeout(() => coordsInput.classList.remove('bg-emerald-50', 'border-emerald-500'), 2500);
+      }
+      if (latEl) latEl.value = lat;
+      if (lngEl) lngEl.value = lng;
+      if (statusHint) {
+        statusHint.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>พิกัดตำแหน่งสด</span>`;
+      }
+      if (noticeText) {
+        noticeText.innerHTML = `<span class="text-emerald-600 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i>ดึงพิกัดปัจจุบันสำเร็จ: ${formatted} (ความแม่นยำ ~${Math.round(pos.coords.accuracy || 10)} ม.)</span>`;
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    },
+    (err) => {
+      console.warn('Schedule GPS fetch error:', err);
+      let errMsg = 'ไม่สามารถดึงพิกัดได้';
+      if (err.code === 1) errMsg = 'ถูกปฏิเสธสิทธิ์การเข้าถึงพิกัด (กรุณาอนุญาต Location ในเบราว์เซอร์)';
+      else if (err.code === 2) errMsg = 'ไม่พบสัญญาณตำแหน่งพิกัด';
+      else if (err.code === 3) errMsg = 'หมดเวลาเชื่อมต่อสัญญาณ GPS';
+
+      if (noticeText) {
+        noticeText.innerHTML = `<span class="text-rose-600 font-semibold"><i class="fa-solid fa-circle-exclamation mr-1"></i>${errMsg}</span>`;
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+};
+
+/**
+ * สกัดพิกัด GPS จากรูปภาพที่แนบ (EXIF Metadata) โดยรูปนี้ใช้เพื่อหาพิกัดเท่านั้น ไม่ทำการอัปโหลดขึ้น Server
+ */
+window.handleScheduleGpsImageExtraction = async function(event, prefix) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  const noticeText = document.getElementById(`${prefix}gpsNoticeText`);
+  const statusHint = document.getElementById(`${prefix}gpsStatusHint`);
+  const coordsInput = document.getElementById(`${prefix}coordinates`);
+  const latEl = document.getElementById(`${prefix}selectedLat`);
+  const lngEl = document.getElementById(`${prefix}selectedLng`);
+
+  if (noticeText) {
+    noticeText.innerHTML = `<span class="text-blue-600 font-semibold"><i class="fa-solid fa-spinner fa-spin mr-1"></i>กำลังสกัดพิกัด GPS จากภาพถ่าย (${file.name})...</span>`;
+  }
+
+  try {
+    let lat = null;
+    let lng = null;
+
+    // 1. ตรวจจาก EXIF GPS Metadata
+    if (typeof exifr !== 'undefined') {
+      try {
+        const gps = await exifr.gps(file);
+        if (gps && typeof gps.latitude === 'number' && typeof gps.longitude === 'number') {
+          lat = gps.latitude;
+          lng = gps.longitude;
+        }
+      } catch (e) {
+        console.warn('EXIF error:', e);
+      }
+    }
+
+    // 2. ถ้าไม่มี EXIF ลองอ่านไฟล์และสกัดพิกัดจากตัวอักษร OCR บนภาพ
+    if ((!lat || !lng) && typeof Tesseract !== 'undefined') {
+      const dataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+
+      if (dataUrl && typeof parseCoordinatesFromText === 'function') {
+        const img = await new Promise((resolve, reject) => {
+          const i = new Image();
+          i.onload = () => resolve(i);
+          i.onerror = reject;
+          i.src = dataUrl;
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.min(img.width, 1280);
+        canvas.height = Math.round((img.height / img.width) * canvas.width);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const ocrRes = await Tesseract.recognize(canvas, 'eng+tha', { logger: () => {} });
+        const text = ocrRes?.data?.text || '';
+        const parsed = parseCoordinatesFromText(text);
+        if (parsed && parsed.lat && parsed.lng) {
+          lat = parsed.lat;
+          lng = parsed.lng;
+        }
+      }
+    }
+
+    if (lat && lng) {
+      const formatted = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      if (coordsInput) {
+        coordsInput.value = formatted;
+        coordsInput.classList.add('bg-emerald-50', 'border-emerald-500');
+        setTimeout(() => coordsInput.classList.remove('bg-emerald-50', 'border-emerald-500'), 2500);
+      }
+      if (latEl) latEl.value = lat;
+      if (lngEl) lngEl.value = lng;
+      if (statusHint) {
+        statusHint.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>สกัดพิกัดสำเร็จ</span>`;
+      }
+      if (noticeText) {
+        noticeText.innerHTML = `<span class="text-emerald-600 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i>สกัดพิกัดจากภาพสำเร็จ: ${formatted} (ไม่บันทึกรูปนี้)</span>`;
+      }
+    } else {
+      if (noticeText) {
+        noticeText.innerHTML = `<span class="text-amber-600 font-semibold"><i class="fa-solid fa-triangle-exclamation mr-1"></i>ไม่พบข้อมูลพิกัด GPS ในรูปภาพนี้ กรุณากรอกพิกัดด้วยตนเองหรือกดดึงพิกัด</span>`;
+      }
+    }
+  } catch (err) {
+    console.error('Extraction error:', err);
+    if (noticeText) {
+      noticeText.innerHTML = `<span class="text-rose-600 font-semibold"><i class="fa-solid fa-circle-xmark mr-1"></i>เกิดข้อผิดพลาดในการอ่านรูปภาพ</span>`;
+    }
+  } finally {
+    // ล้างค่า input เพื่อให้สามารถเลือกรูปเดิมซ้ำได้ และไม่เก็บไฟล์นี้ไว้
+    event.target.value = '';
+  }
+};
+
+/**
+ * จัดการเลือกรูปภาพประกอบการวางแผนเส้นทาง บีบอัดภาพและแสดงพรีวิว
+ */
+window.handleScheduleRoutePlanImage = async function(event, prefix) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  const previewBox = document.getElementById(`${prefix}routePlanImgPreviewContainer`);
+  const previewImg = document.getElementById(`${prefix}routePlanImgPreview`);
+  const pickerBox = document.getElementById(`${prefix}routePlanImgPickerBox`);
+  const fileNameEl = document.getElementById(`${prefix}routePlanImgFileName`);
+  const statusEl = document.getElementById(`${prefix}routePlanImgStatusText`);
+  const hiddenDataUrlEl = document.getElementById(`${prefix}routePlanImageDataUrl`);
+
+  if (statusEl) statusEl.textContent = 'กำลังประมวลผลและบีบอัดรูปภาพ...';
+
+  try {
+    const compressedDataUrl = await compressImageFileToDataUrl(file, 900, 0.72);
+    if (hiddenDataUrlEl) hiddenDataUrlEl.value = compressedDataUrl;
+    if (previewImg) previewImg.src = compressedDataUrl;
+    if (fileNameEl) fileNameEl.textContent = file.name || 'รูปภาพประกอบเส้นทาง';
+    if (statusEl) statusEl.textContent = 'เลือกรูปภาพแล้ว (พร้อมส่งไปแสดงผลบนมือถือ)';
+
+    if (previewBox) {
+      previewBox.classList.remove('hidden');
+      previewBox.classList.add('flex');
+    }
+    if (pickerBox) {
+      pickerBox.classList.add('hidden');
+    }
+  } catch (err) {
+    console.error('Image compression error:', err);
+  }
+};
+
+/**
+ * ลบรูปภาพประกอบการวางแผนเส้นทาง
+ */
+window.clearScheduleRoutePlanImage = function(prefix) {
+  const previewBox = document.getElementById(`${prefix}routePlanImgPreviewContainer`);
+  const previewImg = document.getElementById(`${prefix}routePlanImgPreview`);
+  const pickerBox = document.getElementById(`${prefix}routePlanImgPickerBox`);
+  const hiddenDataUrlEl = document.getElementById(`${prefix}routePlanImageDataUrl`);
+  const fileInput = document.getElementById(`${prefix}routePlanFileInput`);
+
+  if (hiddenDataUrlEl) hiddenDataUrlEl.value = '';
+  if (previewImg) previewImg.src = '';
+  if (fileInput) fileInput.value = '';
+
+  if (previewBox) {
+    previewBox.classList.add('hidden');
+    previewBox.classList.remove('flex');
+  }
+  if (pickerBox) {
+    pickerBox.classList.remove('hidden');
+  }
+};
+
+/**
  * สร้าง HTML สำหรับแบบฟอร์มกรอกข้อมูลหมาย (อ้างอิงตามบันทึกส่งหมาย ภาพที่ 1 และ 2)
  */
 function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
@@ -13450,6 +13743,108 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
         </div>
       </div>
 
+      <!-- 4.1 ระบบพิกัด GPS (สามารถพิมพ์แก้ไขพิกัดได้ / ดึงพิกัด / สกัดจากรูป) -->
+      <div class="bg-white p-3 rounded-xl border border-gray-200 space-y-2" id="${prefix}gpsSection">
+        <div class="flex items-center justify-between">
+          <label class="block font-bold text-gray-800 text-xs flex items-center gap-1.5">
+            <i class="fa-solid fa-crosshairs text-blue-600"></i>
+            <span>พิกัด GPS (พิมพ์แก้ไขพิกัดได้ / ดึงพิกัด / สกัดจากรูป)</span>
+          </label>
+          <span class="text-[10px] text-gray-500 font-medium" id="${prefix}gpsStatusHint">
+            ${initialData.lat && initialData.lng ? '<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>มีพิกัดแล้ว</span>' : 'ยังไม่ได้ระบุพิกัด'}
+          </span>
+        </div>
+
+        <div class="flex gap-1.5 items-center">
+          <div class="relative flex-1">
+            <input 
+              type="text" 
+              id="${prefix}coordinates" 
+              value="${(initialData.lat && initialData.lng) ? `${Number(initialData.lat).toFixed(6)}, ${Number(initialData.lng).toFixed(6)}` : ''}" 
+              placeholder="เช่น 17.414400, 102.788200" 
+              class="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-gray-800 transition"
+            >
+          </div>
+          
+          <!-- ปุ่มดึงพิกัดปัจจุบัน (Manual Fetch Only - ไม่ดึงอัตโนมัติ) -->
+          <button 
+            type="button" 
+            id="${prefix}btnFetchGps" 
+            onclick="handleScheduleFetchGps('${prefix}')" 
+            class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-semibold text-xs px-3 py-2 rounded-xl whitespace-nowrap shadow-xs transition flex items-center gap-1 cursor-pointer shrink-0" 
+            title="กดเพื่อดึงพิกัดปัจจุบันจากอุปกรณ์"
+          >
+            <i class="fa-solid fa-location-crosshairs"></i>
+            <span>ดึงพิกัด</span>
+          </button>
+
+          <!-- ปุ่มแนบรูปเพื่อสกัดหาพิกัด (EXIF) เท่านั้น (ไม่ได้อัปโหลดรูป) -->
+          <label 
+            class="bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 active:scale-95 font-semibold text-xs px-2.5 py-2 rounded-xl whitespace-nowrap transition flex items-center gap-1 cursor-pointer shrink-0" 
+            title="แนบรูปถ่ายเพื่อสกัดหาพิกัด GPS จากรูปภาพเท่านั้น (ไม่ทำการอัปโหลดรูปนี้)"
+          >
+            <i class="fa-solid fa-camera-retro text-violet-600"></i>
+            <span>สกัดพิกัดจากรูป</span>
+            <input 
+              type="file" 
+              id="${prefix}gpsExtractFileInput" 
+              accept="image/*" 
+              class="hidden" 
+              onchange="handleScheduleGpsImageExtraction(event, '${prefix}')"
+            >
+          </label>
+        </div>
+
+        <div id="${prefix}gpsNoticeArea" class="text-[11px] text-gray-500 flex items-center justify-between min-h-[16px]">
+          <span id="${prefix}gpsNoticeText">${(initialData.lat && initialData.lng) ? `พิกัดปัจจุบัน: ${Number(initialData.lat).toFixed(6)}, ${Number(initialData.lng).toFixed(6)}` : 'สามารถพิมพ์พิกัดเอง, กดปุ่มดึงพิกัด หรือแนบรูปเพื่อสกัดพิกัด GPS'}</span>
+        </div>
+      </div>
+
+      <!-- 4.2 รูปภาพประกอบการวางแผนเส้นทาง (สำหรับกรณีสร้างหมุดเอง หรือระบุภาพใหม่เพื่อส่งไปมือถือ) -->
+      <div class="bg-white p-3 rounded-xl border border-gray-200 space-y-2.5" id="${prefix}routePlanImageSection">
+        <div class="flex items-center justify-between">
+          <label class="block font-bold text-gray-800 text-xs flex items-center gap-1.5">
+            <i class="fa-regular fa-image text-emerald-600"></i>
+            <span>รูปภาพประกอบการวางแผนเส้นทาง (ส่งไปเปิดดูบนมือถือได้)</span>
+          </label>
+          <span class="text-[10px] text-gray-400 font-medium">ภาพหน้าบ้าน / ทางเข้า / จุดสังเกต</span>
+        </div>
+
+        <!-- กล่อง Preview รูปภาพที่เลือก -->
+        <div id="${prefix}routePlanImgPreviewContainer" class="${initialData.imageUrl ? 'flex' : 'hidden'} items-center gap-3 p-2 bg-gray-50 border border-gray-200 rounded-xl">
+          <div class="relative w-14 h-14 rounded-lg overflow-hidden bg-gray-200 shrink-0 border border-gray-300">
+            <img id="${prefix}routePlanImgPreview" src="${initialData.imageUrl || ''}" alt="รูปประกอบ" class="w-full h-full object-cover cursor-pointer" onclick="if(window.viewPhotoModal && this.src) window.viewPhotoModal(this.src, 'รูปภาพประกอบเส้นทาง')">
+          </div>
+          <div class="flex-1 min-w-0 text-xs">
+            <p class="font-bold text-gray-800 truncate" id="${prefix}routePlanImgFileName">รูปภาพประกอบเส้นทาง</p>
+            <p class="text-[10px] text-emerald-700 font-semibold mt-0.5" id="${prefix}routePlanImgStatusText">พร้อมส่งไปแสดงผลบนมือถือ</p>
+          </div>
+          <button type="button" onclick="clearScheduleRoutePlanImage('${prefix}')" class="text-rose-600 hover:text-rose-800 p-1.5 rounded-lg hover:bg-rose-50 transition cursor-pointer shrink-0" title="ลบรูปภาพนี้">
+            <i class="fa-solid fa-trash-can text-sm"></i>
+          </button>
+        </div>
+
+        <!-- ปุ่มเลือกรูปภาพประกอบ -->
+        <div id="${prefix}routePlanImgPickerBox" class="${initialData.imageUrl ? 'hidden' : 'block'}">
+          <label class="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-emerald-500 hover:bg-emerald-50/40 rounded-xl py-3 px-4 cursor-pointer transition group">
+            <div class="flex items-center gap-2 text-gray-600 group-hover:text-emerald-700 font-medium text-xs">
+              <i class="fa-solid fa-cloud-arrow-up text-base text-gray-400 group-hover:text-emerald-600"></i>
+              <span>คลิกเพื่อเลือกรูปภาพประกอบ (จุดสังเกต / ทางเข้า / หน้าบ้าน)</span>
+            </div>
+            <span class="text-[10px] text-gray-400 mt-0.5">บีบอัดภาพอัตโนมัติและจัดเก็บบน Server ชั่วคราวเพื่อส่งไปเปิดดูบนมือถือ</span>
+            <input 
+              type="file" 
+              id="${prefix}routePlanFileInput" 
+              accept="image/*" 
+              class="hidden" 
+              onchange="handleScheduleRoutePlanImage(event, '${prefix}')"
+            >
+          </label>
+        </div>
+
+        <input type="hidden" id="${prefix}routePlanImageDataUrl" value="${initialData.imageUrl || ''}">
+      </div>
+
       <!-- 5. Inline Court Picker Overlay (ไม่ปิด Modal หลัก ไม่เด้งออก) -->
       <div id="${prefix}courtPickerOverlay" class="hidden absolute inset-0 bg-white/95 backdrop-blur-xs z-50 rounded-2xl p-4 flex flex-col shadow-2xl border-2 border-blue-500 transition-all">
         <div class="flex items-center justify-between pb-2.5 border-b border-gray-200 mb-2 flex-shrink-0">
@@ -13566,6 +13961,40 @@ function bindScheduleFormEvents(prefix = 'modal_') {
   if (locTypeEl) locTypeEl.addEventListener('change', refreshSuggestions);
   if (adminNameEl) adminNameEl.addEventListener('input', refreshSuggestions);
   if (otherNameEl) otherNameEl.addEventListener('input', refreshSuggestions);
+
+  // ตรวจสอบการพิมพ์หรือแก้ไขพิกัดในช่อง coordinates ด้วยตนเอง (ไม่ดึงพิกัดอัตโนมัติ)
+  const coordsInput = document.getElementById(`${prefix}coordinates`);
+  const latEl = document.getElementById(`${prefix}selectedLat`);
+  const lngEl = document.getElementById(`${prefix}selectedLng`);
+  const statusHint = document.getElementById(`${prefix}gpsStatusHint`);
+  const noticeText = document.getElementById(`${prefix}gpsNoticeText`);
+
+  if (coordsInput) {
+    coordsInput.addEventListener('input', () => {
+      const val = coordsInput.value.trim();
+      if (!val) {
+        if (latEl) latEl.value = '';
+        if (lngEl) lngEl.value = '';
+        if (statusHint) statusHint.textContent = 'ยังไม่ได้ระบุพิกัด';
+        if (noticeText) noticeText.textContent = 'สามารถพิมพ์พิกัดเอง, กดปุ่มดึงพิกัด หรือแนบรูปเพื่อสกัดพิกัด GPS';
+        refreshSuggestions();
+        return;
+      }
+      const parts = val.split(/[,;\s]+/).map(p => parseFloat(p)).filter(p => !isNaN(p));
+      if (parts.length >= 2 && Math.abs(parts[0]) <= 90 && Math.abs(parts[1]) <= 180) {
+        const lat = parts[0];
+        const lng = parts[1];
+        if (latEl) latEl.value = lat;
+        if (lngEl) lngEl.value = lng;
+        if (statusHint) {
+          statusHint.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>ระบุพิกัดแล้ว</span>`;
+        }
+        if (noticeText) {
+          noticeText.innerHTML = `<span class="text-emerald-600 font-semibold"><i class="fa-solid fa-check mr-1"></i>พิกัดที่ระบุ: ${lat.toFixed(6)}, ${lng.toFixed(6)}</span>`;
+        }
+      }
+    });
+  }
 
   // เริ่มค้นหาหมุดอ้างอิงทันทีเมื่อเปิดแบบฟอร์ม
   setTimeout(refreshSuggestions, 120);
@@ -13793,12 +14222,25 @@ window.selectRefPinChoice = function(prefix, lat, lng, refText, refImg, refNote)
   const noteEl = document.getElementById(`${prefix}selectedRefNote`);
   const previewBox = document.getElementById(`${prefix}selectedPinPreview`);
   const previewLabel = document.getElementById(`${prefix}selectedPinLabel`);
+  const coordsInput = document.getElementById(`${prefix}coordinates`);
+  const statusHint = document.getElementById(`${prefix}gpsStatusHint`);
+  const noticeText = document.getElementById(`${prefix}gpsNoticeText`);
 
   if (latEl) latEl.value = lat;
   if (lngEl) lngEl.value = lng;
   if (textEl) textEl.value = refText || '';
   if (imgEl) imgEl.value = refImg || '';
   if (noteEl) noteEl.value = refNote || '';
+
+  if (coordsInput) {
+    coordsInput.value = `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
+  }
+  if (statusHint) {
+    statusHint.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>เลือกจากหมุดอ้างอิง</span>`;
+  }
+  if (noticeText) {
+    noticeText.innerHTML = `<span class="text-emerald-600 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i>ใช้หมุดอ้างอิง: ${refText} (${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)})</span>`;
+  }
 
   if (previewBox && previewLabel) {
     previewLabel.textContent = `ใช้หมุดอ้างอิง: ${refText} (${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)})`;
@@ -13817,12 +14259,19 @@ window.clearSelectedRefPin = function(prefix) {
   const imgEl = document.getElementById(`${prefix}selectedRefImg`);
   const noteEl = document.getElementById(`${prefix}selectedRefNote`);
   const previewBox = document.getElementById(`${prefix}selectedPinPreview`);
+  const coordsInput = document.getElementById(`${prefix}coordinates`);
+  const statusHint = document.getElementById(`${prefix}gpsStatusHint`);
+  const noticeText = document.getElementById(`${prefix}gpsNoticeText`);
 
   if (latEl) latEl.value = '';
   if (lngEl) lngEl.value = '';
   if (textEl) textEl.value = '';
   if (imgEl) imgEl.value = '';
   if (noteEl) noteEl.value = '';
+
+  if (coordsInput) coordsInput.value = '';
+  if (statusHint) statusHint.textContent = 'ยังไม่ได้ระบุพิกัด';
+  if (noticeText) noticeText.textContent = 'สามารถพิมพ์พิกัดเอง, กดปุ่มดึงพิกัด หรือแนบรูปเพื่อสกัดพิกัด GPS';
 
   if (previewBox) {
     previewBox.classList.add('hidden');
@@ -13962,13 +14411,25 @@ function extractSummonsFormData(prefix = 'modal_') {
 
   const locationText = buildFullLocationText(locationType, houseNo, moo, localAdminName, customOtherLocationName, subdistrict, district, province);
 
+  const rawCoordsVal = (document.getElementById(`${prefix}coordinates`)?.value || '').trim();
+  let manualLat = null;
+  let manualLng = null;
+  if (rawCoordsVal) {
+    const parts = rawCoordsVal.split(/[,;\s]+/).map(p => parseFloat(p)).filter(p => !isNaN(p));
+    if (parts.length >= 2 && Math.abs(parts[0]) <= 90 && Math.abs(parts[1]) <= 180) {
+      manualLat = parts[0];
+      manualLng = parts[1];
+    }
+  }
+
   const rawLat = parseFloat(document.getElementById(`${prefix}selectedLat`)?.value || '');
   const rawLng = parseFloat(document.getElementById(`${prefix}selectedLng`)?.value || '');
-  const selectedLat = (!isNaN(rawLat) && rawLat > 0) ? rawLat : null;
-  const selectedLng = (!isNaN(rawLng) && rawLng > 0) ? rawLng : null;
+  const selectedLat = (!isNaN(rawLat) && rawLat > 0) ? rawLat : (manualLat || null);
+  const selectedLng = (!isNaN(rawLng) && rawLng > 0) ? rawLng : (manualLng || null);
   const selectedRefText = (document.getElementById(`${prefix}selectedRefText`)?.value || '').trim();
   const selectedRefImg = (document.getElementById(`${prefix}selectedRefImg`)?.value || '').trim();
   const selectedRefNote = (document.getElementById(`${prefix}selectedRefNote`)?.value || '').trim();
+  const customRoutePlanImg = (document.getElementById(`${prefix}routePlanImageDataUrl`)?.value || '').trim();
 
   return {
     province,
@@ -13990,7 +14451,9 @@ function extractSummonsFormData(prefix = 'modal_') {
     selectedLng,
     selectedRefText,
     selectedRefImg,
-    selectedRefNote
+    selectedRefNote,
+    customRoutePlanImg,
+    coordinates: rawCoordsVal
   };
 }
 
@@ -14793,15 +15256,28 @@ window.openMapAreaSelectorModal = function() {
           return;
         }
 
-        const matchRes = matchSingleCaseWithHistory(
-          data.caseNumber,
-          data.houseNo,
-          data.subdistrict,
-          data.district,
-          data.locationText,
-          data.moo,
-          data.province
-        );
+        let lat = data.selectedLat;
+        let lng = data.selectedLng;
+        let matchType = (lat && lng) ? 'exact' : 'none';
+        let matchNote = data.selectedRefNote || (lat && lng ? 'กำหนดพิกัดเอง' : '');
+        let imageUrl = data.customRoutePlanImg || data.selectedRefImg || '';
+
+        if (!lat || !lng) {
+          const matchRes = matchSingleCaseWithHistory(
+            data.caseNumber,
+            data.houseNo,
+            data.subdistrict,
+            data.district,
+            data.locationText,
+            data.moo,
+            data.province
+          );
+          lat = matchRes.lat;
+          lng = matchRes.lng;
+          matchType = matchRes.matchType;
+          matchNote = matchRes.matchNote;
+          if (!imageUrl) imageUrl = matchRes.imageUrl || '';
+        }
 
         const stopItem = {
           id: 'stop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
@@ -14820,17 +15296,20 @@ window.openMapAreaSelectorModal = function() {
           subdistrict: data.subdistrict,
           district: data.district,
           province: data.province,
-          lat: matchRes.lat,
-          lng: matchRes.lng,
-          imageUrl: matchRes.imageUrl || '',
-          dateTime: matchRes.dateTime || '',
-          matchType: matchRes.matchType,
-          matchNote: matchRes.matchNote,
-          isMatched: matchRes.matchType === 'exact',
-          hasCoords: Boolean(matchRes.lat && matchRes.lng)
+          lat: lat,
+          lng: lng,
+          imageUrl: imageUrl,
+          dateTime: data.dateTime || '',
+          matchType: matchType,
+          matchNote: matchNote,
+          isMatched: Boolean(lat && lng),
+          hasCoords: Boolean(lat && lng)
         };
 
         state.stagedScheduleStops.push(stopItem);
+        if (imageUrl && imageUrl.startsWith('data:image/')) {
+          uploadRouteReferenceImageToServer(stopItem);
+        }
         const selectedBadge = document.getElementById('schedSelectedCountBadge');
         if (selectedBadge) selectedBadge.textContent = state.stagedScheduleStops.length;
 
@@ -15158,10 +15637,10 @@ window.openAddRouteStopModal = function(editIndex = null) {
       let lat = data.selectedLat;
       let lng = data.selectedLng;
       let matchType = (lat && lng) ? 'exact' : 'none';
-      let matchNote = data.selectedRefNote || 'หมุดอ้างอิงที่เลือก';
-      let imageUrl = data.selectedRefImg || '';
+      let matchNote = data.selectedRefNote || (lat && lng ? 'กำหนดพิกัดเอง' : '');
+      let imageUrl = data.customRoutePlanImg || data.selectedRefImg || '';
 
-      // หากผู้ใช้ไม่ได้คลิกเลือกหมุดอ้างอิงเอง ให้ประมวลผลหมุดอ้างอิงตามลำดับความใกล้เคียงในพื้นที่เดียวกัน
+      // หากผู้ใช้ไม่ได้คลิกเลือกหมุดอ้างอิงเอง และไม่ได้ระบุพิกัด ให้ประมวลผลหมุดอ้างอิงตามลำดับความใกล้เคียงในพื้นที่เดียวกัน
       if (!lat || !lng) {
         const matchRes = matchSingleCaseWithHistory(
           data.caseNumber,
@@ -15176,7 +15655,7 @@ window.openAddRouteStopModal = function(editIndex = null) {
         lng = matchRes.lng;
         matchType = matchRes.matchType;
         matchNote = matchRes.matchNote;
-        imageUrl = matchRes.imageUrl || '';
+        if (!imageUrl) imageUrl = matchRes.imageUrl || '';
       }
 
       const stopItem = {
@@ -15210,6 +15689,10 @@ window.openAddRouteStopModal = function(editIndex = null) {
         state.currentRouteStops[editIndex] = stopItem;
       } else {
         state.currentRouteStops.push(stopItem);
+      }
+
+      if (imageUrl && imageUrl.startsWith('data:image/')) {
+        uploadRouteReferenceImageToServer(stopItem);
       }
 
       state.lastScheduleFormData = {
@@ -16178,6 +16661,12 @@ function renderRouteSidebarList(stops, totalDistKm) {
           ${statusNote}
         </div>
 
+        ${stop.imageUrl ? `
+          <div class="w-9 h-9 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 shrink-0 cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition mt-0.5" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${stop.imageUrl.replace(/'/g, "\\'")}', '${(stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'")}')" title="คลิกดูรูปภาพประกอบ">
+            <img src="${stop.imageUrl}" alt="รูป" class="w-full h-full object-cover" loading="lazy">
+          </div>
+        ` : ''}
+
         <!-- Quick Action Buttons (Edit, Delete, Up, Down, Send to Mobile) -->
         <div class="flex items-center gap-0.5 flex-shrink-0">
           <button type="button" onclick="sendSingleStopToMobileHandoff(${index})" class="hidden md:inline-flex p-1 text-violet-600 hover:bg-violet-50 rounded cursor-pointer" title="ส่งพิกัดศูนย์กลางหมู่บ้านของหมายนี้ไปมือถือ (Handoff)">
@@ -16513,6 +17002,13 @@ window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
   if (!targetStop && stops.length === 0) {
     Swal.fire('ไม่มีรายการส่งหมาย', 'กรุณาเลือกพื้นที่หรือจัดตารางส่งหมายก่อนส่งไปแสดงผลบนมือถือ', 'info');
     return;
+  }
+
+  // หากมีรายการ Stop ที่ยังมีรูปภาพแบบ Base64 ให้ทำการอัปโหลดขึ้น Server เพื่อให้ได้ URL ขนาดเล็กก่อนส่ง Handoff
+  const rawTargetStops = targetStop ? [targetStop] : stops;
+  const base64Stops = rawTargetStops.filter(s => s && s.imageUrl && s.imageUrl.startsWith('data:image/'));
+  if (base64Stops.length > 0 && navigator.onLine) {
+    await Promise.all(base64Stops.map(s => uploadRouteReferenceImageToServer(s)));
   }
 
   const cleanStops = cleanStopsForStorage(targetStop ? [targetStop] : stops);
@@ -17216,9 +17712,26 @@ window.initMobileModalMapInstance = function() {
         iconAnchor: [12, 24],
         popupAnchor: [0, -24]
       });
+      const safeCase = (stop.caseNumber || '').replace(/'/g, "\\'");
+      const popupHtml = `
+        <div class="text-xs space-y-1.5 p-1 max-w-[220px]">
+          <div class="font-bold text-gray-900 flex items-center justify-between gap-1">
+            <span>#${pinNum} ${stop.caseNumber}</span>
+          </div>
+          ${stop.imageUrl ? `
+            <div class="w-full h-24 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer shadow-2xs" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${stop.imageUrl.replace(/'/g, "\\'")}', '${safeCase}')" title="แตะดูรูปภาพขนาดเต็ม">
+              <img src="${stop.imageUrl}" alt="รูปประกอบ" class="w-full h-full object-cover">
+            </div>
+          ` : ''}
+          <p class="text-[11px] text-gray-600 leading-snug">${stop.locationText}</p>
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="inline-flex items-center gap-1 text-[10px] text-blue-600 font-bold hover:underline">
+            <i class="fa-solid fa-location-arrow"></i> นำทางจุดนี้
+          </a>
+        </div>
+      `;
       L.marker([stop.lat, stop.lng], { icon: pinIcon })
         .addTo(window.mobileModalMarkersLayer)
-        .bindPopup(`<b>#${pinNum} ${stop.caseNumber}</b><br><span class="text-xs text-gray-600">${stop.locationText}</span>`);
+        .bindPopup(popupHtml);
       waypoints.push([stop.lat, stop.lng]);
       pinNum++;
     }
@@ -17377,6 +17890,11 @@ window.renderMobileRouteList = function() {
             ` : ''}
           </div>
         </div>
+        ${stop.imageUrl ? `
+          <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 shrink-0 self-center cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${stop.imageUrl.replace(/'/g, "\\'")}', '${(stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'")}')" title="แตะดูรูปภาพประกอบ">
+            <img src="${stop.imageUrl}" alt="รูปประกอบ" class="w-full h-full object-cover" loading="lazy">
+          </div>
+        ` : ''}
         <div class="flex items-center gap-1 flex-shrink-0 self-center">
           <button type="button" onclick="openAddRouteStopModal(${index})" class="p-1.5 text-blue-600 hover:bg-blue-100/60 rounded-lg cursor-pointer" title="แก้ไข">
             <i class="fa-solid fa-pen-to-square text-xs"></i>

@@ -579,6 +579,46 @@ function doPost(e) {
     }
 
     // ==========================================
+    // ACTION: UPLOAD_ROUTE_REFERENCE_IMAGE (อัปโหลดรูปภาพประกอบการวางแผนเส้นทางลง Google Drive ชั่วคราวเพื่อให้เปิดดูบนมือถือได้)
+    // ==========================================
+    if (data.action === "upload_route_reference_image") {
+      let fileUrl = "";
+      let fileId = "";
+      let directUrl = "";
+
+      if (data.imageBase64) {
+        let base64String = data.imageBase64;
+        if (base64String.indexOf("base64,") !== -1) {
+          base64String = base64String.split("base64,")[1];
+        }
+        
+        const fileName = (data.fileName || `route_ref_${data.caseNumber || 'stop'}_${Date.now()}.jpg`).replace(/[^\w\.\-]/g, '_');
+        const decodedBytes = Utilities.base64Decode(base64String);
+        const blob = Utilities.newBlob(decodedBytes, "image/jpeg", fileName);
+        const createdFile = folder.createFile(blob);
+        
+        // กำหนดสิทธิ์ให้เปิดดูผ่านลิงก์ได้สำหรับแสดงผลบนมือถือ
+        try {
+          createdFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {
+          console.warn("Set sharing error:", shareErr);
+        }
+
+        fileId = createdFile.getId();
+        fileUrl = createdFile.getUrl();
+        directUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: "อัปโหลดรูปภาพประกอบการวางแผนเส้นทางสำเร็จ",
+        fileId: fileId,
+        fileUrl: fileUrl,
+        imageUrl: directUrl || fileUrl
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ==========================================
     // ACTION 2: UPLOAD_IMAGE (อัปโหลดรูปภาพลง Google Drive และบันทึกข้อมูลเข้า Google Sheet ในขั้นตอนเดียว)
     // ==========================================
     if (data.action === "upload_image" || !data.action) {
