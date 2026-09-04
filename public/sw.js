@@ -3,7 +3,7 @@
  * ระบบจัดเก็บข้อมูลพิกัดส่งหมาย - ศาลจังหวัดอุดรธานี
  */
 
-const CACHE_NAME = 'slts-court-cache-v79';
+const CACHE_NAME = 'slts-court-cache-v80';
 
 const STATIC_ASSETS = [
   './',
@@ -75,3 +75,23 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// 4. Background Sync Event: Trigger queue processing when connection restores
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'slts-sync-queue') {
+    event.waitUntil(notifyClientsToProcessQueue());
+  }
+});
+
+async function notifyClientsToProcessQueue() {
+  try {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (clients && clients.length > 0) {
+      clients.forEach((client) => {
+        client.postMessage({ type: 'TRIGGER_BACKGROUND_QUEUE' });
+      });
+    }
+  } catch (err) {
+    console.warn('[Service Worker] Background sync notification error:', err);
+  }
+}

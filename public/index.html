@@ -55,7 +55,7 @@
   </script>
 
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260904_14">
+  <link rel="stylesheet" href="css/style.css?v=20260904_15">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -1131,9 +1131,9 @@
           </span>
         </div>
 
-        <!-- 5: ปุ่มนับจำนวนทำงานเบื้องหลัง: สีเขียวเมื่อออนไลน์ / สีส้มเมื่อออฟไลน์ -->
-        <button id="btnCameraBgQueue" type="button" onclick="openBackgroundQueueModal()" class="gyro-rotate px-2.5 py-1.5 bg-emerald-600/95 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-emerald-400/50 shadow-md whitespace-nowrap cursor-pointer" title="คลิกเพื่อดูคิวงานเบื้องหลัง">
-          <i id="iconCameraBgQueue" class="fa-solid fa-cloud-arrow-up text-xs animate-pulse"></i>
+        <!-- 5: ปุ่มนับจำนวนทำงานเบื้องหลัง: Disabled เป็นค่าเริ่มต้นเมื่อยังไม่มีรายการรอส่ง -->
+        <button id="btnCameraBgQueue" type="button" disabled onclick="openBackgroundQueueModal()" class="gyro-rotate px-2.5 py-1.5 bg-gray-700/50 text-gray-400 rounded-xl text-xs font-medium flex items-center gap-1.5 border border-gray-600/30 opacity-40 cursor-not-allowed pointer-events-none select-none" title="ไม่มีรายการรออัปโหลด">
+          <i id="iconCameraBgQueue" class="fa-solid fa-cloud text-xs"></i>
           <span id="txtCameraBgQueueCount" class="font-mono text-xs font-bold">0</span>
         </button>
       </div>
@@ -1295,14 +1295,14 @@
   <script src="js/data.js?v=20260904_07"></script>
   <script src="js/compass.js?v=20260904_08"></script>
   <script src="js/map.js?v=20260904_08"></script>
-  <script src="js/watermark.js?v=20260904_14"></script>
-  <script src="js/app.js?v=20260904_14"></script>
+  <script src="js/watermark.js?v=20260904_15"></script>
+  <script src="js/app.js?v=20260904_15"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260904_14')
+        navigator.serviceWorker.register('./sw.js?v=20260904_15')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

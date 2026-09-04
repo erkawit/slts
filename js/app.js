@@ -52,47 +52,283 @@ const CACHE_KEY_SHEET_DATA = 'slts_sheet_data_cache';
 const CACHE_KEY_SHEET_TIME = 'slts_sheet_data_last_fetch';
 const CACHE_TTL_MS = 60 * 1000; // 1 นาที (60,000 มิลลิวินาที)
 
-// Offline Queue Storage Key
+// Offline Queue & Background Queue Multi-Tier Storage
+// 1. IndexedDB (SLTS_OfflineDB) - Primary high-capacity storage (GBs)
+// 2. CacheStorage (slts-offline-backup) - Secondary isolated backup
+// 3. LocalStorage & Memory - Fast synchronous UI access
+// 4. Persistent Storage API (navigator.storage.persist) - Anti-eviction
+
+const OFFLINE_DB_NAME = 'SLTS_OfflineDB';
+const OFFLINE_DB_VERSION = 1;
+const OFFLINE_STORE_NAME = 'upload_queue';
+const BG_UPLOAD_QUEUE_KEY = 'slts_bg_upload_queue';
 const OFFLINE_QUEUE_KEY = 'slts_offline_queue';
 
-function getOfflineQueue() {
-  try {
-    return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]');
-  } catch (e) {
-    return [];
+let isBgQueueWorkerRunning = false;
+let bgQueueWorkerStartTime = 0;
+let bgQueueProgressInterval = null;
+let bgQueueModalTimer = null;
+let memoryBgQueue = null;
+window.currentActiveItemProgress = 0;
+window.sessionCompletedTasks = [];
+
+/**
+ * เปิดฐานข้อมูล IndexedDB สำหรับเก็บข้อมูลคิวออฟไลน์ความจุสูง
+ */
+function openOfflineDB() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      return reject(new Error('IndexedDB not supported'));
+    }
+    const request = indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION);
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(OFFLINE_STORE_NAME)) {
+        db.createObjectStore(OFFLINE_STORE_NAME, { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = (e) => resolve(e.target.result);
+    request.onerror = (e) => reject(e.target.error);
+    request.onblocked = () => console.warn('[IDB] Database open blocked');
+  });
+}
+
+/**
+ * ขอสิทธิ์ Persistent Storage จากเบราว์เซอร์ เพื่อป้องกันการล้างแคชอัตโนมัติ
+ */
+async function requestPersistentStorage() {
+  if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
+    try {
+      const isPersisted = await navigator.storage.persisted();
+      if (!isPersisted) {
+        const granted = await navigator.storage.persist();
+        console.log('[Storage] Requested persistent storage, granted:', granted);
+      } else {
+        console.log('[Storage] Storage is already persistent');
+      }
+    } catch (e) {
+      console.warn('[Storage] Storage persist check error:', e);
+    }
   }
 }
 
-function addToOfflineQueue(item) {
-  const queue = getOfflineQueue();
-  const queueItem = {
-    id: 'off_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-    createdAt: new Date().toISOString(),
-    ...item
-  };
-  queue.push(queueItem);
+/**
+ * ดึงรายการทั้งหมดจาก IndexedDB
+ */
+async function idbGetAllQueue() {
   try {
-    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+    const db = await openOfflineDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(OFFLINE_STORE_NAME, 'readonly');
+      const store = tx.objectStore(OFFLINE_STORE_NAME);
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => resolve([]);
+    });
   } catch (e) {
-    console.error('Save offline queue error:', e);
+    console.warn('[Storage] idbGetAllQueue error:', e);
+    return null;
   }
+}
+
+/**
+ * สำรองข้อมูลคิวลง CacheStorage (ระบบสำรองชั้นที่ 2)
+ */
+async function backupQueueToCacheStorage(queue) {
+  if (typeof caches !== 'undefined') {
+    try {
+      const cache = await caches.open('slts-offline-backup');
+      const response = new Response(JSON.stringify(queue), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      await cache.put('/slts-offline-queue-backup', response);
+    } catch (e) {}
+  }
+}
+
+/**
+ * กู้คืนข้อมูลคิวจาก CacheStorage
+ */
+async function restoreQueueFromCacheStorage() {
+  if (typeof caches !== 'undefined') {
+    try {
+      const cache = await caches.open('slts-offline-backup');
+      const res = await cache.match('/slts-offline-queue-backup');
+      if (res) {
+        return await res.json();
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+/**
+ * กู้คืนข้อมูลคิวทั้งหมดเมื่อเปิดแอพ (Cold Start Auto-Recovery)
+ */
+async function initStorageRecovery() {
+  await requestPersistentStorage();
+
+  try {
+    // 1. ลองโหลดจาก IndexedDB ก่อนเสมอ
+    const idbQueue = await idbGetAllQueue();
+    if (Array.isArray(idbQueue) && idbQueue.length > 0) {
+      console.log(`[Storage] Recovered ${idbQueue.length} items from IndexedDB persistent storage.`);
+      memoryBgQueue = idbQueue;
+      try {
+        localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(idbQueue));
+      } catch (e) {}
+    } else {
+      // 2. หากใน IndexedDB ไม่มี ให้ตรวจสอบใน CacheStorage
+      const csQueue = await restoreQueueFromCacheStorage();
+      if (Array.isArray(csQueue) && csQueue.length > 0) {
+        console.log(`[Storage] Recovered ${csQueue.length} items from CacheStorage backup.`);
+        memoryBgQueue = csQueue;
+        saveBackgroundQueue(csQueue);
+      } else {
+        // 3. ใช้ข้อมูลจาก LocalStorage ตามปกติ
+        getBackgroundQueue();
+      }
+    }
+  } catch (err) {
+    console.warn('[Storage] Recovery error:', err);
+    getBackgroundQueue();
+  }
+
+  updateBackgroundQueueUI();
   updateOfflineBadgeUI();
-  return queueItem;
+  updateCameraTopBarUI();
+
+  // หากกลับมาออนไลน์และมีข้อมูลค้าง ให้เริ่มส่งข้อมูลเบื้องหลังทันทีแบบเงียบๆ
+  if (navigator.onLine && memoryBgQueue && memoryBgQueue.length > 0 && !isBgQueueWorkerRunning) {
+    processBackgroundQueue();
+  }
+}
+
+/**
+ * อ่านคิวงานทั้งหมด (Unified Queue)
+ */
+function getBackgroundQueue() {
+  if (memoryBgQueue === null) {
+    try {
+      memoryBgQueue = JSON.parse(localStorage.getItem(BG_UPLOAD_QUEUE_KEY) || '[]');
+    } catch (e) {
+      memoryBgQueue = [];
+    }
+
+    // ตรวจสอบและดึงข้อมูลเดิมจาก slts_offline_queue มารวมในคิวหลัก (Backward Compatibility)
+    try {
+      const legacyOffline = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]');
+      if (Array.isArray(legacyOffline) && legacyOffline.length > 0) {
+        legacyOffline.forEach(legItem => {
+          const actualPayload = legItem.payload || legItem;
+          const exists = memoryBgQueue.some(m => m.id === legItem.id || (m.caseNumber && m.caseNumber === actualPayload.caseNumber));
+          if (!exists) {
+            memoryBgQueue.push({
+              id: legItem.id || ('off_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
+              caseNumber: legItem.caseNumber || actualPayload.caseNumber || '-',
+              courtType: legItem.courtType || actualPayload.courtType || '',
+              locationText: legItem.locationText || actualPayload.locationText || '',
+              fileName: legItem.fileName || actualPayload.fileName || 'image.jpg',
+              payload: actualPayload,
+              createdAt: legItem.createdAt || new Date().toISOString(),
+              status: 'pending',
+              retryCount: 0
+            });
+          }
+        });
+        localStorage.removeItem(OFFLINE_QUEUE_KEY);
+      }
+    } catch (e) {}
+  }
+  return memoryBgQueue;
+}
+
+/**
+ * เพื่อความเข้ากันได้ 100% getOfflineQueue() ชี้ไปยัง unified queue เดียวกันเสมอ
+ */
+function getOfflineQueue() {
+  return getBackgroundQueue();
+}
+
+/**
+ * บันทึกคิวงานลง Multi-Tier Storage (IndexedDB + CacheStorage + LocalStorage Metadata + Memory)
+ */
+function saveBackgroundQueue(queue) {
+  memoryBgQueue = queue;
+
+  // 1. บันทึกลง IndexedDB ความจุสูง (Primary Persistence)
+  if (typeof indexedDB !== 'undefined') {
+    (async () => {
+      try {
+        const db = await openOfflineDB();
+        const tx = db.transaction(OFFLINE_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(OFFLINE_STORE_NAME);
+        store.clear();
+        for (const item of queue) {
+          store.put(item);
+        }
+      } catch (e) {
+        console.warn('[Storage] Sync to IndexedDB error:', e);
+      }
+    })();
+  }
+
+  // 2. สำรองข้อมูลลง CacheStorage
+  backupQueueToCacheStorage(queue);
+
+  // 3. บันทึกลง LocalStorage (พร้อมระบบป้องกันโควตาเต็ม)
+  try {
+    localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(queue));
+  } catch (e) {
+    console.warn('[Storage] LocalStorage quota reached, saving lightweight metadata...');
+    try {
+      localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+      localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+      localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(queue));
+    } catch (e2) {
+      try {
+        // บันทึกเฉพาะ metadata โดยตัด Base64 เพื่อให้ค้นหา/นับจำนวนได้ตลอดเวลา
+        const lightQueue = queue.map(q => ({
+          ...q,
+          payload: q.payload ? { ...q.payload, imageBase64: '[STORED_IN_INDEXEDDB]' } : null
+        }));
+        localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(lightQueue));
+      } catch (e3) {
+        console.warn('[Storage] LocalStorage full, queue safely stored in IndexedDB:', e3);
+      }
+    }
+  }
+
+  updateBackgroundQueueUI();
+  updateOfflineBadgeUI();
+  updateCameraTopBarUI();
+}
+
+/**
+ * นำงานเข้าคิวออฟไลน์ โดยเชื่อมโยงเข้าสู่ Unified Background Queue ทันที
+ */
+function addToOfflineQueue(item) {
+  const actualPayload = item.payload || item;
+  const caseNumber = item.caseNumber || actualPayload.caseNumber || '-';
+  const courtType = item.courtType || actualPayload.courtType || '';
+  const locationText = item.locationText || actualPayload.locationText || '';
+  const fileName = item.fileName || actualPayload.fileName || `${String(caseNumber).replace(/\//g, '-')}.jpg`;
+
+  return enqueueBackgroundUpload({
+    caseNumber: caseNumber,
+    courtType: courtType,
+    locationText: locationText,
+    fileName: fileName,
+    payload: actualPayload
+  });
 }
 
 function removeFromOfflineQueue(id) {
-  let queue = getOfflineQueue();
-  queue = queue.filter(q => q.id !== id);
-  try {
-    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
-  } catch (e) {
-    console.error('Remove offline queue error:', e);
-  }
-  updateOfflineBadgeUI();
+  removeBackgroundQueueItem(id);
 }
 
 function updateOfflineBadgeUI() {
-  const queue = getOfflineQueue();
+  const queue = getBackgroundQueue();
   const badgeBtn = document.getElementById('btnSyncOfflineQueue');
   const countBadge = document.getElementById('offlineQueueCountBadge');
   const netBadge = document.getElementById('networkStatusBadge');
@@ -125,42 +361,57 @@ function updateOfflineBadgeUI() {
   }
 }
 
+/**
+ * เริ่มต้นระบบตรวจจับสถานะเครือข่ายและการซิงค์ข้อมูลเบื้องหลังแบบเงียบ 100%
+ */
 function initOfflineSyncSystem() {
+  // 1. กู้คืนข้อมูลจาก Multi-Tier Persistent Storage
+  initStorageRecovery();
+
+  // 2. ดักจับเมื่อเชื่อมต่อเน็ตได้: อัปโหลดเบื้องหลังทันทีโดยไม่ต้องแจ้งเตือนใดๆ
   window.addEventListener('online', () => {
     updateOfflineBadgeUI();
     updateBackgroundQueueUI();
     updateCameraTopBarUI();
     processBackgroundQueue();
-
-    const queue = getOfflineQueue();
-    if (queue.length > 0) {
-      Swal.fire({
-        icon: 'info',
-        title: 'เชื่อมต่ออินเทอร์เน็ตแล้ว',
-        html: `ตรวจพบข้อมูลที่บันทึกไว้ในโหมดออฟไลน์จำนวน <b>${queue.length}</b> รายการ<br>ระบบจะเริ่มทำการซิงค์ขึ้น Google Drive & Sheet ทันที`,
-        timer: 3000,
-        toast: true,
-        position: 'top-end',
-        showConfirmButton: false
-      });
-      syncOfflineQueue(false);
-    }
   });
 
+  // 3. เมื่อสัญญาณเน็ตขาดหาย
   window.addEventListener('offline', () => {
     updateOfflineBadgeUI();
     updateBackgroundQueueUI();
     updateCameraTopBarUI();
-    // ตัดการแจ้งเตือน "เข้าสู่โหมดออฟไลน์" ออกไปตามข้อ 4 (ใช้จุดกระพริบสีแดงแทน)
   });
+
+  // 4. Background Connectivity Probe: ตรวจสอบความพร้อมเครือข่ายทุก 10 วินาทีหากยังมีรายการค้าง
+  setInterval(() => {
+    const queue = getBackgroundQueue();
+    if (queue && queue.length > 0 && navigator.onLine && !isBgQueueWorkerRunning) {
+      processBackgroundQueue();
+    }
+  }, 10000);
+
+  // 5. รับข้อความจาก Service Worker เมื่อมี Background Sync
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'TRIGGER_BACKGROUND_QUEUE') {
+        if (navigator.onLine && !isBgQueueWorkerRunning) {
+          processBackgroundQueue();
+        }
+      }
+    });
+  }
 
   updateOfflineBadgeUI();
   updateBackgroundQueueUI();
   updateCameraTopBarUI();
 }
 
+/**
+ * ซิงค์ข้อมูลในคิว (หากเรียกแบบแมนนวลจาก Desktop Header)
+ */
 async function syncOfflineQueue(isManual = false) {
-  const queue = getOfflineQueue();
+  const queue = getBackgroundQueue();
 
   if (!navigator.onLine) {
     if (isManual) {
@@ -190,99 +441,8 @@ async function syncOfflineQueue(isManual = false) {
     return;
   }
 
-  // ซิงค์ข้อมูลทีละรายการ
-  let successCount = 0;
-  let failCount = 0;
-
-  showCustomLoading(`กำลังซิงค์ข้อมูล (${queue.length} รายการ)...`, 'กำลังนำส่งข้อมูลขึ้น Google Drive & Sheet');
-
-  for (let i = 0; i < queue.length; i++) {
-    const item = queue[i];
-    try {
-      const response = await fetch(state.appsScriptUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(item.payload)
-      });
-      const resJson = await response.json();
-      if (resJson && resJson.status === 'success') {
-        removeFromOfflineQueue(item.id);
-        successCount++;
-      } else {
-        failCount++;
-      }
-    } catch (err) {
-      console.error('Sync item error:', err);
-      failCount++;
-    }
-  }
-
-  hideCustomLoading();
-  updateOfflineBadgeUI();
-  localStorage.removeItem(CACHE_KEY_SHEET_DATA);
-  localStorage.removeItem(CACHE_KEY_SHEET_TIME);
-
-  if (successCount > 0) {
-    Swal.fire({
-      icon: 'success',
-      title: 'ซิงค์ข้อมูลสำเร็จ!',
-      html: `นำส่งข้อมูลจากโหมดออฟไลน์ขึ้น Google Drive & Sheet สำเร็จ <b>${successCount}</b> รายการ${failCount > 0 ? `<br><span class="text-xs text-red-500">คงเหลือไม่สำเร็จ ${failCount} รายการ</span>` : ''}`,
-      showCloseButton: true,
-      allowOutsideClick: false,
-      confirmButtonColor: '#2563eb'
-    }).then(() => {
-      loadGoogleSheetData(true, true);
-    });
-  } else if (failCount > 0) {
-    Swal.fire({
-      icon: 'error',
-      title: 'การซิงค์ล้มเหลว',
-      text: 'ไม่สามารถส่งข้อมูลได้ กรุณาลองใหม่อีกครั้งเมื่อมีสัญญาณอินเทอร์เน็ตที่เสถียร',
-      showCloseButton: true,
-      allowOutsideClick: false,
-      confirmButtonColor: '#2563eb'
-    });
-  }
-}
-
-// =========================================================================
-// BACKGROUND UPLOAD QUEUE SYSTEM (ระบบจัดเรียงคิวอัปโหลดภาพเบื้องหลัง Non-Blocking)
-// =========================================================================
-const BG_UPLOAD_QUEUE_KEY = 'slts_bg_upload_queue';
-let isBgQueueWorkerRunning = false;
-let bgQueueWorkerStartTime = 0;
-let bgQueueProgressInterval = null;
-let bgQueueModalTimer = null;
-let memoryBgQueue = null;
-window.currentActiveItemProgress = 0;
-window.sessionCompletedTasks = [];
-
-function getBackgroundQueue() {
-  if (memoryBgQueue === null) {
-    try {
-      memoryBgQueue = JSON.parse(localStorage.getItem(BG_UPLOAD_QUEUE_KEY) || '[]');
-    } catch (e) {
-      memoryBgQueue = [];
-    }
-  }
-  return memoryBgQueue;
-}
-
-function saveBackgroundQueue(queue) {
-  memoryBgQueue = queue;
-  try {
-    localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(queue));
-  } catch (e) {
-    console.warn('[BgQueue] LocalStorage quota reached, clearing old sheet cache and retrying...');
-    try {
-      localStorage.removeItem(CACHE_KEY_SHEET_DATA);
-      localStorage.removeItem(CACHE_KEY_SHEET_TIME);
-      localStorage.setItem(BG_UPLOAD_QUEUE_KEY, JSON.stringify(queue));
-    } catch (e2) {
-      console.warn('[BgQueue] LocalStorage still full, queue safely maintained in application memory:', e2);
-    }
-  }
-  updateBackgroundQueueUI();
+  // เรียก processBackgroundQueue ทำงานเบื้องหลังทันทีแบบเงียบๆ
+  processBackgroundQueue();
 }
 
 function recordCompletedSubmission(caseNumber, fileName) {
@@ -343,12 +503,19 @@ function enqueueBackgroundUpload(taskData) {
   const item = {
     id: 'bg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
     createdAt: new Date().toISOString(),
-    status: 'pending', // 'pending' | 'uploading' | 'failed'
+    status: navigator.onLine ? 'pending' : 'offline',
     retryCount: 0,
     ...taskData
   };
   queue.push(item);
   saveBackgroundQueue(queue);
+
+  if ('serviceWorker' in navigator && 'SyncManager' in window) {
+    navigator.serviceWorker.ready.then(reg => {
+      return reg.sync.register('slts-sync-queue');
+    }).catch(err => console.warn('[Sync] Register background sync warning:', err));
+  }
+
   return item;
 }
 
@@ -459,8 +626,8 @@ function updateBackgroundQueueUI() {
  */
 window.updateCameraTopBarUI = function() {
   const isOnline = navigator.onLine;
-  const bgQueue = getBackgroundQueue();
-  const offlineQueue = getOfflineQueue();
+  const queue = getBackgroundQueue();
+  const total = queue.length;
 
   // 1. จุดกระพริบสถานะออนไลน์/ออฟไลน์ (4.1)
   const dotPing = document.getElementById('cameraStatusDotPing');
@@ -479,28 +646,35 @@ window.updateCameraTopBarUI = function() {
     }
   }
 
-  // 2. ปุ่มนับจำนวนทำงานเบื้องหลัง (ข้อ 5)
+  // 2. ปุ่มนับจำนวนทำงานเบื้องหลัง (ข้อ 5 & ข้อกำหนด disabled เมื่อไม่มีรายการ)
   const bgBtn = document.getElementById('btnCameraBgQueue');
   const bgIcon = document.getElementById('iconCameraBgQueue');
   const bgTxt = document.getElementById('txtCameraBgQueueCount');
 
   if (bgBtn && bgTxt) {
-    if (!isOnline) {
-      // โหมดออฟไลน์: ปุ่มสีส้ม แสดงจำนวนที่รอซิงค์
-      bgBtn.className = 'px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap cursor-pointer';
-      bgBtn.title = `โหมดออฟไลน์: มี ${offlineQueue.length} รายการรออัปโหลดเมื่อกลับมาออนไลน์`;
-      if (bgIcon) {
-        bgIcon.className = offlineQueue.length > 0 ? 'fa-solid fa-cloud text-xs animate-pulse' : 'fa-solid fa-cloud text-xs';
-      }
-      bgTxt.textContent = offlineQueue.length;
+    if (total === 0) {
+      // ไม่มีรายการรออัปโหลด: ทำการ disabled ปุ่มไว้ และไม่สามารถกดคลิกได้
+      bgBtn.disabled = true;
+      bgBtn.setAttribute('disabled', 'disabled');
+      bgBtn.className = 'gyro-rotate px-2.5 py-1.5 bg-gray-700/50 text-gray-400 rounded-xl text-xs font-medium flex items-center gap-1.5 border border-gray-600/30 opacity-40 cursor-not-allowed pointer-events-none select-none';
+      bgBtn.title = 'ไม่มีรายการรออัปโหลด';
+      if (bgIcon) bgIcon.className = 'fa-solid fa-cloud text-xs';
+      bgTxt.textContent = '0';
     } else {
-      // โหมดออนไลน์: ปุ่มสีเขียว แสดงจำนวนงานที่กำลังทำในเบื้องหลัง
-      bgBtn.className = 'px-2.5 py-1.5 bg-emerald-600/95 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-emerald-400/50 shadow-md whitespace-nowrap cursor-pointer';
-      bgBtn.title = `โหมดออนไลน์: กำลังทำงานเบื้องหลัง ${bgQueue.length} รายการ`;
-      if (bgIcon) {
-        bgIcon.className = bgQueue.length > 0 ? 'fa-solid fa-cloud-arrow-up text-xs animate-pulse' : 'fa-solid fa-cloud-arrow-up text-xs';
+      bgBtn.disabled = false;
+      bgBtn.removeAttribute('disabled');
+      if (!isOnline) {
+        // โหมดออฟไลน์: ปุ่มสีส้ม แสดงจำนวนที่รอซิงค์
+        bgBtn.className = 'gyro-rotate px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap cursor-pointer pointer-events-auto';
+        bgBtn.title = `โหมดออฟไลน์: มี ${total} รายการรออัปโหลดเมื่อกลับมาออนไลน์`;
+        if (bgIcon) bgIcon.className = 'fa-solid fa-cloud text-xs animate-pulse';
+      } else {
+        // โหมดออนไลน์: ปุ่มสีเขียว แสดงจำนวนงานที่กำลังทำในเบื้องหลัง
+        bgBtn.className = 'gyro-rotate px-2.5 py-1.5 bg-emerald-600/95 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-emerald-400/50 shadow-md whitespace-nowrap cursor-pointer pointer-events-auto';
+        bgBtn.title = `โหมดออนไลน์: กำลังนำส่งข้อมูล ${total} รายการ`;
+        if (bgIcon) bgIcon.className = 'fa-solid fa-cloud-arrow-up text-xs animate-pulse';
       }
-      bgTxt.textContent = bgQueue.length;
+      bgTxt.textContent = total;
     }
   }
 
@@ -516,6 +690,11 @@ window.updateCameraTopBarUI = function() {
  * เปิด Pop Up แสดงรายการคิวอัปโหลดภาพเบื้องหลังทั้งหมด พร้อม Progress Bar แต่ละรายการ
  */
 window.openBackgroundQueueModal = function() {
+  const queue = getBackgroundQueue();
+  // ข้อกำหนด: หากไม่มีรายการรออัปโหลด ให้ disabled ไว้ และเมื่อกดไม่ต้องมีการแจ้งเตือนอะไร แค่ไม่เปิด modal
+  if (!queue || queue.length === 0) {
+    return;
+  }
   if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('ดูรายการคิวงานเบื้องหลัง')) {
     return;
   }
@@ -527,8 +706,8 @@ window.openBackgroundQueueModal = function() {
             <i class="fa-solid fa-list-check"></i>
           </div>
           <div class="text-left">
-            <span class="block leading-tight">คิวอัปโหลดภาพส่งหมายเบื้องหลัง</span>
-            <span class="text-[10px] text-gray-400 font-normal">ทำงานอัตโนมัติ กรอกหมายอื่นต่อได้ทันที</span>
+            <span class="block leading-tight">คิวอัปโหลดภาพส่งหมาย</span>
+            <span class="text-[10px] text-gray-400 font-normal">${navigator.onLine ? 'นำส่งขึ้นระบบอัตโนมัติ' : 'จัดเก็บในเครื่อง ปลอดภัย'}</span>
           </div>
         </div>
         <span id="modalQueueSummaryBadge" class="text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-blue-100 text-blue-800">
@@ -542,7 +721,7 @@ window.openBackgroundQueueModal = function() {
       </div>
       <div id="bgQueueModalFooterControls" class="flex items-center justify-between pt-3 border-t border-gray-100 text-xs">
         <span class="text-[11px] text-gray-500">
-          <i class="fa-solid fa-shield-halved text-blue-500 mr-1"></i>บันทึกคิวในเครื่อง ปิดหน้าต่างนี้ได้ตลอดเวลา
+          <i class="fa-solid fa-shield-halved text-blue-500 mr-1"></i>บันทึกในเครื่อง ปิดหน้าต่างนี้ได้ตลอดเวลา
         </span>
         <button type="button" onclick="cancelCurrentBackgroundQueue()" class="text-xs text-red-600 hover:text-red-700 font-semibold px-2 py-1 rounded-lg hover:bg-red-50 transition cursor-pointer">
           <i class="fa-solid fa-trash-can mr-1"></i>ล้างคิวที่รอ
@@ -591,11 +770,14 @@ function renderBackgroundQueueModalContent() {
   const queue = getBackgroundQueue();
   const completed = window.sessionCompletedTasks || [];
   const total = queue.length;
+  const isOnline = navigator.onLine;
 
   if (summaryBadge) {
     if (total > 0) {
-      summaryBadge.className = 'text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-blue-100 text-blue-800';
-      summaryBadge.textContent = `เหลือ ${total} รายการ`;
+      summaryBadge.className = isOnline 
+        ? 'text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-blue-100 text-blue-800'
+        : 'text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-amber-100 text-amber-800';
+      summaryBadge.textContent = isOnline ? `เหลือ ${total} รายการ` : `รอออฟไลน์ ${total} รายการ`;
     } else {
       summaryBadge.className = 'text-xs font-bold font-mono px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800';
       summaryBadge.textContent = 'เสร็จสิ้นทั้งหมด';
@@ -612,7 +794,7 @@ function renderBackgroundQueueModalContent() {
         <div class="w-14 h-14 mx-auto mb-3 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center text-2xl shadow-inner">
           <i class="fa-solid fa-circle-check"></i>
         </div>
-        <p class="text-sm font-bold text-gray-700">ไม่มีรายการค้างในคิวเบื้องหลัง</p>
+        <p class="text-sm font-bold text-gray-700">ไม่มีรายการค้างในคิว</p>
         <p class="text-xs text-gray-400 mt-1">ทุกรายการได้รับการบันทึกขึ้น Google Drive & Sheet เรียบร้อยแล้ว</p>
       </div>
     `;
@@ -621,8 +803,40 @@ function renderBackgroundQueueModalContent() {
 
   let html = '';
 
-  // 1. รายการที่กำลังทำงานอยู่ (Active Item)
-  if (total > 0) {
+  // 1. กรณีเครื่องออฟไลน์: แสดงรายการทั้งหมดในคิวในสถานะรอเชื่อมต่อเน็ต
+  if (!isOnline && total > 0) {
+    html += `
+      <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center gap-2 mb-2">
+        <i class="fa-solid fa-cloud-slash text-amber-600 text-sm shrink-0"></i>
+        <span>เครื่องอยู่ในโหมดออฟไลน์ ข้อมูลภาพ ${total} รายการถูกบันทึกไว้อย่างปลอดภัยในเครื่อง และจะอัปโหลดอัตโนมัติเมื่อต่อเน็ต</span>
+      </div>
+    `;
+
+    queue.forEach((item, idx) => {
+      html += `
+        <div class="p-3.5 rounded-2xl border border-amber-200 bg-amber-50/40 shadow-xs space-y-1.5 text-left transition-all">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded-full bg-amber-500 text-white font-bold text-xs flex items-center justify-center shadow-xs">${idx + 1}</span>
+              <span class="font-bold text-sm text-gray-900 font-mono"><i class="fa-solid fa-gavel mr-1 text-amber-600"></i>${item.caseNumber}</span>
+              <span class="text-[10px] text-gray-500">${item.courtType || ''}</span>
+            </div>
+            <span class="text-[10px] font-bold text-amber-800 bg-white px-2 py-0.5 rounded-full border border-amber-200 shadow-2xs flex items-center gap-1">
+              <i class="fa-solid fa-clock text-amber-600"></i>
+              <span>รอสัญญาณเน็ต</span>
+            </span>
+          </div>
+          <p class="text-xs text-gray-700 pl-8 truncate"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${item.locationText || '-'}</p>
+          <div class="pl-8 flex items-center justify-between text-[10px] text-gray-400">
+            <span><i class="fa-solid fa-floppy-disk text-gray-400 mr-1"></i>บันทึกในเครื่องปลอดภัย</span>
+            <span class="font-mono">${item.createdAt ? new Date(item.createdAt).toLocaleTimeString('th-TH') : ''}</span>
+          </div>
+        </div>
+      `;
+    });
+  }
+  // 2. กรณีเครื่องออนไลน์: รายการแรกกำลังส่ง + รายการถัดไปรอในคิว
+  else if (total > 0) {
     const activeItem = queue[0];
     const activePercent = window.currentActiveItemProgress || 20;
     html += `
@@ -654,7 +868,7 @@ function renderBackgroundQueueModalContent() {
       </div>
     `;
 
-    // 2. รายการที่รอในคิวถัดไป (Pending Items)
+    // รายการที่รอในคิวถัดไป
     for (let i = 1; i < total; i++) {
       const item = queue[i];
       html += `
@@ -690,7 +904,7 @@ function renderBackgroundQueueModalContent() {
         </span>
       </div>
     `;
-    completed.slice(0, 5).forEach((item, idx) => {
+    completed.slice(0, 5).forEach((item) => {
       html += `
         <div class="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 text-left flex items-center justify-between gap-2">
           <div class="flex items-center gap-2 min-w-0">
@@ -769,6 +983,24 @@ async function processBackgroundQueue() {
     }
   }
 
+  // หาก payload imageBase64 ถูกตัดไปเก็บใน IndexedDB ให้ดึงภาพกลับมาก่อนส่ง
+  if (currentItem.payload && currentItem.payload.imageBase64 === '[STORED_IN_INDEXEDDB]') {
+    try {
+      const db = await openOfflineDB();
+      const fullItem = await new Promise((res) => {
+        const tx = db.transaction(OFFLINE_STORE_NAME, 'readonly');
+        const req = tx.objectStore(OFFLINE_STORE_NAME).get(currentItem.id);
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => res(null);
+      });
+      if (fullItem && fullItem.payload) {
+        currentItem.payload = fullItem.payload;
+      }
+    } catch (idbErr) {
+      console.warn('[BgQueue] IDB payload retrieval error:', idbErr);
+    }
+  }
+
   currentItem.uploadStartedAt = Date.now();
   currentItem.status = 'uploading';
   saveBackgroundQueue(queue);
@@ -826,9 +1058,7 @@ async function processBackgroundQueue() {
     recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName);
     removeBackgroundQueueItem(currentItem.id);
 
-    // ข้อกำหนด: ในหน้าจอความกว้างน้อยกว่า 768 pixel (และ Desktop)
-    // เมื่อกำลังอัปโหลดอยู่เบื้องหลัง ไม่ต้องมีการแจ้งเตือน Little Notification (Toast) ใดๆ ให้นำออกไปเลย เพื่อไม่ให้รบกวนหน้าต่างกรอกข้อมูลหมายถัดไป
-    // โดยสถานะการทำงานสามารถดูได้จากปุ่มคิวบน Top Bar หรือ Floating Queue เสมอ
+    // ทำงานเงียบ 100% เบื้องหลังโดยไม่มี Pop Up หรือ Toast รบกวน
 
     // Invalidate sheet cache
     localStorage.removeItem(CACHE_KEY_SHEET_DATA);
@@ -840,24 +1070,15 @@ async function processBackgroundQueue() {
     console.error('[BgQueue] Upload error for item:', currentItem.caseNumber, err);
 
     currentItem.retryCount = (currentItem.retryCount || 0) + 1;
-    if (currentItem.retryCount >= 3) {
-      // ย้ายเข้า Offline queue เพื่อไม่ให้ค้างขวางคิวอื่น
-      addToOfflineQueue({
-        payload: currentItem.payload,
-        fileName: currentItem.fileName,
-        caseNumber: currentItem.caseNumber
-      });
-      removeBackgroundQueueItem(currentItem.id);
-
-      Swal.fire({
-        toast: true,
-        position: 'top-end',
-        icon: 'warning',
-        title: `การส่งภาพล่าช้า (${currentItem.caseNumber})`,
-        text: 'ระบบได้ย้ายข้อมูลเข้าสู่คิวออฟไลน์ไว้ให้แล้ว ท่านสามารถกดซิงค์ใหม่ได้ที่ปุ่มบนหัวเว็บ',
-        timer: 5000,
-        showConfirmButton: false
-      });
+    if (currentItem.retryCount >= 5) {
+      // ย้ายไปท้ายคิวเพื่อให้รายการอื่นได้โอกาสอัปโหลดต่อไป
+      const q = getBackgroundQueue();
+      const failed = q.shift();
+      if (failed) {
+        failed.status = 'failed';
+        q.push(failed);
+        saveBackgroundQueue(q);
+      }
     } else {
       const q = getBackgroundQueue();
       if (q.length > 0) {
@@ -9920,6 +10141,14 @@ function initCameraResumeLifecycle() {
         _cameraPausedTimestamp = 0;
       }
     } else if (document.visibilityState === 'visible') {
+      // ตรวจสอบการกลับมาออนไลน์ขณะพักหน้าจอหรืออยู่นอกแอพ: อัปโหลดคิวที่ค้างอยู่เบื้องหลังทันที
+      if (navigator.onLine) {
+        const queue = getBackgroundQueue();
+        if (queue && queue.length > 0 && !isBgQueueWorkerRunning) {
+          processBackgroundQueue();
+        }
+      }
+
       // หากไม่ได้เปิดกล้องค้างไว้ หรือเป็นการเข้าแอพครั้งแรก ให้ข้าม ไม่ทำอะไรรบกวน
       if (!_cameraWasActiveWhenHidden || _cameraPausedTimestamp === 0) {
         return;
@@ -9974,6 +10203,12 @@ function initCameraResumeLifecycle() {
 
   // รองรับ bfcache (Back/Forward Cache) บนเบราว์เซอร์ iOS Safari
   window.addEventListener('pageshow', (event) => {
+    if (navigator.onLine) {
+      const queue = getBackgroundQueue();
+      if (queue && queue.length > 0 && !isBgQueueWorkerRunning) {
+        processBackgroundQueue();
+      }
+    }
     if (event.persisted) {
       if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
         if (typeof fetchCurrentLocation === 'function') {
@@ -9982,6 +10217,16 @@ function initCameraResumeLifecycle() {
         startCameraStream().catch(e => console.warn('Bfcache camera restart error:', e));
         startLiveCameraHUD();
         updateCameraTopBarUI();
+      }
+    }
+  });
+
+  // ตรวจจับเมื่อผู้ใช้คลิกหรือสลับแท็บกลับมาโฟกัส
+  window.addEventListener('focus', () => {
+    if (navigator.onLine) {
+      const queue = getBackgroundQueue();
+      if (queue && queue.length > 0 && !isBgQueueWorkerRunning) {
+        processBackgroundQueue();
       }
     }
   });
@@ -11842,20 +12087,16 @@ async function captureAndProcessPhoto() {
       imageBase64: compressedImageBase64
     };
 
-    // จัดการคิวตามสถานะ ออนไลน์ vs ออฟไลน์ (ทำงานเบื้องหลัง 100%)
-    if (!navigator.onLine) {
-      addToOfflineQueue(uploadPayload);
-    } else {
-      const enqueued = enqueueBackgroundUpload({
-        caseNumber: caseNumber,
-        courtType: payloadData.courtType,
-        locationText: locationText,
-        fileName: imageFilename,
-        payload: uploadPayload
-      });
-      if (enqueued) {
-        processBackgroundQueue();
-      }
+    // จัดการคิวผ่านระบบ Unified Multi-Tier Queue (ทำงานเบื้องหลัง 100%)
+    const enqueued = enqueueBackgroundUpload({
+      caseNumber: caseNumber,
+      courtType: payloadData.courtType,
+      locationText: locationText,
+      fileName: imageFilename,
+      payload: uploadPayload
+    });
+    if (enqueued && navigator.onLine) {
+      processBackgroundQueue();
     }
 
     // รีเซ็ตฟอร์มให้พร้อมสำหรับกรอกหมายถัดไปทันที (Instant Form Release)
@@ -11947,22 +12188,16 @@ async function handleFallbackFile(e) {
       imageBase64: compressedImageBase64
     };
 
-    // 3. จัดการคิวตามสถานะ ออนไลน์ vs ออฟไลน์ (ข้อ 5: ทำงานเบื้องหลังทั้งหมด 100% โดยไม่ต้องมี Pop Up แจ้งเตือน)
-    if (!navigator.onLine) {
-      // โหมดออฟไลน์: บันทึกเข้า Offline Queue รอซิงค์เมื่อกลับมาออนไลน์
-      addToOfflineQueue(uploadPayload);
-    } else {
-      // โหมดออนไลน์: เพิ่มงานเข้าสู่คิวอัปโหลดภาพเบื้องหลัง (Background Upload Queue)
-      const enqueued = enqueueBackgroundUpload({
-        caseNumber: caseNumber,
-        courtType: payloadData.courtType,
-        locationText: locationText,
-        fileName: imageFilename,
-        payload: uploadPayload
-      });
-      if (enqueued) {
-        processBackgroundQueue();
-      }
+    // 3. จัดการคิวผ่านระบบ Unified Multi-Tier Queue (ทำงานเบื้องหลัง 100%)
+    const enqueued = enqueueBackgroundUpload({
+      caseNumber: caseNumber,
+      courtType: payloadData.courtType,
+      locationText: locationText,
+      fileName: imageFilename,
+      payload: uploadPayload
+    });
+    if (enqueued && navigator.onLine) {
+      processBackgroundQueue();
     }
 
     // 4. รีเซ็ตฟอร์มสำหรับหมายถัดไปทันที (Instant Form Release)
