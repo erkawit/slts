@@ -20,6 +20,6 @@ if %ERRORLEVEL% NEQ 0 (
 )
 echo.
 echo [3/3] Deploying to Vercel Production...
-call npx vercel --prod --yes
+call npx vercel --prod --scope erkawit-ladlais-projects --yes
 echo.
 pause
