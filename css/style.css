@@ -69,10 +69,10 @@ body {
   will-change: transform, top, bottom, left, right;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  transform-style: preserve-3d;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+}
+
+#liveBadgeWrapper.gyro-rotate {
+  display: block;
 }
 
 /* Large Ergonomic Shutter Button (เด่นชัด กดง่ายด้วยนิ้วมือ) */
@@ -130,54 +130,38 @@ body {
 /* ================================================================
    Gyroscope Dynamic Landscape Transitions (สำหรับกรณีหมุนเครื่องขณะเปิด Portrait Lock)
    ================================================================ */
-/* Base HUD Positions (Portrait Base) สำหรับคำนวณ Interpolation ของ Transition ให้ลื่นไหล */
-#liveCompassWrapper {
-  top: 1rem;
-  left: 1rem;
-  transform: translate(0, 0) rotate(0deg);
-  transform-origin: center center;
-}
-
-#liveMapWrapper {
-  top: calc(100% - 1rem);
-  left: 1rem;
-  transform: translateY(-100%) rotate(0deg);
-  transform-origin: center center;
-}
-
-#liveBadgeWrapper {
-  top: calc(100% - 1rem);
-  left: calc(100% - 1rem);
-  transform: translate(-100%, -100%) rotate(0deg);
-  transform-origin: center center;
-  max-width: min(68vw, 340px);
-}
 
 /* 1. เมื่อหมุนกล้องเป็นแนวนอน 90 องศา (Landscape Left: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์) */
 body.gyro-landscape-90 #liveCompassWrapper {
   top: 1.25rem !important;
-  left: calc(100% - 1.5rem) !important;
-  transform: translate(-100%, 0) rotate(90deg) !important;
+  right: 1.5rem !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: rotate(90deg) !important;
   transform-origin: center center !important;
 }
 
 body.gyro-landscape-90 #liveMapWrapper {
   top: 1.25rem !important;
   left: 1.25rem !important;
-  transform: translateY(0) rotate(90deg) !important;
+  bottom: auto !important;
+  right: auto !important;
+  transform: rotate(90deg) !important;
   transform-origin: center center !important;
 }
 
-/* ย้ายกล่องข้อมูลสดไปยังตำแหน่งกรอบสี่เหลี่ยมสีขาว (ยกขึ้นจากแถบดำปุ่มชัตเตอร์ 6.75rem ไม่ให้ถูกบดบัง) */
+/* ย้ายกล่องข้อมูลสดไปยังตำแหน่งกรอบสี่เหลี่ยมสีขาว (ยกขึ้นจากแถบดำปุ่มชัตเตอร์ 6.5rem ไม่ให้ถูกบดบัง) */
 body.gyro-landscape-90 #liveBadgeWrapper {
-  top: calc(100% - 6.75rem) !important;
+  bottom: 6.5rem !important;
   left: 1.25rem !important;
-  transform: translate(0, -100%) rotate(90deg) !important;
+  right: auto !important;
+  top: auto !important;
+  transform: rotate(90deg) !important;
   transform-origin: center center !important;
   max-width: min(70vh, 320px) !important;
 }
 
-/* หมุนปุ่มเมนูด้านบน และปุ่มชัตเตอร์ด้านล่าง */
+/* หมุนปุ่มชัตเตอร์และปุ่มบนแถบด้านบน */
 body.gyro-landscape-90 #btnCameraBgQueue,
 body.gyro-landscape-90 #btnEditMobileForm,
 body.gyro-landscape-90 #btnCameraCaseSearch,
@@ -190,51 +174,40 @@ body.gyro-landscape-90 #btnFlipOrientationQuick {
   transform-origin: center center !important;
 }
 
-/* หมุน SweetAlert Modal ทุกตัวในระบบ เมื่อเปิดในแนวนอน (ภาพที่ 2) */
-body.gyro-landscape-90 .swal2-container {
-  align-items: center !important;
-  justify-content: center !important;
-}
-
-body.gyro-landscape-90 .swal2-popup,
-body.gyro-landscape-90 .slts-swal-fullscreen-80 {
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
-  width: min(88vh, 640px) !important;
-  max-width: min(88vh, 640px) !important;
-  max-height: min(92vw, 400px) !important;
-  margin: auto !important;
-}
-
-body.gyro-landscape-90 .slts-form-modal {
-  max-height: min(92vw, 400px) !important;
-}
-
-body.gyro-landscape-90 .slts-swal-body-scroll {
-  max-height: calc(min(92vw, 400px) - 55px) !important;
-  overflow-y: auto !important;
+/* ปิดความเด่นชัด (dim) ของปุ่มฟอร์ม/ค้นหา/แผนที่/คิว ในแนวนอน และมี cursor ช่วยเตือน */
+body.gyro-landscape-90 #btnCameraBgQueue,
+body.gyro-landscape-90 #btnEditMobileForm,
+body.gyro-landscape-90 #btnCameraCaseSearch,
+body.gyro-landscape-90 #btnCameraRouteMap {
+  opacity: 0.55 !important;
 }
 
 /* 2. เมื่อหมุนกล้องเป็นแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา) */
 body.gyro-landscape-270 #liveCompassWrapper {
-  top: calc(100% - 1.5rem) !important;
+  bottom: 1.5rem !important;
   left: 1.25rem !important;
-  transform: translateY(-100%) rotate(-90deg) !important;
+  top: auto !important;
+  right: auto !important;
+  transform: rotate(-90deg) !important;
   transform-origin: center center !important;
 }
 
 body.gyro-landscape-270 #liveMapWrapper {
-  top: calc(100% - 1.5rem) !important;
-  left: calc(100% - 1.5rem) !important;
-  transform: translate(-100%, -100%) rotate(-90deg) !important;
+  bottom: 1.5rem !important;
+  right: 1.5rem !important;
+  top: auto !important;
+  left: auto !important;
+  transform: rotate(-90deg) !important;
   transform-origin: center center !important;
 }
 
-/* ย้ายกล่องข้อมูลสดให้อยู่ต่ำลงมาจากแถบบาร์บน 6.75rem เพื่อความสมมาตรและไม่ถูกบดบัง */
+/* ย้ายกล่องข้อมูลสดให้อยู่ต่ำลงมาจากแถบบาร์บน 6.5rem เพื่อความสมมาตรและไม่ถูกบดบัง */
 body.gyro-landscape-270 #liveBadgeWrapper {
-  top: 6.75rem !important;
-  left: calc(100% - 1.25rem) !important;
-  transform: translate(-100%, 0) rotate(-90deg) !important;
+  top: 6.5rem !important;
+  right: 1.5rem !important;
+  bottom: auto !important;
+  left: auto !important;
+  transform: rotate(-90deg) !important;
   transform-origin: center center !important;
   max-width: min(70vh, 320px) !important;
 }
@@ -251,33 +224,11 @@ body.gyro-landscape-270 #btnFlipOrientationQuick {
   transform-origin: center center !important;
 }
 
-body.gyro-landscape-270 .swal2-container {
-  align-items: center !important;
-  justify-content: center !important;
-}
-
-body.gyro-landscape-270 .swal2-popup,
-body.gyro-landscape-270 .slts-swal-fullscreen-80 {
-  transform: rotate(-90deg) !important;
-  transform-origin: center center !important;
-  width: min(88vh, 640px) !important;
-  max-width: min(88vh, 640px) !important;
-  max-height: min(92vw, 400px) !important;
-  margin: auto !important;
-}
-
-body.gyro-landscape-270 .slts-form-modal {
-  max-height: min(92vw, 400px) !important;
-}
-
-body.gyro-landscape-270 .slts-swal-body-scroll {
-  max-height: calc(min(92vw, 400px) - 55px) !important;
-  overflow-y: auto !important;
-}
-
-.swal2-popup {
-  transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1), width 0.35s ease, max-height 0.35s ease;
-  will-change: transform;
+body.gyro-landscape-270 #btnCameraBgQueue,
+body.gyro-landscape-270 #btnEditMobileForm,
+body.gyro-landscape-270 #btnCameraCaseSearch,
+body.gyro-landscape-270 #btnCameraRouteMap {
+  opacity: 0.55 !important;
 }
 
 .camera-live-frame::before, .camera-live-frame::after {

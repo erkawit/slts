@@ -476,6 +476,9 @@ window.updateCameraTopBarUI = function() {
  * เปิด Pop Up แสดงรายการคิวอัปโหลดภาพเบื้องหลังทั้งหมด พร้อม Progress Bar แต่ละรายการ
  */
 window.openBackgroundQueueModal = function() {
+  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('ดูรายการคิวงานเบื้องหลัง')) {
+    return;
+  }
   Swal.fire({
     title: `
       <div class="flex items-center justify-between text-base font-bold text-gray-900 pb-2.5 border-b border-gray-100">
@@ -1514,6 +1517,9 @@ function updateAuthUI() {
  * จัดการการคลิกปุ่ม Auth ที่มุมขวาบนของหน้ากล้องมือถือ (< 768px)
  */
 window.handleMobileCameraAuthAction = function() {
+  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('จัดการระบบบัญชีผู้ใช้')) {
+    return;
+  }
   const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
   if (!isLoggedIn) {
     openLoginModal();
@@ -2715,6 +2721,11 @@ function applyGyroOrientation(orientation, angle) {
   state.deviceAngle = angle;
   state.deviceOrientation = orientation;
 
+  // หากมี SweetAlert Popup เปิดอยู่ ให้คงสถานะเดิมไว้ ป้องกันอาการหน้าต่างสั่น/กระตุกขณะผู้ใช้อ่านหรือกรอกข้อมูล
+  if (document.body.classList.contains('swal2-shown')) {
+    return;
+  }
+
   const isScreenLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || (window.innerWidth > window.innerHeight);
 
   document.body.classList.remove('gyro-landscape-90', 'gyro-landscape-270', 'gyro-portrait');
@@ -2727,7 +2738,6 @@ function applyGyroOrientation(orientation, angle) {
     }
   } else {
     // หน้าจออยู่ในแนวตั้ง (เช่น โทรศัพท์เปิด Portrait Lock ไว้):
-    // สลับคลาสเพื่อย้ายตำแหน่งลายน้ำ หมุนไอคอน และหมุน SweetAlert Modal 90 องศาตามแบบภาพที่ 1 และ 2
     if (angle === 90) {
       document.body.classList.add('gyro-landscape-90');
     } else if (angle === -90 || angle === 270) {
@@ -2743,6 +2753,30 @@ function applyGyroOrientation(orientation, angle) {
   }
 }
 window.applyGyroOrientation = applyGyroOrientation;
+
+/**
+ * ตรวจสอบว่าขณะนี้กล้องหมุนเป็นแนวนอนผ่าน Gyroscope หรือไม่
+ * หากอยู่แนวนอนและผู้ใช้กดฟังก์ชันที่ต้องพิมพ์หรือใช้พื้นที่มาก ให้แจ้งเตือนให้ถือแนวตั้งเพื่อ UX ที่ดีที่สุด
+ */
+function checkGyroLandscapeAndWarn(actionName = 'ใช้งานฟังก์ชันนี้') {
+  if (document.body.classList.contains('gyro-landscape-90') || document.body.classList.contains('gyro-landscape-270')) {
+    if (typeof Swal !== 'undefined') {
+      Swal.fire({
+        toast: true,
+        position: 'top',
+        icon: 'info',
+        title: `กรุณาถือโทรศัพท์ในแนวตั้ง เพื่อ${actionName}`,
+        showConfirmButton: false,
+        timer: 2500,
+        timerProgressBar: true
+      });
+    }
+    return true;
+  }
+  return false;
+}
+window.checkGyroLandscapeAndWarn = checkGyroLandscapeAndWarn;
+
 
 function initResponsiveUI() {
   const handleOrientationSync = () => {
@@ -5291,6 +5325,9 @@ window.handleMobileModalBackOrClose = function() {
  *    - แสดงปุ่ม "เปลี่ยนจังหวัด" เพื่อให้เปลี่ยนกลับไปยังจังหวัดที่รับผิดชอบได้ตลอดเวลา
  */
 window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock = false) {
+  if (!forceLock && typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('ค้นหาข้อมูลหมาย')) {
+    return;
+  }
   // 1. โหลดข้อมูลเดิมจาก memory หรือ cache ในเครื่องทันทีก่อน เพื่อให้เปิดหน้าต่างได้เร็วที่สุดโดยไม่ต้องรอโหลด
   if (!state.allSheetRows || state.allSheetRows.length === 0) {
     try {
@@ -7738,6 +7775,9 @@ window.showCaseSubRecordsModal = function(caseNumber) {
 // SweetAlert Form บันทึกข้อมูลส่งหมาย 80% สำหรับ Mobile
 // -------------------------------------------------------------------------
 window.showMobileSummonsFormModal = function(isEditing = false) {
+  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('กรอกหรือแก้ไขข้อมูลหมาย')) {
+    return;
+  }
   if (!state.selectedProvince) {
     showProvinceSelectorModal(true);
     return;
@@ -15296,6 +15336,9 @@ function hasDesktopHandoffForCurrentUser() {
 }
 
 window.showMobileRouteMapModal = function() {
+  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('ดูแผนที่และเส้นทางส่งหมาย')) {
+    return;
+  }
   const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
   if (!isUserLoggedIn) {
     Swal.fire({
