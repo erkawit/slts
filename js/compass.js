@@ -77,9 +77,24 @@ class CompassManager {
     }
 
     if (newAngle !== this.deviceAngle || newOrientation !== this.deviceOrientation) {
-      this.deviceAngle = newAngle;
-      this.deviceOrientation = newOrientation;
-      this.notifyOrientationChange(this.deviceOrientation, this.deviceAngle);
+      if (this._targetAngle !== newAngle || this._targetOrientation !== newOrientation) {
+        this._targetAngle = newAngle;
+        this._targetOrientation = newOrientation;
+        clearTimeout(this._tiltDebounceTimer);
+        this._tiltDebounceTimer = setTimeout(() => {
+          if (this._targetAngle !== null && (this._targetAngle !== this.deviceAngle || this._targetOrientation !== this.deviceOrientation)) {
+            this.deviceAngle = this._targetAngle;
+            this.deviceOrientation = this._targetOrientation;
+            this.notifyOrientationChange(this.deviceOrientation, this.deviceAngle);
+          }
+        }, 50);
+      }
+    } else {
+      this._targetAngle = null;
+      if (this._tiltDebounceTimer) {
+        clearTimeout(this._tiltDebounceTimer);
+        this._tiltDebounceTimer = null;
+      }
     }
   }
 

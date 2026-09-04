@@ -58,10 +58,18 @@ body {
   z-index: 10;
 }
 
-/* Gyroscope rotation for HUD elements and camera controls */
+/* Gyroscope rotation for HUD elements and camera controls with GPU acceleration and fluid cubic-bezier curve */
 .gyro-rotate {
-  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+              top 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+              bottom 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+              left 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+              right 0.45s cubic-bezier(0.25, 1, 0.5, 1);
   transform-origin: center center;
+  will-change: transform, top, bottom, left, right;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform-style: preserve-3d;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -122,35 +130,51 @@ body {
 /* ================================================================
    Gyroscope Dynamic Landscape Transitions (สำหรับกรณีหมุนเครื่องขณะเปิด Portrait Lock)
    ================================================================ */
-.gyro-rotate {
-  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), top 0.35s ease, bottom 0.35s ease, left 0.35s ease, right 0.35s ease;
+/* Base HUD Positions (Portrait Base) สำหรับคำนวณ Interpolation ของ Transition ให้ลื่นไหล */
+#liveCompassWrapper {
+  top: 1rem;
+  left: 1rem;
+  transform: translate(0, 0) rotate(0deg);
   transform-origin: center center;
 }
 
-/* 1. เมื่อหมุนกล้องเป็นแนวนอน 90 องศา (Landscape Left: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์ ตามภาพที่ 1) */
+#liveMapWrapper {
+  top: calc(100% - 1rem);
+  left: 1rem;
+  transform: translateY(-100%) rotate(0deg);
+  transform-origin: center center;
+}
+
+#liveBadgeWrapper {
+  top: calc(100% - 1rem);
+  left: calc(100% - 1rem);
+  transform: translate(-100%, -100%) rotate(0deg);
+  transform-origin: center center;
+  max-width: min(68vw, 340px);
+}
+
+/* 1. เมื่อหมุนกล้องเป็นแนวนอน 90 องศา (Landscape Left: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์) */
 body.gyro-landscape-90 #liveCompassWrapper {
   top: 1.25rem !important;
-  right: 1.5rem !important;
-  left: auto !important;
-  bottom: auto !important;
-  transform: rotate(90deg) !important;
+  left: calc(100% - 1.5rem) !important;
+  transform: translate(-100%, 0) rotate(90deg) !important;
+  transform-origin: center center !important;
 }
 
 body.gyro-landscape-90 #liveMapWrapper {
   top: 1.25rem !important;
   left: 1.25rem !important;
-  bottom: auto !important;
-  right: auto !important;
-  transform: rotate(90deg) !important;
+  transform: translateY(0) rotate(90deg) !important;
+  transform-origin: center center !important;
 }
 
+/* ย้ายกล่องข้อมูลสดไปยังตำแหน่งกรอบสี่เหลี่ยมสีขาว (ยกขึ้นจากแถบดำปุ่มชัตเตอร์ 6.75rem ไม่ให้ถูกบดบัง) */
 body.gyro-landscape-90 #liveBadgeWrapper {
-  bottom: 1.5rem !important;
+  top: calc(100% - 6.75rem) !important;
   left: 1.25rem !important;
-  right: auto !important;
-  top: auto !important;
-  transform: rotate(90deg) !important;
+  transform: translate(0, -100%) rotate(90deg) !important;
   transform-origin: center center !important;
+  max-width: min(70vh, 320px) !important;
 }
 
 /* หมุนปุ่มเมนูด้านบน และปุ่มชัตเตอร์ด้านล่าง */
@@ -193,28 +217,26 @@ body.gyro-landscape-90 .slts-swal-body-scroll {
 
 /* 2. เมื่อหมุนกล้องเป็นแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา) */
 body.gyro-landscape-270 #liveCompassWrapper {
-  bottom: 1.5rem !important;
+  top: calc(100% - 1.5rem) !important;
   left: 1.25rem !important;
-  top: auto !important;
-  right: auto !important;
-  transform: rotate(-90deg) !important;
+  transform: translateY(-100%) rotate(-90deg) !important;
+  transform-origin: center center !important;
 }
 
 body.gyro-landscape-270 #liveMapWrapper {
-  bottom: 1.5rem !important;
-  right: 1.5rem !important;
-  top: auto !important;
-  left: auto !important;
-  transform: rotate(-90deg) !important;
+  top: calc(100% - 1.5rem) !important;
+  left: calc(100% - 1.5rem) !important;
+  transform: translate(-100%, -100%) rotate(-90deg) !important;
+  transform-origin: center center !important;
 }
 
+/* ย้ายกล่องข้อมูลสดให้อยู่ต่ำลงมาจากแถบบาร์บน 6.75rem เพื่อความสมมาตรและไม่ถูกบดบัง */
 body.gyro-landscape-270 #liveBadgeWrapper {
-  top: 1.25rem !important;
-  right: 1.5rem !important;
-  bottom: auto !important;
-  left: auto !important;
-  transform: rotate(-90deg) !important;
+  top: 6.75rem !important;
+  left: calc(100% - 1.25rem) !important;
+  transform: translate(-100%, 0) rotate(-90deg) !important;
   transform-origin: center center !important;
+  max-width: min(70vh, 320px) !important;
 }
 
 body.gyro-landscape-270 #btnCameraBgQueue,
@@ -251,6 +273,11 @@ body.gyro-landscape-270 .slts-form-modal {
 body.gyro-landscape-270 .slts-swal-body-scroll {
   max-height: calc(min(92vw, 400px) - 55px) !important;
   overflow-y: auto !important;
+}
+
+.swal2-popup {
+  transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1), width 0.35s ease, max-height 0.35s ease;
+  will-change: transform;
 }
 
 .camera-live-frame::before, .camera-live-frame::after {
@@ -1553,9 +1580,25 @@ table.dataTable tbody td {
     }
   }
 
-  /* 3. ปรับตำแหน่งกล่องข้อมูลสดในแนวนอน ไม่ให้ชิดปุ่มชัตเตอร์ขวาเกินไป */
+  /* 3. ปรับตำแหน่งกล่องข้อมูลสดและ HUD ในแนวนอนแท้ */
+  #liveCompassWrapper {
+    top: 1rem !important;
+    left: 1rem !important;
+    transform: none !important;
+  }
+  #liveMapWrapper {
+    top: auto !important;
+    bottom: 1rem !important;
+    left: 1rem !important;
+    transform: none !important;
+  }
   #liveBadgeWrapper {
+    top: auto !important;
+    bottom: 1rem !important;
     right: max(7.5rem, calc(env(safe-area-inset-right, 0px) + 7rem)) !important;
+    left: auto !important;
+    transform: none !important;
+    max-width: min(55vw, 360px) !important;
   }
 
   /* 4. ปรับขนาด Modal และฟอร์มข้อมูลในแนวนอน (max-h-[85vh] + overflow-y-auto ขยายกว้างเพื่อประสิทธิภาพสูงสุด) */
