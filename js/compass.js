@@ -13,27 +13,30 @@ class CompassManager {
   }
 
   initSensor() {
-    if (window.DeviceOrientationEvent) {
-      window.addEventListener('deviceorientation', (e) => {
-        let heading = null;
-        if (e.webkitCompassHeading !== undefined) {
-          // iOS Safari
-          heading = e.webkitCompassHeading;
-        } else if (e.alpha !== null) {
-          // Android Chrome
-          heading = 360 - e.alpha;
-        }
+    const handleOrientationEvent = (e) => {
+      let heading = null;
+      if (e.webkitCompassHeading !== undefined) {
+        // iOS Safari
+        heading = e.webkitCompassHeading;
+      } else if (e.alpha !== null) {
+        // Android Chrome
+        heading = 360 - e.alpha;
+      }
 
-        if (heading !== null && !isNaN(heading)) {
-          this.heading = Math.round(heading) % 360;
-          this.hasOrientation = true;
-        }
+      if (heading !== null && !isNaN(heading)) {
+        this.heading = Math.round(heading) % 360;
+        this.hasOrientation = true;
+      }
 
-        // วัดการเอียง/หมุนเครื่องจาก Gyroscope (Gamma: เอียงซ้าย/ขวา, Beta: เอียงหน้า/หลัง)
-        if (e.gamma !== null && e.beta !== null) {
-          this.handleDeviceTilt(e.gamma, e.beta);
-        }
-      }, true);
+      // วัดการเอียง/หมุนเครื่องจาก Gyroscope (Gamma: เอียงซ้าย/ขวา, Beta: เอียงหน้า/หลัง)
+      if (e.gamma !== null && e.beta !== null && e.gamma !== undefined && e.beta !== undefined) {
+        this.handleDeviceTilt(e.gamma, e.beta);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('deviceorientation', handleOrientationEvent, true);
+      window.addEventListener('deviceorientationabsolute', handleOrientationEvent, true);
     }
   }
 

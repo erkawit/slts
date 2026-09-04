@@ -119,9 +119,138 @@ body {
   transform: scale(1.15);
 }
 
-/* Gyroscope rotation for HUD elements */
+/* ================================================================
+   Gyroscope Dynamic Landscape Transitions (สำหรับกรณีหมุนเครื่องขณะเปิด Portrait Lock)
+   ================================================================ */
 .gyro-rotate {
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), top 0.35s ease, bottom 0.35s ease, left 0.35s ease, right 0.35s ease;
+  transform-origin: center center;
+}
+
+/* 1. เมื่อหมุนกล้องเป็นแนวนอน 90 องศา (Landscape Left: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์ ตามภาพที่ 1) */
+body.gyro-landscape-90 #liveCompassWrapper {
+  top: 1.25rem !important;
+  right: 1.5rem !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: rotate(90deg) !important;
+}
+
+body.gyro-landscape-90 #liveMapWrapper {
+  top: 1.25rem !important;
+  left: 1.25rem !important;
+  bottom: auto !important;
+  right: auto !important;
+  transform: rotate(90deg) !important;
+}
+
+body.gyro-landscape-90 #liveBadgeWrapper {
+  bottom: 1.5rem !important;
+  left: 1.25rem !important;
+  right: auto !important;
+  top: auto !important;
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
+}
+
+/* หมุนปุ่มเมนูด้านบน และปุ่มชัตเตอร์ด้านล่าง */
+body.gyro-landscape-90 #btnCameraBgQueue,
+body.gyro-landscape-90 #btnEditMobileForm,
+body.gyro-landscape-90 #btnCameraCaseSearch,
+body.gyro-landscape-90 #btnCameraRouteMap,
+body.gyro-landscape-90 #btnCameraAuth,
+body.gyro-landscape-90 #btnFlipCamera,
+body.gyro-landscape-90 #btnCapture,
+body.gyro-landscape-90 #btnFlipOrientationQuick {
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
+}
+
+/* หมุน SweetAlert Modal ทุกตัวในระบบ เมื่อเปิดในแนวนอน (ภาพที่ 2) */
+body.gyro-landscape-90 .swal2-container {
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+body.gyro-landscape-90 .swal2-popup,
+body.gyro-landscape-90 .slts-swal-fullscreen-80 {
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
+  width: min(88vh, 640px) !important;
+  max-width: min(88vh, 640px) !important;
+  max-height: min(92vw, 400px) !important;
+  margin: auto !important;
+}
+
+body.gyro-landscape-90 .slts-form-modal {
+  max-height: min(92vw, 400px) !important;
+}
+
+body.gyro-landscape-90 .slts-swal-body-scroll {
+  max-height: calc(min(92vw, 400px) - 55px) !important;
+  overflow-y: auto !important;
+}
+
+/* 2. เมื่อหมุนกล้องเป็นแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา) */
+body.gyro-landscape-270 #liveCompassWrapper {
+  bottom: 1.5rem !important;
+  left: 1.25rem !important;
+  top: auto !important;
+  right: auto !important;
+  transform: rotate(-90deg) !important;
+}
+
+body.gyro-landscape-270 #liveMapWrapper {
+  bottom: 1.5rem !important;
+  right: 1.5rem !important;
+  top: auto !important;
+  left: auto !important;
+  transform: rotate(-90deg) !important;
+}
+
+body.gyro-landscape-270 #liveBadgeWrapper {
+  top: 1.25rem !important;
+  right: 1.5rem !important;
+  bottom: auto !important;
+  left: auto !important;
+  transform: rotate(-90deg) !important;
+  transform-origin: center center !important;
+}
+
+body.gyro-landscape-270 #btnCameraBgQueue,
+body.gyro-landscape-270 #btnEditMobileForm,
+body.gyro-landscape-270 #btnCameraCaseSearch,
+body.gyro-landscape-270 #btnCameraRouteMap,
+body.gyro-landscape-270 #btnCameraAuth,
+body.gyro-landscape-270 #btnFlipCamera,
+body.gyro-landscape-270 #btnCapture,
+body.gyro-landscape-270 #btnFlipOrientationQuick {
+  transform: rotate(-90deg) !important;
+  transform-origin: center center !important;
+}
+
+body.gyro-landscape-270 .swal2-container {
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+body.gyro-landscape-270 .swal2-popup,
+body.gyro-landscape-270 .slts-swal-fullscreen-80 {
+  transform: rotate(-90deg) !important;
+  transform-origin: center center !important;
+  width: min(88vh, 640px) !important;
+  max-width: min(88vh, 640px) !important;
+  max-height: min(92vw, 400px) !important;
+  margin: auto !important;
+}
+
+body.gyro-landscape-270 .slts-form-modal {
+  max-height: min(92vw, 400px) !important;
+}
+
+body.gyro-landscape-270 .slts-swal-body-scroll {
+  max-height: calc(min(92vw, 400px) - 55px) !important;
+  overflow-y: auto !important;
 }
 
 .camera-live-frame::before, .camera-live-frame::after {

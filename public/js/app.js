@@ -2716,22 +2716,25 @@ function applyGyroOrientation(orientation, angle) {
   state.deviceOrientation = orientation;
 
   const isScreenLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || (window.innerWidth > window.innerHeight);
-  const rotatableElements = document.querySelectorAll('.gyro-rotate');
+
+  document.body.classList.remove('gyro-landscape-90', 'gyro-landscape-270', 'gyro-portrait');
 
   if (isScreenLandscape) {
-    // หน้าจอหมุนตามจอแนวนอนจริงแล้ว: รีเซ็ต transform กลับเป็น 0 เพราะ CSS หมุนหน้าจอให้แล้ว
-    rotatableElements.forEach(el => {
-      el.style.transform = 'rotate(0deg)';
-    });
+    // หน้าจอหมุนตามจอแนวนอนจริงแล้ว: CSS @media (orientation: landscape) จัดการ
+    document.body.classList.add('gyro-portrait');
     if (state.captureOrientation !== 'landscape' && typeof setCaptureOrientation === 'function') {
       setCaptureOrientation('landscape');
     }
   } else {
-    // หน้าจออยู่ในแนวตั้ง (เช่น ผู้ใช้เปิด Portrait Lock ในโทรศัพท์ไว้):
-    // หมุนไอคอนและเนื้อหาปุ่ม/ลายน้ำตามมุมเอียงจริงของ Gyro เพื่อให้อยู่ในแนวระนาบพอดีกับสายตา
-    rotatableElements.forEach(el => {
-      el.style.transform = `rotate(${angle}deg)`;
-    });
+    // หน้าจออยู่ในแนวตั้ง (เช่น โทรศัพท์เปิด Portrait Lock ไว้):
+    // สลับคลาสเพื่อย้ายตำแหน่งลายน้ำ หมุนไอคอน และหมุน SweetAlert Modal 90 องศาตามแบบภาพที่ 1 และ 2
+    if (angle === 90) {
+      document.body.classList.add('gyro-landscape-90');
+    } else if (angle === -90 || angle === 270) {
+      document.body.classList.add('gyro-landscape-270');
+    } else {
+      document.body.classList.add('gyro-portrait');
+    }
 
     const targetMode = Math.abs(angle) === 90 ? 'landscape' : 'portrait';
     if (state.captureOrientation !== targetMode && typeof setCaptureOrientation === 'function') {
