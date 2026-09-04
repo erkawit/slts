@@ -13091,6 +13091,31 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
     }
   }
 
+  // 3.1 กรณีเป็นที่ทำการปกครองส่วนท้องถิ่น: ตรวจสอบจากชื่อที่ทำการ ใน ตำบล + อำเภอ + จังหวัด เดียวกัน
+  if (!matched && subdistrict && locationText) {
+    const isLocalAdminSearch = locationText.includes('อบต') || locationText.includes('เทศบาล') || locationText.includes('ที่ว่าการ') || locationText.includes('ที่ทำการ') || locationText.includes('กำนัน') || locationText.includes('ผู้ใหญ่บ้าน');
+    if (isLocalAdminSearch) {
+      matched = allRows.find(r => {
+        const rProv = getRowProvince(r);
+        if (province && rProv && rProv !== province) return false;
+        const rDist = (r['อำเภอ'] || '').trim();
+        if (district && rDist && rDist !== district) return false;
+        const rSub = (r['ตำบล'] || '').trim();
+        const subMatch = rSub && (rSub === subdistrict || rSub.includes(subdistrict) || subdistrict.includes(rSub));
+        if (!subMatch) return false;
+
+        const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
+        const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
+        const adminMatch = rLoc.includes('ที่ทำการ') || rLoc.includes('อบต') || rLoc.includes('เทศบาล') || rLoc.includes('ที่ว่าการ') || rLoc.includes('กำนัน') || rLoc.includes('ผู้ใหญ่บ้าน');
+        return adminMatch && !isNaN(lat) && lat > 0;
+      });
+      if (matched) {
+        matchType = 'near';
+        matchNote = `ที่ทำการปกครองส่วนท้องถิ่น (ต.${subdistrict})`;
+      }
+    }
+  }
+
   // ส่งคืนผลลัพธ์
   if (matched) {
     const lat = parseFloat(matched['ละติจูด (Lat)'] || matched['ละติจูด'] || 0);
@@ -13685,15 +13710,56 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
           </div>
         </div>
 
-        <!-- ที่ทำการปกครองส่วนท้องถิ่น -->
-        <div id="${prefix}localAdminAddressFields" class="${locType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'block' : 'hidden'}">
-          <input 
-            type="text" 
-            id="${prefix}localAdminName" 
-            value="${localAdminNameVal}" 
-            placeholder="ที่ทำการปกครองส่วนท้องถิ่น เช่น อบต.โนนสูง" 
-            class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs text-gray-800 focus:border-blue-500"
-          >
+        <!-- ที่ทำการปกครองส่วนท้องถิ่น (ระบบค้นหาข้อมูลที่ตั้ง อบต./เทศบาล/ที่ว่าการอำเภอ) -->
+        <div id="${prefix}localAdminAddressFields" class="${locType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'block' : 'hidden'} space-y-2">
+          <div class="flex gap-1.5 items-stretch">
+            <div class="relative flex-1">
+              <input 
+                type="text" 
+                id="${prefix}localAdminName" 
+                value="${localAdminNameVal}" 
+                placeholder="พิมพ์ชื่อ อบต., เทศบาล หรือ ที่ว่าการอำเภอ เพื่อค้นหา..." 
+                class="w-full bg-white border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-xl pl-8 pr-3 py-2 text-xs font-semibold text-gray-800"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();searchLocalAdminLocation('${prefix}');}"
+              >
+              <i class="fa-solid fa-landmark absolute left-2.5 top-2.5 text-gray-400 text-xs"></i>
+            </div>
+            <button 
+              type="button" 
+              id="${prefix}btnSearchLocalAdmin" 
+              onclick="searchLocalAdminLocation('${prefix}')" 
+              class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs px-3 py-2 rounded-xl whitespace-nowrap shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="ค้นหาข้อมูลที่ตั้งและพิกัดของที่ทำการปกครองส่วนท้องถิ่น"
+            >
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>ค้นหาที่ทำการ</span>
+            </button>
+          </div>
+
+          <!-- แถบปุ่มลัดเลือกด่วนตาม ตำบล/อำเภอ ที่เลือกด้านบน -->
+          <div class="flex items-center gap-1.5 flex-wrap pt-0.5">
+            <span class="text-[10px] text-gray-500 font-semibold flex items-center gap-1 shrink-0">
+              <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i> เลือกด่วน:
+            </span>
+            <div id="${prefix}localAdminQuickPills" class="flex items-center gap-1.5 flex-wrap">
+              <!-- Dynamically populated pills -->
+            </div>
+          </div>
+
+          <!-- กล่องแสดงผลการค้นหาที่ทำการปกครองส่วนท้องถิ่น -->
+          <div id="${prefix}localAdminSearchResults" class="hidden rounded-xl border border-blue-200 bg-blue-50/40 p-2 space-y-1.5 transition">
+            <div class="flex items-center justify-between px-1 text-[11px] font-bold text-blue-900 border-b border-blue-200/60 pb-1">
+              <span id="${prefix}localAdminResultsTitle" class="flex items-center gap-1">
+                <i class="fa-solid fa-building-flag text-blue-600"></i> ผลการค้นหาที่ทำการ
+              </span>
+              <button type="button" onclick="document.getElementById('${prefix}localAdminSearchResults').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xs cursor-pointer">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div id="${prefix}localAdminResultsList" class="max-h-48 overflow-y-auto space-y-1.5 pr-0.5 slts-swal-body-scroll text-xs">
+              <!-- Injected search results -->
+            </div>
+          </div>
         </div>
 
         <!-- อื่นๆ -->
@@ -13890,14 +13956,359 @@ window.handleScheduleLocationTypeChange = function(prefix, value) {
   }
 
   if (adminFields) {
-    if (value === 'ที่ทำการปกครองส่วนท้องถิ่น') adminFields.classList.remove('hidden');
-    else adminFields.classList.add('hidden');
+    if (value === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+      adminFields.classList.remove('hidden');
+      if (typeof window.updateLocalAdminQuickPills === 'function') {
+        window.updateLocalAdminQuickPills(prefix);
+      }
+    } else {
+      adminFields.classList.add('hidden');
+    }
   }
 
   if (otherFields) {
     if (value === 'อื่นๆ') otherFields.classList.remove('hidden');
     else otherFields.classList.add('hidden');
   }
+};
+
+/**
+ * อัปเดตปุ่มเลือกด่วนสำหรับที่ทำการปกครองส่วนท้องถิ่น (อบต., เทศบาล, ที่ว่าการอำเภอ) ตามตำบล/อำเภอที่เลือก
+ */
+window.updateLocalAdminQuickPills = function(prefix) {
+  const container = document.getElementById(`${prefix}localAdminQuickPills`);
+  if (!container) return;
+
+  const provEl = document.getElementById(`${prefix}province`);
+  const distEl = document.getElementById(`${prefix}district`);
+  const subEl = document.getElementById(`${prefix}subdistrict`);
+
+  const sub = subEl?.value?.trim() || '';
+  const dist = distEl?.value?.trim() || '';
+
+  const pills = [];
+  if (sub) {
+    pills.push(`อบต.${sub}`);
+    pills.push(`เทศบาลตำบล${sub}`);
+  }
+  if (dist) {
+    pills.push(`ที่ว่าการอำเภอ${dist}`);
+    pills.push(`เทศบาลเมือง${dist}`);
+  }
+
+  if (pills.length === 0) {
+    container.innerHTML = `<span class="text-[10px] text-gray-400 font-normal">กรุณาเลือกตำบลหรืออำเภอ</span>`;
+    return;
+  }
+
+  container.innerHTML = pills.map(p => `
+    <button 
+      type="button" 
+      onclick="quickSelectLocalAdmin('${prefix}', '${p}')" 
+      class="text-[10px] bg-white hover:bg-blue-50 text-blue-700 hover:text-blue-900 border border-blue-200 hover:border-blue-400 px-2 py-0.5 rounded-md font-semibold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+      title="คลิกเพื่อเลือกและค้นหาพิกัด ${p}"
+    >
+      <i class="fa-solid fa-building-columns text-[9px] text-blue-500"></i>
+      <span>${p}</span>
+    </button>
+  `).join('');
+};
+
+/**
+ * คลิกปุ่มลัดเลือกด่วนที่ทำการ แล้วนำไปค้นหาพิกัดทันที
+ */
+window.quickSelectLocalAdmin = function(prefix, name) {
+  const adminInput = document.getElementById(`${prefix}localAdminName`);
+  if (adminInput) adminInput.value = name;
+  window.searchLocalAdminLocation(prefix);
+};
+
+/**
+ * ค้นหาข้อมูลที่ตั้งของที่ทำการปกครองส่วนท้องถิ่น (อบต., เทศบาล, ที่ว่าการอำเภอ)
+ * จาก 2 แหล่งข้อมูล: 1. ประวัติในระบบศาล (state.allSheetRows) 2. OpenStreetMap Geocoding
+ */
+window.searchLocalAdminLocation = async function(prefix) {
+  const adminInput = document.getElementById(`${prefix}localAdminName`);
+  const provEl = document.getElementById(`${prefix}province`);
+  const distEl = document.getElementById(`${prefix}district`);
+  const subEl = document.getElementById(`${prefix}subdistrict`);
+  const resultsContainer = document.getElementById(`${prefix}localAdminSearchResults`);
+  const resultsList = document.getElementById(`${prefix}localAdminResultsList`);
+  const resultsTitle = document.getElementById(`${prefix}localAdminResultsTitle`);
+  const btnSearch = document.getElementById(`${prefix}btnSearchLocalAdmin`);
+
+  if (!resultsContainer || !resultsList) return;
+
+  const rawQuery = (adminInput?.value || '').trim();
+  const province = provEl?.value?.trim() || '';
+  const district = distEl?.value?.trim() || '';
+  const subdistrict = subEl?.value?.trim() || '';
+
+  // ถ้าช่องค้นหาว่าง ให้ใช้ค่าเริ่มต้นตามตำบล/อำเภอ
+  let query = rawQuery;
+  if (!query || query === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+    if (subdistrict) {
+      query = `อบต.${subdistrict}`;
+      if (adminInput) adminInput.value = query;
+    } else if (district) {
+      query = `ที่ว่าการอำเภอ${district}`;
+      if (adminInput) adminInput.value = query;
+    } else {
+      query = 'อบต.';
+    }
+  }
+
+  resultsContainer.classList.remove('hidden');
+  resultsList.innerHTML = `
+    <div class="p-3 text-center text-blue-600 bg-white rounded-xl border border-dashed border-blue-200 text-xs">
+      <i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังค้นหาข้อมูลที่ตั้ง "${query}"...
+    </div>
+  `;
+
+  if (btnSearch) {
+    btnSearch.disabled = true;
+    btnSearch.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>ค้นหา...</span>';
+  }
+
+  try {
+    const combinedResults = [];
+    const seenKeys = new Set();
+
+    // 1. ค้นหาจากฐานข้อมูลประวัติส่งหมายในระบบศาล (state.allSheetRows)
+    const allRows = state.allSheetRows || [];
+    const cleanQ = query.toLowerCase().replace(/[\s\.\-\_]/g, '');
+
+    allRows.forEach(r => {
+      const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || 0);
+      const lng = parseFloat(r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || 0);
+      if (isNaN(lat) || isNaN(lng) || lat <= 0 || lng <= 0) return;
+
+      const rProv = (getRowProvince(r) || '').trim();
+      if (province && rProv && rProv !== province) return;
+
+      const rDist = (r['อำเภอ'] || '').trim();
+      const rSub = (r['ตำบล'] || '').trim();
+      const rLoc = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').trim();
+      const cleanLoc = rLoc.toLowerCase().replace(/[\s\.\-\_]/g, '');
+
+      const isLocalAdmin = rLoc.includes('ที่ทำการ') || rLoc.includes('อบต') || rLoc.includes('เทศบาล') || rLoc.includes('ที่ว่าการ') || rLoc.includes('กำนัน') || rLoc.includes('ผู้ใหญ่บ้าน') || rLoc.includes('ทต.') || rLoc.includes('อบจ');
+      
+      const matchesQuery = cleanLoc.includes(cleanQ) || cleanQ.includes(cleanLoc) || rLoc.includes(query);
+      const matchesArea = (subdistrict && (rSub === subdistrict || rLoc.includes(subdistrict))) || (district && (rDist === district || rLoc.includes(district)));
+
+      if ((isLocalAdmin && (matchesQuery || matchesArea)) || matchesQuery) {
+        const coordKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+        if (!seenKeys.has(coordKey)) {
+          seenKeys.add(coordKey);
+          let score = 100;
+          if (matchesQuery) score += 200;
+          if (subdistrict && rSub === subdistrict) score += 150;
+          if (district && rDist === district) score += 50;
+
+          combinedResults.push({
+            name: rLoc || `ที่ทำการปกครองส่วนท้องถิ่น ต.${rSub}`,
+            lat,
+            lng,
+            subdistrict: rSub,
+            district: rDist,
+            province: rProv,
+            source: 'court',
+            sourceLabel: 'ประวัติในระบบศาล',
+            badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+            imageUrl: extractRowImageUrl(r),
+            caseNumber: r['เลขคดี'] || '',
+            dateTime: formatThaiDateDisplay(r['วัน-เวลาบันทึก'] || r['Timestamp'] || ''),
+            score
+          });
+        }
+      }
+    });
+
+    // 2. ค้นหาผ่าน OpenStreetMap / Nominatim (Geocoding API)
+    try {
+      let osmQuery = query;
+      if (osmQuery.startsWith('อบต.')) {
+        osmQuery = 'องค์การบริหารส่วนตำบล' + osmQuery.substring(4);
+      } else if (osmQuery.startsWith('อบต ')) {
+        osmQuery = 'องค์การบริหารส่วนตำบล ' + osmQuery.substring(4);
+      }
+      
+      const searchTerms = [osmQuery];
+      if (subdistrict && !osmQuery.includes(subdistrict)) searchTerms.push(subdistrict);
+      if (district && !osmQuery.includes(district)) searchTerms.push(district);
+      if (province && !osmQuery.includes(province)) searchTerms.push(province);
+      const fullSearchStr = searchTerms.join(' ');
+
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullSearchStr)}&countrycodes=th&limit=5`, {
+        headers: { 'User-Agent': 'SLTS-Court-LocalAdmin-Search/1.0' },
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (res.ok) {
+        const osmData = await res.json();
+        if (Array.isArray(osmData)) {
+          osmData.forEach(item => {
+            const lat = parseFloat(item.lat);
+            const lng = parseFloat(item.lon);
+            if (isNaN(lat) || isNaN(lng)) return;
+            const coordKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+            if (!seenKeys.has(coordKey)) {
+              seenKeys.add(coordKey);
+              const displayName = item.display_name || '';
+              const shortName = displayName.split(',')[0].trim();
+              combinedResults.push({
+                name: shortName || query,
+                lat,
+                lng,
+                subdistrict: subdistrict,
+                district: district,
+                province: province,
+                source: 'osm',
+                sourceLabel: 'แผนที่ OpenStreetMap',
+                badgeClass: 'bg-blue-100 text-blue-800 border-blue-300',
+                imageUrl: '',
+                caseNumber: '',
+                dateTime: '',
+                score: 80
+              });
+            }
+          });
+        }
+      }
+    } catch (osmErr) {
+      console.warn('OSM Local admin search fallback error:', osmErr);
+    }
+
+    // เรียงตามคะแนนความเกี่ยวข้อง
+    combinedResults.sort((a, b) => b.score - a.score);
+
+    if (resultsTitle) {
+      resultsTitle.innerHTML = `<i class="fa-solid fa-building-flag text-blue-600"></i> ผลการค้นหาที่ทำการ (${combinedResults.length} รายการ)`;
+    }
+
+    if (combinedResults.length === 0) {
+      resultsList.innerHTML = `
+        <div class="p-3 text-center text-gray-500 bg-white rounded-xl border border-dashed border-gray-300 text-xs">
+          <i class="fa-solid fa-circle-exclamation text-amber-500 text-base mb-1 block"></i>
+          ไม่พบข้อมูลที่ตั้งของ "${query}" ในระบบหรือแผนที่<br>
+          <span class="text-[11px] text-gray-400 mt-1 block">💡 ท่านสามารถระบุพิกัดเองในช่องพิกัด GPS หรือกดปุ่ม "ดึงพิกัด" ด้านล่าง</span>
+        </div>
+      `;
+      return;
+    }
+
+    // Render results list
+    resultsList.innerHTML = combinedResults.map((item) => {
+      const safeName = item.name.replace(/'/g, "\\'");
+      const safeImg = (item.imageUrl || '').replace(/'/g, "\\'");
+      return `
+        <div class="p-2 bg-white rounded-xl border border-gray-200 hover:border-blue-400 hover:bg-blue-50/30 transition flex items-center justify-between gap-2 shadow-2xs">
+          <div class="flex items-start gap-2 min-w-0 flex-1">
+            <div class="w-7 h-7 rounded-lg ${item.source === 'court' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'} flex items-center justify-center text-xs shrink-0 mt-0.5">
+              <i class="fa-solid fa-landmark"></i>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5 flex-wrap mb-0.5">
+                <span class="text-[9px] px-1.5 py-0.2 rounded border font-bold ${item.badgeClass}">
+                  <i class="fa-solid ${item.source === 'court' ? 'fa-check' : 'fa-globe'} mr-0.5"></i>${item.sourceLabel}
+                </span>
+                ${item.caseNumber ? `<span class="text-[9px] text-gray-500 font-mono"><i class="fa-solid fa-scale-balanced mr-0.5"></i>${item.caseNumber}</span>` : ''}
+              </div>
+              <p class="font-bold text-gray-900 text-xs truncate" title="${item.name}">${item.name}</p>
+              <div class="text-[10px] text-gray-500 font-mono mt-0.5 flex items-center gap-1.5">
+                <span><i class="fa-solid fa-location-crosshairs text-gray-400 mr-0.5"></i>${item.lat.toFixed(6)}, ${item.lng.toFixed(6)}</span>
+                ${item.dateTime ? `<span>• ${item.dateTime}</span>` : ''}
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1.5 shrink-0">
+            ${item.imageUrl ? `
+              <img src="${item.imageUrl}" alt="ภาพ" class="w-8 h-8 object-cover rounded-lg border border-gray-200 shrink-0" onerror="this.style.display='none'">
+            ` : ''}
+            <button 
+              type="button" 
+              onclick="applySelectedLocalAdminLocation('${prefix}', '${safeName}', ${item.lat}, ${item.lng}, '${safeImg}')" 
+              class="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shrink-0 shadow-2xs"
+              title="เลือกใช้พิกัดนี้สำหรับส่งหมาย"
+            >
+              <i class="fa-solid fa-location-pin"></i>
+              <span>เลือกพิกัดนี้</span>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } catch (err) {
+    console.error('Error in searchLocalAdminLocation:', err);
+    resultsList.innerHTML = `
+      <div class="p-3 text-center text-rose-500 bg-white rounded-xl border border-dashed border-rose-200 text-xs">
+        <i class="fa-solid fa-triangle-exclamation text-base mb-1 block"></i>
+        เกิดข้อผิดพลาดในการค้นหา: ${err.message || err}
+      </div>
+    `;
+  } finally {
+    if (btnSearch) {
+      btnSearch.disabled = false;
+      btnSearch.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i><span>ค้นหาที่ทำการ</span>';
+    }
+  }
+};
+
+/**
+ * นำพิกัดและข้อมูลที่ทำการปกครองส่วนท้องถิ่นที่เลือกไปใส่ในแบบฟอร์ม
+ */
+window.applySelectedLocalAdminLocation = function(prefix, name, lat, lng, imageUrl) {
+  const adminInput = document.getElementById(`${prefix}localAdminName`);
+  const coordsInput = document.getElementById(`${prefix}coordinates`);
+  const latEl = document.getElementById(`${prefix}selectedLat`);
+  const lngEl = document.getElementById(`${prefix}selectedLng`);
+  const textEl = document.getElementById(`${prefix}selectedRefText`);
+  const imgEl = document.getElementById(`${prefix}selectedRefImg`);
+  const noteEl = document.getElementById(`${prefix}selectedRefNote`);
+  const statusHint = document.getElementById(`${prefix}gpsStatusHint`);
+  const noticeText = document.getElementById(`${prefix}gpsNoticeText`);
+  const resultsContainer = document.getElementById(`${prefix}localAdminSearchResults`);
+
+  if (adminInput) adminInput.value = name;
+  if (coordsInput) coordsInput.value = `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
+  if (latEl) latEl.value = lat;
+  if (lngEl) lngEl.value = lng;
+  if (textEl) textEl.value = name;
+  if (noteEl) noteEl.value = `ที่ทำการปกครองส่วนท้องถิ่น: ${name}`;
+
+  if (imageUrl) {
+    if (imgEl) imgEl.value = imageUrl;
+    const planImgData = document.getElementById(`${prefix}routePlanImageDataUrl`);
+    const planImgPreview = document.getElementById(`${prefix}routePlanImgPreview`);
+    const planImgPreviewContainer = document.getElementById(`${prefix}routePlanImgPreviewContainer`);
+    const planImgPickerBox = document.getElementById(`${prefix}routePlanImgPickerBox`);
+    const planImgFileName = document.getElementById(`${prefix}routePlanImgFileName`);
+
+    if (planImgData) planImgData.value = imageUrl;
+    if (planImgPreview) planImgPreview.src = imageUrl;
+    if (planImgFileName) planImgFileName.textContent = name;
+    if (planImgPreviewContainer) {
+      planImgPreviewContainer.classList.remove('hidden');
+      planImgPreviewContainer.classList.add('flex');
+    }
+    if (planImgPickerBox) planImgPickerBox.classList.add('hidden');
+  }
+
+  if (statusHint) {
+    statusHint.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>เลือกจากที่ทำการ</span>`;
+  }
+  if (noticeText) {
+    noticeText.innerHTML = `<span class="text-emerald-600 font-semibold"><i class="fa-solid fa-check mr-1"></i>พิกัดที่ทำการ: ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)} (${name})</span>`;
+  }
+
+  if (resultsContainer) {
+    resultsContainer.classList.add('hidden');
+  }
+
+  // อัปเดตรายการหมุดอ้างอิง
+  window.updateRefPinsSuggestions(prefix);
 };
 
 /**
@@ -13933,6 +14344,9 @@ function bindScheduleFormEvents(prefix = 'modal_') {
       const subs = firstD ? getSubdistrictsByDistrict(p, firstD) : [];
       subEl.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('');
       window.clearSelectedRefPin(prefix);
+      if (typeof window.updateLocalAdminQuickPills === 'function') {
+        window.updateLocalAdminQuickPills(prefix);
+      }
       refreshSuggestions();
     });
 
@@ -13942,11 +14356,17 @@ function bindScheduleFormEvents(prefix = 'modal_') {
       const subs = d ? getSubdistrictsByDistrict(p, d) : [];
       subEl.innerHTML = subs.map(s => `<option value="${s}">${s}</option>`).join('');
       window.clearSelectedRefPin(prefix);
+      if (typeof window.updateLocalAdminQuickPills === 'function') {
+        window.updateLocalAdminQuickPills(prefix);
+      }
       refreshSuggestions();
     });
 
     subEl.addEventListener('change', () => {
       window.clearSelectedRefPin(prefix);
+      if (typeof window.updateLocalAdminQuickPills === 'function') {
+        window.updateLocalAdminQuickPills(prefix);
+      }
       refreshSuggestions();
     });
   }
@@ -13994,6 +14414,11 @@ function bindScheduleFormEvents(prefix = 'modal_') {
         }
       }
     });
+  }
+
+  // เริ่มต้นปุ่มลัดเลือกด่วนที่ทำการปกครองส่วนท้องถิ่น
+  if (typeof window.updateLocalAdminQuickPills === 'function') {
+    window.updateLocalAdminQuickPills(prefix);
   }
 
   // เริ่มค้นหาหมุดอ้างอิงทันทีเมื่อเปิดแบบฟอร์ม
@@ -14097,13 +14522,24 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
 
     const isLocalAdmin = rLoc.includes('ที่ทำการ') || rLoc.includes('อบต') || rLoc.includes('เทศบาล') || rLoc.includes('ที่ว่าการ') || rLoc.includes('กำนัน') || rLoc.includes('ผู้ใหญ่บ้าน') || rLoc.includes('ทต.') || rLoc.includes('อบจ');
 
+    const locType = document.getElementById(`${prefix}locationType`)?.value || 'หมายบ้าน';
+    const isLocalAdminType = (locType === 'ที่ทำการปกครองส่วนท้องถิ่น');
+    const adminQuery = (document.getElementById(`${prefix}localAdminName`)?.value || '').trim().toLowerCase();
+    const adminMatch = isLocalAdminType && isLocalAdmin && (
+      !adminQuery || 
+      adminQuery === 'ที่ทำการปกครองส่วนท้องถิ่น' || 
+      rLoc.toLowerCase().includes(adminQuery) || 
+      adminQuery.includes(rLoc.toLowerCase()) ||
+      rLoc.includes(subdistrict)
+    );
+
     const caseMatch = cleanEnteredCase && cleanRCase && (cleanRCase === cleanEnteredCase || cleanRCase.includes(cleanEnteredCase) || cleanEnteredCase.includes(cleanRCase));
     const houseMatch = houseNo && (rHouse === houseNo || rLoc.includes(houseNo));
     const mooMatch = moo && (rMoo === moo || rLoc.includes(`ม.${moo}`) || rLoc.includes(`หมู่ ${moo}`) || rLoc.includes(`หมู่ที่ ${moo}`) || (moo.length >= 2 && rLoc.includes(moo)));
 
-    // ข้อกำหนดสำคัญ: หากไม่มีบ้านเลขที่ตรงกัน หรือหมู่ที่/หมู่บ้านตรงกัน (และเลขคดีไม่ตรงกัน)
-    // ไม่ต้องนำเข้ามาแสดงผลเด็ดขาด เพราะข้อมูลจะไม่ถูกต้อง อย่างน้อยต้องอยู่ในอำเภอ ตำบล และหมู่บ้าน/หมู่ที่เดียวกันเท่านั้น
-    if (!caseMatch && !houseMatch && !mooMatch) {
+    // ข้อกำหนดสำคัญ: หากไม่มีบ้านเลขที่ตรงกัน หรือหมู่ที่/หมู่บ้านตรงกัน หรือที่ทำการปกครองส่วนท้องถิ่นตรงกัน (และเลขคดีไม่ตรงกัน)
+    // ไม่ต้องนำเข้ามาแสดงผลเด็ดขาด เพราะข้อมูลจะไม่ถูกต้อง อย่างน้อยต้องอยู่ในอำเภอ ตำบล และหมู่บ้าน/หมู่ที่ หรือที่ทำการเดียวกันเท่านั้น
+    if (!caseMatch && !houseMatch && !mooMatch && !adminMatch) {
       return;
     }
 
@@ -14117,6 +14553,11 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
       badgeText = 'เลขคดีตรงกันในระบบ';
       badgeClass = 'bg-blue-100 text-blue-800 border-blue-300 font-bold';
       icon = 'fa-scale-balanced';
+    } else if (adminMatch) {
+      score = 800;
+      badgeText = `🏛️ ที่ทำการปกครองส่วนท้องถิ่น (ต.${subdistrict})`;
+      badgeClass = 'bg-amber-100 text-amber-900 border-amber-300 font-bold';
+      icon = 'fa-landmark';
     } else if (houseMatch && mooMatch) {
       score = 500;
       badgeText = 'บ้านเลขที่และหมู่ตรงกัน';
@@ -14151,11 +14592,12 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
   });
 
   if (evaluated.length === 0) {
+    const locType = document.getElementById(`${prefix}locationType`)?.value || 'หมายบ้าน';
+    const isLocalAdminType = (locType === 'ที่ทำการปกครองส่วนท้องถิ่น');
     listContainer.innerHTML = `
       <div class="p-3 text-center text-gray-500 bg-white rounded-xl border border-dashed border-gray-300 text-xs">
         <i class="fa-solid fa-circle-exclamation text-amber-500 text-sm mb-1 block"></i>
-        ไม่พบหมุดที่มีบ้านเลขที่ หรือหมู่บ้าน/หมู่ที่ตรงกันใน ต.<b>${subdistrict}</b> อ.<b>${district}</b><br>
-        <span class="text-[11px] text-gray-400 mt-1 block">(ระบบไม่แสดงผลและไม่เลือกหมุด เพื่อความถูกต้องของการนำส่งหมาย)</span>
+        ${isLocalAdminType ? `ไม่พบหมุดที่ทำการปกครองส่วนท้องถิ่นใน ต.<b>${subdistrict}</b> อ.<b>${district}</b> ในฐานข้อมูลระบบ<br><span class="text-[11px] text-blue-600 mt-1 block">💡 สามารถใช้ปุ่ม "ค้นหาที่ทำการ" ด้านบน เพื่อค้นหาพิกัดจากแผนที่ได้</span>` : `ไม่พบหมุดที่มีบ้านเลขที่ หรือหมู่บ้าน/หมู่ที่ตรงกันใน ต.<b>${subdistrict}</b> อ.<b>${district}</b><br><span class="text-[11px] text-gray-400 mt-1 block">(ระบบไม่แสดงผลและไม่เลือกหมุด เพื่อความถูกต้องของการนำส่งหมาย)</span>`}
       </div>
     `;
     return;
@@ -14830,7 +15272,7 @@ window.openMapAreaSelectorModal = function() {
   Swal.fire({
     title: '<div class="flex items-center justify-center gap-2 text-base sm:text-lg font-bold text-gray-900"><i class="fa-solid fa-map-location-dot text-rose-500 text-xl"></i> ระบุพื้นที่ & จัดเส้นทางส่งหมาย</div>',
     html: `
-      <div class="text-left text-xs space-y-3">
+      <div class="text-left text-xs space-y-3 max-h-[72vh] sm:max-h-[75vh] overflow-y-auto pr-1.5 slts-swal-body-scroll">
         
         <!-- Tabs Header -->
         <div class="flex border-b border-gray-200 gap-1 sm:gap-2 mb-2 overflow-x-auto">
@@ -15021,7 +15463,10 @@ window.openMapAreaSelectorModal = function() {
       </div>
     `,
     width: '750px',
-    customClass: { popup: 'rounded-2xl p-4 sm:p-5' },
+    customClass: {
+      popup: 'rounded-2xl p-4 sm:p-5 max-w-[95vw] slts-route-modal-popup',
+      htmlContainer: 'overflow-hidden m-0 p-0 text-left flex-1 min-h-0'
+    },
     showCloseButton: true,
     showCancelButton: true,
     confirmButtonText: '<i class="fa-solid fa-check mr-1.5"></i> ยืนยัน (แสดงหมุดและเส้นทาง)',
@@ -15609,12 +16054,15 @@ window.openAddRouteStopModal = function(editIndex = null) {
   Swal.fire({
     title: `<div class="flex items-center justify-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-${isEditing ? 'pen-to-square' : 'plus'} text-blue-600"></i> ${isEditing ? `แก้ไขรายการส่งหมาย (ลำดับที่ ${editIndex + 1})` : 'เพิ่มรายการส่งหมายใหม่'}</div>`,
     html: `
-      <div class="p-1">
+      <div class="p-1 max-h-[70vh] sm:max-h-[74vh] overflow-y-auto pr-1.5 slts-swal-body-scroll text-left">
         ${getSummonsFormHtml('quick_', initialData)}
       </div>
     `,
     width: '680px',
-    customClass: { popup: 'rounded-2xl p-4 sm:p-5' },
+    customClass: {
+      popup: 'rounded-2xl p-4 sm:p-5 max-w-[95vw] slts-route-modal-popup',
+      htmlContainer: 'overflow-hidden m-0 p-0 text-left flex-1 min-h-0'
+    },
     showCancelButton: true,
     confirmButtonText: isEditing ? 'บันทึกการแก้ไข' : 'เพิ่มรายการ',
     cancelButtonText: 'ยกเลิก',
@@ -15660,7 +16108,7 @@ window.openAddRouteStopModal = function(editIndex = null) {
 
       const stopItem = {
         id: isEditing ? state.currentRouteStops[editIndex].id : ('stop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6)),
-        caseNumber: data.caseNumber || `${data.prefix}${data.caseNo}/${data.caseYear}`.trim() || 'หมายส่ง',
+        caseNumber: data.caseNumber || (data.prefix || data.caseNo ? `${data.prefix}${data.caseNo}/${data.caseYear}`.trim() : (data.localAdminName || data.customOtherLocationName || 'หมายส่ง')),
         courtType: data.courtType,
         prefix: data.prefix,
         caseNo: data.caseNo,

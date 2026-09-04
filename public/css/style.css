@@ -658,6 +658,22 @@ table.dataTable tbody td {
 .slts-swal-body-scroll::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
 .slts-swal-body-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
 
+/* Dedicated responsive SweetAlert popup for route modals */
+.slts-route-modal-popup {
+  max-height: 92vh !important;
+  max-height: 92dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.slts-route-modal-popup .swal2-html-container {
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  text-align: left !important;
+}
+
 /* ================================================================
    Shared Modal Header
    ================================================================ */
