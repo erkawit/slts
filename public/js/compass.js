@@ -6,6 +6,9 @@ class CompassManager {
   constructor() {
     this.heading = 0; // ทิศเป็นองศา 0-360
     this.hasOrientation = false;
+    this.deviceAngle = 0; // 0, 90, -90, 180
+    this.deviceOrientation = 'portrait'; // 'portrait' | 'landscape'
+    this.orientationCallbacks = [];
     this.initSensor();
   }
 
@@ -25,8 +28,76 @@ class CompassManager {
           this.heading = Math.round(heading) % 360;
           this.hasOrientation = true;
         }
+
+        // วัดการเอียง/หมุนเครื่องจาก Gyroscope (Gamma: เอียงซ้าย/ขวา, Beta: เอียงหน้า/หลัง)
+        if (e.gamma !== null && e.beta !== null) {
+          this.handleDeviceTilt(e.gamma, e.beta);
+        }
       }, true);
     }
+  }
+
+  /**
+   * ตรวจจับองศาการหมุนของตัวเครื่องตาม Gyroscope (แม้ผู้ใช้จะเปิด Portrait Lock ในโทรศัพท์ไว้ก็ตาม)
+   */
+  handleDeviceTilt(gamma, beta) {
+    let newAngle = this.deviceAngle;
+    let newOrientation = this.deviceOrientation;
+
+    const absG = Math.abs(gamma);
+    const absB = Math.abs(beta);
+
+    // หากวางเครื่องนอนราบกับพื้น ให้คงสถานะเดิม
+    if (absB < 25 && absG < 25) {
+      return;
+    }
+
+    // หมุนจอแนวนอนไปทางซ้าย (ปุ่มชัตเตอร์อยู่ฝั่งขวาของมือผู้ใช้): gamma ติดลบมาก
+    if (gamma < -35 && absB < 65) {
+      newAngle = 90;
+      newOrientation = 'landscape';
+    } 
+    // หมุนจอแนวนอนไปทางขวา: gamma เป็นบวกมาก
+    else if (gamma > 35 && absB < 65) {
+      newAngle = -90;
+      newOrientation = 'landscape';
+    } 
+    // ถือเครื่องแนวตั้งปกติ
+    else if (absB > 45 && absG < 35) {
+      if (beta < -45) {
+        newAngle = 180;
+        newOrientation = 'portrait';
+      } else {
+        newAngle = 0;
+        newOrientation = 'portrait';
+      }
+    }
+
+    if (newAngle !== this.deviceAngle || newOrientation !== this.deviceOrientation) {
+      this.deviceAngle = newAngle;
+      this.deviceOrientation = newOrientation;
+      this.notifyOrientationChange(this.deviceOrientation, this.deviceAngle);
+    }
+  }
+
+  onOrientationChange(cb) {
+    if (typeof cb === 'function') {
+      this.orientationCallbacks.push(cb);
+    }
+  }
+
+  notifyOrientationChange(orientation, angle) {
+    this.orientationCallbacks.forEach(cb => {
+      try { cb(orientation, angle); } catch (err) { console.error(err); }
+    });
+  }
+
+  getDeviceAngle() {
+    return this.deviceAngle || 0;
+  }
+
+  getDeviceOrientation() {
+    return this.deviceOrientation || 'portrait';
   }
 
   // ขออนุญาต Sensor บน iOS 13+

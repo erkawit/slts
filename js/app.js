@@ -2657,6 +2657,90 @@ function applySafariMobileCameraSafeAreas() {
 }
 window.applySafariMobileCameraSafeAreas = applySafariMobileCameraSafeAreas;
 
+/**
+ * ตรวจสอบประเภทอุปกรณ์และเบราว์เซอร์อย่างละเอียด (Cross-Browser, Touch Sensor & Client Hints)
+ */
+window.getDeviceInfo = function() {
+  const ua = navigator.userAgent || '';
+  const vendor = navigator.vendor || '';
+
+  // 1. ตรวจสอบ Mobile ผ่าน Client Hints API (Chrome, Edge, Opera บน Android/PC)
+  const isMobileClientHint = navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean'
+    ? navigator.userAgentData.mobile
+    : null;
+
+  // 2. ตรวจสอบ User-Agent Regex (Safari, Firefox, Android, iOS)
+  const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  
+  // 3. ตรวจสอบ iPadOS / iOS ใน Desktop Mode (รายงานตัวเป็น MacIntel แต่มี Touch Screen)
+  const isIPadOS = (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  // 4. ตรวจสอบลักษณะจอสัมผัส และขนาดหน้าจอ
+  const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  const isCoarsePointer = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+  const isNarrowScreen = window.innerWidth < 768;
+
+  const isMobile = isMobileClientHint !== null 
+    ? isMobileClientHint 
+    : (isMobileUA || isIPadOS || (isTouchDevice && isNarrowScreen));
+
+  // ระบุเบราว์เซอร์
+  let browser = 'Unknown';
+  if (/Edg\//i.test(ua)) browser = 'Microsoft Edge';
+  else if (/Chrome|CriOS/i.test(ua) && !/Edg/i.test(ua) && !/OPR/i.test(ua)) browser = 'Google Chrome';
+  else if (/Safari/i.test(ua) && !/Chrome/i.test(ua) && /Apple/i.test(vendor)) browser = 'Apple Safari';
+  else if (/Firefox|FxiOS/i.test(ua)) browser = 'Mozilla Firefox';
+  else if (/OPR/i.test(ua) || /Opera/i.test(ua)) browser = 'Opera';
+
+  // ระบุระบบปฏิบัติการ (OS)
+  let os = 'Unknown';
+  if (/iPhone|iPad|iPod/i.test(ua) || isIPadOS) os = 'iOS';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/Windows/i.test(ua)) os = 'Windows';
+  else if (/Macintosh|Mac OS X/i.test(ua)) os = 'macOS';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+
+  return {
+    isMobile: !!isMobile,
+    isDesktop: !isMobile,
+    deviceType: isMobile ? (isIPadOS || (isTouchDevice && window.innerWidth >= 768) ? 'tablet' : 'smartphone') : 'desktop',
+    browser: browser,
+    os: os,
+    screenWidth: window.innerWidth,
+    screenHeight: window.innerHeight
+  };
+};
+
+function applyGyroOrientation(orientation, angle) {
+  state.deviceAngle = angle;
+  state.deviceOrientation = orientation;
+
+  const isScreenLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || (window.innerWidth > window.innerHeight);
+  const rotatableElements = document.querySelectorAll('.gyro-rotate');
+
+  if (isScreenLandscape) {
+    // หน้าจอหมุนตามจอแนวนอนจริงแล้ว: รีเซ็ต transform กลับเป็น 0 เพราะ CSS หมุนหน้าจอให้แล้ว
+    rotatableElements.forEach(el => {
+      el.style.transform = 'rotate(0deg)';
+    });
+    if (state.captureOrientation !== 'landscape' && typeof setCaptureOrientation === 'function') {
+      setCaptureOrientation('landscape');
+    }
+  } else {
+    // หน้าจออยู่ในแนวตั้ง (เช่น ผู้ใช้เปิด Portrait Lock ในโทรศัพท์ไว้):
+    // หมุนไอคอนและเนื้อหาปุ่ม/ลายน้ำตามมุมเอียงจริงของ Gyro เพื่อให้อยู่ในแนวระนาบพอดีกับสายตา
+    rotatableElements.forEach(el => {
+      el.style.transform = `rotate(${angle}deg)`;
+    });
+
+    const targetMode = Math.abs(angle) === 90 ? 'landscape' : 'portrait';
+    if (state.captureOrientation !== targetMode && typeof setCaptureOrientation === 'function') {
+      setCaptureOrientation(targetMode);
+    }
+  }
+}
+window.applyGyroOrientation = applyGyroOrientation;
+
 function initResponsiveUI() {
   const handleOrientationSync = () => {
     try {
@@ -2666,6 +2750,11 @@ function initResponsiveUI() {
       const targetMode = isLandscape ? 'landscape' : 'portrait';
       if (state.captureOrientation !== targetMode && typeof setCaptureOrientation === 'function') {
         setCaptureOrientation(targetMode);
+      }
+      if (isLandscape) {
+        applyGyroOrientation('landscape', 0);
+      } else if (state.deviceAngle) {
+        applyGyroOrientation(state.deviceOrientation || 'portrait', state.deviceAngle);
       }
     } catch (e) {
       console.warn('Orientation sync error:', e);
@@ -2677,6 +2766,7 @@ function initResponsiveUI() {
     applySafariMobileCameraSafeAreas();
     handleOrientationSync();
   };
+
   window.addEventListener('resize', handleResize);
   window.addEventListener('orientationchange', handleResize);
   if (window.matchMedia) {
@@ -2689,6 +2779,14 @@ function initResponsiveUI() {
       }
     } catch (e) {}
   }
+
+  // ดักฟังการหมุนเครื่องจาก Gyroscope Sensor (รองรับแม้เปิด Portrait Lock)
+  if (window.compassManager && typeof window.compassManager.onOrientationChange === 'function') {
+    window.compassManager.onOrientationChange((orientation, angle) => {
+      applyGyroOrientation(orientation, angle);
+    });
+  }
+
   handleResize();
 }
 
@@ -9995,8 +10093,14 @@ async function openCameraModal() {
     fetchCurrentLocation(true);
   }
 
-  // 2. เปิดโหมดพื้นฐานเป็นแนวนอน 4:3
-  setCaptureOrientation('landscape');
+  // ขอสิทธิ์ Sensor Gyroscope / Compass บน iOS 13+ ผ่าน User Interaction
+  if (window.compassManager && typeof window.compassManager.requestPermission === 'function') {
+    window.compassManager.requestPermission().catch(e => console.warn('Compass permission error:', e));
+  }
+
+  // 2. ตรวจสอบโหมดเริ่มต้นตามหน้าจอจริง
+  const isLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || (window.innerWidth > window.innerHeight);
+  setCaptureOrientation(isLandscape ? 'landscape' : 'portrait');
 
   if (elements.cameraModal) {
     elements.cameraModal.classList.remove('hidden');
@@ -10448,7 +10552,10 @@ async function captureAndProcessPhoto() {
       dateTime: WatermarkEngine.formatThaiDateTime(new Date())
     };
 
-    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation);
+    const rotationDeg = (state.captureOrientation === 'landscape' && window.innerWidth < window.innerHeight)
+      ? (state.deviceAngle || 90)
+      : 0;
+    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation, rotationDeg);
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
     
