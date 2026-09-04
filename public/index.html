@@ -1205,9 +1205,9 @@
 
         <!-- มุมขวาล่าง: กล่องข้อมูลสด Live Badge (ตามข้อ 4) -->
         <div id="liveBadgeWrapper" class="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 max-w-[75%] sm:max-w-[65%] gyro-rotate cursor-pointer pointer-events-auto" onclick="handleLiveBadgeClick(event)" title="แตะเพื่อเปิดฟอร์มแก้ไขข้อมูลส่งหมาย">
-          <div class="bg-black border-2 border-white/70 rounded-xl p-2 sm:p-2.5 shadow-2xl text-white space-y-0.5 pointer-events-none">
+          <div class="bg-black border-2 border-white/70 rounded-xl p-2 sm:p-2.5 shadow-2xl text-white space-y-0.5">
             <div id="liveBadgeDate" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📅 --</div>
-            <div id="liveBadgeCoords" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📍 --</div>
+            <div id="liveBadgeCoords" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight pointer-events-auto cursor-pointer" onclick="event.stopPropagation(); handleCameraRefreshGps(event);" title="แตะเพื่อรีเฟรชพิกัด GPS / ดูคำแนะนำแก้ไข">📍 --</div>
             <div id="liveBadgeLocation" class="text-[9px] sm:text-[10px] font-semibold text-white leading-tight truncate">🏠 --</div>
             <div id="liveBadgeCase" class="text-[9px] sm:text-[11px] font-bold text-white leading-tight truncate">⚖️ --</div>
           </div>
@@ -1296,13 +1296,13 @@
   <script src="js/compass.js?v=20260904_08"></script>
   <script src="js/map.js?v=20260904_08"></script>
   <script src="js/watermark.js?v=20260904_15"></script>
-  <script src="js/app.js?v=20260904_15"></script>
+  <script src="js/app.js?v=20260904_16"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260904_15')
+        navigator.serviceWorker.register('./sw.js?v=20260904_16')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

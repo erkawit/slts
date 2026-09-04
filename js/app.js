@@ -9916,16 +9916,253 @@ function getFullLocationText() {
   }
 }
 
+function detectMobileOS() {
+  const ua = navigator.userAgent || navigator.vendor || window.opera || '';
+  if (/iPad|iPhone|iPod/.test(ua) && !window.MSStream) {
+    return 'ios';
+  }
+  if (/android/i.test(ua)) {
+    return 'android';
+  }
+  return 'other';
+}
+
+let lastLocationModalShownTime = 0;
+const LOCATION_MODAL_COOLDOWN_MS = 45000; // 45 วินาที สำหรับ background interval
+
+/**
+ * เด้งหน้าต่างเตือนเมื่ออุปกรณ์ปิด Location Service (GPS) หรือยังไม่ได้รับสิทธิ์ (เฉพาะมือถือ <= 768px)
+ */
+function showLocationServiceDisabledModal(errorType = 'POSITION_UNAVAILABLE') {
+  if (window.innerWidth > 768) return;
+  if (Swal.isVisible()) return;
+
+  lastLocationModalShownTime = Date.now();
+  const os = detectMobileOS();
+  const isDenied = errorType === 'PERMISSION_DENIED';
+  const isNotSupported = errorType === 'NOT_SUPPORTED';
+
+  let title = 'กรุณาเปิดบริการตำแหน่ง (Location Service)';
+  let headerNotice = 'อุปกรณ์ปิดการใช้งาน Location Service (GPS) อยู่ กรุณาเปิดใช้งานเพื่อบันทึกพิกัดส่งหมาย';
+
+  if (isDenied) {
+    title = 'กรุณาอนุญาตสิทธิ์เข้าถึงตำแหน่ง (GPS)';
+    headerNotice = 'เบราว์เซอร์ถูกบล็อกไม่ให้เข้าถึงพิกัด GPS จำเป็นต้องอนุญาตสิทธิ์ในเบราว์เซอร์';
+  } else if (isNotSupported) {
+    title = 'อุปกรณ์ไม่รองรับการระบุพิกัด Geolocation';
+    headerNotice = 'เบราว์เซอร์หรืออุปกรณ์นี้ไม่รองรับระบบระบุตำแหน่งพิกัด Geolocation';
+  }
+
+  let osInstructionsHtml = '';
+  if (os === 'ios') {
+    osInstructionsHtml = `
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-left space-y-2">
+        <div class="font-bold text-blue-900 flex items-center gap-1.5 text-xs sm:text-sm">
+          <i class="fa-brands fa-apple text-base"></i> ขั้นตอนสำหรับ iPhone / iPad (iOS):
+        </div>
+        <ol class="list-decimal list-inside space-y-1.5 text-xs text-blue-950">
+          <li>ไปที่ <b>การตั้งค่า (Settings)</b> ของเครื่อง</li>
+          <li>เลือก <b>ความเป็นส่วนตัวและความปลอดภัย (Privacy & Security)</b> &gt; <b>บริการหาตำแหน่งที่ตั้ง (Location Services)</b></li>
+          <li>เลื่อนเปิดสวิตช์เป็น <b>สีเขียว (เปิด)</b></li>
+          <li>เลื่อนลงมาที่ <b>Safari</b> หรือ <b>Chrome</b> &gt; เลือก <b>"ในระหว่างใช้แอพ"</b> และเปิด <b>"ตำแหน่งที่แน่นอน" (Precise Location)</b></li>
+        </ol>
+      </div>
+    `;
+  } else {
+    osInstructionsHtml = `
+      <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-left space-y-2">
+        <div class="font-bold text-emerald-900 flex items-center gap-1.5 text-xs sm:text-sm">
+          <i class="fa-brands fa-android text-base text-emerald-600"></i> ขั้นตอนสำหรับ Android:
+        </div>
+        <ol class="list-decimal list-inside space-y-1.5 text-xs text-emerald-950">
+          <li><b>รูดขอบหน้าจอด้านบนลงมา</b> เพื่อเปิดแถบเมนูด่วน (Notification / Quick Settings)</li>
+          <li>แตะเปิดไอคอน <b>"ตำแหน่ง"</b> หรือ <b>"Location" (GPS)</b> ให้เป็นสีเปิดใช้งาน</li>
+          <li>หรือไปที่ <b>การตั้งค่า (Settings)</b> &gt; <b>ตำแหน่ง (Location)</b> &gt; เลื่อนเปิดสวิตช์</li>
+          ${isDenied ? '<li>แตะที่ไอคอน <b>แม่กุญแจ 🔒</b> หรือ <b>การตั้งค่าไซต์</b> ที่แถบ URL ด้านบนของเว็บ &gt; เลือก <b>อนุญาต (Allow)</b> การเข้าถึงตำแหน่ง</li>' : ''}
+        </ol>
+      </div>
+    `;
+  }
+
+  Swal.fire({
+    icon: 'warning',
+    title: title,
+    html: `
+      <div class="text-left text-sm text-gray-700 space-y-3 font-sans">
+        <div class="p-3 bg-amber-50 border-l-4 border-amber-500 rounded-r-lg text-xs text-amber-900 leading-relaxed">
+          <p class="font-bold text-amber-900 text-xs sm:text-sm mb-0.5">⚠️ ${headerNotice}</p>
+          ระบบจำเป็นต้องใช้พิกัดจริงของสถานที่ส่งหมายเพื่อประทับลายน้ำลงบนภาพถ่ายตามระเบียบ
+        </div>
+        ${osInstructionsHtml}
+      </div>
+    `,
+    confirmButtonText: '<i class="fa-solid fa-arrows-rotate mr-1"></i> เปิดแล้ว ลองระบุพิกัดใหม่อีกครั้ง',
+    showCancelButton: true,
+    cancelButtonText: 'ปิดหน้าต่าง',
+    confirmButtonColor: '#2563eb',
+    cancelButtonColor: '#64748b',
+    allowOutsideClick: true
+  }).then((res) => {
+    if (res.isConfirmed) {
+      fetchCurrentLocation(true);
+    }
+  });
+}
+window.showLocationServiceDisabledModal = showLocationServiceDisabledModal;
+
+/**
+ * เด้งหน้าต่างคำแนะนำการแก้ไขเมื่อเปิด Location Service แล้ว แต่ยังไม่สามารถตรวจหาพิกัดได้ (เช่น อยู่ในอาคาร/จุดอับสัญญาณ)
+ */
+function showLocationTroubleshootingModal(onRetry) {
+  if (window.innerWidth > 768) return;
+  if (Swal.isVisible()) return;
+
+  lastLocationModalShownTime = Date.now();
+
+  const cachedLat = localStorage.getItem('slts_last_known_lat');
+  const cachedLng = localStorage.getItem('slts_last_known_lng');
+  const hasCached = !!(cachedLat && cachedLng);
+
+  let cachedHtml = '';
+  if (hasCached && (!state.lat || !state.lng)) {
+    cachedHtml = `
+      <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs mt-1">
+        <div>
+          <span class="font-bold text-blue-900">พิกัดล่าสุดที่เคยบันทึกไว้:</span>
+          <div class="font-mono text-blue-700">${Number(parseFloat(cachedLat)).toFixed(6)}, ${Number(parseFloat(cachedLng)).toFixed(6)}</div>
+        </div>
+        <button id="btnUseCachedGps" type="button" class="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xs shadow transition">
+          ใช้พิกัดนี้ชั่วคราว
+        </button>
+      </div>
+    `;
+  }
+
+  Swal.fire({
+    icon: 'info',
+    title: 'วิธีแก้ไขเมื่อระบุพิกัด GPS ไม่ได้',
+    html: `
+      <div class="text-left text-sm text-gray-700 space-y-3 font-sans">
+        <div class="p-3 bg-sky-50 border-l-4 border-sky-500 rounded-r-lg text-xs text-sky-950 leading-relaxed">
+          <p class="font-bold text-sky-900 text-xs sm:text-sm mb-0.5">📡 เปิด Location Service แล้ว แต่ยังไม่พบล็อกสัญญาณพิกัด</p>
+          มักเกิดจากอยู่ในอาคาร คอนกรีตหนา ใต้หลังคาเหล็ก หรือจุดอับสัญญาณดาวเทียม กรุณาปฏิบัติตามคำแนะนำดังนี้:
+        </div>
+
+        <div class="space-y-2 text-xs sm:text-sm">
+          <div class="flex items-start gap-2.5 p-2 bg-gray-50 rounded-xl border border-gray-200">
+            <span class="text-lg">📶</span>
+            <div>
+              <span class="font-bold text-gray-800">1. เปิดสวิตช์ Wi-Fi ทิ้งไว้ (แนะนำอย่างยิ่ง)</span>
+              <p class="text-gray-600 text-xs mt-0.5">แม้ไม่ได้เชื่อมต่อเน็ตบ้าน การเปิด Wi-Fi ช่วยให้เครื่องสแกน Wi-Fi รอบข้าง (Wi-Fi Scanning) และระบุพิกัดได้ทันทีแม้ในอาคาร</p>
+            </div>
+          </div>
+
+          <div class="flex items-start gap-2.5 p-2 bg-gray-50 rounded-xl border border-gray-200">
+            <span class="text-lg">☀️</span>
+            <div>
+              <span class="font-bold text-gray-800">2. ขยับเข้าใกล้หน้าต่าง หรือออกมายังที่โล่ง</span>
+              <p class="text-gray-600 text-xs mt-0.5">โครงสร้างเหล็กและหลังคาหนาจะบดบังสัญญาณดาวเทียม GPS ก้าวออกสู่ที่โล่งประมาณ 5-10 วินาทีเพื่อให้เครื่องจับสัญญาณ</p>
+            </div>
+          </div>
+
+          <div class="flex items-start gap-2.5 p-2 bg-gray-50 rounded-xl border border-gray-200">
+            <span class="text-lg">🔋</span>
+            <div>
+              <span class="font-bold text-gray-800">3. ปิดโหมดประหยัดพลังงาน (Battery Saver)</span>
+              <p class="text-gray-600 text-xs mt-0.5">โหมดประหยัดพลังงานอาจลดความถี่และปิดการทำงานของชิป GPS แนะนำให้ปิดโหมดประหยัดพลังงานชั่วคราว</p>
+            </div>
+          </div>
+
+          <div class="flex items-start gap-2.5 p-2 bg-gray-50 rounded-xl border border-gray-200">
+            <span class="text-lg">🎯</span>
+            <div>
+              <span class="font-bold text-gray-800">4. เปิด "ความแม่นยำของตำแหน่งของ Google"</span>
+              <p class="text-gray-600 text-xs mt-0.5">บน Android: เข้า การตั้งค่า &gt; ตำแหน่ง &gt; บริการระบุตำแหน่ง &gt; เปิด 'ความแม่นยำของตำแหน่งของ Google' (Google Location Accuracy)</p>
+            </div>
+          </div>
+        </div>
+
+        ${cachedHtml}
+      </div>
+    `,
+    didOpen: () => {
+      const btnUseCached = document.getElementById('btnUseCachedGps');
+      if (btnUseCached && hasCached) {
+        btnUseCached.addEventListener('click', () => {
+          state.lat = Number(parseFloat(cachedLat).toFixed(6));
+          state.lng = Number(parseFloat(cachedLng).toFixed(6));
+          state.accuracy = 50;
+          state.lastLocationTime = new Date();
+          if (elements.coordinatesInput) {
+            elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+          }
+          const modalCoordInput = document.getElementById('m_coords');
+          if (modalCoordInput) {
+            modalCoordInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+          }
+          updateLiveMapHUD();
+          Swal.close();
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'info',
+            title: 'ใช้พิกัดล่าสุดที่เคยบันทึกไว้เรียบร้อย',
+            timer: 2000,
+            showConfirmButton: false
+          });
+        });
+      }
+    },
+    confirmButtonText: '<i class="fa-solid fa-arrows-rotate mr-1"></i> ลองค้นหาพิกัดใหม่อีกครั้ง',
+    showCancelButton: true,
+    cancelButtonText: 'ปิด',
+    confirmButtonColor: '#2563eb',
+    cancelButtonColor: '#64748b'
+  }).then((res) => {
+    if (res.isConfirmed) {
+      if (typeof onRetry === 'function') {
+        onRetry();
+      } else {
+        fetchCurrentLocation(true);
+      }
+    }
+  });
+}
+window.showLocationTroubleshootingModal = showLocationTroubleshootingModal;
+
 function initLocationService() {
   if (navigator.geolocation) {
     if (window.compassManager) {
       window.compassManager.requestPermission();
     }
+
+    // ตรวจสอบสิทธิ์เบื้องต้นผ่าน Permissions API บนมือถือ (Chrome/Safari)
+    if (window.innerWidth <= 768 && navigator.permissions && navigator.permissions.query) {
+      try {
+        navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+          if (result.state === 'denied') {
+            showLocationServiceDisabledModal('PERMISSION_DENIED');
+          }
+          result.onchange = () => {
+            if (result.state === 'granted') {
+              fetchCurrentLocation(true);
+            } else if (result.state === 'denied' && window.innerWidth <= 768) {
+              showLocationServiceDisabledModal('PERMISSION_DENIED');
+            }
+          };
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
     // บนมือถือ (<= 768px): ดึงพิกัดและเริ่ม interval ตรวจจับพิกัดสด
     // บน Desktop (> 768px): ไม่รัน interval อัปเดตพิกัดอัตโนมัติ เพื่อให้ผู้ใช้พิมพ์แก้ไขหรือรับพิกัดจากรูปภาพได้โดยไม่ถูกเขียนทับ
     if (window.innerWidth <= 768) {
       fetchCurrentLocation(true);
       startLocationInterval();
+    }
+  } else {
+    if (window.innerWidth <= 768) {
+      showLocationServiceDisabledModal('NOT_SUPPORTED');
     }
   }
 }
@@ -9944,8 +10181,17 @@ function startLocationInterval() {
   }
 }
 
-function fetchCurrentLocation(isManual = false) {
+/**
+ * ดึงพิกัดปัจจุบัน พร้อมระบบ 2-Phase Fallback อัตโนมัติ:
+ * Phase 1: High-Accuracy Satellite GPS (ความแม่นยำสูง)
+ * Phase 2: Network / Assisted Wi-Fi Positioning (ค้นหาฉับไวผ่านเครือข่ายเมื่ออยู่ในอาคาร)
+ */
+function fetchCurrentLocation(isManual = false, isFallbackPhase = false, callback = null) {
   if (!navigator.geolocation) {
+    if (window.innerWidth <= 768 && (isManual || Date.now() - lastLocationModalShownTime > LOCATION_MODAL_COOLDOWN_MS)) {
+      showLocationServiceDisabledModal('NOT_SUPPORTED');
+    }
+    if (callback) callback(false, { code: 0, message: 'Geolocation not supported' });
     return;
   }
 
@@ -9965,15 +10211,19 @@ function fetchCurrentLocation(isManual = false) {
   }
 
   // ป้องกันการยิง Geolocation ซ้อนทับกันกรณีฮาร์ดแวร์ GPS ยังคืนค่าไม่เสร็จ
-  if (isFetchingLocation && !isManual) {
+  if (isFetchingLocation && !isManual && !isFallbackPhase) {
     return;
   }
   isFetchingLocation = true;
 
   if (isManual && elements.locationStatus) {
-    elements.locationStatus.textContent = 'กำลังดึงพิกัดล่าสุด...';
+    elements.locationStatus.textContent = isFallbackPhase ? 'กำลังสแกนพิกัดเครือข่าย/Wi-Fi...' : 'กำลังดึงพิกัดล่าสุด...';
     elements.locationStatus.className = 'text-xs text-blue-600 font-semibold';
   }
+
+  const geoOptions = isFallbackPhase
+    ? { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }
+    : { enableHighAccuracy: true, timeout: 6500, maximumAge: 2000 };
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
@@ -10014,30 +10264,58 @@ function fetchCurrentLocation(isManual = false) {
       
       const timeStr = state.lastLocationTime.toLocaleTimeString('th-TH');
       if (elements.locationStatus) {
-        elements.locationStatus.textContent = `● อัปเดตล่าสุด ${timeStr} (ความแม่นยำ ±${state.accuracy}ม.)`;
+        const accuracyText = isFallbackPhase ? ` (โหมดเครือข่าย ±${state.accuracy}ม.)` : ` (ความแม่นยำ ±${state.accuracy}ม.)`;
+        elements.locationStatus.textContent = `● อัปเดตล่าสุด ${timeStr}${accuracyText}`;
         elements.locationStatus.className = 'text-xs text-emerald-600 font-medium';
       }
 
       // Realtime map snapshot update
       updateLiveMapHUD();
+      if (callback) callback(true, position);
     },
     (error) => {
       isFetchingLocation = false;
-      console.warn('Geolocation error:', error);
+      console.warn(`Geolocation error (phase ${isFallbackPhase ? '2-Network' : '1-HighAccuracy'}):`, error);
+
+      // Phase 1 ล้มเหลวด้วย TIMEOUT หรือ POSITION_UNAVAILABLE ให้ลอง Phase 2 (Network/Wi-Fi) อัตโนมัติทันที
+      if (!isFallbackPhase && (error.code === error.TIMEOUT || error.code === error.POSITION_UNAVAILABLE)) {
+        console.log('[Geolocation] High-accuracy GPS unavailable/timeout. Trying Phase 2 fallback (Network/Wi-Fi)...');
+        fetchCurrentLocation(isManual, true, callback);
+        return;
+      }
+
       let msg = 'ไม่สามารถดึงพิกัดได้';
       if (error.code === error.PERMISSION_DENIED) {
         msg = 'กรุณาเปิดสิทธิ์ Location ในเบราว์เซอร์ของคุณ';
+      } else if (error.code === error.POSITION_UNAVAILABLE) {
+        msg = 'กรุณาเปิดบริการตำแหน่ง (GPS) บนอุปกรณ์';
+      } else if (error.code === error.TIMEOUT) {
+        msg = 'หมดเวลารอสัญญาณ GPS (จุดอับสัญญาณ)';
       }
+
       if (elements.locationStatus) {
         elements.locationStatus.textContent = msg;
         elements.locationStatus.className = 'text-xs text-red-500';
       }
+
+      // ตรวจสอบการแจ้งเตือน Modal บนมือถือ
+      if (window.innerWidth <= 768) {
+        const canShow = isManual || (Date.now() - lastLocationModalShownTime > LOCATION_MODAL_COOLDOWN_MS);
+        if (canShow) {
+          if (error.code === error.PERMISSION_DENIED) {
+            showLocationServiceDisabledModal('PERMISSION_DENIED');
+          } else if (error.code === error.POSITION_UNAVAILABLE) {
+            showLocationServiceDisabledModal('POSITION_UNAVAILABLE');
+          } else if (error.code === error.TIMEOUT && isManual) {
+            // หากผู้ใช้กดด้วยตนเองแล้วยัง timeout ให้แสดงคำแนะนำแก้ไขปัญหา
+            showLocationTroubleshootingModal(() => fetchCurrentLocation(true));
+          }
+        }
+      }
+
+      if (callback) callback(false, error);
     },
-    {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 2000
-    }
+    geoOptions
   );
 }
 
@@ -10046,19 +10324,35 @@ function fetchCurrentLocation(isManual = false) {
  */
 window.handleCameraRefreshGps = function(e) {
   if (e) {
-    e.preventDefault();
-    e.stopPropagation();
+    try {
+      e.preventDefault();
+      e.stopPropagation();
+    } catch (err) {}
   }
 
   const icon = document.querySelector('#btnFlipOrientationQuick i');
   if (icon) icon.classList.add('fa-spin');
 
-  fetchCurrentLocation(true);
-
-  setTimeout(() => {
+  fetchCurrentLocation(true, false, (success, errOrPos) => {
     if (icon) icon.classList.remove('fa-spin');
     updateLiveMapHUD();
-  }, 1000);
+    if (success) {
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: `อัปเดตพิกัดสำเร็จ (ความแม่นยำ ±${state.accuracy || 0} ม.)`,
+        timer: 2500,
+        showConfirmButton: false
+      });
+    } else {
+      if (errOrPos && (errOrPos.code === 1 || errOrPos.code === 2)) {
+        showLocationServiceDisabledModal(errOrPos.code === 1 ? 'PERMISSION_DENIED' : 'POSITION_UNAVAILABLE');
+      } else {
+        showLocationTroubleshootingModal(() => window.handleCameraRefreshGps());
+      }
+    }
+  });
 };
 
 function initCameraEvents() {
@@ -11576,9 +11870,15 @@ function updateCaptureButtonState() {
 window.updateCaptureButtonState = updateCaptureButtonState;
 
 async function openCameraModal() {
-  // 1. ดึงพิกัด Latitude, Longitude ทันทีเป็นอันดับต้นที่สุดเสมอเมื่อเข้าสู่โหมดกล้อง (isManual = false ป้องกันการเขียนทับที่อยู่)
+  // 1. ดึงพิกัด Latitude, Longitude ทันทีเป็นอันดับต้นที่สุดเสมอเมื่อเข้าสู่โหมดกล้อง (isManual = true เพื่อบังคับเช็คพิกัดสดและเตือนทันทีหาก Location Service ปิดอยู่)
   if (typeof fetchCurrentLocation === 'function') {
-    fetchCurrentLocation(false);
+    fetchCurrentLocation(true, false, (success, err) => {
+      if (!success && window.innerWidth <= 768) {
+        if (err && (err.code === 1 || err.code === 2)) {
+          showLocationServiceDisabledModal(err.code === 1 ? 'PERMISSION_DENIED' : 'POSITION_UNAVAILABLE');
+        }
+      }
+    });
   }
 
   // ขอสิทธิ์ Sensor Gyroscope / Compass บน iOS 13+ ผ่าน User Interaction
@@ -11670,8 +11970,9 @@ function startLiveCameraHUD() {
     if (secondKey !== lastSecondKey || headingChanged) {
       lastSecondKey = secondKey;
       const dateStr = WatermarkEngine.formatThaiDateTime(now);
-      const latFormatted = state.lat ? `${Math.abs(state.lat).toFixed(4)}°${state.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
-      const lngFormatted = state.lng ? `${Math.abs(state.lng).toFixed(4)}°${state.lng >= 0 ? 'E' : 'W'}` : '102.7882°E';
+      const hasCoords = !!(state.lat && state.lng);
+      const latFormatted = hasCoords ? `${Math.abs(state.lat).toFixed(4)}°${state.lat >= 0 ? 'N' : 'S'}` : '';
+      const lngFormatted = hasCoords ? `${Math.abs(state.lng).toFixed(4)}°${state.lng >= 0 ? 'E' : 'W'}` : '';
       const dirText = window.compassManager ? window.compassManager.getDirectionText(curHeading) : 'N';
 
       const caseNum = getFormattedCaseNumber();
@@ -11679,7 +11980,15 @@ function startLiveCameraHUD() {
       const isReady = isFormValidForCapture();
 
       if (elements.liveBadgeDate) elements.liveBadgeDate.textContent = `📅  ${dateStr}`;
-      if (elements.liveBadgeCoords) elements.liveBadgeCoords.textContent = `📍  ${latFormatted} ${lngFormatted} ${curHeading}° ${dirText}`;
+      if (elements.liveBadgeCoords) {
+        if (hasCoords) {
+          elements.liveBadgeCoords.textContent = `📍  ${latFormatted} ${lngFormatted} ${curHeading}° ${dirText}`;
+          elements.liveBadgeCoords.className = "text-[9px] sm:text-[10px] font-bold text-white leading-tight cursor-pointer";
+        } else {
+          elements.liveBadgeCoords.textContent = `📍  กำลังค้นหาสัญญาณ GPS (แตะดูวิธีแก้ไข)`;
+          elements.liveBadgeCoords.className = "text-[9px] sm:text-[10px] font-bold text-amber-300 animate-pulse leading-tight cursor-pointer";
+        }
+      }
       if (elements.liveBadgeLocation) {
         elements.liveBadgeLocation.textContent = isReady && locText ? `🏠  ${locText}` : (locText || `🏠  (กด "ฟอร์มข้อมูล" เพื่อระบุสถานที่)`);
       }
