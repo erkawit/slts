@@ -55,7 +55,7 @@
   </script>
 
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260904_07">
+  <link rel="stylesheet" href="css/style.css?v=20260904_08">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -1179,8 +1179,8 @@
           <canvas id="liveMapCanvas" width="100" height="75" class="rounded-lg border-2 border-white/80 shadow-2xl"></canvas>
         </div>
 
-        <!-- มุมขวาล่าง: กล่องข้อมูลสด Live Badge -->
-        <div id="liveBadgeWrapper" class="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 max-w-[65%] sm:max-w-[55%] gyro-rotate">
+        <!-- มุมขวาล่าง: กล่องข้อมูลสด Live Badge (แตะเพื่อเปิดฟอร์มบันทึกข้อมูลส่งหมายในแนวตั้ง) -->
+        <div id="liveBadgeWrapper" class="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 max-w-[65%] sm:max-w-[55%] gyro-rotate cursor-pointer pointer-events-auto" onclick="handleLiveBadgeClick(event)" title="แตะเพื่อเปิดฟอร์มแก้ไขข้อมูลส่งหมาย">
           <div class="bg-black border-2 border-white/70 rounded-xl p-2 sm:p-2.5 shadow-2xl text-white space-y-0.5 pointer-events-none">
             <div id="liveBadgeDate" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📅 --</div>
             <div id="liveBadgeCoords" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📍 --</div>
@@ -1257,16 +1257,16 @@
 
   <!-- Scripts -->
   <script src="js/data.js?v=20260904_07"></script>
-  <script src="js/compass.js?v=20260904_07"></script>
-  <script src="js/map.js?v=20260904_07"></script>
-  <script src="js/watermark.js?v=20260904_07"></script>
-  <script src="js/app.js?v=20260904_07"></script>
+  <script src="js/compass.js?v=20260904_08"></script>
+  <script src="js/map.js?v=20260904_08"></script>
+  <script src="js/watermark.js?v=20260904_08"></script>
+  <script src="js/app.js?v=20260904_08"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260904_07')
+        navigator.serviceWorker.register('./sw.js?v=20260904_08')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

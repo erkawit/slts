@@ -1517,10 +1517,10 @@ function updateAuthUI() {
  * จัดการการคลิกปุ่ม Auth ที่มุมขวาบนของหน้ากล้องมือถือ (< 768px)
  */
 window.handleMobileCameraAuthAction = function() {
-  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('จัดการระบบบัญชีผู้ใช้')) {
+  const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn(isLoggedIn ? 'ออกจากระบบ' : 'เข้าสู่ระบบ')) {
     return;
   }
-  const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
   if (!isLoggedIn) {
     openLoginModal();
   } else {
@@ -2755,21 +2755,67 @@ function applyGyroOrientation(orientation, angle) {
 window.applyGyroOrientation = applyGyroOrientation;
 
 /**
+ * ตรวจสอบทิศทางการหมุนของตัวเครื่องจาก Gyroscope Sensor อย่างละเอียด
+ * คืนค่า: 90 (หมุนซ้าย), 270 (หมุนขวา), 'native' (เบราว์เซอร์หมุนตาม OS), หรือ 0 (แนวตั้ง)
+ */
+function getEffectiveGyroOrientation() {
+  // 1. ตรวจสอบคลาสบน document.body ก่อน
+  if (document.body.classList.contains('gyro-landscape-90')) return 90;
+  if (document.body.classList.contains('gyro-landscape-270')) return 270;
+
+  // 2. ตรวจสอบค่าองศาจาก compassManager
+  if (window.compassManager && typeof window.compassManager.getDeviceAngle === 'function') {
+    const angle = window.compassManager.getDeviceAngle();
+    if (angle === 90) return 90;
+    if (angle === -90 || angle === 270) return 270;
+  }
+
+  // 3. ตรวจสอบค่าองศาจาก state.deviceAngle
+  if (state.deviceAngle === 90) return 90;
+  if (state.deviceAngle === -90 || state.deviceAngle === 270) return 270;
+
+  // 4. ตรวจสอบกรณี native landscape บนหน้าจอขนาดเล็ก/มือถือ
+  const isMobile = window.innerWidth < 1024;
+  const isLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || 
+                      (screen.orientation && screen.orientation.type && screen.orientation.type.includes('landscape')) ||
+                      (window.innerWidth > window.innerHeight);
+
+  if (isMobile && isLandscape) {
+    return 'native';
+  }
+
+  return 0;
+}
+window.getEffectiveGyroOrientation = getEffectiveGyroOrientation;
+
+/**
  * ตรวจสอบว่าขณะนี้กล้องหมุนเป็นแนวนอนผ่าน Gyroscope หรือไม่
  * หากอยู่แนวนอนและผู้ใช้กดฟังก์ชันที่ต้องพิมพ์หรือใช้พื้นที่มาก ให้แจ้งเตือนให้ถือแนวตั้งเพื่อ UX ที่ดีที่สุด
+ * แสดงตรงกลางหน้าจอแนวนอน พอดีตามทิศทางการหมุนของ Gyroscope
  */
 function checkGyroLandscapeAndWarn(actionName = 'ใช้งานฟังก์ชันนี้') {
-  const isLandscape90 = document.body.classList.contains('gyro-landscape-90');
-  const isLandscape270 = document.body.classList.contains('gyro-landscape-270');
+  const gyroMode = getEffectiveGyroOrientation();
 
-  if (isLandscape90 || isLandscape270) {
+  if (gyroMode !== 0) {
+    let containerClass = 'slts-gyro-toast-container-90';
+    let popupClass = 'slts-gyro-toast-popup-90';
+
+    if (gyroMode === 270) {
+      containerClass = 'slts-gyro-toast-container-270';
+      popupClass = 'slts-gyro-toast-popup-270';
+    } else if (gyroMode === 'native') {
+      containerClass = 'slts-gyro-toast-container-native';
+      popupClass = 'slts-gyro-toast-popup-native';
+    }
+
     if (typeof Swal !== 'undefined') {
+      try { Swal.close(); } catch (e) {}
       Swal.fire({
         toast: true,
         position: 'center',
         customClass: {
-          container: isLandscape90 ? 'slts-gyro-toast-container-90' : 'slts-gyro-toast-container-270',
-          popup: isLandscape90 ? 'slts-gyro-toast-popup-90' : 'slts-gyro-toast-popup-270',
+          container: containerClass,
+          popup: popupClass,
           title: 'slts-gyro-toast-title'
         },
         icon: 'info',
@@ -2784,6 +2830,23 @@ function checkGyroLandscapeAndWarn(actionName = 'ใช้งานฟังก�
   return false;
 }
 window.checkGyroLandscapeAndWarn = checkGyroLandscapeAndWarn;
+
+/**
+ * จัดการการคลิกที่กล่องข้อมูลสด / ลายน้ำมุมขวาล่าง
+ * - เฉพาะในโหมดแนวตั้ง: เปิดฟอร์มแก้ไขข้อมูลหมาย (showMobileSummonsFormModal)
+ * - หากอยู่ในโหมดแนวนอน: แสดงการแจ้งเตือนเตือนให้ถือแนวตั้ง
+ */
+window.handleLiveBadgeClick = function(e) {
+  if (e) {
+    try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
+  }
+  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('กรอกหรือแก้ไขข้อมูลหมาย')) {
+    return;
+  }
+  if (typeof showMobileSummonsFormModal === 'function') {
+    showMobileSummonsFormModal(true);
+  }
+};
 
 
 function initResponsiveUI() {
@@ -6444,19 +6507,9 @@ window.selectProvinceAndProceed = function(provinceName) {
     
     // ตรวจสอบว่าผู้ใช้งานอยู่ในพื้นที่จังหวัดที่รับผิดชอบส่งหมายหรือไม่
     if (isUserOutsideAssignedProvince()) {
-      // แสดงข้อความแจ้งเตือนตามที่กำหนด
-      Swal.fire({
-        icon: 'warning',
-        title: 'แจ้งเตือนพื้นที่รับผิดชอบ',
-        text: 'การเปลี่ยนจังหวัดของคุณไม่ตรงกับพื้นที่จังหวัดที่รับผิดชอบส่งหมาย คุณจะใช้งานได้เพียงการค้นหาข้อมูลหมายเท่านั้น',
-        confirmButtonText: 'ปิด',
-        confirmButtonColor: '#2563eb',
-        allowOutsideClick: false,
-        allowEscapeKey: false
-      }).then(() => {
-        // เมื่อกดปุ่มปิดให้แสดงหน้าต่างค้นหาข้อมูลหมายได้เท่านั้น
-        openMobileCaseSearchModal('', true);
-      });
+      // หากจังหวัดที่เลือกไม่ตรงกับข้อมูลจังหวัดที่สังกัดส่งหมาย จากข้อมูล user ที่ล็อกอินใช้งานอยู่
+      // ให้ทำการแสดงผลหน้าค้นหาข้อมูลหมายที่เป็นข้อมูลจังหวัดที่เลือกทันที
+      openMobileCaseSearchModal('', true);
       return;
     }
 
@@ -7797,6 +7850,13 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
     return;
   }
   if (!state.selectedProvince) {
+    showProvinceSelectorModal(true);
+    return;
+  }
+
+  // หากจังหวัดที่เลือกไม่ตรงกับข้อมูลจังหวัดที่สังกัดส่งหมาย จากข้อมูล user ที่ล็อกอินใช้งานอยู่
+  // ให้แสดงหน้าต่างเลือกจังหวัดเท่านั้น จนกว่าจะเปลี่ยนกลับมาเป็นจังหวัดที่สังกัดส่งหมายจึงจะใช้หน้าฟอร์มแก้ไขข้อมูลหมายได้ตามปกติ
+  if (typeof isUserOutsideAssignedProvince === 'function' && isUserOutsideAssignedProvince()) {
     showProvinceSelectorModal(true);
     return;
   }

@@ -75,6 +75,16 @@ body {
   display: block;
 }
 
+#liveBadgeWrapper {
+  pointer-events: auto !important;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#liveBadgeWrapper:active {
+  transform: scale(0.96);
+}
+
 /* Large Ergonomic Shutter Button (เด่นชัด กดง่ายด้วยนิ้วมือ) */
 .shutter-btn {
   width: 86px;
@@ -174,11 +184,12 @@ body.gyro-landscape-90 #btnFlipOrientationQuick {
   transform-origin: center center !important;
 }
 
-/* ปิดความเด่นชัด (dim) ของปุ่มฟอร์ม/ค้นหา/แผนที่/คิว ในแนวนอน และมี cursor ช่วยเตือน */
+/* ปิดความเด่นชัด (dim) ของปุ่มฟอร์ม/ค้นหา/แผนที่/คิว/ออกจากระบบ ในแนวนอน และมี cursor ช่วยเตือน */
 body.gyro-landscape-90 #btnCameraBgQueue,
 body.gyro-landscape-90 #btnEditMobileForm,
 body.gyro-landscape-90 #btnCameraCaseSearch,
-body.gyro-landscape-90 #btnCameraRouteMap {
+body.gyro-landscape-90 #btnCameraRouteMap,
+body.gyro-landscape-90 #btnCameraAuth {
   opacity: 0.55 !important;
 }
 
@@ -227,14 +238,17 @@ body.gyro-landscape-270 #btnFlipOrientationQuick {
 body.gyro-landscape-270 #btnCameraBgQueue,
 body.gyro-landscape-270 #btnEditMobileForm,
 body.gyro-landscape-270 #btnCameraCaseSearch,
-body.gyro-landscape-270 #btnCameraRouteMap {
+body.gyro-landscape-270 #btnCameraRouteMap,
+body.gyro-landscape-270 #btnCameraAuth {
   opacity: 0.55 !important;
 }
 
 /* ================================================================
-   Landscape Gyro Warning Toast Pop Up (แสดงผลในมุมมองแนวนอน เมื่อแตะปุ่มที่ disabled)
+   Landscape Gyro Warning Toast Pop Up (แสดงผลตรงกลางหน้าจอในมุมมองแนวนอน เมื่อแตะปุ่มที่ disabled)
    ================================================================ */
-.slts-gyro-toast-container-90 {
+.slts-gyro-toast-container-90,
+.slts-gyro-toast-container-270,
+.slts-gyro-toast-container-native {
   position: fixed !important;
   inset: 0 !important;
   pointer-events: none !important;
@@ -246,66 +260,83 @@ body.gyro-landscape-270 #btnCameraRouteMap {
 .slts-gyro-toast-container-90 .slts-gyro-toast-popup-90 {
   position: absolute !important;
   top: 50% !important;
-  right: 1.5rem !important;
-  left: auto !important;
+  left: 50% !important;
+  right: auto !important;
   bottom: auto !important;
-  transform: translateY(-50%) rotate(90deg) !important;
+  transform: translate(-50%, -50%) rotate(90deg) !important;
   transform-origin: center center !important;
+  margin: 0 !important;
   background: rgba(15, 23, 42, 0.96) !important;
   color: #ffffff !important;
   border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
   border-radius: 1rem !important;
   box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6) !important;
-  padding: 0.65rem 1.15rem !important;
+  padding: 0.75rem 1.25rem !important;
   pointer-events: auto !important;
   white-space: nowrap !important;
   display: flex !important;
   align-items: center !important;
-  gap: 0.5rem !important;
-}
-
-.slts-gyro-toast-container-270 {
-  position: fixed !important;
-  inset: 0 !important;
-  pointer-events: none !important;
-  z-index: 99999 !important;
-  background: transparent !important;
-  display: block !important;
+  gap: 0.55rem !important;
 }
 
 .slts-gyro-toast-container-270 .slts-gyro-toast-popup-270 {
   position: absolute !important;
   top: 50% !important;
-  left: 1.5rem !important;
+  left: 50% !important;
   right: auto !important;
   bottom: auto !important;
-  transform: translateY(-50%) rotate(-90deg) !important;
+  transform: translate(-50%, -50%) rotate(-90deg) !important;
   transform-origin: center center !important;
+  margin: 0 !important;
   background: rgba(15, 23, 42, 0.96) !important;
   color: #ffffff !important;
   border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
   border-radius: 1rem !important;
   box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6) !important;
-  padding: 0.65rem 1.15rem !important;
+  padding: 0.75rem 1.25rem !important;
   pointer-events: auto !important;
   white-space: nowrap !important;
   display: flex !important;
   align-items: center !important;
-  gap: 0.5rem !important;
+  gap: 0.55rem !important;
+}
+
+.slts-gyro-toast-container-native .slts-gyro-toast-popup-native {
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%) !important;
+  transform-origin: center center !important;
+  margin: 0 !important;
+  background: rgba(15, 23, 42, 0.96) !important;
+  color: #ffffff !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.6) !important;
+  padding: 0.75rem 1.25rem !important;
+  pointer-events: auto !important;
+  white-space: nowrap !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.55rem !important;
 }
 
 .slts-gyro-toast-popup-90 .swal2-title,
 .slts-gyro-toast-popup-270 .swal2-title,
+.slts-gyro-toast-popup-native .swal2-title,
 .slts-gyro-toast-title {
   color: #ffffff !important;
-  font-size: 0.82rem !important;
+  font-size: 0.88rem !important;
   font-weight: 600 !important;
   margin: 0 !important;
   padding: 0 !important;
 }
 
 .slts-gyro-toast-popup-90 .swal2-icon,
-.slts-gyro-toast-popup-270 .swal2-icon {
+.slts-gyro-toast-popup-270 .swal2-icon,
+.slts-gyro-toast-popup-native .swal2-icon {
   margin: 0 !important;
   transform: scale(0.75) !important;
 }
@@ -1638,6 +1669,15 @@ table.dataTable tbody td {
   #cameraTopBar {
     padding-top: max(10px, env(safe-area-inset-top, 8px)) !important;
     padding-right: max(7rem, calc(env(safe-area-inset-right, 0px) + 6.5rem)) !important;
+  }
+
+  /* ปิดความเด่นชัด (dim) ของ 5 ปุ่มเมนูในแนวนอน */
+  #cameraTopBar #btnCameraBgQueue,
+  #cameraTopBar #btnEditMobileForm,
+  #cameraTopBar #btnCameraCaseSearch,
+  #cameraTopBar #btnCameraRouteMap,
+  #cameraTopBar #btnCameraAuth {
+    opacity: 0.55 !important;
   }
 
   @supports (-webkit-touch-callout: none) {
