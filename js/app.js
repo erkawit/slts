@@ -2789,42 +2789,84 @@ function getEffectiveGyroOrientation() {
 window.getEffectiveGyroOrientation = getEffectiveGyroOrientation;
 
 /**
- * ตรวจสอบว่าขณะนี้กล้องหมุนเป็นแนวนอนผ่าน Gyroscope หรือไม่
- * หากอยู่แนวนอนและผู้ใช้กดฟังก์ชันที่ต้องพิมพ์หรือใช้พื้นที่มาก ให้แจ้งเตือนให้ถือแนวตั้งเพื่อ UX ที่ดีที่สุด
- * แสดงตรงกลางหน้าจอแนวนอน พอดีตามทิศทางการหมุนของ Gyroscope
+ * แสดง Toast แจ้งเตือนเมื่ออยู่ในโหมดแนวนอน โดยคำนวณตำแหน่งจากความกว้างและความยาวของหน้าจอแนวนอนแท้จริง
+ * จัดวางกึ่งกลางหน้าจอแนวนอน (50% ของความกว้าง และ 50% ของความยาว) หมุนตาม Gyroscope หรือ Native Landscape
  */
+function showLandscapeWarningToast(actionName = 'ใช้งานฟังก์ชันนี้') {
+  let toastOverlay = document.getElementById('sltsLandscapeToast');
+  let toastCard = document.getElementById('sltsLandscapeToastCard');
+  let toastMsg = document.getElementById('sltsLandscapeToastMsg');
+
+  if (!toastOverlay) {
+    toastOverlay = document.createElement('div');
+    toastOverlay.id = 'sltsLandscapeToast';
+    toastOverlay.className = 'slts-landscape-toast-overlay';
+    toastOverlay.innerHTML = `
+      <div id="sltsLandscapeToastCard" class="slts-landscape-toast-card">
+        <div class="slts-landscape-toast-icon"><i class="fa-solid fa-circle-info"></i></div>
+        <div class="slts-landscape-toast-text" id="sltsLandscapeToastMsg"></div>
+      </div>
+    `;
+    document.body.appendChild(toastOverlay);
+    toastCard = document.getElementById('sltsLandscapeToastCard');
+    toastMsg = document.getElementById('sltsLandscapeToastMsg');
+  }
+
+  if (toastMsg) {
+    toastMsg.textContent = `กรุณาถือโทรศัพท์ในแนวตั้ง เพื่อ${actionName}`;
+  }
+
+  // คำนวณความกว้างและความยาวของหน้าจอในมุมมองแนวนอน
+  const winW = window.innerWidth;
+  const winH = window.innerHeight;
+  const landscapeWidth = Math.max(winW, winH);
+  const landscapeHeight = Math.min(winW, winH);
+
+  if (toastCard) {
+    toastCard.style.maxWidth = `${Math.min(landscapeWidth * 0.85, 480)}px`;
+    // จุดกึ่งกลางทางกายภาพของ Viewport
+    toastCard.style.top = `${winH / 2}px`;
+    toastCard.style.left = `${winW / 2}px`;
+
+    const isNativeLandscape = winW > winH;
+    const gyroMode = (typeof getEffectiveGyroOrientation === 'function') ? getEffectiveGyroOrientation() : 90;
+
+    if (!isNativeLandscape) {
+      if (gyroMode === 270) {
+        toastCard.style.transform = 'translate(-50%, -50%) rotate(-90deg)';
+      } else {
+        // default 90 (โทรศัพท์หมุนซ้าย)
+        toastCard.style.transform = 'translate(-50%, -50%) rotate(90deg)';
+      }
+    } else {
+      toastCard.style.transform = 'translate(-50%, -50%) rotate(0deg)';
+    }
+  }
+
+  toastOverlay.style.display = 'flex';
+  toastOverlay.style.opacity = '1';
+  if (toastCard) toastCard.style.opacity = '1';
+
+  // ตั้งเวลาปิดอัตโนมัติ 2 วินาที (2000ms)
+  if (window._sltsLandscapeToastTimer) {
+    clearTimeout(window._sltsLandscapeToastTimer);
+  }
+  window._sltsLandscapeToastTimer = setTimeout(() => {
+    if (toastCard) toastCard.style.opacity = '0';
+    if (toastOverlay) {
+      toastOverlay.style.opacity = '0';
+      setTimeout(() => {
+        toastOverlay.style.display = 'none';
+      }, 200);
+    }
+  }, 2000);
+}
+window.showLandscapeWarningToast = showLandscapeWarningToast;
+
 function checkGyroLandscapeAndWarn(actionName = 'ใช้งานฟังก์ชันนี้') {
-  const gyroMode = getEffectiveGyroOrientation();
-
+  const gyroMode = (typeof getEffectiveGyroOrientation === 'function') ? getEffectiveGyroOrientation() : 0;
   if (gyroMode !== 0) {
-    let containerClass = 'slts-gyro-toast-container-90';
-    let popupClass = 'slts-gyro-toast-popup-90';
-
-    if (gyroMode === 270) {
-      containerClass = 'slts-gyro-toast-container-270';
-      popupClass = 'slts-gyro-toast-popup-270';
-    } else if (gyroMode === 'native') {
-      containerClass = 'slts-gyro-toast-container-native';
-      popupClass = 'slts-gyro-toast-popup-native';
-    }
-
-    if (typeof Swal !== 'undefined') {
-      try { Swal.close(); } catch (e) {}
-      Swal.fire({
-        toast: true,
-        position: 'center',
-        customClass: {
-          container: containerClass,
-          popup: popupClass,
-          title: 'slts-gyro-toast-title'
-        },
-        icon: 'info',
-        title: `กรุณาถือโทรศัพท์ในแนวตั้ง เพื่อ${actionName}`,
-        showConfirmButton: false,
-        timer: 2000,
-        timerProgressBar: true
-      });
-    }
+    showLandscapeWarningToast(actionName);
     return true;
   }
   return false;
@@ -6355,6 +6397,7 @@ function updateDistricts(provinceName, selectDistrict = null, selectSubdistrict 
   elements.districtSelect.onchange = (e) => {
     state.selectedDistrict = e.target.value;
     updateSubdistricts(state.selectedProvince || provinceName, e.target.value);
+    if (typeof triggerDesktopSimilarSearch === 'function') triggerDesktopSimilarSearch();
   };
 }
 
@@ -6378,6 +6421,7 @@ function updateSubdistricts(provinceName, districtName, selectSubdistrict = null
   elements.subdistrictSelect.onchange = (e) => {
     state.selectedSubdistrict = e.target.value;
     if (typeof updateCaptureButtonState === 'function') updateCaptureButtonState();
+    if (typeof triggerDesktopSimilarSearch === 'function') triggerDesktopSimilarSearch();
   };
 }
 
@@ -6777,6 +6821,11 @@ window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = '
     if (locStatus) {
       locStatus.innerHTML = `<span class="text-emerald-700 font-semibold"><i class="fa-solid fa-wand-magic-sparkles mr-1 text-emerald-600"></i>วิเคราะห์ที่ตั้งออนไลน์สำเร็จ: <strong>${summaryText}</strong> (${sourceLabel})</span>`;
     }
+  }
+
+  // หากอยู่บน Desktop ให้เรียกตรวจหาข้อมูลที่ตั้งใกล้เคียงแบบเบื้องหลัง
+  if (typeof triggerDesktopSimilarSearch === 'function') {
+    triggerDesktopSimilarSearch();
   }
 
   return result;
@@ -8643,6 +8692,7 @@ function initFormEventListeners() {
         .replace(/^\s+/, '')
         .replace(/\s{2,}/g, ' ');
       updateCaptureButtonState();
+      triggerDesktopSimilarSearch();
     });
   }
 
@@ -8651,6 +8701,7 @@ function initFormEventListeners() {
     elements.udonCaseNoInput.addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/\D/g, '');
       updateCaptureButtonState();
+      triggerDesktopSimilarSearch();
     });
   }
 
@@ -8659,7 +8710,15 @@ function initFormEventListeners() {
     elements.otherCaseNoInput.addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/\D/g, '');
       updateCaptureButtonState();
+      triggerDesktopSimilarSearch();
     });
+  }
+
+  if (elements.udonCaseYearSelect) {
+    elements.udonCaseYearSelect.addEventListener('change', triggerDesktopSimilarSearch);
+  }
+  if (elements.otherCaseYearSelect) {
+    elements.otherCaseYearSelect.addEventListener('change', triggerDesktopSimilarSearch);
   }
 
   // ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)
@@ -8672,11 +8731,15 @@ function initFormEventListeners() {
     elements.mooInput.addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/\D/g, '');
       updateCaptureButtonState();
+      triggerDesktopSimilarSearch();
     });
   }
 
   if (elements.houseNoInput) {
-    elements.houseNoInput.addEventListener('input', updateCaptureButtonState);
+    elements.houseNoInput.addEventListener('input', () => {
+      updateCaptureButtonState();
+      triggerDesktopSimilarSearch();
+    });
   }
   if (elements.customOtherLocationName) {
     elements.customOtherLocationName.addEventListener('input', updateCaptureButtonState);
@@ -8740,6 +8803,493 @@ function initFormEventListeners() {
     });
   }
 }
+
+// =========================================================================
+// DESKTOP SIMILAR SUMMONS RECORD SEARCH SYSTEM (ระบบตรวจสอบข้อมูลที่ตั้งหมายที่ใกล้เคียง)
+// ค้นหาแบบเบื้องหลัง อัตโนมัติเมื่อกรอกเลขคดี หรือ บ้านเลขที่ (หน่วง 1 วินาที)
+// กรองเฉพาะข้อมูลที่ตรงกัน หรือใกล้เคียง >= 80% และเรียงจากมากไปน้อย
+// เมื่อเลือกข้อมูล จะนำเข้าฟอร์ม ยกเว้นรูปภาพและพิกัด ให้คงไว้ซึ่งข้อมูลเดิมจากภาพถ่ายเท่านั้น
+// =========================================================================
+
+/**
+ * คำนวณความใกล้เคียงของสตริงด้วย Levenshtein Distance (0.0 - 1.0)
+ */
+function calculateStringSimilarity(s1, s2) {
+  if (!s1 && !s2) return 1.0;
+  if (!s1 || !s2) return 0.0;
+  s1 = String(s1).trim().toLowerCase();
+  s2 = String(s2).trim().toLowerCase();
+  if (s1 === s2) return 1.0;
+
+  const len1 = s1.length;
+  const len2 = s2.length;
+  const maxLen = Math.max(len1, len2);
+  if (maxLen === 0) return 1.0;
+
+  let prevRow = new Array(len1 + 1);
+  let currRow = new Array(len1 + 1);
+
+  for (let i = 0; i <= len1; i++) {
+    prevRow[i] = i;
+  }
+
+  for (let j = 1; j <= len2; j++) {
+    currRow[0] = j;
+    const c2 = s2.charAt(j - 1);
+    for (let i = 1; i <= len1; i++) {
+      const cost = s1.charAt(i - 1) === c2 ? 0 : 1;
+      currRow[i] = Math.min(
+        currRow[i - 1] + 1,       // insertion
+        prevRow[i] + 1,           // deletion
+        prevRow[i - 1] + cost     // substitution
+      );
+    }
+    for (let i = 0; i <= len1; i++) {
+      prevRow[i] = currRow[i];
+    }
+  }
+
+  const dist = prevRow[len1];
+  return Math.max(0, 1 - (dist / maxLen));
+}
+window.calculateStringSimilarity = calculateStringSimilarity;
+
+let _desktopSimilarSearchTimer = null;
+
+/**
+ * สั่งเริ่มสืบค้นข้อมูลที่ตั้งหมายที่ใกล้เคียงแบบเบื้องหลัง
+ * หน่วงเวลา 1 วินาที (1,000 ms) ตามข้อกำหนด เพื่อไม่ให้กระทบกับการพิมพ์
+ */
+function triggerDesktopSimilarSearch() {
+  if (window.innerWidth <= 768) return; // ทำงานเฉพาะหน้าจอคอมพิวเตอร์ตามข้อกำหนด
+
+  if (_desktopSimilarSearchTimer) {
+    clearTimeout(_desktopSimilarSearchTimer);
+  }
+  _desktopSimilarSearchTimer = setTimeout(() => {
+    performDesktopSimilarSearch();
+  }, 1000);
+}
+window.triggerDesktopSimilarSearch = triggerDesktopSimilarSearch;
+
+/**
+ * ดำเนินการสืบค้นข้อมูลที่ตั้งหมายที่ใกล้เคียงในฐานข้อมูลชีตและประวัติ
+ */
+function performDesktopSimilarSearch() {
+  if (window.innerWidth <= 768) return;
+
+  const card = document.getElementById('desktopSimilarRecordsCard');
+  const list = document.getElementById('desktopSimilarRecordsList');
+  if (!card || !list) return;
+
+  // ตรวจสอบข้อมูลที่ผู้ใช้กรอกในฟอร์มปัจจุบัน
+  const isOther = elements.courtTypeSelect?.value === 'ศาลอื่น' || 
+                  elements.courtTypeSelect?.value === 'หมายศาลอื่น' || 
+                  (elements.otherCourtCaseField && !elements.otherCourtCaseField.classList.contains('hidden'));
+
+  const inputPrefix = isOther ? 'ต' : (elements.udonPrefixInput?.value.trim() || '');
+  const inputCaseNo = (isOther ? elements.otherCaseNoInput?.value : elements.udonCaseNoInput?.value || '').trim();
+  const inputCaseYear = (isOther ? elements.otherCaseYearSelect?.value : elements.udonCaseYearSelect?.value || '').trim();
+
+  const inputHouseNo = elements.houseNoInput?.value.trim() || '';
+  const inputMoo = elements.mooInput?.value.trim().replace(/\D/g, '') || '';
+  const inputDistrict = elements.districtSelect?.value.trim() || state.selectedDistrict || '';
+  const inputSubdistrict = elements.subdistrictSelect?.value.trim() || state.selectedSubdistrict || '';
+  const inputProvince = elements.provinceSelect?.value.trim() || state.selectedProvince || 'อุดรธานี';
+
+  // หากไม่มีการกรอกเลขคดี และไม่มีการกรอกบ้านเลขที่ ให้ซ่อนการแสดงผลทันที
+  if (!inputCaseNo && !inputHouseNo) {
+    card.classList.add('hidden');
+    list.innerHTML = '';
+    window._desktopSimilarResults = [];
+    return;
+  }
+
+  // แหล่งข้อมูลสำหรับตรวจสอบ: state.allSheetRows + แคชชีต + ประวัติการกรอก
+  let allRows = (state.allSheetRows && state.allSheetRows.length > 0) ? state.allSheetRows : [];
+  if (allRows.length === 0) {
+    try {
+      const cached = localStorage.getItem('slts_cached_sheet_data');
+      if (cached) allRows = JSON.parse(cached);
+    } catch (e) {}
+  }
+
+  // เสริมด้วยข้อมูลจาก Desktop Form History เพื่อให้ครอบคลุมหมายล่าสุด
+  const historyList = (typeof getDesktopFormHistory === 'function') ? getDesktopFormHistory() : [];
+  const combinedRows = [...allRows];
+  historyList.forEach(h => {
+    combinedRows.push({
+      'เลขคดี': h.caseNumber,
+      'ประเภทศาล': h.courtType,
+      'จังหวัด': h.province,
+      'อำเภอ': h.district,
+      'ตำบล': h.subdistrict,
+      'ประเภทสถานที่': h.locationType,
+      'บ้านเลขที่': h.houseNo,
+      'หมู่': h.moo,
+      'ที่ตั้งส่งหมาย (เต็ม)': h.locationText,
+      'วัน-เวลาบันทึก': h.savedAt
+    });
+  });
+
+  if (combinedRows.length === 0) {
+    card.classList.add('hidden');
+    return;
+  }
+
+  const results = [];
+  const seenKeys = new Set();
+
+  const inputFullCase = (inputPrefix + inputCaseNo + (inputCaseYear ? '/' + inputCaseYear : '')).toLowerCase();
+  const inputAddrStr = [
+    inputHouseNo ? 'บ้านเลขที่ ' + inputHouseNo : '',
+    inputMoo ? 'หมู่ ' + inputMoo : '',
+    inputSubdistrict ? 'ต.' + inputSubdistrict : '',
+    inputDistrict ? 'อ.' + inputDistrict : '',
+    inputProvince ? 'จ.' + inputProvince : ''
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  for (let i = 0; i < combinedRows.length; i++) {
+    const r = combinedRows[i];
+    const rCase = (r['เลขคดี'] || '').trim();
+    const rHouse = (r['บ้านเลขที่'] || '').trim();
+    const rMoo = (r['หมู่'] || '').trim().replace(/\D/g, '');
+    const rSub = (r['ตำบล'] || '').trim();
+    const rDist = (r['อำเภอ'] || '').trim();
+    const rProv = (r['จังหวัด'] || r._resolvedProvince || (typeof getRowProvince === 'function' ? getRowProvince(r) : '') || '').trim();
+
+    if (!rCase && !rHouse) continue;
+
+    let caseScore = 0;
+    let addrScore = 0;
+    let matchReasons = [];
+
+    // -------------------------------------------------------------
+    // 1.1 การตรวจสอบความใกล้เคียงของเลขคดี (Case Number Similarity)
+    // -------------------------------------------------------------
+    if (inputCaseNo) {
+      const rCaseClean = rCase.replace(/\s+/g, '').toLowerCase();
+      if (rCaseClean === inputFullCase.replace(/\s+/g, '')) {
+        caseScore = 1.0;
+        matchReasons.push('เลขคดีตรงกัน 100%');
+      } else {
+        const mDb = rCase.match(/^([^\d/]+)?\s*(\d+)(?:\/(\d+))?/);
+        if (mDb) {
+          const dbPfx = (mDb[1] || '').trim().toLowerCase();
+          const dbNum = (mDb[2] || '').trim();
+          const dbYear = (mDb[3] || '').trim();
+
+          if (inputCaseNo === dbNum) {
+            // หมายเลขตรงกัน
+            if (inputCaseYear && dbYear && inputCaseYear === dbYear) {
+              if (inputPrefix && dbPfx) {
+                const pfxSim = calculateStringSimilarity(inputPrefix.toLowerCase(), dbPfx);
+                caseScore = 0.85 + (0.15 * pfxSim);
+                matchReasons.push(`เลขคดีตรงกัน (${dbNum}/${dbYear})`);
+              } else {
+                caseScore = 0.95;
+                matchReasons.push(`เลขคดีตรงกัน (${dbNum}/${dbYear})`);
+              }
+            } else if (!inputCaseYear || !dbYear) {
+              caseScore = 0.90;
+              matchReasons.push(`เลขคดีตรงกัน (${dbNum})`);
+            } else {
+              // ตัวเลขคดีเดียวกันแต่คนละปี พ.ศ. เช่น 2097/2567 กับ 2097/2568
+              caseScore = 0.80;
+              matchReasons.push(`ตัวเลขคดีตรงกัน (${dbNum}) ต่างปี`);
+            }
+          } else {
+            // ความใกล้เคียงตัวเลขคดี
+            const numSim = calculateStringSimilarity(inputCaseNo, dbNum);
+            const fullSim = calculateStringSimilarity(inputFullCase, rCaseClean);
+            const bestCaseSim = Math.max(numSim * 0.85, fullSim);
+            if (bestCaseSim >= 0.80) {
+              caseScore = bestCaseSim;
+              matchReasons.push(`เลขคดีใกล้เคียง (${rCase})`);
+            }
+          }
+        } else {
+          const fullSim = calculateStringSimilarity(inputFullCase, rCaseClean);
+          if (fullSim >= 0.80) {
+            caseScore = fullSim;
+            matchReasons.push(`เลขคดีใกล้เคียง (${rCase})`);
+          }
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 1.2 การตรวจสอบความใกล้เคียงของที่อยู่ (Address Similarity)
+    // -------------------------------------------------------------
+    if (inputHouseNo) {
+      const distMatches = !inputDistrict || !rDist || inputDistrict === rDist || rDist.includes(inputDistrict) || inputDistrict.includes(rDist);
+      const subMatches = !inputSubdistrict || !rSub || inputSubdistrict === rSub || rSub.includes(inputSubdistrict) || inputSubdistrict.includes(rSub);
+
+      if (distMatches && subMatches) {
+        if (inputHouseNo === rHouse) {
+          if (inputMoo && rMoo) {
+            if (inputMoo === rMoo) {
+              addrScore = 1.0;
+              matchReasons.push('ที่อยู่ตรงกัน 100%');
+            } else {
+              addrScore = 0.88;
+              matchReasons.push(`บ้านเลขที่ตรงกัน (${rHouse}) คนละหมู่`);
+            }
+          } else {
+            addrScore = 0.95;
+            matchReasons.push(`บ้านเลขที่ตรงกัน (${rHouse})`);
+          }
+        } else if (rHouse) {
+          const hSim = calculateStringSimilarity(inputHouseNo, rHouse);
+          if (hSim >= 0.80) {
+            addrScore = hSim;
+            matchReasons.push(`บ้านเลขที่ใกล้เคียง (${rHouse})`);
+          }
+        }
+      } else {
+        const rAddrStr = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || [
+          rHouse ? 'บ้านเลขที่ ' + rHouse : '',
+          rMoo ? 'หมู่ ' + rMoo : '',
+          rSub ? 'ต.' + rSub : '',
+          rDist ? 'อ.' + rDist : '',
+          rProv ? 'จ.' + rProv : ''
+        ].filter(Boolean).join(' ')).toLowerCase();
+
+        const addrSim = calculateStringSimilarity(inputAddrStr, rAddrStr);
+        if (addrSim >= 0.80) {
+          addrScore = addrSim;
+          matchReasons.push('ที่อยู่ใกล้เคียง');
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 1.3 รวมคะแนน: กรองเฉพาะข้อมูลที่มีความใกล้เคียงตรงกันหรือเกิน 80% (>= 0.80)
+    // -------------------------------------------------------------
+    let finalScore = Math.max(caseScore, addrScore);
+    if (caseScore >= 0.80 && addrScore >= 0.80) {
+      finalScore = Math.min(1.0, finalScore + 0.05); // โบนัสตรงกันทั้งสองส่วน
+    }
+
+    if (finalScore >= 0.80) {
+      const dedupeKey = `${rCase}_${rHouse}_${rMoo}_${rSub}_${rDist}`;
+      if (!seenKeys.has(dedupeKey)) {
+        seenKeys.add(dedupeKey);
+        results.push({
+          record: r,
+          score: finalScore,
+          matchReason: matchReasons.join(' • ') || 'ตรงกัน ≥ 80%'
+        });
+      }
+    }
+  }
+
+  // เรียงลำดับจากข้อมูลที่ตรงกันมากที่สุดไปน้อยที่สุด (Descending)
+  results.sort((a, b) => b.score - a.score);
+
+  // เก็บผลลัพธ์ไว้ให้ฟังก์ชันเลือกเรียกใช้
+  window._desktopSimilarResults = results.map(item => item.record);
+
+  renderDesktopSimilarResults(results);
+}
+window.performDesktopSimilarSearch = performDesktopSimilarSearch;
+
+/**
+ * วาดผลลัพธ์ข้อมูลที่ตั้งหมายที่ใกล้เคียงลงในบล็อก #desktopSimilarRecordsCard
+ */
+function renderDesktopSimilarResults(results) {
+  const card = document.getElementById('desktopSimilarRecordsCard');
+  const list = document.getElementById('desktopSimilarRecordsList');
+  const countBadge = document.getElementById('desktopSimilarCountBadge');
+
+  if (!card || !list) return;
+
+  if (!results || results.length === 0) {
+    card.classList.add('hidden');
+    list.innerHTML = '';
+    return;
+  }
+
+  card.classList.remove('hidden');
+  if (countBadge) {
+    countBadge.textContent = `พบ ${results.length} รายการ (ตรงกัน ≥ 80%)`;
+  }
+
+  let html = '';
+  // แสดงผลสูงสุด 10 รายการที่ตรงกันมากที่สุด
+  const displayItems = results.slice(0, 10);
+
+  displayItems.forEach((item, idx) => {
+    const r = item.record;
+    const scorePct = Math.round(item.score * 100);
+    const caseNo = r['เลขคดี'] || '-';
+    const court = r['ประเภทศาล'] || 'ศาลจังหวัด';
+    const locFull = r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || [
+      r['บ้านเลขที่'] ? `บ้านเลขที่ ${r['บ้านเลขที่']}` : '',
+      r['หมู่'] ? `หมู่ ${r['หมู่']}` : '',
+      r['ตำบล'] ? `ต.${r['ตำบล']}` : '',
+      r['อำเภอ'] ? `อ.${r['อำเภอ']}` : '',
+      r['จังหวัด'] ? `จ.${r['จังหวัด']}` : ''
+    ].filter(Boolean).join(' ') || '-';
+
+    const rawTime = r['วัน-เวลาบันทึก'] || r['Timestamp'] || '';
+    const dateStr = (rawTime && typeof formatThaiDateDisplay === 'function') ? formatThaiDateDisplay(rawTime) : '';
+
+    let badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+    if (scorePct >= 95) {
+      badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+    } else if (scorePct >= 85) {
+      badgeClass = 'bg-blue-100 text-blue-800 border-blue-300';
+    } else {
+      badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+    }
+
+    html += `
+      <div class="similar-record-card p-3.5 bg-white hover:bg-amber-50/40 rounded-xl border border-gray-200 hover:border-amber-400 transition-all duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+        <div class="space-y-1 flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="inline-flex items-center gap-1 font-bold text-blue-800 text-sm font-mono">
+              <i class="fa-solid fa-gavel text-blue-600"></i> ${caseNo}
+            </span>
+            <span class="inline-flex items-center text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${badgeClass}">
+              <i class="fa-solid fa-percent mr-1 text-[10px]"></i>ตรงกัน ${scorePct}%
+            </span>
+            <span class="text-[11px] text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md font-semibold border border-amber-200">
+              ${item.matchReason}
+            </span>
+            <span class="text-[11px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-md font-medium">
+              ${court}
+            </span>
+          </div>
+          <div class="text-xs text-gray-700 flex items-center gap-1.5 flex-wrap">
+            <i class="fa-solid fa-location-dot text-rose-500 shrink-0"></i>
+            <span class="font-medium text-gray-900">${locFull}</span>
+            ${dateStr ? `<span class="text-gray-400 text-[11px]">(${dateStr})</span>` : ''}
+          </div>
+        </div>
+        <div class="shrink-0 flex items-center gap-2">
+          <button 
+            type="button" 
+            onclick="applySimilarRecordToDesktopForm(${idx})" 
+            class="w-full sm:w-auto px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+            title="นำข้อมูลนี้ไปกรอกในฟอร์ม (คงพิกัดและรูปภาพเดิม)"
+          >
+            <i class="fa-solid fa-arrow-turn-down text-[11px]"></i>
+            <span>เลือกข้อมูลนี้</span>
+          </button>
+        </div>
+      </div>
+    `;
+  });
+
+  list.innerHTML = html;
+}
+window.renderDesktopSimilarResults = renderDesktopSimilarResults;
+
+/**
+ * 1.4 เมื่อกดเลือกข้อมูลใด ให้นำข้อมูล อำเภอ ตำบล เลขคดี บ้านเลขที่ หมู่ มากรอกลงในฟอร์ม
+ * ยกเว้นรูปภาพและพิกัด ให้คงไว้ซึ่งข้อมูลที่ได้จากภาพถ่ายเท่านั้น
+ */
+window.applySimilarRecordToDesktopForm = function(idx) {
+  const rec = window._desktopSimilarResults?.[idx];
+  if (!rec) return;
+
+  const rawCourt = rec['ประเภทศาล'] || '';
+  const caseNo = (rec['เลขคดี'] || '').trim();
+  const prov = rec['จังหวัด'] || rec._resolvedProvince || (typeof getRowProvince === 'function' ? getRowProvince(rec) : '') || state.selectedProvince || 'อุดรธานี';
+  const dist = (rec['อำเภอ'] || '').trim();
+  const sub = (rec['ตำบล'] || '').trim();
+
+  // 1. หมวดหมู่ประเภทศาล
+  let category = 'ศาลจังหวัด';
+  if (rawCourt.includes('ไม่สังกัดภาค') || rawCourt.includes('ศาลแพ่ง') || rawCourt.includes('ศาลอาญา') || rawCourt.includes('ล้มละลาย') || rawCourt.includes('ทรัพย์สินทางปัญญา')) {
+    category = 'ศาลที่ไม่สังกัดภาค';
+  } else if (rawCourt.includes('เยาวชน')) {
+    category = 'ศาลเยาวชนและครอบครัว';
+  } else if (rawCourt.includes('แขวง')) {
+    category = 'ศาลแขวง';
+  } else if (rawCourt.includes('ศาลอื่น') || rawCourt.includes('หมาย ต') || caseNo.startsWith('ต')) {
+    category = 'ศาลอื่น';
+  }
+
+  if (typeof setDesktopCourtType === 'function') {
+    setDesktopCourtType(category, rawCourt, prov);
+  }
+
+  // 2. ข้อมูลเลขคดี (แยกอักษรนำหน้า ตัวเลข และปี พ.ศ.)
+  if (category === 'ศาลอื่น' || caseNo.startsWith('ต')) {
+    const m = caseNo.match(/^ต?\s*(\d+)(?:\/(\d+))?/);
+    if (m) {
+      if (elements.otherCaseNoInput) elements.otherCaseNoInput.value = m[1] || '';
+      if (elements.otherCaseYearSelect && m[2]) elements.otherCaseYearSelect.value = m[2];
+    } else {
+      if (elements.otherCaseNoInput) elements.otherCaseNoInput.value = caseNo.replace(/\D/g, '');
+    }
+  } else {
+    const m = caseNo.match(/^([^\d/]+)?\s*(\d+)(?:\/(\d+))?/);
+    if (m) {
+      if (elements.udonPrefixInput) elements.udonPrefixInput.value = (m[1] || '').trim();
+      if (elements.udonCaseNoInput) elements.udonCaseNoInput.value = m[2] || '';
+      if (elements.udonCaseYearSelect && m[3]) elements.udonCaseYearSelect.value = m[3];
+    } else {
+      if (elements.udonCaseNoInput) elements.udonCaseNoInput.value = caseNo.replace(/\D/g, '');
+    }
+  }
+
+  // 3. จังหวัด, อำเภอ, ตำบล
+  if (prov && elements.provinceSelect) {
+    elements.provinceSelect.value = prov;
+    state.selectedProvince = prov;
+  }
+  if (typeof updateDistricts === 'function') {
+    updateDistricts(prov, dist, sub);
+  } else {
+    if (dist && elements.districtSelect) elements.districtSelect.value = dist;
+    if (sub && elements.subdistrictSelect) elements.subdistrictSelect.value = sub;
+  }
+
+  // 4. ข้อมูลสถานที่ส่งหมาย (ประเภทสถานที่, บ้านเลขที่, หมู่)
+  const locType = rec['ประเภทสถานที่'] || 'หมายบ้าน';
+  if (elements.locationTypeSelect) {
+    elements.locationTypeSelect.value = locType;
+    elements.locationTypeSelect.dispatchEvent(new Event('change'));
+  }
+
+  if (locType === 'หมายบ้าน') {
+    if (elements.houseNoInput) elements.houseNoInput.value = rec['บ้านเลขที่'] || '';
+    if (elements.mooInput) elements.mooInput.value = (rec['หมู่'] || '').replace(/\D/g, '');
+  } else if (locType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+    if (elements.localAdminNameInput) {
+      elements.localAdminNameInput.value = rec['ที่ทำการปกครองส่วนท้องถิ่น'] || rec['ที่ตั้งส่งหมาย (เต็ม)'] || 'ที่ทำการปกครองส่วนท้องถิ่น';
+    }
+  } else {
+    if (elements.customOtherLocationName) {
+      elements.customOtherLocationName.value = rec['สถานที่อื่นๆ'] || rec['ที่ตั้งส่งหมาย (เต็ม)'] || 'อื่นๆ';
+    }
+  }
+
+  // -------------------------------------------------------------
+  // ข้อกำหนดสำคัญ: รูปภาพและพิกัด ให้คงไว้ซึ่งข้อมูลที่ได้จากภาพถ่ายเท่านั้น!
+  // (ไม่แก้ไข elements.coordinatesInput, state.lat, state.lng หรือภาพถ่ายที่แนบไว้)
+  // -------------------------------------------------------------
+
+  if (typeof updateCaptureButtonState === 'function') {
+    updateCaptureButtonState();
+  }
+
+  if (typeof Swal !== 'undefined') {
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: `นำข้อมูลหมาย "${caseNo}" ลงฟอร์มเรียบร้อยแล้ว`,
+      text: 'ข้อมูลที่อยู่และเลขคดีถูกนำมาใช้เรียบร้อย (คงพิกัดและภาพถ่ายเดิม)',
+      showConfirmButton: false,
+      timer: 2200,
+      timerProgressBar: true
+    });
+  }
+};
 
 function getFullLocationText() {
   const province = (elements.provinceSelect ? elements.provinceSelect.value : '') || state.selectedProvince || '';
@@ -9656,6 +10206,8 @@ function resetDesktopForm(keepValues = true) {
   if (elements.desktopImageFileInput) elements.desktopImageFileInput.value = '';
   if (elements.desktopImagePreviewContainer) elements.desktopImagePreviewContainer.classList.add('hidden');
   if (elements.desktopPreviewImg) elements.desktopPreviewImg.src = '';
+  const similarCard = document.getElementById('desktopSimilarRecordsCard');
+  if (similarCard) similarCard.classList.add('hidden');
   if (!keepValues) {
     resetFormForNextCase();
   }
@@ -11046,6 +11598,8 @@ function resetFormForNextCase() {
   if (elements.houseNoInput) elements.houseNoInput.value = '';
   if (elements.mooInput) elements.mooInput.value = '';
   if (elements.customOtherLocationName) elements.customOtherLocationName.value = '';
+  const similarCard = document.getElementById('desktopSimilarRecordsCard');
+  if (similarCard) similarCard.classList.add('hidden');
 
   // บนจอมือถือ หากยังเปิดกล้องอยู่ ให้เด้งฟอร์มกรอกหมายถัดไปทันที โดยคงอำเภอและตำบลเดิมไว้เพื่อความสะดวกรวดเร็ว
   if (window.innerWidth < 768 && elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {

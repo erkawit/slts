@@ -345,6 +345,67 @@ body.gyro-landscape-270 #btnCameraAuth {
   display: none !important;
 }
 
+/* ================================================================
+   Dedicated Landscape Warning Toast Overlay & Card
+   คำนวณตำแหน่งจากความกว้างและความยาวของหน้าจอแนวนอนแท้จริง
+   ================================================================ */
+.slts-landscape-toast-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  pointer-events: none !important;
+  z-index: 999999 !important;
+  overflow: hidden !important;
+  transition: opacity 0.2s ease-out;
+}
+
+.slts-landscape-toast-card {
+  position: absolute !important;
+  pointer-events: auto !important;
+  background: rgba(15, 23, 42, 0.96) !important;
+  color: #ffffff !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.35) !important;
+  border-radius: 1.25rem !important;
+  box-shadow: 0 20px 45px -5px rgba(0, 0, 0, 0.75), 0 0 20px rgba(59, 130, 246, 0.35) !important;
+  padding: 0.8rem 1.45rem !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.75rem !important;
+  white-space: nowrap !important;
+  user-select: none !important;
+  transform-origin: center center !important;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
+.slts-landscape-toast-icon {
+  font-size: 1.15rem !important;
+  color: #60a5fa !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.slts-landscape-toast-text {
+  font-size: 0.9rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.015em !important;
+  color: #ffffff !important;
+}
+
+/* ================================================================
+   Desktop Similar Records Block (ข้อมูลที่ตั้งหมายที่ใกล้เคียง > 80%)
+   ================================================================ */
+.similar-record-card {
+  transition: all 0.2s ease;
+}
+.similar-record-card:hover {
+  border-color: #3b82f6 !important;
+  background-color: #f8fafc !important;
+  transform: translateY(-1px);
+}
+
 /* DataTables Minimalist Customization */
 .dataTables_wrapper {
   padding-top: 8px;
