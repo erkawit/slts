@@ -40,15 +40,19 @@ function doPost(e) {
     // ==========================================
     // ACTION: DEVICE_HANDOFF (การส่งข้อมูลพิกัดและเส้นทางข้ามอุปกรณ์ Cross-Device Handoff)
     // ==========================================
-    if (data.action === "send_handoff") {
+    if (data.action === "send_handoff" || data.action === "share_route") {
       const handoffSheet = getHandoffSheet(spreadsheet);
-      const targetUserId = String(data.user_id || data.username || 'anonymous').trim();
+      const targetUserId = String(data.target_user_id || data.user_id || data.username || 'anonymous').trim().toLowerCase();
+      const fromUserId = String(data.from_user_id || data.sender_username || '').trim().toLowerCase();
+      const fromUserName = String(data.from_user_name || data.sender_name || fromUserId).trim();
+      const handoffType = String(data.type || (fromUserId && fromUserId !== targetUserId ? 'share_route' : 'handoff')).trim();
       const timestamp = Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss");
       const hData = handoffSheet.getDataRange().getValues();
 
       let foundRow = -1;
-      for (let i = 1; i < hData.length; i++) {
-        if (String(hData[i][0] || '').trim().toLowerCase() === targetUserId.toLowerCase()) {
+      // Search backwards to update the most recent record for this user
+      for (let i = hData.length - 1; i >= 1; i--) {
+        if (String(hData[i][0] || '').trim().toLowerCase() === targetUserId) {
           foundRow = i + 1;
           break;
         }
@@ -64,7 +68,13 @@ function doPost(e) {
         String(data.lng || ''),
         "pending",
         timestamp,
-        timestamp
+        timestamp,
+        fromUserId,
+        fromUserName,
+        handoffType,
+        typeof data.startLocation === 'object' ? JSON.stringify(data.startLocation) : String(data.startLocation || ''),
+        typeof data.endLocation === 'object' ? JSON.stringify(data.endLocation) : String(data.endLocation || ''),
+        JSON.stringify(data)
       ];
 
       if (foundRow !== -1) {
@@ -75,31 +85,40 @@ function doPost(e) {
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
-        message: "Handoff payload sent to pending state",
+        message: handoffType === 'share_route' ? "Shared route sent to user" : "Handoff payload sent to pending state",
         user_id: targetUserId,
+        from_user_id: fromUserId,
+        from_user_name: fromUserName,
+        type: handoffType,
         timestamp: timestamp
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
     if (data.action === "get_pending_handoff") {
       const handoffSheet = getHandoffSheet(spreadsheet);
-      const targetUserId = String(data.user_id || data.username || '').trim();
+      const targetUserId = String(data.target_user_id || data.user_id || data.username || '').trim().toLowerCase();
       const hData = handoffSheet.getDataRange().getValues();
 
       let pendingItem = null;
-      for (let i = 1; i < hData.length; i++) {
+      for (let i = hData.length - 1; i >= 1; i--) {
         const uId = String(hData[i][0] || '').trim().toLowerCase();
         const status = String(hData[i][7] || '').trim().toLowerCase();
-        if (uId === targetUserId.toLowerCase() && status === "pending") {
+        if ((!targetUserId || uId === targetUserId) && status === "pending") {
+          let fullPayload = null;
+          if (hData[i][15]) {
+            try { fullPayload = JSON.parse(hData[i][15]); } catch (pe) {}
+          }
+
           let parsedStops = [];
-          try {
-            parsedStops = JSON.parse(hData[i][4] || '[]');
-          } catch (pe) {
-            parsedStops = [];
+          if (fullPayload && fullPayload.stops) {
+            parsedStops = fullPayload.stops;
+          } else {
+            try { parsedStops = JSON.parse(hData[i][4] || '[]'); } catch (pe) { parsedStops = []; }
           }
 
           pendingItem = {
             user_id: hData[i][0],
+            target_user_id: hData[i][0],
             queryString: hData[i][1],
             fullAddress: hData[i][2],
             caseNumber: hData[i][3],
@@ -107,8 +126,17 @@ function doPost(e) {
             lat: hData[i][5] ? parseFloat(hData[i][5]) : null,
             lng: hData[i][6] ? parseFloat(hData[i][6]) : null,
             status: hData[i][7],
-            timestamp: hData[i][8],
-            updated_at: hData[i][9]
+            timestamp: hData[i][8] instanceof Date ? Utilities.formatDate(hData[i][8], "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss") : String(hData[i][8] || ''),
+            updated_at: hData[i][9] instanceof Date ? Utilities.formatDate(hData[i][9], "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss") : String(hData[i][9] || ''),
+            from_user_id: hData[i][10] || (fullPayload ? fullPayload.from_user_id : ''),
+            from_user_name: hData[i][11] || (fullPayload ? fullPayload.from_user_name : ''),
+            type: hData[i][12] || (fullPayload ? fullPayload.type : 'handoff'),
+            startLocation: fullPayload ? fullPayload.startLocation : null,
+            endLocation: fullPayload ? fullPayload.endLocation : null,
+            isRoundTrip: fullPayload ? Boolean(fullPayload.isRoundTrip) : false,
+            routeRoadPolyline: fullPayload ? fullPayload.routeRoadPolyline : null,
+            totalDistanceKm: fullPayload ? fullPayload.totalDistanceKm : null,
+            note: fullPayload ? fullPayload.note : ''
           };
           break;
         }
@@ -123,18 +151,17 @@ function doPost(e) {
 
     if (data.action === "ack_handoff") {
       const handoffSheet = getHandoffSheet(spreadsheet);
-      const targetUserId = String(data.user_id || data.username || '').trim();
+      const targetUserId = String(data.target_user_id || data.user_id || data.username || '').trim().toLowerCase();
       const timestamp = Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss");
       const hData = handoffSheet.getDataRange().getValues();
 
       let updated = false;
-      for (let i = 1; i < hData.length; i++) {
+      for (let i = hData.length - 1; i >= 1; i--) {
         const uId = String(hData[i][0] || '').trim().toLowerCase();
-        if (uId === targetUserId.toLowerCase()) {
+        if (uId === targetUserId) {
           handoffSheet.getRange(i + 1, 8).setValue("received");
           handoffSheet.getRange(i + 1, 10).setValue(timestamp);
           updated = true;
-          break;
         }
       }
 
@@ -973,7 +1000,13 @@ function getHandoffSheet(spreadsheet) {
       "lng",
       "status",
       "timestamp",
-      "updated_at"
+      "updated_at",
+      "from_user_id",
+      "from_user_name",
+      "type",
+      "startLocationJson",
+      "endLocationJson",
+      "payloadJson"
     ];
     sheet.appendRow(headers);
 
@@ -1075,20 +1108,42 @@ function doGet(e) {
           const uId = String(hData[i][0] || '').trim().toLowerCase();
           const status = String(hData[i][7] || '').trim().toLowerCase();
           
-          const isUserMatch = !targetUserId || uId === targetUserId || targetUserId === 'admin' || uId === 'admin';
+          // Match only when targetUserId is specified and matches, or no filter
+          const isUserMatch = !targetUserId || uId === targetUserId;
           if (isUserMatch) {
             if (e.parameter.action === "get_pending_handoff" && status !== "pending") {
               continue;
             }
+
+            let fullPayload = null;
+            if (hData[i][15]) {
+              try { fullPayload = JSON.parse(hData[i][15]); } catch (pe) {}
+            }
+
             let parsedStops = [];
-            try {
-              parsedStops = JSON.parse(hData[i][4] || '[]');
-            } catch (pe) {
-              parsedStops = [];
+            if (fullPayload && fullPayload.stops) {
+              parsedStops = fullPayload.stops;
+            } else {
+              try { parsedStops = JSON.parse(hData[i][4] || '[]'); } catch (pe) { parsedStops = []; }
+            }
+
+            let parsedStart = null;
+            if (fullPayload && fullPayload.startLocation) {
+              parsedStart = fullPayload.startLocation;
+            } else if (hData[i][13]) {
+              try { parsedStart = JSON.parse(hData[i][13]); } catch (pe) {}
+            }
+
+            let parsedEnd = null;
+            if (fullPayload && fullPayload.endLocation) {
+              parsedEnd = fullPayload.endLocation;
+            } else if (hData[i][14]) {
+              try { parsedEnd = JSON.parse(hData[i][14]); } catch (pe) {}
             }
 
             latestItem = {
               user_id: hData[i][0],
+              target_user_id: hData[i][0],
               queryString: hData[i][1],
               fullAddress: hData[i][2],
               caseNumber: hData[i][3],
@@ -1096,8 +1151,17 @@ function doGet(e) {
               lat: hData[i][5] ? parseFloat(hData[i][5]) : null,
               lng: hData[i][6] ? parseFloat(hData[i][6]) : null,
               status: hData[i][7],
-              timestamp: hData[i][8],
-              updated_at: hData[i][9]
+              timestamp: hData[i][8] instanceof Date ? Utilities.formatDate(hData[i][8], "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss") : String(hData[i][8] || ''),
+              updated_at: hData[i][9] instanceof Date ? Utilities.formatDate(hData[i][9], "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss") : String(hData[i][9] || ''),
+              from_user_id: hData[i][10] || (fullPayload ? fullPayload.from_user_id : ''),
+              from_user_name: hData[i][11] || (fullPayload ? fullPayload.from_user_name : ''),
+              type: hData[i][12] || (fullPayload ? fullPayload.type : 'handoff'),
+              startLocation: parsedStart,
+              endLocation: parsedEnd,
+              isRoundTrip: fullPayload ? Boolean(fullPayload.isRoundTrip) : false,
+              routeRoadPolyline: fullPayload ? fullPayload.routeRoadPolyline : null,
+              totalDistanceKm: fullPayload ? fullPayload.totalDistanceKm : null,
+              note: fullPayload ? fullPayload.note : ''
             };
             break;
           }

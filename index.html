@@ -735,6 +735,11 @@
             <i class="fa-solid fa-mobile-screen-button text-violet-200"></i>
             <span>ส่งไปแสดงผลบนมือถือ</span>
           </button>
+          <!-- ปุ่มแชร์เส้นทางการส่งหมายให้ผู้ใช้งานอื่น (Share Route) -->
+          <button type="button" id="btnShareRouteToUser" onclick="openShareRouteModal()" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition inline-flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer" title="แชร์เส้นทางการส่งหมายนี้ไปยังผู้ใช้งานอื่น">
+            <i class="fa-solid fa-share-nodes text-indigo-200"></i>
+            <span>แชร์เส้นทางให้ผู้อื่น</span>
+          </button>
         </div>
       </div>
 
@@ -1296,13 +1301,13 @@
   <script src="js/compass.js?v=20260904_08"></script>
   <script src="js/map.js?v=20260904_08"></script>
   <script src="js/watermark.js?v=20260904_15"></script>
-  <script src="js/app.js?v=20260904_20"></script>
+  <script src="js/app.js?v=20260904_22"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260904_20')
+        navigator.serviceWorker.register('./sw.js?v=20260904_22')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
