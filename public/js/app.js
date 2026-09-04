@@ -4149,7 +4149,15 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
   const district = rec['อำเภอ'] || '';
   const subdistrict = rec['ตำบล'] || '';
   const locationType = rec['ประเภทสถานที่'] || 'หมายบ้าน';
-  const locationFull = rec['ที่ตั้งส่งหมาย (เต็ม)'] || rec['ที่ตั้งส่งหมาย'] || '';
+  let locationFull = rec['ที่ตั้งส่งหมาย (เต็ม)'] || rec['ที่ตั้งส่งหมาย'] || '';
+
+  // หากข้อมูลที่ตั้งส่งหมาย (เต็ม) เดิม มีชื่อตำบลไม่ตรงกับตำบลที่เลือกไว้ ให้ปรับให้ตรงกันอัตโนมัติ
+  if (subdistrict && locationFull) {
+    const subMatch = locationFull.match(/ต\.([^\s]+)/);
+    if (subMatch && subMatch[1] && subMatch[1] !== subdistrict) {
+      locationFull = locationFull.replace('ต.' + subMatch[1], 'ต.' + subdistrict);
+    }
+  }
   const lat = rec['ละติจูด (Lat)'] || rec['ละติจูด'] || '';
   const lng = rec['ลองจิจูด (Lng)'] || rec['ลองจิจูด'] || '';
   const imgUrl = rec['ลิงก์รูปภาพใน Google Drive'] || rec['ลิงก์รูปภาพ'] || '';
@@ -4351,15 +4359,66 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
       const coordEl = document.getElementById('swalEditCoordinates');
 
       if (provEl && distEl && subEl) {
+        let prevProv = provEl.value;
+        let prevDist = distEl.value;
+        let prevSub = subEl.value;
+
+        const syncAddressText = () => {
+          const locEl = document.getElementById('swalEditLocationText');
+          if (!locEl) return;
+          let curAddr = locEl.value;
+          const newP = provEl.value;
+          const newD = distEl.value;
+          const newS = subEl.value;
+
+          if (prevSub && newS && prevSub !== newS) {
+            if (curAddr.includes('ต.' + prevSub)) {
+              curAddr = curAddr.replace('ต.' + prevSub, 'ต.' + newS);
+            } else if (/ต\.[^\s]+/.test(curAddr)) {
+              curAddr = curAddr.replace(/ต\.[^\s]+/, 'ต.' + newS);
+            }
+          } else if (newS && !/ต\.[^\s]+/.test(curAddr)) {
+            if (/อ\.[^\s]+/.test(curAddr)) {
+              curAddr = curAddr.replace(/(อ\.[^\s]+)/, `ต.${newS} $1`);
+            }
+          }
+
+          if (prevDist && newD && prevDist !== newD) {
+            if (curAddr.includes('อ.' + prevDist)) {
+              curAddr = curAddr.replace('อ.' + prevDist, 'อ.' + newD);
+            } else if (/อ\.[^\s]+/.test(curAddr)) {
+              curAddr = curAddr.replace(/อ\.[^\s]+/, 'อ.' + newD);
+            }
+          }
+
+          if (prevProv && newP && prevProv !== newP) {
+            if (curAddr.includes('จ.' + prevProv)) {
+              curAddr = curAddr.replace('จ.' + prevProv, 'จ.' + newP);
+            } else if (/จ\.[^\s]+/.test(curAddr)) {
+              curAddr = curAddr.replace(/จ\.[^\s]+/, 'จ.' + newP);
+            }
+          }
+
+          prevProv = newP;
+          prevDist = newD;
+          prevSub = newS;
+          locEl.value = curAddr.trim();
+        };
+
         provEl.onchange = () => {
           const newDists = getDistrictsByProvince(provEl.value);
           distEl.innerHTML = newDists.map(d => `<option value="${d}">${d}</option>`).join('');
           const newSubs = getSubdistrictsByDistrict(provEl.value, newDists[0]);
           subEl.innerHTML = newSubs.map(s => `<option value="${s}">${s}</option>`).join('');
+          syncAddressText();
         };
         distEl.onchange = () => {
           const newSubs = getSubdistrictsByDistrict(provEl.value, distEl.value);
           subEl.innerHTML = newSubs.map(s => `<option value="${s}">${s}</option>`).join('');
+          syncAddressText();
+        };
+        subEl.onchange = () => {
+          syncAddressText();
         };
       }
 
@@ -4402,8 +4461,16 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
       const newDistrict = document.getElementById('swalEditDistrict')?.value || '';
       const newSubdistrict = document.getElementById('swalEditSubdistrict')?.value || '';
       const newLocationType = document.getElementById('swalEditLocationType')?.value || 'หมายบ้าน';
-      const newLocationText = (document.getElementById('swalEditLocationText')?.value || '').trim();
+      let newLocationText = (document.getElementById('swalEditLocationText')?.value || '').trim();
       const coordStr = (document.getElementById('swalEditCoordinates')?.value || '').trim();
+
+      // ตรวจสอบและซิงก์ตำบลในที่ตั้งส่งหมาย (เต็ม) ให้ตรงกับตำบลที่เลือก
+      if (newSubdistrict && newLocationText) {
+        const subInTxt = (newLocationText.match(/ต\.([^\s]+)/) || [])[1];
+        if (subInTxt && subInTxt !== newSubdistrict) {
+          newLocationText = newLocationText.replace('ต.' + subInTxt, 'ต.' + newSubdistrict);
+        }
+      }
 
       if (!newCaseNumber) {
         Swal.showValidationMessage('กรุณาระบุเลขคดี');
@@ -6188,6 +6255,12 @@ function updateSubdistricts(provinceName, districtName, selectSubdistrict = null
     elements.subdistrictSelect.value = chosenSub;
     state.selectedSubdistrict = chosenSub;
   }
+
+  // ดักจับเมื่อผู้ใช้เลือกเปลี่ยนตำบลบนหน้าจอ Desktop เพื่ออัปเดต state ให้ตรงกันทันที
+  elements.subdistrictSelect.onchange = (e) => {
+    state.selectedSubdistrict = e.target.value;
+    if (typeof updateCaptureButtonState === 'function') updateCaptureButtonState();
+  };
 }
 
 // -------------------------------------------------------------------------
@@ -8551,9 +8624,9 @@ function initFormEventListeners() {
 }
 
 function getFullLocationText() {
-  const province = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '');
-  const district = state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : '');
-  const subdistrict = state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : '');
+  const province = (elements.provinceSelect ? elements.provinceSelect.value : '') || state.selectedProvince || '';
+  const district = (elements.districtSelect ? elements.districtSelect.value : '') || state.selectedDistrict || '';
+  const subdistrict = (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || state.selectedSubdistrict || '';
   const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
 
   const isBkk = province === 'กรุงเทพมหานคร';
@@ -9220,9 +9293,9 @@ async function handleDesktopUpload() {
   try {
     const caseNumber = getFormattedCaseNumber();
     const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || 'ศาลจังหวัดอุดรธานี';
-    const province = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || 'อุดรธานี';
-    const district = elements.districtSelect ? elements.districtSelect.value : '';
-    const subdistrict = elements.subdistrictSelect ? elements.subdistrictSelect.value : '';
+    const province = (elements.provinceSelect ? elements.provinceSelect.value : '') || state.selectedProvince || 'อุดรธานี';
+    const district = (elements.districtSelect ? elements.districtSelect.value : '') || state.selectedDistrict || '';
+    const subdistrict = (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || state.selectedSubdistrict || '';
     const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
     const locationText = getFullLocationText();
     const heading = window.compassManager ? window.compassManager.getHeading() : 0;
