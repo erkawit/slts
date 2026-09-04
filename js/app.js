@@ -6391,12 +6391,15 @@ function updateDistricts(provinceName, selectDistrict = null, selectSubdistrict 
   if (chosenDistrict) {
     elements.districtSelect.value = chosenDistrict;
     state.selectedDistrict = chosenDistrict;
+    try { localStorage.setItem('slts_selected_district', chosenDistrict); } catch(e){}
   }
-  updateSubdistricts(provinceName, chosenDistrict, selectSubdistrict);
+  const targetSubdistrict = selectSubdistrict || state.selectedSubdistrict || localStorage.getItem('slts_selected_subdistrict');
+  updateSubdistricts(provinceName, chosenDistrict, targetSubdistrict);
 
   elements.districtSelect.onchange = (e) => {
     state.selectedDistrict = e.target.value;
-    updateSubdistricts(state.selectedProvince || provinceName, e.target.value);
+    try { localStorage.setItem('slts_selected_district', e.target.value); } catch(err){}
+    updateSubdistricts(state.selectedProvince || provinceName, e.target.value, state.selectedSubdistrict);
     if (typeof triggerDesktopSimilarSearch === 'function') triggerDesktopSimilarSearch();
   };
 }
@@ -6411,15 +6414,30 @@ function updateSubdistricts(provinceName, districtName, selectSubdistrict = null
     opt.textContent = sub;
     elements.subdistrictSelect.appendChild(opt);
   });
-  const chosenSub = selectSubdistrict && subdistricts.includes(selectSubdistrict) ? selectSubdistrict : (subdistricts[0] || '');
+  
+  let chosenSub = '';
+  if (selectSubdistrict && subdistricts.includes(selectSubdistrict)) {
+    chosenSub = selectSubdistrict;
+  } else if (state.selectedSubdistrict && subdistricts.includes(state.selectedSubdistrict)) {
+    chosenSub = state.selectedSubdistrict;
+  } else if (localStorage.getItem('slts_selected_subdistrict') && subdistricts.includes(localStorage.getItem('slts_selected_subdistrict'))) {
+    chosenSub = localStorage.getItem('slts_selected_subdistrict');
+  } else if (elements.subdistrictSelect && elements.subdistrictSelect.value && subdistricts.includes(elements.subdistrictSelect.value)) {
+    chosenSub = elements.subdistrictSelect.value;
+  } else {
+    chosenSub = subdistricts[0] || '';
+  }
+
   if (chosenSub) {
     elements.subdistrictSelect.value = chosenSub;
     state.selectedSubdistrict = chosenSub;
+    try { localStorage.setItem('slts_selected_subdistrict', chosenSub); } catch(e){}
   }
 
   // ดักจับเมื่อผู้ใช้เลือกเปลี่ยนตำบลบนหน้าจอ Desktop เพื่ออัปเดต state ให้ตรงกันทันที
   elements.subdistrictSelect.onchange = (e) => {
     state.selectedSubdistrict = e.target.value;
+    try { localStorage.setItem('slts_selected_subdistrict', e.target.value); } catch(err){}
     if (typeof updateCaptureButtonState === 'function') updateCaptureButtonState();
     if (typeof triggerDesktopSimilarSearch === 'function') triggerDesktopSimilarSearch();
   };
@@ -6759,6 +6777,12 @@ function matchWithThailandDatabase(rawProv, rawDist, rawSub, fullDisplayName = '
 window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = 'พิกัด') {
   if (!lat || !lng) return null;
 
+  // บนมือถือ (<= 768px): ห้ามเขียนทับอำเภอและตำบลที่ผู้ใช้กรอกหรือเลือกไว้แล้วโดยเด็ดขาด
+  if (window.innerWidth <= 768 && state.selectedSubdistrict) {
+    console.log('[GPS] Mobile device: subdistrict already selected (' + state.selectedSubdistrict + '), skipping auto address overwrite');
+    return null;
+  }
+
   const locStatus = document.getElementById('locationStatus');
   if (locStatus) {
     locStatus.innerHTML = `<span class="text-blue-600 font-semibold"><i class="fa-solid fa-spinner fa-spin mr-1"></i>กำลังวิเคราะห์ที่ตั้งออนไลน์ (ตำบล/อำเภอ/จังหวัด)...</span>`;
@@ -6785,7 +6809,7 @@ window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = '
 
   // 2. อัปเดตอำเภอ
   if (result.district && elements.districtSelect) {
-    updateDistricts(result.province || state.selectedProvince, result.district);
+    updateDistricts(result.province || state.selectedProvince, result.district, result.subdistrict || state.selectedSubdistrict);
     elements.districtSelect.value = result.district;
     changesApplied.push(`อ.${result.district}`);
   }
@@ -7330,18 +7354,19 @@ window.selectDistrictAndReturn = function(districtName) {
   localStorage.setItem('slts_selected_district', districtName);
 
   const subdistricts = getSubdistrictsByDistrict(prov, districtName);
-  const firstSub = subdistricts[0] || '';
-  state.selectedSubdistrict = firstSub;
-  localStorage.setItem('slts_selected_subdistrict', firstSub);
+  const prevSub = state.tempModalValues?.subdistrict || state.selectedSubdistrict || localStorage.getItem('slts_selected_subdistrict');
+  const chosenSub = prevSub && subdistricts.includes(prevSub) ? prevSub : (subdistricts[0] || '');
+  state.selectedSubdistrict = chosenSub;
+  localStorage.setItem('slts_selected_subdistrict', chosenSub);
 
   if (!state.tempModalValues) state.tempModalValues = {};
   state.tempModalValues.district = districtName;
-  state.tempModalValues.subdistrict = firstSub;
+  state.tempModalValues.subdistrict = chosenSub;
 
   if (elements.districtSelect) {
     elements.districtSelect.value = districtName;
   }
-  updateSubdistricts(prov, districtName, firstSub);
+  updateSubdistricts(prov, districtName, chosenSub);
 
   showMobileSummonsFormModal(true);
 };
@@ -7917,8 +7942,10 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
   state.selectedDistrict = curDistrict;
 
   const subdistricts = getSubdistrictsByDistrict(prov, curDistrict);
-  const curSubdistrict = state.tempModalValues?.subdistrict || state.selectedSubdistrict || ((elements.subdistrictSelect?.value && subdistricts.includes(elements.subdistrictSelect.value)) ? elements.subdistrictSelect.value : (subdistricts[0] || ''));
+  const rawSub = state.tempModalValues?.subdistrict || state.selectedSubdistrict || localStorage.getItem('slts_selected_subdistrict') || (elements.subdistrictSelect?.value || '');
+  const curSubdistrict = (rawSub && subdistricts.includes(rawSub)) ? rawSub : (subdistricts[0] || '');
   state.selectedSubdistrict = curSubdistrict;
+  try { localStorage.setItem('slts_selected_subdistrict', curSubdistrict); } catch(e){}
 
   if (elements.districtSelect) {
     elements.districtSelect.value = curDistrict;
@@ -8188,10 +8215,10 @@ window.showMobileSummonsFormModal = function(isEditing = false) {
 
         <!-- Confirm button -->
         <div class="slts-form-footer">
-          <button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { state.tempModalValues = null; Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
+          <button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { state.tempModalValues = v; Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
             <i class="fa-solid fa-camera mr-1.5"></i> ยืนยันข้อมูลและเปิดกล้องถ่ายภาพ
           </button>
-          ${isEditing ? '<button type="button" class="slts-cancel-btn" onclick="state.tempModalValues = null; Swal.close()"><i class="fa-solid fa-xmark mr-1"></i> กลับไปยังกล้อง</button>' : ''}
+          ${isEditing ? '<button type="button" class="slts-cancel-btn" onclick="Swal.close()"><i class="fa-solid fa-xmark mr-1"></i> กลับไปยังกล้อง</button>' : ''}
         </div>
       </div>
     `,
@@ -9292,9 +9319,9 @@ window.applySimilarRecordToDesktopForm = function(idx) {
 };
 
 function getFullLocationText() {
-  const province = (elements.provinceSelect ? elements.provinceSelect.value : '') || state.selectedProvince || '';
-  const district = (elements.districtSelect ? elements.districtSelect.value : '') || state.selectedDistrict || '';
-  const subdistrict = (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || state.selectedSubdistrict || '';
+  const province = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || localStorage.getItem('slts_selected_province') || '';
+  const district = state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : '') || localStorage.getItem('slts_selected_district') || '';
+  const subdistrict = state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || localStorage.getItem('slts_selected_subdistrict') || '';
   const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
 
   const isBkk = province === 'กรุงเทพมหานคร';
@@ -9407,7 +9434,7 @@ function fetchCurrentLocation(isManual = false) {
           modalCoordInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
         }
         state.isManuallyEditedCoords = false;
-        if (isManual) {
+        if (isManual && window.innerWidth > 768) {
           autoFillAddressFromCoordinates(state.lat, state.lng, 'GPS ปัจจุบัน');
         }
       }
@@ -10834,9 +10861,9 @@ function updateCaptureButtonState() {
 window.updateCaptureButtonState = updateCaptureButtonState;
 
 async function openCameraModal() {
-  // 1. ดึงพิกัด Latitude, Longitude ทันทีเป็นอันดับต้นที่สุดเสมอเมื่อเข้าสู่โหมดกล้อง
+  // 1. ดึงพิกัด Latitude, Longitude ทันทีเป็นอันดับต้นที่สุดเสมอเมื่อเข้าสู่โหมดกล้อง (isManual = false ป้องกันการเขียนทับที่อยู่)
   if (typeof fetchCurrentLocation === 'function') {
-    fetchCurrentLocation(true);
+    fetchCurrentLocation(false);
   }
 
   // ขอสิทธิ์ Sensor Gyroscope / Compass บน iOS 13+ ผ่าน User Interaction
@@ -11284,12 +11311,16 @@ async function captureAndProcessPhoto() {
     const locationText = getFullLocationText();
     const currentHeading = window.compassManager ? window.compassManager.getHeading() : 0;
 
+    const finalProvince = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || localStorage.getItem('slts_selected_province') || 'อุดรธานี';
+    const finalDistrict = state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : '') || localStorage.getItem('slts_selected_district') || '';
+    const finalSubdistrict = state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || localStorage.getItem('slts_selected_subdistrict') || '';
+
     const payloadData = {
       caseNumber: caseNumber,
       courtType: elements.courtTypeSelect.value,
-      province: state.selectedProvince || 'อุดรธานี',
-      district: state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : ''),
-      subdistrict: state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : ''),
+      province: finalProvince,
+      district: finalDistrict,
+      subdistrict: finalSubdistrict,
       locationType: elements.locationTypeSelect.value,
       locationText: locationText,
       lat: state.lat,
@@ -11384,12 +11415,16 @@ async function handleFallbackFile(e) {
     const locationText = getFullLocationText();
     const currentHeading = window.compassManager ? window.compassManager.getHeading() : 0;
 
+    const finalProvince = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || localStorage.getItem('slts_selected_province') || 'อุดรธานี';
+    const finalDistrict = state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : '') || localStorage.getItem('slts_selected_district') || '';
+    const finalSubdistrict = state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || localStorage.getItem('slts_selected_subdistrict') || '';
+
     const payloadData = {
       caseNumber: caseNumber,
       courtType: elements.courtTypeSelect.value,
-      province: state.selectedProvince || 'อุดรธานี',
-      district: state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : ''),
-      subdistrict: state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : ''),
+      province: finalProvince,
+      district: finalDistrict,
+      subdistrict: finalSubdistrict,
       locationType: elements.locationTypeSelect.value,
       locationText: locationText,
       lat: state.lat,
