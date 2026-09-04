@@ -2658,12 +2658,37 @@ function applySafariMobileCameraSafeAreas() {
 window.applySafariMobileCameraSafeAreas = applySafariMobileCameraSafeAreas;
 
 function initResponsiveUI() {
+  const handleOrientationSync = () => {
+    try {
+      const isLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || 
+                          (screen.orientation && screen.orientation.type && screen.orientation.type.includes('landscape')) ||
+                          (window.innerWidth > window.innerHeight);
+      const targetMode = isLandscape ? 'landscape' : 'portrait';
+      if (state.captureOrientation !== targetMode && typeof setCaptureOrientation === 'function') {
+        setCaptureOrientation(targetMode);
+      }
+    } catch (e) {
+      console.warn('Orientation sync error:', e);
+    }
+  };
+
   const handleResize = () => {
     updateAuthUI();
     applySafariMobileCameraSafeAreas();
+    handleOrientationSync();
   };
   window.addEventListener('resize', handleResize);
   window.addEventListener('orientationchange', handleResize);
+  if (window.matchMedia) {
+    try {
+      const mql = window.matchMedia('(orientation: landscape)');
+      if (mql.addEventListener) {
+        mql.addEventListener('change', handleResize);
+      } else if (mql.addListener) {
+        mql.addListener(handleResize);
+      }
+    } catch (e) {}
+  }
   handleResize();
 }
 
@@ -9602,17 +9627,19 @@ function toggleOrientation() {
 function setCaptureOrientation(mode) {
   state.captureOrientation = mode;
   const isLandscape = mode === 'landscape';
+  const overlayFrame = (elements && elements.liveOverlayFrame) || document.getElementById('liveOverlayFrame');
 
-  if (elements.liveOverlayFrame) {
+  if (overlayFrame) {
     if (isLandscape) {
-      elements.liveOverlayFrame.className = 'camera-live-frame ratio-4-3 pointer-events-none';
+      overlayFrame.className = 'camera-live-frame ratio-4-3 pointer-events-none';
     } else {
-      elements.liveOverlayFrame.className = 'camera-live-frame ratio-3-4 pointer-events-none';
+      overlayFrame.className = 'camera-live-frame ratio-3-4 pointer-events-none';
     }
   }
 
-  if (elements.txtOrientationMode) {
-    elements.txtOrientationMode.textContent = isLandscape ? 'แนวนอน 4:3' : 'แนวตั้ง 3:4';
+  const txtOrientation = (elements && elements.txtOrientationMode) || document.getElementById('txtOrientationMode');
+  if (txtOrientation) {
+    txtOrientation.textContent = isLandscape ? 'แนวนอน 4:3' : 'แนวตั้ง 3:4';
   }
 }
 

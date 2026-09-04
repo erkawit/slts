@@ -51,24 +51,24 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  border: 2px dashed rgba(255, 255, 255, 0.85);
+  border: none;
   border-radius: 18px;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  box-shadow: none;
   transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), width 0.35s ease, height 0.35s ease;
 }
 
 /* 3:4 Ratio (แนวตั้ง) */
 .camera-live-frame.ratio-3-4 {
-  width: min(84vw, 340px);
-  height: calc(min(84vw, 340px) * 4 / 3);
+  width: min(88vw, 360px);
+  height: calc(min(88vw, 360px) * 4 / 3);
   max-height: calc(100vh - 170px);
   max-width: calc((100vh - 170px) * 3 / 4);
 }
 
 /* 4:3 Ratio (แนวนอน) */
 .camera-live-frame.ratio-4-3 {
-  height: min(60vh, 320px);
-  width: calc(min(60vh, 320px) * 4 / 3);
+  height: min(72vh, 420px);
+  width: calc(min(72vh, 420px) * 4 / 3);
   max-width: calc(100vw - 32px);
   max-height: calc((100vw - 32px) * 3 / 4);
 }
@@ -131,27 +131,7 @@ body {
 }
 
 .camera-live-frame::before, .camera-live-frame::after {
-  content: '';
-  position: absolute;
-  width: 24px;
-  height: 24px;
-  border-color: #3b82f6;
-  border-style: solid;
-  pointer-events: none;
-}
-
-.camera-live-frame::before {
-  top: -2px;
-  left: -2px;
-  border-width: 4px 0 0 4px;
-  border-top-left-radius: 18px;
-}
-
-.camera-live-frame::after {
-  bottom: -2px;
-  right: -2px;
-  border-width: 0 4px 4px 0;
-  border-bottom-right-radius: 18px;
+  display: none !important;
 }
 
 /* DataTables Minimalist Customization */
@@ -1404,6 +1384,74 @@ table.dataTable tbody td {
     display: none !important;
     opacity: 0 !important;
     pointer-events: none !important;
+  }
+}
+
+/* ================================================================
+   Camera Screen & Modals Responsive Landscape Layout
+   เมื่อหมุนจอแนวนอน: ย้าย 3 ปุ่มชัตเตอร์ไปแนวตั้งชิดขอบขวา, ปรับ Top Bar และปรับขนาด Modal ไม่ให้ล้นจอ
+   ================================================================ */
+@media (orientation: landscape) {
+  /* 1. จัดตำแหน่งกลุ่ม 3 ปุ่มชัตเตอร์ ให้เรียงแนวตั้งชิดขอบขวาของหน้าจอ สไตล์กล้อง Native */
+  #cameraControlsContainer {
+    position: fixed !important;
+    right: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    height: 100% !important;
+    width: auto !important;
+    min-width: 96px !important;
+    padding: 1.5rem 1rem !important;
+    padding-right: max(1.25rem, env(safe-area-inset-right)) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 1.5rem !important;
+    background: linear-gradient(to left, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.6) 65%, transparent 100%) !important;
+    z-index: 25 !important;
+  }
+
+  /* 2. ปรับแถบเมนูด้านบน (Top Bar) เว้นระยะขอบขวาเพื่อไม่ให้ทับกับกลุ่มปุ่มชัตเตอร์ */
+  .camera-top-bar,
+  #cameraTopBar {
+    padding-top: max(10px, env(safe-area-inset-top, 8px)) !important;
+    padding-right: max(7rem, calc(env(safe-area-inset-right, 0px) + 6.5rem)) !important;
+  }
+
+  @supports (-webkit-touch-callout: none) {
+    .camera-top-bar,
+    #cameraTopBar,
+    .is-safari-device .camera-top-bar,
+    .is-safari-device #cameraTopBar,
+    .safari-camera-top-bar {
+      padding-top: max(12px, env(safe-area-inset-top, 8px)) !important;
+      padding-right: max(7rem, calc(env(safe-area-inset-right, 0px) + 6.5rem)) !important;
+    }
+  }
+
+  /* 3. ขยายขนาดพื้นที่แสดงผลกล้อง 4:3 ในแนวนอน ให้เต็มจอพอดี ไม่ถูกปุ่มขวาบดบัง */
+  .camera-live-frame.ratio-4-3 {
+    height: calc(100vh - 20px);
+    width: calc((100vh - 20px) * 4 / 3);
+    max-width: calc(100vw - 116px);
+    max-height: calc((100vw - 116px) * 3 / 4);
+  }
+
+  /* 4. ปรับขนาด Modal และฟอร์มข้อมูลในแนวนอน (max-h-[85vh] + overflow-y-auto ขยายกว้างเพื่อประสิทธิภาพสูงสุด) */
+  .slts-swal-fullscreen-80 {
+    max-width: min(92vw, 680px) !important;
+    max-height: 85vh !important;
+    max-height: 85dvh !important;
+  }
+
+  .slts-form-modal {
+    max-height: 85vh !important;
+  }
+
+  .slts-swal-body-scroll {
+    max-height: calc(85vh - 65px) !important;
+    overflow-y: auto !important;
   }
 }
 

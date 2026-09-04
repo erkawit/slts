@@ -1170,17 +1170,17 @@
       <div id="liveOverlayFrame" class="camera-live-frame ratio-4-3 pointer-events-none">
         
         <!-- มุมซ้ายบน: เข็มทิศสด Live Compass -->
-        <div class="absolute top-2 left-2 sm:top-3 sm:left-3">
+        <div class="absolute top-3 left-3 sm:top-4 sm:left-4">
           <canvas id="liveCompassCanvas" width="84" height="84" class="drop-shadow-lg"></canvas>
         </div>
 
         <!-- มุมซ้ายล่าง: แผนที่สด Live Map -->
-        <div class="absolute bottom-2 left-2 sm:bottom-3 sm:left-3">
+        <div class="absolute bottom-3 left-3 sm:bottom-4 sm:left-4">
           <canvas id="liveMapCanvas" width="100" height="75" class="rounded-lg border-2 border-white/80 shadow-2xl"></canvas>
         </div>
 
         <!-- มุมขวาล่าง: กล่องข้อมูลสด Live Badge -->
-        <div class="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 max-w-[62%] sm:max-w-[55%]">
+        <div class="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 max-w-[62%] sm:max-w-[55%]">
           <div class="bg-black border-2 border-white/70 rounded-xl p-2 sm:p-2.5 shadow-2xl text-white space-y-0.5 pointer-events-none">
             <div id="liveBadgeDate" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📅 --</div>
             <div id="liveBadgeCoords" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📍 --</div>
@@ -1192,8 +1192,8 @@
       </div>
     </div>
 
-    <!-- Bottom Controls -->
-    <div class="p-4 sm:p-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex items-center justify-around z-10">
+    <!-- Bottom Controls / Right Controls in Landscape -->
+    <div id="cameraControlsContainer" class="p-4 sm:p-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex items-center justify-around z-10">
       <button id="btnFlipCamera" type="button" class="camera-circle-btn" title="สลับกล้องหน้า/หลัง">
         <i class="fa-solid fa-camera-rotate text-xl"></i>
       </button>
