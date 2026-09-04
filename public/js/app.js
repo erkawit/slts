@@ -3168,19 +3168,15 @@ function checkGyroLandscapeAndWarn(actionName = 'ใช้งานฟังก�
 window.checkGyroLandscapeAndWarn = checkGyroLandscapeAndWarn;
 
 /**
- * จัดการการคลิกที่กล่องข้อมูลสด / ลายน้ำมุมขวาล่าง
- * - เฉพาะในโหมดแนวตั้ง: เปิดฟอร์มแก้ไขข้อมูลหมาย (showMobileSummonsFormModal)
- * - หากอยู่ในโหมดแนวนอน: แสดงการแจ้งเตือนเตือนให้ถือแนวตั้ง
+ * จัดการการแตะที่กล่องข้อมูลสด / ลายน้ำมุมขวาล่าง (ทั้งในแนวตั้งและแนวนอน)
+ * ให้แสดงฟอร์มบันทึกการส่งหมาย (showMobileSummonsFormModal) ตามความต้องการของผู้ใช้
  */
 window.handleLiveBadgeClick = function(e) {
   if (e) {
     try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
   }
-  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('กรอกหรือแก้ไขข้อมูลหมาย')) {
-    return;
-  }
   if (typeof showMobileSummonsFormModal === 'function') {
-    showMobileSummonsFormModal(true);
+    showMobileSummonsFormModal(true, true);
   }
 };
 
@@ -8232,8 +8228,8 @@ window.showCaseSubRecordsModal = function(caseNumber) {
 // -------------------------------------------------------------------------
 // SweetAlert Form บันทึกข้อมูลส่งหมาย 80% สำหรับ Mobile
 // -------------------------------------------------------------------------
-window.showMobileSummonsFormModal = function(isEditing = false) {
-  if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('กรอกหรือแก้ไขข้อมูลหมาย')) {
+window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape = false) {
+  if (!allowLandscape && typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('กรอกหรือแก้ไขข้อมูลหมาย')) {
     return;
   }
   if (!state.selectedProvince) {
@@ -11983,10 +11979,10 @@ function startLiveCameraHUD() {
       if (elements.liveBadgeCoords) {
         if (hasCoords) {
           elements.liveBadgeCoords.textContent = `📍  ${latFormatted} ${lngFormatted} ${curHeading}° ${dirText}`;
-          elements.liveBadgeCoords.className = "text-[9px] sm:text-[10px] font-bold text-white leading-tight cursor-pointer";
+          elements.liveBadgeCoords.className = "text-[9px] sm:text-[10px] font-bold text-white leading-tight";
         } else {
-          elements.liveBadgeCoords.textContent = `📍  กำลังค้นหาสัญญาณ GPS (แตะดูวิธีแก้ไข)`;
-          elements.liveBadgeCoords.className = "text-[9px] sm:text-[10px] font-bold text-amber-300 animate-pulse leading-tight cursor-pointer";
+          elements.liveBadgeCoords.textContent = `📍  กำลังค้นหาสัญญาณ GPS...`;
+          elements.liveBadgeCoords.className = "text-[9px] sm:text-[10px] font-bold text-amber-300 animate-pulse leading-tight";
         }
       }
       if (elements.liveBadgeLocation) {
