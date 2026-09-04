@@ -1296,13 +1296,13 @@
   <script src="js/compass.js?v=20260904_08"></script>
   <script src="js/map.js?v=20260904_08"></script>
   <script src="js/watermark.js?v=20260904_08"></script>
-  <script src="js/app.js?v=20260904_10"></script>
+  <script src="js/app.js?v=20260904_11"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260904_10')
+        navigator.serviceWorker.register('./sw.js?v=20260904_11')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

@@ -8819,7 +8819,25 @@ function initFormEventListeners() {
           elements.locationStatus.textContent = '● ระบุพิกัดด้วยตนเอง (Manual Coordinates)';
           elements.locationStatus.className = 'text-xs text-blue-600 font-semibold';
         }
+        triggerDesktopSimilarSearch();
       }
+    });
+  }
+
+  // ตรวจสอบการเปลี่ยนแปลงของข้อมูลตำบล อำเภอ และจังหวัดร่วมด้วย บนจอ Desktop
+  if (elements.districtSelect) {
+    elements.districtSelect.addEventListener('change', () => {
+      triggerDesktopSimilarSearch();
+    });
+  }
+  if (elements.subdistrictSelect) {
+    elements.subdistrictSelect.addEventListener('change', () => {
+      triggerDesktopSimilarSearch();
+    });
+  }
+  if (elements.provinceSelect) {
+    elements.provinceSelect.addEventListener('change', () => {
+      triggerDesktopSimilarSearch();
     });
   }
 
@@ -8901,6 +8919,10 @@ window.triggerDesktopSimilarSearch = triggerDesktopSimilarSearch;
 
 /**
  * ดำเนินการสืบค้นข้อมูลที่ตั้งหมายที่ใกล้เคียงในฐานข้อมูลชีตและประวัติ
+ * 1. ตรวจสอบ Latitude, Longitude จากภาพที่แนบเข้ามาเป็นอันดับต้น เทียบว่าเป็นพื้นที่เดียวกันหรือใกล้เคียงกันหรือไม่
+ * 2. ตรวจสอบการเปลี่ยนข้อมูล อำเภอ หรือ ตำบล และใช้กรองร่วมกับพิกัด
+ * 3. ตรวจสอบการเปลี่ยนข้อมูล หมู่ที่ ต่อ และใช้กรองร่วมด้วย
+ * 4. ตรวจสอบตัวเลขคดีเป็นอันดับสุดท้าย
  */
 function performDesktopSimilarSearch() {
   if (window.innerWidth <= 768) return;
@@ -8909,7 +8931,31 @@ function performDesktopSimilarSearch() {
   const list = document.getElementById('desktopSimilarRecordsList');
   if (!card || !list) return;
 
-  // ตรวจสอบข้อมูลที่ผู้ใช้กรอกในฟอร์มปัจจุบัน
+  // 1. ตรวจสอบพิกัด Latitude, Longitude จากภาพที่แนบเข้ามา หรือช่องพิกัด (อันดับต้น)
+  let inputLat = null;
+  let inputLng = null;
+  const coordText = (elements.coordinatesInput?.value || document.getElementById('coordinates')?.value || '').trim();
+  if (coordText) {
+    const parts = coordText.split(/[,;\s]+/).map(p => parseFloat(p)).filter(p => !isNaN(p));
+    if (parts.length >= 2 && parts[0] > 0 && parts[1] > 0) {
+      inputLat = parts[0];
+      inputLng = parts[1];
+    }
+  }
+  if (inputLat === null && typeof state.lat === 'number' && state.lat > 0 && typeof state.lng === 'number' && state.lng > 0) {
+    inputLat = state.lat;
+    inputLng = state.lng;
+  }
+  const hasCoords = (inputLat !== null && inputLng !== null);
+
+  // 2. ตรวจสอบข้อมูล อำเภอ, ตำบล, หมู่ที่ (ใช้กรองร่วมกับพิกัด)
+  const inputDistrict = (elements.districtSelect?.value || state.selectedDistrict || '').trim();
+  const inputSubdistrict = (elements.subdistrictSelect?.value || state.selectedSubdistrict || '').trim();
+  const inputProvince = (elements.provinceSelect?.value || state.selectedProvince || 'อุดรธานี').trim();
+  const inputMoo = (elements.mooInput?.value || '').trim().replace(/\D/g, '');
+  const inputHouseNo = (elements.houseNoInput?.value || '').trim();
+
+  // 3. ตรวจสอบข้อมูลเลขคดี (ตรวจสอบเป็นอันดับสุดท้าย)
   const isOther = elements.courtTypeSelect?.value === 'ศาลอื่น' || 
                   elements.courtTypeSelect?.value === 'หมายศาลอื่น' || 
                   (elements.otherCourtCaseField && !elements.otherCourtCaseField.classList.contains('hidden'));
@@ -8918,14 +8964,8 @@ function performDesktopSimilarSearch() {
   const inputCaseNo = (isOther ? elements.otherCaseNoInput?.value : elements.udonCaseNoInput?.value || '').trim();
   const inputCaseYear = (isOther ? elements.otherCaseYearSelect?.value : elements.udonCaseYearSelect?.value || '').trim();
 
-  const inputHouseNo = elements.houseNoInput?.value.trim() || '';
-  const inputMoo = elements.mooInput?.value.trim().replace(/\D/g, '') || '';
-  const inputDistrict = elements.districtSelect?.value.trim() || state.selectedDistrict || '';
-  const inputSubdistrict = elements.subdistrictSelect?.value.trim() || state.selectedSubdistrict || '';
-  const inputProvince = elements.provinceSelect?.value.trim() || state.selectedProvince || 'อุดรธานี';
-
-  // หากไม่มีการกรอกเลขคดี และไม่มีการกรอกบ้านเลขที่ ให้ซ่อนการแสดงผลทันที
-  if (!inputCaseNo && !inputHouseNo) {
+  // หากไม่มีพิกัดจากภาพถ่าย, ไม่มีบ้านเลขที่, ไม่มีหมู่ที่ และไม่มีเลขคดี ให้ซ่อนบล็อกทันที
+  if (!hasCoords && !inputHouseNo && !inputMoo && !inputCaseNo) {
     card.classList.add('hidden');
     list.innerHTML = '';
     window._desktopSimilarResults = [];
@@ -8941,7 +8981,7 @@ function performDesktopSimilarSearch() {
     } catch (e) {}
   }
 
-  // เสริมด้วยข้อมูลจาก Desktop Form History เพื่อให้ครอบคลุมหมายล่าสุด
+  // เสริมด้วยข้อมูลจาก Desktop Form History
   const historyList = (typeof getDesktopFormHistory === 'function') ? getDesktopFormHistory() : [];
   const combinedRows = [...allRows];
   historyList.forEach(h => {
@@ -8955,6 +8995,8 @@ function performDesktopSimilarSearch() {
       'บ้านเลขที่': h.houseNo,
       'หมู่': h.moo,
       'ที่ตั้งส่งหมาย (เต็ม)': h.locationText,
+      'ละติจูด (Lat)': h.lat,
+      'ลองจิจูด (Lng)': h.lng,
       'วัน-เวลาบันทึก': h.savedAt
     });
   });
@@ -8966,15 +9008,7 @@ function performDesktopSimilarSearch() {
 
   const results = [];
   const seenKeys = new Set();
-
-  const inputFullCase = (inputPrefix + inputCaseNo + (inputCaseYear ? '/' + inputCaseYear : '')).toLowerCase();
-  const inputAddrStr = [
-    inputHouseNo ? 'บ้านเลขที่ ' + inputHouseNo : '',
-    inputMoo ? 'หมู่ ' + inputMoo : '',
-    inputSubdistrict ? 'ต.' + inputSubdistrict : '',
-    inputDistrict ? 'อ.' + inputDistrict : '',
-    inputProvince ? 'จ.' + inputProvince : ''
-  ].filter(Boolean).join(' ').toLowerCase();
+  const inputFullCase = (inputPrefix + inputCaseNo + (inputCaseYear ? '/' + inputCaseYear : '')).replace(/\s+/g, '').toLowerCase();
 
   for (let i = 0; i < combinedRows.length; i++) {
     const r = combinedRows[i];
@@ -8985,82 +9019,163 @@ function performDesktopSimilarSearch() {
     const rDist = (r['อำเภอ'] || '').trim();
     const rProv = (r['จังหวัด'] || r._resolvedProvince || (typeof getRowProvince === 'function' ? getRowProvince(r) : '') || '').trim();
 
-    if (!rCase && !rHouse) continue;
+    // ดึงพิกัดจากข้อมูลแถว
+    const rLat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || r['Lat'] || r.lat || 0);
+    const rLng = parseFloat(r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || r['Lng'] || r.lng || 0);
+    const rHasCoords = !isNaN(rLat) && !isNaN(rLng) && rLat > 0 && rLng > 0;
 
-    let caseScore = 0;
-    let addrScore = 0;
+    if (!rCase && !rHouse && !rHasCoords) continue;
+
+    // กรองข้ามหากจังหวัดไม่ตรงกัน
+    if (inputProvince && rProv && inputProvince !== rProv && !rProv.includes(inputProvince) && !inputProvince.includes(rProv)) {
+      continue;
+    }
+
+    const distMatches = !inputDistrict || !rDist || inputDistrict === rDist || rDist.includes(inputDistrict) || inputDistrict.includes(rDist);
+    const subMatches = !inputSubdistrict || !rSub || inputSubdistrict === rSub || rSub.includes(inputSubdistrict) || inputSubdistrict.includes(rSub);
+
     let matchReasons = [];
+    let distanceMeters = undefined;
+    let finalScore = 0;
 
-    // -------------------------------------------------------------
-    // 1.1 การตรวจสอบความใกล้เคียงของเลขคดี (Case Number Similarity)
-    // -------------------------------------------------------------
-    if (inputCaseNo) {
-      const rCaseClean = rCase.replace(/\s+/g, '').toLowerCase();
-      if (rCaseClean === inputFullCase.replace(/\s+/g, '')) {
-        caseScore = 1.0;
-        matchReasons.push('เลขคดีตรงกัน 100%');
+    if (hasCoords && rHasCoords) {
+      // -------------------------------------------------------------
+      // อันดับ 1 (อันดับต้น): ตรวจสอบ Latitude, Longitude จากภาพที่แนบเข้ามา
+      // เทียบระยะทางว่า เป็นพื้นที่เดียวกัน หรือใกล้เคียงกันหรือไม่
+      // -------------------------------------------------------------
+      const distKm = calculateHaversineDistance(inputLat, inputLng, rLat, rLng);
+      distanceMeters = distKm * 1000;
+
+      // กรองพื้นที่ตาม อำเภอ/ตำบล:
+      // หากเลือกอำเภอหรือตำบลแล้ว แต่ข้อมูลในชีตระบุอำเภอ/ตำบลอื่น และพิกัดห่างเกิน 350 เมตร ให้ตัดออก
+      if (inputDistrict && rDist && !distMatches && distanceMeters > 350) {
+        continue;
+      }
+      if (inputSubdistrict && rSub && !subMatches && distanceMeters > 350) {
+        continue;
+      }
+
+      // กรองตามหมู่ที่: หากผู้ใช้ระบุหมู่ที่แล้ว และในชีตระบุเป็นคนละหมู่ และพิกัดห่างเกิน 180 เมตร ให้ตัดออก
+      if (inputMoo && rMoo && inputMoo !== rMoo && distanceMeters > 180) {
+        continue;
+      }
+
+      // คำนวณคะแนนพิกัดตามระดับความใกล้เคียง
+      let coordScore = 0;
+      if (distanceMeters <= 30) {
+        // พิกัดตำแหน่งเดียวกัน / จุดเดียวกัน
+        coordScore = 1.0;
+        matchReasons.push(`พิกัดตำแหน่งเดียวกัน (ห่าง ${Math.round(distanceMeters)} ม.)`);
+      } else if (distanceMeters <= 80) {
+        // พื้นที่เดียวกัน / รั้วติดกัน
+        coordScore = 0.95 - (0.05 * (distanceMeters - 30) / 50);
+        matchReasons.push(`พื้นที่เดียวกัน (ห่าง ${Math.round(distanceMeters)} ม.)`);
+      } else if (distanceMeters <= 250) {
+        // พื้นที่ใกล้เคียง (ละแวกเดียวกัน)
+        coordScore = 0.88 - (0.06 * (distanceMeters - 80) / 170);
+        matchReasons.push(`พื้นที่ใกล้เคียง (ห่าง ${Math.round(distanceMeters)} ม.)`);
+      } else if (distanceMeters <= 500) {
+        // ละแวกใกล้เคียงในรัศมี 500 ม.
+        coordScore = 0.82 - (0.05 * (distanceMeters - 250) / 250);
+        matchReasons.push(`ละแวกใกล้เคียง (ห่าง ${Math.round(distanceMeters)} ม.)`);
+      } else if (distanceMeters <= 1000) {
+        coordScore = 0.76 - (0.10 * (distanceMeters - 500) / 500);
+        matchReasons.push(`รัศมีใกล้เคียง (ห่าง ${Math.round(distanceMeters)} ม.)`);
       } else {
-        const mDb = rCase.match(/^([^\d/]+)?\s*(\d+)(?:\/(\d+))?/);
-        if (mDb) {
-          const dbPfx = (mDb[1] || '').trim().toLowerCase();
-          const dbNum = (mDb[2] || '').trim();
-          const dbYear = (mDb[3] || '').trim();
+        coordScore = Math.max(0, 0.65 - (distanceMeters / 4000));
+      }
 
-          if (inputCaseNo === dbNum) {
-            // หมายเลขตรงกัน
-            if (inputCaseYear && dbYear && inputCaseYear === dbYear) {
-              if (inputPrefix && dbPfx) {
-                const pfxSim = calculateStringSimilarity(inputPrefix.toLowerCase(), dbPfx);
-                caseScore = 0.85 + (0.15 * pfxSim);
-                matchReasons.push(`เลขคดีตรงกัน (${dbNum}/${dbYear})`);
-              } else {
-                caseScore = 0.95;
-                matchReasons.push(`เลขคดีตรงกัน (${dbNum}/${dbYear})`);
-              }
-            } else if (!inputCaseYear || !dbYear) {
-              caseScore = 0.90;
-              matchReasons.push(`เลขคดีตรงกัน (${dbNum})`);
-            } else {
-              // ตัวเลขคดีเดียวกันแต่คนละปี พ.ศ. เช่น 2097/2567 กับ 2097/2568
-              caseScore = 0.80;
-              matchReasons.push(`ตัวเลขคดีตรงกัน (${dbNum}) ต่างปี`);
-            }
-          } else {
-            // ความใกล้เคียงตัวเลขคดี
-            const numSim = calculateStringSimilarity(inputCaseNo, dbNum);
-            const fullSim = calculateStringSimilarity(inputFullCase, rCaseClean);
-            const bestCaseSim = Math.max(numSim * 0.85, fullSim);
-            if (bestCaseSim >= 0.80) {
-              caseScore = bestCaseSim;
-              matchReasons.push(`เลขคดีใกล้เคียง (${rCase})`);
-            }
-          }
+      // -------------------------------------------------------------
+      // อันดับ 2: ตรวจสอบต่อจากการเปลี่ยนข้อมูล อำเภอ หรือ ตำบล
+      // -------------------------------------------------------------
+      if (inputDistrict && inputSubdistrict && distMatches && subMatches) {
+        coordScore = Math.min(1.0, coordScore + 0.04);
+        if (rSub && rDist) {
+          matchReasons.push(`ต.${rSub} อ.${rDist}`);
+        }
+      }
+
+      // -------------------------------------------------------------
+      // อันดับ 3: หากมีการเปลี่ยนหมู่ที่ ก็ตรวจสอบหมู่ที่ต่อ
+      // -------------------------------------------------------------
+      if (inputMoo && rMoo) {
+        if (inputMoo === rMoo) {
+          coordScore = Math.min(1.0, coordScore + 0.05);
+          matchReasons.push(`หมู่ ${rMoo} ตรงกัน`);
         } else {
-          const fullSim = calculateStringSimilarity(inputFullCase, rCaseClean);
-          if (fullSim >= 0.80) {
-            caseScore = fullSim;
-            matchReasons.push(`เลขคดีใกล้เคียง (${rCase})`);
+          coordScore -= 0.06;
+          matchReasons.push(`ระบุ ม.${inputMoo} (ในชีต ม.${rMoo})`);
+        }
+      }
+
+      // ตรวจสอบบ้านเลขที่ (หากมีการกรอก)
+      if (inputHouseNo && rHouse) {
+        if (inputHouseNo === rHouse) {
+          coordScore = Math.min(1.0, coordScore + 0.08);
+          matchReasons.push(`บ้านเลขที่ ${rHouse} ตรงกัน`);
+        } else {
+          const hSim = calculateStringSimilarity(inputHouseNo, rHouse);
+          if (hSim >= 0.80) {
+            coordScore = Math.min(1.0, coordScore + 0.03);
+            matchReasons.push(`บ้านเลขที่ใกล้เคียง (${rHouse})`);
           }
         }
       }
-    }
 
-    // -------------------------------------------------------------
-    // 1.2 การตรวจสอบความใกล้เคียงของที่อยู่ (Address Similarity)
-    // -------------------------------------------------------------
-    if (inputHouseNo) {
-      const distMatches = !inputDistrict || !rDist || inputDistrict === rDist || rDist.includes(inputDistrict) || inputDistrict.includes(rDist);
-      const subMatches = !inputSubdistrict || !rSub || inputSubdistrict === rSub || rSub.includes(inputSubdistrict) || inputSubdistrict.includes(rSub);
+      // -------------------------------------------------------------
+      // อันดับสุดท้าย: ตรวจสอบตัวเลขคดี
+      // -------------------------------------------------------------
+      if (inputCaseNo && rCase) {
+        const rCaseClean = rCase.replace(/\s+/g, '').toLowerCase();
+        if (rCaseClean === inputFullCase) {
+          coordScore = Math.min(1.0, coordScore + 0.10);
+          matchReasons.push(`เลขคดีตรงกัน 100% (${rCase})`);
+        } else {
+          const mDb = rCase.match(/^([^\d/]+)?\s*(\d+)(?:\/(\d+))?/);
+          if (mDb) {
+            const dbNum = (mDb[2] || '').trim();
+            const dbYear = (mDb[3] || '').trim();
+            if (inputCaseNo === dbNum) {
+              if (inputCaseYear && dbYear && inputCaseYear === dbYear) {
+                coordScore = Math.min(1.0, coordScore + 0.08);
+                matchReasons.push(`เลขคดีตรงกัน (${dbNum}/${dbYear})`);
+              } else {
+                coordScore = Math.min(1.0, coordScore + 0.04);
+                matchReasons.push(`ตัวเลขคดีตรงกัน (${dbNum})`);
+              }
+            } else {
+              const numSim = calculateStringSimilarity(inputCaseNo, dbNum);
+              if (numSim >= 0.80) {
+                matchReasons.push(`เลขคดีใกล้เคียง (${rCase})`);
+              }
+            }
+          }
+        }
+      }
 
-      if (distMatches && subMatches) {
+      finalScore = coordScore;
+
+    } else {
+      // -------------------------------------------------------------
+      // กรณีไม่มีพิกัดภาพถ่าย: ตรวจสอบตามลำดับ อำเภอ/ตำบล -> หมู่ที่ -> บ้านเลขที่ -> และตัวเลขคดีเป็นอันดับสุดท้าย
+      // -------------------------------------------------------------
+      if (inputDistrict && rDist && !distMatches) continue;
+      if (inputSubdistrict && rSub && !subMatches) continue;
+      if (inputMoo && rMoo && inputMoo !== rMoo) continue;
+
+      let addrScore = 0;
+      let caseScore = 0;
+
+      // 1. ตรวจสอบที่อยู่และหมู่ที่
+      if (inputHouseNo) {
         if (inputHouseNo === rHouse) {
           if (inputMoo && rMoo) {
             if (inputMoo === rMoo) {
               addrScore = 1.0;
-              matchReasons.push('ที่อยู่ตรงกัน 100%');
+              matchReasons.push('ที่อยู่และหมู่ตรงกัน 100%');
             } else {
               addrScore = 0.88;
-              matchReasons.push(`บ้านเลขที่ตรงกัน (${rHouse}) คนละหมู่`);
+              matchReasons.push(`บ้านเลขที่ตรงกัน (${rHouse}) ต่างหมู่`);
             }
           } else {
             addrScore = 0.95;
@@ -9073,46 +9188,75 @@ function performDesktopSimilarSearch() {
             matchReasons.push(`บ้านเลขที่ใกล้เคียง (${rHouse})`);
           }
         }
-      } else {
-        const rAddrStr = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || [
-          rHouse ? 'บ้านเลขที่ ' + rHouse : '',
-          rMoo ? 'หมู่ ' + rMoo : '',
-          rSub ? 'ต.' + rSub : '',
-          rDist ? 'อ.' + rDist : '',
-          rProv ? 'จ.' + rProv : ''
-        ].filter(Boolean).join(' ')).toLowerCase();
+      } else if (inputMoo && rMoo && inputMoo === rMoo && inputSubdistrict && subMatches) {
+        addrScore = 0.82;
+        matchReasons.push(`ต.${rSub} หมู่ ${rMoo}`);
+      }
 
-        const addrSim = calculateStringSimilarity(inputAddrStr, rAddrStr);
-        if (addrSim >= 0.80) {
-          addrScore = addrSim;
-          matchReasons.push('ที่อยู่ใกล้เคียง');
+      // 2. ตรวจสอบตัวเลขคดีเป็นอันดับสุดท้าย
+      if (inputCaseNo && rCase) {
+        const rCaseClean = rCase.replace(/\s+/g, '').toLowerCase();
+        if (rCaseClean === inputFullCase) {
+          caseScore = 1.0;
+          matchReasons.push('เลขคดีตรงกัน 100%');
+        } else {
+          const mDb = rCase.match(/^([^\d/]+)?\s*(\d+)(?:\/(\d+))?/);
+          if (mDb) {
+            const dbNum = (mDb[2] || '').trim();
+            const dbYear = (mDb[3] || '').trim();
+            if (inputCaseNo === dbNum) {
+              if (inputCaseYear && dbYear && inputCaseYear === dbYear) {
+                caseScore = 0.95;
+                matchReasons.push(`เลขคดีตรงกัน (${dbNum}/${dbYear})`);
+              } else if (!inputCaseYear || !dbYear) {
+                caseScore = 0.90;
+                matchReasons.push(`เลขคดีตรงกัน (${dbNum})`);
+              } else {
+                caseScore = 0.82;
+                matchReasons.push(`ตัวเลขคดีตรงกัน (${dbNum}) ต่างปี`);
+              }
+            } else {
+              const numSim = calculateStringSimilarity(inputCaseNo, dbNum);
+              if (numSim >= 0.80) {
+                caseScore = numSim;
+                matchReasons.push(`เลขคดีใกล้เคียง (${rCase})`);
+              }
+            }
+          }
         }
+      }
+
+      finalScore = Math.max(caseScore, addrScore);
+      if (caseScore >= 0.80 && addrScore >= 0.80) {
+        finalScore = Math.min(1.0, finalScore + 0.05);
       }
     }
 
-    // -------------------------------------------------------------
-    // 1.3 รวมคะแนน: กรองเฉพาะข้อมูลที่มีความใกล้เคียงตรงกันหรือเกิน 80% (>= 0.80)
-    // -------------------------------------------------------------
-    let finalScore = Math.max(caseScore, addrScore);
-    if (caseScore >= 0.80 && addrScore >= 0.80) {
-      finalScore = Math.min(1.0, finalScore + 0.05); // โบนัสตรงกันทั้งสองส่วน
-    }
-
+    // กรองเฉพาะรายการที่ตรงกัน หรือใกล้เคียง >= 80% (>= 0.80)
     if (finalScore >= 0.80) {
-      const dedupeKey = `${rCase}_${rHouse}_${rMoo}_${rSub}_${rDist}`;
+      const dedupeKey = `${rCase}_${rHouse}_${rMoo}_${rSub}_${rDist}_${distanceMeters !== undefined ? Math.round(distanceMeters / 15) : ''}`;
       if (!seenKeys.has(dedupeKey)) {
         seenKeys.add(dedupeKey);
         results.push({
           record: r,
           score: finalScore,
+          distanceMeters: distanceMeters,
           matchReason: matchReasons.join(' • ') || 'ตรงกัน ≥ 80%'
         });
       }
     }
   }
 
-  // เรียงลำดับจากข้อมูลที่ตรงกันมากที่สุดไปน้อยที่สุด (Descending)
-  results.sort((a, b) => b.score - a.score);
+  // เรียงลำดับ: ความตรงกันมากที่สุด (Descending) และระยะพิกัดที่ใกล้ที่สุด
+  results.sort((a, b) => {
+    if (Math.abs(b.score - a.score) > 0.04) {
+      return b.score - a.score;
+    }
+    if (a.distanceMeters !== undefined && b.distanceMeters !== undefined) {
+      return a.distanceMeters - b.distanceMeters;
+    }
+    return b.score - a.score;
+  });
 
   // เก็บผลลัพธ์ไว้ให้ฟังก์ชันเลือกเรียกใช้
   window._desktopSimilarResults = results.map(item => item.record);
@@ -9171,6 +9315,18 @@ function renderDesktopSimilarResults(results) {
       badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
     }
 
+    let distanceBadge = '';
+    if (item.distanceMeters !== undefined) {
+      const dM = Math.round(item.distanceMeters);
+      if (dM <= 35) {
+        distanceBadge = `<span class="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"><i class="fa-solid fa-location-crosshairs mr-1 text-[10px]"></i>พื้นที่เดียวกัน (${dM} ม.)</span>`;
+      } else if (dM <= 150) {
+        distanceBadge = `<span class="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs"><i class="fa-solid fa-location-dot mr-1 text-[10px]"></i>พื้นที่ใกล้เคียง (${dM} ม.)</span>`;
+      } else {
+        distanceBadge = `<span class="inline-flex items-center text-[11px] font-bold px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 shadow-2xs"><i class="fa-solid fa-satellite-dish mr-1 text-[10px]"></i>ห่าง ${dM} ม.</span>`;
+      }
+    }
+
     html += `
       <div class="similar-record-card p-3.5 bg-white hover:bg-amber-50/40 rounded-xl border border-gray-200 hover:border-amber-400 transition-all duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
         <div class="space-y-1 flex-1 min-w-0">
@@ -9181,6 +9337,7 @@ function renderDesktopSimilarResults(results) {
             <span class="inline-flex items-center text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${badgeClass}">
               <i class="fa-solid fa-percent mr-1 text-[10px]"></i>ตรงกัน ${scorePct}%
             </span>
+            ${distanceBadge}
             <span class="text-[11px] text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md font-semibold border border-amber-200">
               ${item.matchReason}
             </span>
@@ -9664,6 +9821,8 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
         }, 2500);
       }
 
+      state.lat = latNum;
+      state.lng = lngNum;
       state.currentLocation = {
         lat: latNum,
         lng: lngNum,
@@ -9682,6 +9841,11 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
 
       // อ้างอิงและเติม จังหวัด, อำเภอ, ตำบล จากพิกัดภาพถ่ายให้อัตโนมัติทันที
       await autoFillAddressFromCoordinates(latNum, lngNum, 'พิกัดภาพถ่าย');
+
+      // เริ่มค้นหาข้อมูลที่ตั้งหมายที่ใกล้เคียงจากพิกัดภาพถ่ายทันที
+      if (typeof triggerDesktopSimilarSearch === 'function') {
+        triggerDesktopSimilarSearch();
+      }
     }
 
     return result;
@@ -9820,6 +9984,9 @@ function initDesktopUploadEvents() {
                   }
                   if (elements.locationStatus) {
                     elements.locationStatus.innerHTML = `<span class="text-amber-700 font-semibold"><i class="fa-solid fa-location-dot mr-1"></i>พิกัดตำแหน่งปัจจุบันของคุณ (${baseLat.toFixed(4)}, ${baseLng.toFixed(4)}) - กรุณาตรวจสอบหรือพิมพ์แก้ไข</span>`;
+                  }
+                  if (typeof triggerDesktopSimilarSearch === 'function') {
+                    triggerDesktopSimilarSearch();
                   }
                 },
                 (err) => {
