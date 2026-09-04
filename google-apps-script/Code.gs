@@ -640,20 +640,23 @@ function doPost(e) {
         const uploaderUser = data.uploader || data.username || data.uploadedBy || data.user_id || "";
 
         // ตรวจสอบเพื่อป้องกันการบันทึกแถวซ้ำซ้อน (Server-side Deduplication Check)
-        // ตรวจแถวล่าสุดไม่เกิน 8 แถว หากพบเลขคดีเดียวกัน และเวลาหรือชื่อไฟล์เดียวกัน ถือเป็นรายการซ้ำจาก Retry
+        // ตรวจแถวล่าสุดไม่เกิน 20 แถว หากพบเลขคดีเดียวกัน และเวลาหรือชื่อไฟล์เดียวกัน ถือเป็นรายการซ้ำจาก Retry / Reload
         const lastRow = sheet.getLastRow();
         let isDuplicateRow = false;
         if (lastRow > 1) {
-          const startCheckRow = Math.max(2, lastRow - 7);
+          const startCheckRow = Math.max(2, lastRow - 19);
           const numCheckRows = lastRow - startCheckRow + 1;
           const recentData = sheet.getRange(startCheckRow, 1, numCheckRows, 11).getValues();
-          for (let r = 0; r < recentData.length; r++) {
+          for (let r = recentData.length - 1; r >= 0; r--) {
             const rTime = String(recentData[r][0] || '').trim();
             const rCase = String(recentData[r][1] || '').trim();
             const rFile = String(recentData[r][10] || '').trim();
 
             if (rCase === String(data.caseNumber || '').trim()) {
-              if (rTime === String(thaiDateStr).trim() || (data.fileName && rFile === String(data.fileName).trim())) {
+              if (
+                (data.fileName && rFile === String(data.fileName).trim()) ||
+                (rTime === String(thaiDateStr).trim())
+              ) {
                 isDuplicateRow = true;
                 break;
               }
@@ -662,6 +665,14 @@ function doPost(e) {
         }
 
         if (isDuplicateRow) {
+          // หากสร้างไฟล์รูปซ้ำใน Google Drive ให้ลบไฟล์รูปซ้ำลงถังขยะทันทีเพื่อไม่ให้เปลืองพื้นที่
+          if (fileId) {
+            try {
+              DriveApp.getFileById(fileId).setTrashed(true);
+            } catch (trashErr) {
+              console.warn("Trash duplicate file error:", trashErr);
+            }
+          }
           return ContentService.createTextOutput(JSON.stringify({
             status: "success",
             message: "ตรวจพบรายการส่งซ้ำ ข้อมูลถูกบันทึกลงใน Google Sheet แล้ว",

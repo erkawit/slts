@@ -285,20 +285,60 @@ function saveBackgroundQueue(queue) {
   updateBackgroundQueueUI();
 }
 
+function recordCompletedSubmission(caseNumber, fileName) {
+  try {
+    let recent = JSON.parse(localStorage.getItem('slts_recent_submissions') || '[]');
+    recent = recent.filter(r => (Date.now() - r.timestamp) < 900000); // 15 นาที
+    recent.unshift({ caseNumber: String(caseNumber || '').trim(), fileName: String(fileName || '').trim(), timestamp: Date.now() });
+    if (recent.length > 30) recent = recent.slice(0, 30);
+    localStorage.setItem('slts_recent_submissions', JSON.stringify(recent));
+  } catch (e) {}
+}
+
+// ป้องกันการกด Ctrl + Shift + R, F5 หรือปิดหน้าต่างขณะที่กำลังนำส่งข้อมูลขึ้น Google Sheet ในเบื้องหลัง
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', (e) => {
+    const queue = (typeof getBackgroundQueue === 'function') ? getBackgroundQueue() : [];
+    const isUploading = Boolean(window.isBgQueueWorkerRunning) || (queue && queue.length > 0) || Boolean(window.isDesktopUploadInProgress);
+    if (isUploading) {
+      const warningText = 'ระบบกำลังนำส่งข้อมูลขึ้น Google Sheet ในเบื้องหลัง หากรีเฟรชหน้าจอ (Ctrl+Shift+R) หรือปิดหน้านี้ตอนนี้ อาจทำให้เกิดข้อมูลซ้ำซ้อนหรือบันทึกไม่สมบูรณ์';
+      e.preventDefault();
+      e.returnValue = warningText;
+      return warningText;
+    }
+  });
+}
+
 function enqueueBackgroundUpload(taskData) {
   const queue = getBackgroundQueue();
 
-  // ป้องกันการอัปโหลดซ้ำซ้อนของเลขคดีเดียวกันจากการกดรัวหรือบั๊กซ้ำ (Deduplication Check)
+  // 1. ป้องกันการอัปโหลดซ้ำซ้อนของเลขคดีเดียวกันจากการกดรัวหรือบั๊กซ้ำ (Queue Deduplication Check)
   const isDuplicate = queue.some(item => 
     item.caseNumber && 
     taskData.caseNumber && 
     String(item.caseNumber).trim() === String(taskData.caseNumber).trim() &&
-    (Date.now() - new Date(item.createdAt || 0).getTime()) < 45000
+    (Date.now() - new Date(item.createdAt || 0).getTime()) < 60000
   );
   if (isDuplicate) {
     console.warn('[BgQueue] Suppressed duplicate enqueue for case:', taskData.caseNumber);
     return null;
   }
+
+  // 2. ป้องกันการอัปโหลดซ้ำจากประวัติการส่งสำเร็จล่าสุด (Recent Completed Check ภายใน 60 วินาที)
+  try {
+    const recentSubmissions = JSON.parse(localStorage.getItem('slts_recent_submissions') || '[]');
+    const isRecentDuplicate = recentSubmissions.some(sub => 
+      sub.caseNumber && 
+      taskData.caseNumber && 
+      String(sub.caseNumber).trim() === String(taskData.caseNumber).trim() &&
+      (!taskData.fileName || sub.fileName === taskData.fileName) &&
+      (Date.now() - sub.timestamp) < 60000
+    );
+    if (isRecentDuplicate) {
+      console.warn('[BgQueue] Suppressed enqueue: case already completed within last 60s:', taskData.caseNumber);
+      return null;
+    }
+  } catch (e) {}
 
   const item = {
     id: 'bg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
@@ -700,7 +740,38 @@ async function processBackgroundQueue() {
   updateBackgroundQueueUI();
 
   const currentItem = queue[0];
+
+  // ตรวจสอบกรณีหน้ารีเฟรช (เช่น ผู้ใช้กด Ctrl + Shift + R หรือ F5) ขณะที่รายการนี้กำลังส่งอยู่ก่อนหน้า
+  if (currentItem.uploadStartedAt && (Date.now() - currentItem.uploadStartedAt < 50000)) {
+    console.log('[BgQueue] Item was in-flight when page reloaded. Verifying Google Sheet before retrying...', currentItem.caseNumber);
+    try {
+      const apiUrl = `${getSanitizedAppsScriptUrl()}?action=get_data&_t=${Date.now()}`;
+      const checkRes = await fetch(apiUrl, { cache: 'no-store' });
+      const checkJson = await checkRes.json();
+      if (checkJson && checkJson.status === 'success' && Array.isArray(checkJson.data)) {
+        const recentRows = checkJson.data.slice(-20);
+        const alreadyExists = recentRows.some(row => {
+          const rCase = String(row['เลขคดี'] || row['caseNumber'] || '').trim();
+          const rFile = String(row['ชื่อไฟล์'] || row['fileName'] || '').trim();
+          return rCase === String(currentItem.caseNumber).trim() && (!currentItem.fileName || rFile === String(currentItem.fileName).trim());
+        });
+        if (alreadyExists) {
+          console.log('[BgQueue] Verified: Item already recorded in Google Sheet! Skipping duplicate upload.', currentItem.caseNumber);
+          recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName);
+          removeBackgroundQueueItem(currentItem.id);
+          isBgQueueWorkerRunning = false;
+          setTimeout(processBackgroundQueue, 500);
+          return;
+        }
+      }
+    } catch (checkErr) {
+      console.warn('[BgQueue] Could not verify existing row via Sheet API:', checkErr);
+    }
+  }
+
+  currentItem.uploadStartedAt = Date.now();
   currentItem.status = 'uploading';
+  saveBackgroundQueue(queue);
 
   // Progress ticker
   let percent = 20;
@@ -752,6 +823,7 @@ async function processBackgroundQueue() {
     }
 
     // สำเร็จ! นำออกจากคิว
+    recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName);
     removeBackgroundQueueItem(currentItem.id);
 
     // ข้อกำหนด: ในหน้าจอความกว้างน้อยกว่า 768 pixel (และ Desktop)
@@ -10064,10 +10136,19 @@ window.viewDesktopFullPreview = function() {
   });
 };
 
+window.isDesktopUploadInProgress = false;
+
 async function handleDesktopUpload() {
+  if (window.isDesktopUploadInProgress) {
+    console.warn('[Desktop Upload] Upload already in progress, ignoring duplicate submit.');
+    return;
+  }
+  window.isDesktopUploadInProgress = true;
+
   // 1. ตรวจสอบการแนบไฟล์รูปภาพก่อนเป็นอันดับแรก (เฉพาะ Desktop > 768px)
   const hasFile = state.selectedDesktopImageDataUrl || (elements.desktopImageFileInput && elements.desktopImageFileInput.files && elements.desktopImageFileInput.files.length > 0);
   if (!hasFile) {
+    window.isDesktopUploadInProgress = false;
     Swal.fire({
       icon: 'warning',
       title: 'กรุณาแนบไฟล์รูปภาพ',
@@ -10079,7 +10160,10 @@ async function handleDesktopUpload() {
   }
 
   // 2. ตรวจสอบความครบถ้วนและความถูกต้องของข้อมูลในแบบฟอร์มที่บังคับกรอก
-  if (!validateForm()) return;
+  if (!validateForm()) {
+    window.isDesktopUploadInProgress = false;
+    return;
+  }
 
   // 3. ตรวจสอบกรณีภาพที่แนบไม่มีพิกัดในตัวภาพ (เฉพาะ Desktop > 768px)
   if (window.innerWidth > 768 && state.desktopPhotoHadGps === false) {
@@ -10117,6 +10201,7 @@ async function handleDesktopUpload() {
           elements.coordinatesInput.focus();
           elements.coordinatesInput.select();
         }
+        window.isDesktopUploadInProgress = false;
         return;
       }
     } else if (baseline) {
@@ -10146,6 +10231,7 @@ async function handleDesktopUpload() {
 
         if (!confirmDiff.isConfirmed) {
           if (elements.coordinatesInput) elements.coordinatesInput.focus();
+          window.isDesktopUploadInProgress = false;
           return;
         }
       }
@@ -10392,6 +10478,10 @@ async function handleDesktopUpload() {
     console.error('Desktop upload error:', err);
     hideCustomLoading();
     showGasUploadErrorModal(err, uploadPayload, imageFilename, caseNumber);
+  } finally {
+    setTimeout(() => {
+      window.isDesktopUploadInProgress = false;
+    }, 1500);
   }
 }
 
@@ -11496,9 +11586,34 @@ async function captureAndProcessPhoto() {
       dateTime: WatermarkEngine.formatThaiDateTime(new Date())
     };
 
-    const rotationDeg = (state.captureOrientation === 'landscape' && window.innerWidth < window.innerHeight)
-      ? (state.deviceAngle || 90)
-      : 0;
+    let rotationDeg = 0;
+    const isScreenPortrait = window.innerWidth < window.innerHeight;
+    const currentDeviceAngle = (window.compassManager && typeof window.compassManager.getDeviceAngle === 'function')
+      ? window.compassManager.getDeviceAngle()
+      : (state.deviceAngle || 0);
+
+    if (state.captureOrientation === 'landscape') {
+      if (isScreenPortrait) {
+        // เมื่อหน้าจอโทรศัพท์เป็นแนวตั้ง แต่ผู้ใช้ถ่ายในโหมดแนวนอน (4:3):
+        // หากโทรศัพท์เอียงซ้าย (Landscape Left, deviceAngle = 90): ต้องหมุนทวนเข็ม -90 องศาเพื่อชดเชยการเอียง
+        // หากโทรศัพท์เอียงขวา (Landscape Right, deviceAngle = -90 หรือ 270): ต้องหมุนตามเข็ม +90 องศาเพื่อชดเชย
+        // ป้องกันบั๊กเดิมที่หมุน +90 ทำให้ภาพกลับหัว 180 องศา
+        if (currentDeviceAngle === -90 || currentDeviceAngle === 270) {
+          rotationDeg = 90;
+        } else {
+          rotationDeg = -90;
+        }
+      } else {
+        rotationDeg = 0;
+      }
+    } else {
+      // โหมดแนวตั้ง (Portrait 3:4)
+      if (currentDeviceAngle === 180) {
+        rotationDeg = 180;
+      } else {
+        rotationDeg = 0;
+      }
+    }
     const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation, rotationDeg);
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';

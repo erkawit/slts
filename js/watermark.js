@@ -148,24 +148,24 @@ class WatermarkEngine {
     // 4. คำนวณ Scale Factor เพื่อให้ Element ขยายสมส่วน
     const scale = isPortrait ? (width / 1000) : (height / 1000);
 
-    // 5. [มุมซ้ายบน (Top-Left)]: เข็มทิศ (Compass Overlay)
-    const compassRadius = 55 * scale;
-    const compassX = 30 * scale + compassRadius;
-    const compassY = 30 * scale + compassRadius;
-    if (window.compassManager) {
-      window.compassManager.drawCompass(ctx, compassX, compassY, compassRadius);
-    }
-
-    // 6. [มุมซ้ายล่าง (Bottom-Left)]: ภาพแผนที่พิกัดปัจจุบัน
+    // 5. [มุมซ้ายบน (Top-Left)]: ภาพแผนที่พิกัดปัจจุบัน
     const mapWidth = 220 * scale;
     const mapHeight = 160 * scale;
     const mapX = 28 * scale;
-    const mapY = height - mapHeight - (28 * scale);
+    const mapY = 28 * scale;
     if (window.mapSnapshotManager && data.lat && data.lng) {
       await window.mapSnapshotManager.drawMapOverlay(ctx, mapX, mapY, mapWidth, mapHeight, data.lat, data.lng);
     }
 
-    // 7. [มุมขวาล่าง (Bottom-Right)]: กล่องข้อมูลสีดำสนิท ตัวหนังสือและสัญลักษณ์สีขาวล้วน ขยายขนาด 100%
+    // 6. [มุมขวาบน (Top-Right)]: เข็มทิศ (Compass Overlay)
+    const compassRadius = 55 * scale;
+    const compassX = width - (28 * scale) - compassRadius;
+    const compassY = 28 * scale + compassRadius;
+    if (window.compassManager) {
+      window.compassManager.drawCompass(ctx, compassX, compassY, compassRadius);
+    }
+
+    // 7. [มุมซ้ายล่าง (Bottom-Left)]: กล่องข้อมูลสีดำสนิทพร้อมไอคอน ชิดซ้าย ตามแบบ HUD ก่อนถ่ายภาพ (Image 2)
     await this.drawInfoBadge(ctx, width, height, scale, data);
 
     // แปลงผลลัพธ์เป็น Data URL และ Blob (คุณภาพ 0.88 คมชัดสูงและประมวลผลเร็ว)
@@ -177,41 +177,41 @@ class WatermarkEngine {
   }
 
   /**
-   * วาดกล่องข้อความมุมขวาล่าง (สีดำสนิท + ตัวหนังสือสีขาวล้วน จัดชิดขวาตามแบบตัวอย่างภาพ)
+   * วาดกล่องข้อความมุมซ้ายล่าง (สีดำสนิท + ขอบขาวมน + ไอคอนและข้อความชิดซ้าย ตามแบบ HUD ใน Image 2)
    */
   static async drawInfoBadge(ctx, canvasWidth, canvasHeight, scale, data) {
-    const padding = 20 * scale;
-    const fontSize = Math.round(26 * scale);
-    const fontTitleSize = Math.round(29 * scale);
-    const lineHeight = fontSize * 1.45;
+    const padding = 18 * scale;
+    const fontSize = Math.round(23 * scale);
+    const fontTitleSize = Math.round(25 * scale);
+    const lineHeight = fontSize * 1.5;
 
     ctx.save();
 
     // 1. วันที่และเวลาปัจจุบัน (พ.ศ.)
     const dateStr = data.dateTime || this.formatThaiDateTime(new Date());
 
-    // 2. พิกัดในรูปแบบ: 17.3891N 102.8138E
-    const latFormatted = data.lat ? `${Math.abs(data.lat).toFixed(4)}${data.lat >= 0 ? 'N' : 'S'}` : '17.4144N';
-    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}${data.lng >= 0 ? 'E' : 'W'}` : '102.7882E';
-    const coordStr = `${latFormatted} ${lngFormatted}`;
-
-    // 3. องศาทิศ: 19° N
+    // 2. พิกัดในรูปแบบ: 17.4144°N 102.7881°E 30° NE
+    const latFormatted = data.lat ? `${Math.abs(data.lat).toFixed(4)}°${data.lat >= 0 ? 'N' : 'S'}` : '17.4144°N';
+    const lngFormatted = data.lng ? `${Math.abs(data.lng).toFixed(4)}°${data.lng >= 0 ? 'E' : 'W'}` : '102.7882°E';
     const headingDeg = (data.heading !== undefined && data.heading !== null) ? data.heading : (window.compassManager ? window.compassManager.getHeading() : 0);
     const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
-    const headingStr = `${headingDeg}° ${dirText}`;
+    const coordWithHeadingStr = `${latFormatted} ${lngFormatted} ${headingDeg}° ${dirText}`;
 
-    // 4. ที่ตั้ง (อำเภอ / ตำบล)
+    // 3. ที่ตั้ง (อำเภอ / ตำบล หรือที่ตั้งละเอียด)
     const locationStr = data.locationText || 'อำเภอเมืองอุดรธานี';
 
-    // 5. เลขคดี (เช่น ต1664/2569)
-    const caseStr = data.caseNumber ? String(data.caseNumber) : '-';
+    // 4. เลขคดี (เช่น ต2188/2569)
+    let rawCase = data.caseNumber ? String(data.caseNumber).trim() : '-';
+    let caseStr = rawCase;
+    if (!caseStr.startsWith('เลขคดี:')) {
+      caseStr = `เลขคดี: ${caseStr}`;
+    }
 
     const lines = [
-      { text: dateStr, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
-      { text: coordStr, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
-      { text: headingStr, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
-      { text: locationStr, font: `600 ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
-      { text: caseStr, font: `bold ${fontTitleSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' }
+      { text: `📅  ${dateStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
+      { text: `📍  ${coordWithHeadingStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
+      { text: `🏠  ${locationStr}`, font: `600 ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
+      { text: `⚖️  ${caseStr}`, font: `bold ${fontTitleSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' }
     ];
 
     // คำนวณความกว้างสูงสุดของข้อความ
@@ -223,12 +223,13 @@ class WatermarkEngine {
     });
 
     const boxWidth = maxTextWidth + (padding * 2.2);
-    const boxHeight = (lines.length * lineHeight) + (padding * 1.5);
-    const boxX = canvasWidth - boxWidth - (24 * scale);
-    const boxY = canvasHeight - boxHeight - (24 * scale);
+    const boxHeight = (lines.length * lineHeight) + (padding * 1.4);
+    // วางที่มุมซ้ายล่าง (Bottom-Left) ตามสเปก Image 2
+    const boxX = 28 * scale;
+    const boxY = canvasHeight - boxHeight - (28 * scale);
 
-    // วาดพื้นหลังกล่องดำสนิท (Solid Black)
-    const radius = 8 * scale;
+    // วาดพื้นหลังกล่องดำสนิท (Solid Black) ขอบมนสวยงาม
+    const radius = 16 * scale;
     ctx.beginPath();
     ctx.moveTo(boxX + radius, boxY);
     ctx.lineTo(boxX + boxWidth - radius, boxY);
@@ -244,20 +245,20 @@ class WatermarkEngine {
     ctx.fillStyle = '#000000';
     ctx.fill();
 
-    // กรอบขอบสีขาวบางคมชัด
-    ctx.lineWidth = 1.5 * scale;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    // กรอบขอบสีขาวคมชัด
+    ctx.lineWidth = 2 * scale;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
     ctx.stroke();
 
-    // วาดข้อความสีขาวล้วน จัดชิดขวา (Right-Aligned) ตามตัวอย่างภาพ
-    const textRightX = boxX + boxWidth - padding;
+    // วาดข้อความสีขาว จัดชิดซ้าย (Left-Aligned) ตามตัวอย่าง Image 2
+    const textLeftX = boxX + padding;
     let currentY = boxY + padding + (fontSize * 0.85);
 
     lines.forEach(line => {
       ctx.font = line.font;
       ctx.fillStyle = line.color;
-      ctx.textAlign = 'right';
-      ctx.fillText(line.text, textRightX, currentY);
+      ctx.textAlign = 'left';
+      ctx.fillText(line.text, textLeftX, currentY);
       currentY += lineHeight;
     });
 
