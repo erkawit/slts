@@ -452,6 +452,14 @@ function recordCompletedSubmission(caseNumber, fileName) {
     recent.unshift({ caseNumber: String(caseNumber || '').trim(), fileName: String(fileName || '').trim(), timestamp: Date.now() });
     if (recent.length > 30) recent = recent.slice(0, 30);
     localStorage.setItem('slts_recent_submissions', JSON.stringify(recent));
+
+    // อัปเดตสถานะจุดส่งหมายว่า "นำส่งขึ้น Server แล้ว (สีเทา)"
+    if (typeof setRouteStopDeliveryStatus === 'function') {
+      setRouteStopDeliveryStatus(caseNumber, 'uploaded', {
+        uploadedAt: new Date().toISOString(),
+        fileName: fileName
+      });
+    }
   } catch (e) {}
 }
 
@@ -1208,10 +1216,12 @@ function initDOMElements() {
   elements.tabBtnForm = document.getElementById('tabBtnForm') || elements.tabBtnCamera;
   elements.tabBtnTable = document.getElementById('tabBtnTable');
   elements.tabBtnMap = document.getElementById('tabBtnMap');
+  elements.tabBtnRouteBatch = document.getElementById('tabBtnRouteBatch');
   elements.tabBtnUsers = document.getElementById('tabBtnUsers');
   elements.tabContentForm = document.getElementById('tabContentForm');
   elements.tabContentTable = document.getElementById('tabContentTable');
   elements.tabContentMap = document.getElementById('tabContentMap');
+  elements.tabContentRouteBatch = document.getElementById('tabContentRouteBatch');
   elements.tabContentUsers = document.getElementById('tabContentUsers');
 
   elements.form = document.getElementById('summonsForm');
@@ -1683,11 +1693,13 @@ function updateAuthUI() {
     if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
   }
 
-  // Tab แผนที่และหมุด (แสดงเฉพาะผู้ใช้งานที่ล็อกอินแล้วเท่านั้น บน Desktop)
+  // Tab แผนที่และหมุด และแท็บรายการส่งหมายรอบนี้ (แสดงเฉพาะผู้ใช้งานที่ล็อกอินแล้วเท่านั้น บน Desktop)
   if (isLoggedIn && isDesktop) {
     if (elements.tabBtnMap) elements.tabBtnMap.classList.remove('hidden');
+    if (elements.tabBtnRouteBatch) elements.tabBtnRouteBatch.classList.remove('hidden');
   } else {
     if (elements.tabBtnMap) elements.tabBtnMap.classList.add('hidden');
+    if (elements.tabBtnRouteBatch) elements.tabBtnRouteBatch.classList.add('hidden');
   }
 
   // Tab จัดการผู้ใช้งาน (แสดงเฉพาะ Admin และ Local Advisor บน Desktop)
@@ -2918,6 +2930,47 @@ window.switchTab = function(tabName) {
         }
       }, 150);
     }
+  } else if (tabName === 'route_batch') {
+    if (window.innerWidth <= 768) return;
+
+    // ตรวจสอบการเข้าสู่ระบบก่อนเข้าใช้งานรายการส่งหมายรอบนี้
+    if (!state.currentUser) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'จำเป็นต้องเข้าสู่ระบบ',
+        text: 'ระบบ "รายการส่งหมายรอบนี้" สงวนสิทธิ์สำหรับเจ้าหน้าที่ผู้ใช้งานที่เข้าสู่ระบบแล้วเท่านั้น',
+        confirmButtonText: '<i class="fa-solid fa-right-to-bracket mr-1"></i> เข้าสู่ระบบทันที',
+        showCancelButton: true,
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#2563eb',
+        cancelButtonColor: '#6b7280',
+        customClass: { popup: 'rounded-2xl' }
+      }).then((result) => {
+        if (result.isConfirmed) {
+          openLoginModal();
+        }
+      });
+      return;
+    }
+
+    closeCameraModal();
+    const btn = elements.tabBtnRouteBatch || document.getElementById('tabBtnRouteBatch');
+    if (btn) btn.classList.add('active');
+    const pane = elements.tabContentRouteBatch || document.getElementById('tabContentRouteBatch');
+    if (pane) {
+      pane.classList.remove('hidden');
+      pane.classList.add('active');
+    }
+
+    // โหลดข้อมูลประวัติรอในเบื้องหลัง เพื่อให้รูปภาพและข้อมูลส่งหมายอัปเดตล่าสุด
+    if (typeof loadGoogleSheetData === 'function') {
+      loadGoogleSheetData(false);
+    }
+    if (typeof fetchActiveRouteFromServer === 'function') {
+      fetchActiveRouteFromServer();
+    }
+
+    renderRouteBatchTab();
   } else if (tabName === 'users') {
     const isAllowed = state.currentUser && (state.currentUser.role === 'admin' || state.currentUser.role === 'local_advisor');
     if (!isAllowed) {
@@ -5722,7 +5775,7 @@ window.pushMobileModalState = function(restoreFn) {
 };
 
 window.handleMobileModalBackOrClose = function() {
-  if (window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0) {
+  if (window.mobileModalStack && window.mobileModalStack.length > 0) {
     const prevFn = window.mobileModalStack.pop();
     if (typeof prevFn === 'function') {
       prevFn();
@@ -6259,7 +6312,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     directImgUrl = `https://lh3.googleusercontent.com/d/${match[1]}=w1200`;
   }
 
-  const hasBackStack = window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0;
+  const hasBackStack = Boolean(window.mobileModalStack && window.mobileModalStack.length > 0);
   let isNavigatingToFullScreen = false;
 
   const executeSafeBack = () => {
@@ -12405,6 +12458,15 @@ async function captureAndProcessPhoto() {
       fileName: imageFilename,
       payload: uploadPayload
     });
+
+    // บันทึกสถานะจุดส่งหมายของเส้นทางรอบนี้ว่า "ถ่ายรูปแล้ว (สีส้ม)"
+    if (typeof setRouteStopDeliveryStatus === 'function') {
+      setRouteStopDeliveryStatus(caseNumber, 'captured_offline', {
+        capturedAt: new Date().toISOString(),
+        capturedPhotoUrl: compressedImageBase64
+      });
+    }
+
     if (enqueued && navigator.onLine) {
       processBackgroundQueue();
     }
@@ -12506,6 +12568,15 @@ async function handleFallbackFile(e) {
       fileName: imageFilename,
       payload: uploadPayload
     });
+
+    // บันทึกสถานะจุดส่งหมายของเส้นทางรอบนี้ว่า "ถ่ายรูปแล้ว (สีส้ม)"
+    if (typeof setRouteStopDeliveryStatus === 'function') {
+      setRouteStopDeliveryStatus(caseNumber, 'captured_offline', {
+        capturedAt: new Date().toISOString(),
+        capturedPhotoUrl: compressedImageBase64
+      });
+    }
+
     if (enqueued && navigator.onLine) {
       processBackgroundQueue();
     }
@@ -18484,6 +18555,13 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
     return;
   }
 
+  // บันทึกเป้าหมายจุดส่งหมายที่เลือกไว้สำหรับการติดตามสถานะการถ่ายภาพ
+  state.activeRouteStopTarget = {
+    index: typeof stopIndex === 'number' ? stopIndex : 0,
+    caseNumber: stop.caseNumber,
+    id: stop.id
+  };
+
   // 1. ปิด Modals อื่นๆ ที่เปิดอยู่
   if (typeof Swal !== 'undefined' && Swal.isVisible()) {
     Swal.close();
@@ -18709,6 +18787,22 @@ window.initMobileHandoffReceiver = function() {
           const uId = (state.currentUser?.username || '').trim().toLowerCase();
           const targetUserId = (event.data.user_id || event.data.target_user_id || '').trim().toLowerCase();
           const targetUserIds = Array.isArray(event.data.target_user_ids) ? event.data.target_user_ids.map(u => String(u).toLowerCase()) : [];
+
+          // ตรวจสอบกรณีเป็นคำสั่งล้างเส้นทาง (Clear Route) ข้ามอุปกรณ์
+          if (event.data.type === 'clear_user_route' || event.data.action === 'clear_user_route') {
+            if (!targetUserId || targetUserId === uId) {
+              state.currentRouteStops = [];
+              state.routeRoadPolylineCoords = [];
+              state.mapRoutePolylineCoords = [];
+              localStorage.removeItem('slts_shared_route_stops');
+              updateMobileRouteMapButtonBadge(0);
+              if (document.getElementById('mobileMapRouteStopsList')) renderMobileRouteList();
+              if (window.mobileModalMap && document.getElementById('mobileModalLeafletMap')) initMobileModalMapInstance();
+              if (typeof renderRouteBatchTab === 'function') renderRouteBatchTab();
+              return;
+            }
+          }
+
           if (uId && (targetUserId === uId || targetUserIds.includes(uId))) {
             applyReceivedHandoff(event.data);
           }
@@ -19133,6 +19227,7 @@ window.updateMobileRouteMapButtonBadge = function(count) {
   const pillSub = document.getElementById('mobileHandoffPillSub');
   const floatingWidget = document.getElementById('floatingMobileRouteWidget');
   const floatingCount = document.getElementById('floatingMobileRouteCount');
+  const pcBadge = document.getElementById('routeBatchBadgeCount');
 
   if (txt) {
     if (stopsCount > 0) {
@@ -19146,6 +19241,16 @@ window.updateMobileRouteMapButtonBadge = function(count) {
 
   if (floatingCount) {
     floatingCount.textContent = `${stopsCount}`;
+  }
+
+  if (pcBadge) {
+    if (stopsCount > 0) {
+      pcBadge.textContent = `${stopsCount}`;
+      pcBadge.classList.remove('hidden');
+    } else {
+      pcBadge.textContent = '0';
+      pcBadge.classList.add('hidden');
+    }
   }
 
   if (stopsCount > 0) {
@@ -19198,8 +19303,18 @@ window.clearMobileRouteHandoff = function(event) {
   if (userId) {
     localStorage.removeItem('slts_device_handoff_' + userId);
     localStorage.removeItem('slts_user_route_' + userId);
+    localStorage.removeItem('slts_route_stop_status_' + userId);
+    localStorage.removeItem('slts_batch_downloaded_at_' + userId);
   }
   localStorage.removeItem('slts_latest_handoff');
+
+  // BroadcastChannel เพื่อแจ้งเตือนไปยังแท็บ/เครื่องอื่นๆ ทันที
+  if (window.BroadcastChannel) {
+    try {
+      const bc = new BroadcastChannel('slts_device_handoff');
+      bc.postMessage({ type: 'clear_user_route', user_id: userId });
+    } catch (e) {}
+  }
 
   // บันทึก timestamp ที่ถูกล้าง เพื่อไม่ให้ Polling ดึงซ้ำมาอีก
   window.dismissedHandoffTime = lastReceivedHandoffTime || Date.now().toString();
@@ -19220,7 +19335,12 @@ window.clearMobileRouteHandoff = function(event) {
   // 3. ปิดการแจ้งเตือนบนหน้าจอกล้อง และรีเซ็ตปุ่มแผนที่
   updateMobileRouteMapButtonBadge(0);
 
-  // 4. แสดง Toast แจ้งเตือนสั้นๆ แบบไม่ขัดจังหวะ
+  // 4. อัปเดตหน้าจอแท็บรายการส่งหมายรอบนี้ (หากเปิดอยู่)
+  if (typeof renderRouteBatchTab === 'function') {
+    renderRouteBatchTab();
+  }
+
+  // 5. แสดง Toast แจ้งเตือนสั้นๆ แบบไม่ขัดจังหวะ
   Swal.fire({
     toast: true,
     position: 'top',
@@ -19258,6 +19378,661 @@ function hasDesktopHandoffForCurrentUser() {
   return Boolean(state.currentRouteStops && state.currentRouteStops.length > 0);
 }
 
+// =========================================================================
+// 8. ระบบจัดการสถานะการส่งหมายรายจุด และแถบเมนู "รายการส่งหมายรอบนี้" (PC)
+// =========================================================================
+
+function getRouteDeliveryUserKey() {
+  return (state.currentUser?.username || localStorage.getItem('slts_auth_user_name') || 'default_user').trim().toLowerCase();
+}
+
+function getRouteStopStatusMap(userId = null) {
+  const uId = userId || getRouteDeliveryUserKey();
+  try {
+    const raw = localStorage.getItem('slts_route_stop_status_' + uId);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveRouteStopStatusMap(statusMap, userId = null) {
+  const uId = userId || getRouteDeliveryUserKey();
+  try {
+    localStorage.setItem('slts_route_stop_status_' + uId, JSON.stringify(statusMap));
+  } catch (e) {}
+}
+
+window.setRouteStopDeliveryStatus = function(caseNumber, status, extra = {}) {
+  if (!caseNumber) return;
+  const uId = getRouteDeliveryUserKey();
+  const statusMap = getRouteStopStatusMap(uId);
+  const cleanCase = String(caseNumber).trim();
+  const normCase = cleanCase.replace(/\s+/g, '');
+
+  const existing = statusMap[cleanCase] || statusMap[normCase] || {};
+  statusMap[cleanCase] = {
+    ...existing,
+    caseNumber: cleanCase,
+    deliveryStatus: status, // 'captured_offline' (สีส้ม) | 'uploaded' (สีเทา)
+    updatedAt: new Date().toISOString(),
+    ...extra
+  };
+  saveRouteStopStatusMap(statusMap, uId);
+
+  // Sync to state.currentRouteStops
+  if (Array.isArray(state.currentRouteStops)) {
+    let changed = false;
+    state.currentRouteStops.forEach((stop, idx) => {
+      const sCase = String(stop.caseNumber || '').trim();
+      if (sCase === cleanCase || sCase.replace(/\s+/g, '') === normCase || (state.activeRouteStopTarget && state.activeRouteStopTarget.index === idx)) {
+        stop.deliveryStatus = status;
+        if (extra.capturedAt) stop.capturedAt = extra.capturedAt;
+        if (extra.uploadedAt) stop.uploadedAt = extra.uploadedAt;
+        if (extra.capturedPhotoUrl) stop.capturedPhotoUrl = extra.capturedPhotoUrl;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      try {
+        localStorage.setItem('slts_shared_route_stops', JSON.stringify(state.currentRouteStops));
+        localStorage.setItem('slts_user_route_' + uId, JSON.stringify({
+          stops: state.currentRouteStops,
+          startLocation: state.routeStartLocation,
+          endLocation: state.routeEndLocation,
+          isRoundTrip: state.isRoundTrip,
+          timestamp: new Date().toISOString()
+        }));
+      } catch (e) {}
+
+      // ซิงค์การเปลี่ยนแปลงขึ้น Server
+      if (typeof saveRouteToServer === 'function' && navigator.onLine) {
+        saveRouteToServer();
+      }
+    }
+  }
+
+  // ตรวจสอบความครบถ้วนของรอบการส่งหมาย
+  if (typeof checkRouteDeliveryBatchStatus === 'function') {
+    checkRouteDeliveryBatchStatus();
+  }
+
+  // หากหน้าต่างแสดงผลแผนที่/รายการบนมือถือเปิดอยู่ ให้รีเฟรชการแสดงผลหมุดและสีการ์ด
+  if (document.getElementById('mobileMapRouteStopsList')) {
+    renderMobileRouteList();
+  }
+  if (window.mobileModalMap && document.getElementById('mobileModalLeafletMap')) {
+    initMobileModalMapInstance();
+  }
+
+  // หากหน้าแท็บ PC เปิดอยู่ ให้รีเฟรชตาราง
+  if (document.getElementById('tabContentRouteBatch') && !document.getElementById('tabContentRouteBatch').classList.contains('hidden')) {
+    renderRouteBatchTab();
+  }
+};
+
+window.syncStopsWithDeliveryStatus = function(stops) {
+  if (!Array.isArray(stops) || stops.length === 0) return stops;
+  const uId = getRouteDeliveryUserKey();
+  const statusMap = getRouteStopStatusMap(uId);
+
+  // ดึงประวัติจาก Google Sheet และคิวอัปโหลดมาตรวจสอบ
+  const sheetRows = state.allSheetRows || [];
+  const bgQueue = typeof getBackgroundQueue === 'function' ? getBackgroundQueue() : [];
+
+  stops.forEach((stop) => {
+    const sCase = String(stop.caseNumber || '').trim();
+    const normCase = sCase.replace(/\s+/g, '');
+    const mapped = statusMap[sCase] || statusMap[normCase];
+
+    if (mapped && mapped.deliveryStatus) {
+      stop.deliveryStatus = mapped.deliveryStatus;
+      if (mapped.capturedAt) stop.capturedAt = mapped.capturedAt;
+      if (mapped.uploadedAt) stop.uploadedAt = mapped.uploadedAt;
+      if (mapped.capturedPhotoUrl) stop.capturedPhotoUrl = mapped.capturedPhotoUrl;
+    }
+
+    // ตรวจสอบว่ามีข้อมูลใน Google Sheet หรือไม่ (ส่งขึ้น Server แล้ว)
+    if (stop.deliveryStatus !== 'uploaded' && sheetRows.length > 0) {
+      const matchRow = sheetRows.find(r => {
+        const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
+        return rCase && rCase === normCase;
+      });
+      if (matchRow) {
+        stop.deliveryStatus = 'uploaded';
+        stop.uploadedAt = matchRow['วันที่และเวลา'] || matchRow['timestamp'] || new Date().toISOString();
+        if (!stop.imageUrl && (matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'])) {
+          stop.imageUrl = matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'];
+        }
+      }
+    }
+
+    // ตรวจสอบว่าค้างอยู่ในคิว Background Queue หรือไม่
+    if (stop.deliveryStatus !== 'uploaded') {
+      const inQueue = bgQueue.some(q => String(q.caseNumber || '').trim().replace(/\s+/g, '') === normCase);
+      if (inQueue) {
+        stop.deliveryStatus = 'captured_offline';
+      }
+    }
+
+    // กำหนดค่าเริ่มต้นเป็น pending หากยังไม่มีสถานะ
+    if (!stop.deliveryStatus) {
+      stop.deliveryStatus = 'pending';
+    }
+  });
+
+  return stops;
+};
+
+window.checkRouteDeliveryBatchStatus = function() {
+  const stops = state.currentRouteStops || [];
+  if (stops.length === 0) return;
+
+  const total = stops.length;
+  let capturedCount = 0;
+  let uploadedCount = 0;
+
+  stops.forEach(s => {
+    if (s.deliveryStatus === 'uploaded') {
+      uploadedCount++;
+      capturedCount++;
+    } else if (s.deliveryStatus === 'captured_offline') {
+      capturedCount++;
+    }
+  });
+
+  // หากถ่ายรูปครบทุกจุดแล้ว
+  if (capturedCount >= total) {
+    const bgQueue = typeof getBackgroundQueue === 'function' ? getBackgroundQueue() : [];
+    // หากยังมีรายการที่ยังไม่ได้นำส่งขึ้น Server ให้สั่งคิวอัปโหลดทำงานต่อทันที
+    if (uploadedCount < total || bgQueue.length > 0) {
+      if (navigator.onLine && typeof processBackgroundQueue === 'function') {
+        processBackgroundQueue();
+      }
+    } else if (uploadedCount >= total) {
+      // นำส่งขึ้น Server ครบทุกจุดแล้ว
+      const uId = getRouteDeliveryUserKey();
+      const notifiedKey = 'slts_batch_complete_notified_' + uId + '_' + total;
+      if (!sessionStorage.getItem(notifiedKey)) {
+        sessionStorage.setItem(notifiedKey, '1');
+        Swal.fire({
+          toast: true,
+          position: 'top',
+          icon: 'success',
+          title: '🎉 นำส่งข้อมูลครบทุกจุดหมายแล้ว!',
+          text: `รายการส่งหมายทั้ง ${total} จุด ได้รับการอัปโหลดขึ้น Server เรียบร้อยทั้งหมดแล้ว`,
+          timer: 4000,
+          showConfirmButton: false
+        });
+      }
+    }
+  }
+};
+
+window.renderRouteBatchTab = function() {
+  const container = document.getElementById('routeBatchTableBody');
+  const emptyState = document.getElementById('routeBatchEmptyState');
+  if (!container) return;
+
+  const userId = getRouteDeliveryUserKey();
+  let stops = state.currentRouteStops || [];
+  if (stops.length === 0) {
+    try {
+      const saved = localStorage.getItem('slts_shared_route_stops') || localStorage.getItem('slts_user_route_' + userId);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        stops = Array.isArray(parsed) ? parsed : (parsed.stops || []);
+        state.currentRouteStops = stops;
+      }
+    } catch (e) {}
+  }
+
+  syncStopsWithDeliveryStatus(stops);
+
+  const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)' };
+  const prov = state.selectedProvince || 'อุดรธานี';
+
+  const total = stops.length;
+  let capturedCount = 0;
+  let uploadedCount = 0;
+  let photosCount = 0;
+
+  stops.forEach(s => {
+    if (s.deliveryStatus === 'uploaded') {
+      uploadedCount++;
+      capturedCount++;
+    } else if (s.deliveryStatus === 'captured_offline') {
+      capturedCount++;
+    }
+    if (s.capturedPhotoUrl || s.imageUrl) {
+      photosCount++;
+    } else {
+      const sCase = String(s.caseNumber || '').trim().replace(/\s+/g, '');
+      const hasSheetImg = (state.allSheetRows || []).some(r => {
+        const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
+        return rCase === sCase && (r['ลิงก์รูปภาพ'] || r['รูปภาพ']);
+      });
+      const hasQueueImg = (typeof getBackgroundQueue === 'function' ? getBackgroundQueue() : []).some(q => {
+        const qCase = String(q.caseNumber || '').trim().replace(/\s+/g, '');
+        return qCase === sCase && q.payload?.imageBase64;
+      });
+      if (hasSheetImg || hasQueueImg) photosCount++;
+    }
+  });
+
+  // อัปเดตข้อมูลสรุปและ Badge
+  const badgeTotal = document.getElementById('routeBatchTotalBadge');
+  if (badgeTotal) badgeTotal.textContent = `${total} รายการ`;
+
+  const sub = document.getElementById('routeBatchSubtitle');
+  if (sub) sub.textContent = `จ.${prov} • ผู้ส่งหมาย: @${userId} • รวมระยะทาง ${(state.calculatedRoadDistanceKm || 0).toFixed(1)} กม.`;
+
+  const navBadge = document.getElementById('routeBatchBadgeCount');
+  if (navBadge) {
+    if (total > 0) {
+      navBadge.textContent = `${total}`;
+      navBadge.classList.remove('hidden');
+    } else {
+      navBadge.classList.add('hidden');
+    }
+  }
+
+  const startText = document.getElementById('routeBatchStartText');
+  if (startText) startText.textContent = start.name || 'ศาลจังหวัดอุดรธานี';
+
+  const totalCountEl = document.getElementById('routeBatchTotalCountText');
+  if (totalCountEl) totalCountEl.textContent = `${total} จุด`;
+
+  const capturedCountEl = document.getElementById('routeBatchCapturedCountText');
+  if (capturedCountEl) capturedCountEl.textContent = `${Math.max(0, capturedCount - uploadedCount)} จุด`;
+
+  const uploadedCountEl = document.getElementById('routeBatchUploadedCountText');
+  if (uploadedCountEl) uploadedCountEl.textContent = `${uploadedCount} จุด`;
+
+  // อัปเดตปุ่มดาวน์โหลดรูปภาพ ZIP
+  const zipBtnText = document.getElementById('btnDownloadBatchZipText');
+  if (zipBtnText) zipBtnText.textContent = `ดาวน์โหลดรูปภาพทั้งหมด (${photosCount} รูป) .ZIP`;
+
+  const btnZip = document.getElementById('btnDownloadBatchZip');
+  if (btnZip) {
+    btnZip.disabled = photosCount === 0;
+  }
+
+  // ป้ายแจ้งเตือนประวัติการดาวน์โหลด
+  const noticeBanner = document.getElementById('batchDownloadNotice');
+  const noticeText = document.getElementById('batchDownloadNoticeText');
+  const dlInfoRaw = localStorage.getItem('slts_batch_downloaded_at_' + userId);
+  if (dlInfoRaw && noticeBanner && noticeText) {
+    try {
+      const dlInfo = JSON.parse(dlInfoRaw);
+      noticeText.textContent = dlInfo.formatted || 'ได้มีการดาวน์โหลดรูปทั้งหมดไปก่อนหน้านี้';
+      noticeBanner.classList.remove('hidden');
+    } catch (e) {
+      noticeText.textContent = `ได้มีการดาวน์โหลดรูปทั้งหมดไปเมื่อ ${dlInfoRaw}`;
+      noticeBanner.classList.remove('hidden');
+    }
+  } else if (noticeBanner) {
+    noticeBanner.classList.add('hidden');
+  }
+
+  if (total === 0) {
+    container.innerHTML = '';
+    if (emptyState) emptyState.classList.remove('hidden');
+    return;
+  }
+  if (emptyState) emptyState.classList.add('hidden');
+
+  let rowsHtml = '';
+  stops.forEach((stop, index) => {
+    const seq = index + 1;
+    const sCase = (stop.caseNumber || '-').trim();
+    const safeCase = sCase.replace(/'/g, "\\'");
+    const sType = stop.courtType || stop.caseType || stop.courtCategory || 'ศาลจังหวัด';
+    const locText = stop.locationText || `${stop.houseNo || ''} ${stop.moo || ''} ${stop.subdistrict || ''} ${stop.district || ''}`.trim() || '-';
+    const safeLoc = locText.replace(/'/g, "\\'");
+
+    let displayImg = stop.capturedPhotoUrl || stop.imageUrl || '';
+    let timestampText = '-';
+
+    if (stop.uploadedAt) {
+      const d = new Date(stop.uploadedAt);
+      if (!isNaN(d.getTime())) {
+        timestampText = d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+      } else {
+        timestampText = stop.uploadedAt;
+      }
+    } else if (stop.capturedAt) {
+      const d = new Date(stop.capturedAt);
+      if (!isNaN(d.getTime())) {
+        timestampText = d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+      } else {
+        timestampText = stop.capturedAt;
+      }
+    }
+
+    if (!displayImg || timestampText === '-') {
+      const normCase = sCase.replace(/\s+/g, '');
+      const matchRow = (state.allSheetRows || []).find(r => {
+        const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
+        return rCase === normCase;
+      });
+      if (matchRow) {
+        if (!displayImg && (matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'])) {
+          displayImg = matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'];
+        }
+        if (timestampText === '-' && (matchRow['วันที่และเวลา'] || matchRow['timestamp'])) {
+          timestampText = matchRow['วันที่และเวลา'] || matchRow['timestamp'];
+        }
+      }
+    }
+
+    // สถานะ
+    let statusBadge = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200"><i class="fa-solid fa-circle-dot text-[8px]"></i> ยังไม่ถ่ายภาพ</span>`;
+    let rowBg = 'hover:bg-gray-50/80';
+
+    if (stop.deliveryStatus === 'uploaded') {
+      statusBadge = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-gray-100 text-gray-700 border border-gray-300 shadow-2xs"><i class="fa-solid fa-cloud-check text-gray-500"></i> ส่ง Server แล้ว</span>`;
+      rowBg = 'bg-gray-50/40 hover:bg-gray-100/50';
+    } else if (stop.deliveryStatus === 'captured_offline') {
+      statusBadge = `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs"><i class="fa-solid fa-camera text-amber-600"></i> ถ่ายแล้ว (รอส่ง)</span>`;
+      rowBg = 'bg-amber-50/25 hover:bg-amber-50/60';
+    }
+
+    // คอลัมน์รูปภาพ
+    let imgHtml = `<span class="text-gray-300 text-xs">-</span>`;
+    if (displayImg) {
+      const safeImg = displayImg.replace(/'/g, "\\'");
+      imgHtml = `
+        <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 mx-auto cursor-pointer shadow-2xs hover:scale-105 active:scale-95 transition group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeImg}', '${safeCase}', '${safeLoc}', '${timestampText}', '${stop.lat || ''}', '${stop.lng || ''}')" title="คลิกดูภาพขนาดเต็ม">
+          <img src="${displayImg}" alt="${safeCase}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='img/logo.png';">
+          <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px]">
+            <i class="fa-solid fa-magnifying-glass-plus"></i>
+          </div>
+        </div>
+      `;
+    }
+
+    // คอลัมน์นำทาง
+    const hasCoords = stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && Number(stop.lat) > 0;
+    const navHtml = hasCoords ? `
+      <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-[11px] transition inline-flex items-center gap-1 border border-blue-200 cursor-pointer shadow-2xs">
+        <i class="fa-solid fa-location-arrow"></i> นำทาง
+      </a>
+    ` : `<span class="text-gray-300 text-[10px]">ไม่มีพิกัด</span>`;
+
+    rowsHtml += `
+      <tr class="${rowBg} transition border-b border-gray-100">
+        <td class="py-3 px-3 text-center font-extrabold text-gray-700">
+          <span class="w-7 h-7 rounded-full inline-flex items-center justify-center text-xs font-bold ${stop.deliveryStatus === 'uploaded' ? 'bg-gray-500 text-white' : (stop.deliveryStatus === 'captured_offline' ? 'bg-amber-500 text-white' : 'bg-blue-100 text-blue-800')}">
+            ${seq}
+          </span>
+        </td>
+        <td class="py-3 px-3">
+          <p class="font-bold text-gray-900 text-xs">${sCase}</p>
+          <p class="text-[10px] text-gray-500">${sType}</p>
+        </td>
+        <td class="py-3 px-4">
+          <p class="text-xs text-gray-800 leading-snug">${locText}</p>
+          ${hasCoords ? `<p class="text-[10px] text-gray-400 font-mono mt-0.5">${Number(stop.lat).toFixed(4)}, ${Number(stop.lng).toFixed(4)}</p>` : ''}
+        </td>
+        <td class="py-3 px-3 text-center">
+          ${statusBadge}
+        </td>
+        <td class="py-3 px-3 text-center text-gray-600 text-[11px] font-mono">
+          ${timestampText}
+        </td>
+        <td class="py-3 px-3 text-center">
+          ${imgHtml}
+        </td>
+        <td class="py-3 px-3 text-center">
+          ${navHtml}
+        </td>
+      </tr>
+    `;
+  });
+
+  container.innerHTML = rowsHtml;
+};
+
+window.downloadRouteBatchZip = async function() {
+  if (typeof JSZip === 'undefined') {
+    Swal.fire('เกิดข้อผิดพลาด', 'ไลบรารี JSZip ยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง', 'error');
+    return;
+  }
+
+  const stops = state.currentRouteStops || [];
+  if (stops.length === 0) {
+    Swal.fire('ไม่พบรายการส่งหมาย', 'ยังไม่มีรายการส่งหมายในรอบนี้', 'info');
+    return;
+  }
+
+  // รวบรวมรูปภาพทั้งหมด
+  const photoItems = [];
+  stops.forEach((stop, index) => {
+    let imgUrl = stop.capturedPhotoUrl || stop.imageUrl || '';
+    if (!imgUrl) {
+      const sCase = String(stop.caseNumber || '').trim().replace(/\s+/g, '');
+      const matchRow = (state.allSheetRows || []).find(r => {
+        const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
+        return rCase === sCase && (r['ลิงก์รูปภาพ'] || r['รูปภาพ']);
+      });
+      if (matchRow) {
+        imgUrl = matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'];
+      }
+    }
+    if (imgUrl) {
+      photoItems.push({
+        index: index + 1,
+        caseNumber: (stop.caseNumber || `Stop_${index + 1}`).replace(/[\/\\?%*:|"<>]/g, '-'),
+        url: imgUrl
+      });
+    }
+  });
+
+  if (photoItems.length === 0) {
+    Swal.fire('ยังไม่มีรูปภาพ', 'ไม่พบรูปภาพที่ถ่ายในรายการส่งหมายรอบนี้', 'info');
+    return;
+  }
+
+  Swal.fire({
+    title: 'กำลังบีบอัดไฟล์ ZIP...',
+    html: `
+      <div class="space-y-3 p-2">
+        <p class="text-xs text-gray-600">กำลังรวบรวมและบีบอัดรูปภาพจำนวน ${photoItems.length} รูป</p>
+        <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+          <div id="zipProgressBar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 10%"></div>
+        </div>
+        <p id="zipProgressText" class="text-[11px] text-gray-500 font-mono">เตรียมการ...</p>
+      </div>
+    `,
+    showConfirmButton: false,
+    allowOutsideClick: false,
+    customClass: { popup: 'rounded-2xl' }
+  });
+
+  try {
+    const zip = new JSZip();
+    const folder = zip.folder("summons_photos");
+    const pBar = document.getElementById('zipProgressBar');
+    const pText = document.getElementById('zipProgressText');
+
+    for (let i = 0; i < photoItems.length; i++) {
+      const item = photoItems[i];
+      const fileName = `ลำดับที่_${String(item.index).padStart(2, '0')}_คดี_${item.caseNumber}.jpg`;
+      
+      if (pBar) pBar.style.width = `${Math.round(((i + 1) / photoItems.length) * 80)}%`;
+      if (pText) pText.textContent = `กำลังโหลดรูปที่ ${i + 1}/${photoItems.length}: ${item.caseNumber}`;
+
+      if (item.url.startsWith('data:image')) {
+        const commaIdx = item.url.indexOf(',');
+        const base64Data = commaIdx > -1 ? item.url.slice(commaIdx + 1) : item.url;
+        folder.file(fileName, base64Data, { base64: true });
+      } else {
+        let fetchUrl = item.url;
+        const driveMatch = fetchUrl.match(/id=([a-zA-Z0-9_-]+)/) || fetchUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+        if (driveMatch && driveMatch[1]) {
+          fetchUrl = `https://lh3.googleusercontent.com/d/${driveMatch[1]}=w1600`;
+        }
+        try {
+          const res = await fetch(fetchUrl);
+          const blob = await res.blob();
+          folder.file(fileName, blob);
+        } catch (fetchErr) {
+          console.warn('Could not fetch photo blob directly, trying canvas fallback:', fetchUrl);
+          try {
+            const b64 = await urlToBase64ViaImage(fetchUrl);
+            const commaIdx = b64.indexOf(',');
+            folder.file(fileName, commaIdx > -1 ? b64.slice(commaIdx + 1) : b64, { base64: true });
+          } catch (imgErr) {
+            console.warn('Image load failed for:', fileName);
+            folder.file(`คดี_${item.caseNumber}_ลิงก์รูปภาพ.txt`, `ลิงก์ภาพถ่ายใน Google Drive:\n${item.url}\n`);
+          }
+        }
+      }
+    }
+
+    if (pBar) pBar.style.width = '95%';
+    if (pText) pText.textContent = 'กำลังสร้างไฟล์ ZIP...';
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+      if (pBar) pBar.style.width = `${90 + Math.round(metadata.percent * 0.1)}%`;
+    });
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const downloadFileName = `รายการส่งหมาย_ศาลจังหวัดอุดรธานี_${dateStr}.zip`;
+    
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = downloadFileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 1000);
+
+    // ป๊อปอัปแจ้งเตือนยืนยันหลังดาวน์โหลดเสร็จสิ้น (ตาม Requirement ข้อ 5)
+    setTimeout(() => {
+      promptPostDownloadCleanupModal();
+    }, 600);
+
+  } catch (err) {
+    console.error('ZIP generation error:', err);
+    Swal.fire('ข้อผิดพลาด', 'ไม่สามารถสร้างไฟล์ ZIP ได้: ' + (err.message || err), 'error');
+  }
+};
+
+window.promptPostDownloadCleanupModal = function() {
+  const userId = getRouteDeliveryUserKey();
+
+  Swal.fire({
+    icon: 'question',
+    title: 'ดาวน์โหลดไฟล์เรียบร้อยแล้ว',
+    text: 'ดำเนินการดาวน์โหลดรายการส่งหมายรอบนี้เรียบร้อยแล้ว ท่านต้องการล้างประวัติการส่งหมายเลยหรือไม่?',
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-trash-can mr-1"></i> ยืนยันล้างประวัติ',
+    cancelButtonText: '<i class="fa-solid fa-floppy-disk mr-1"></i> ไม่ล้างประวัติ (คงไว้ตามเดิม)',
+    confirmButtonColor: '#dc2626',
+    cancelButtonColor: '#2563eb',
+    allowOutsideClick: false,
+    customClass: { popup: 'rounded-2xl' }
+  }).then(async (result) => {
+    if (result.isConfirmed) {
+      if (typeof clearMobileRouteHandoff === 'function') {
+        clearMobileRouteHandoff();
+      }
+      localStorage.removeItem('slts_batch_downloaded_at_' + userId);
+      localStorage.removeItem('slts_route_stop_status_' + userId);
+      renderRouteBatchTab();
+      Swal.fire({
+        icon: 'success',
+        title: 'ล้างประวัติเรียบร้อยแล้ว',
+        text: 'ล้างข้อมูลรายการส่งหมายรอบนี้ทั้งในระบบ PC และมือถือเรียบร้อยแล้ว',
+        timer: 2000,
+        showConfirmButton: false
+      });
+    } else {
+      const now = new Date();
+      const thaiDate = now.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const thaiTime = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      const downloadInfo = {
+        timestamp: now.toISOString(),
+        formatted: `ได้มีการดาวน์โหลดรูปทั้งหมดไปเมื่อวันที่ ${thaiDate} เวลา ${thaiTime} น.`
+      };
+      localStorage.setItem('slts_batch_downloaded_at_' + userId, JSON.stringify(downloadInfo));
+      renderRouteBatchTab();
+      Swal.fire({
+        toast: true,
+        position: 'top',
+        icon: 'info',
+        title: 'คงประวัติไว้ตามเดิม',
+        text: downloadInfo.formatted,
+        timer: 3000,
+        showConfirmButton: false
+      });
+    }
+  });
+};
+
+window.confirmClearBatchHistory = function() {
+  Swal.fire({
+    icon: 'warning',
+    title: 'ล้างประวัติการส่งหมายรอบนี้?',
+    text: 'การล้างประวัติจะรีเซ็ตเส้นทางการส่งหมายทั้งบนเครื่องคอมพิวเตอร์และโทรศัพท์มือถือ',
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-trash-can mr-1"></i> ยืนยันล้างข้อมูล',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#dc2626',
+    cancelButtonColor: '#6b7280',
+    customClass: { popup: 'rounded-2xl' }
+  }).then((res) => {
+    if (res.isConfirmed) {
+      const userId = getRouteDeliveryUserKey();
+      if (typeof clearMobileRouteHandoff === 'function') {
+        clearMobileRouteHandoff();
+      }
+      localStorage.removeItem('slts_batch_downloaded_at_' + userId);
+      localStorage.removeItem('slts_route_stop_status_' + userId);
+      renderRouteBatchTab();
+    }
+  });
+};
+
+window.refreshRouteBatchData = async function() {
+  if (typeof loadGoogleSheetData === 'function') {
+    await loadGoogleSheetData(true, true);
+  }
+  if (typeof fetchActiveRouteFromServer === 'function') {
+    await fetchActiveRouteFromServer();
+  }
+  renderRouteBatchTab();
+};
+
+function urlToBase64ViaImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      try {
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        resolve(dataUrl);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
 window.showMobileRouteMapModal = function() {
   if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('ดูแผนที่และเส้นทางส่งหมาย')) {
     return;
@@ -19287,6 +20062,10 @@ window.showMobileRouteMapModal = function() {
         state.currentRouteStops = JSON.parse(savedStops);
       }
     } catch (e) {}
+  }
+
+  if (typeof syncStopsWithDeliveryStatus === 'function') {
+    syncStopsWithDeliveryStatus(state.currentRouteStops);
   }
 
   const stops = state.currentRouteStops || [];
@@ -19440,11 +20219,26 @@ window.initMobileModalMapInstance = function() {
     const sLat = parseFloat(stop.lat);
     const sLng = parseFloat(stop.lng);
     if (!isNaN(sLat) && !isNaN(sLng) && sLat > 0 && sLng > 0) {
+      const delStatus = stop.deliveryStatus || 'pending';
+      let pinBgClass = 'bg-rose-600 ring-rose-300';
+      let pinIconInner = `${pinNum}`;
+      let statusBadgeHtml = '';
+
+      if (delStatus === 'uploaded') {
+        pinBgClass = 'bg-gray-500 ring-gray-300';
+        pinIconInner = `${pinNum}✓`;
+        statusBadgeHtml = `<span class="text-[10px] font-bold text-gray-700 bg-gray-100 border border-gray-300 px-1.5 py-0.5 rounded shadow-2xs flex items-center gap-1"><i class="fa-solid fa-cloud-check text-gray-500"></i> ส่ง Server แล้ว</span>`;
+      } else if (delStatus === 'captured_offline') {
+        pinBgClass = 'bg-amber-500 ring-amber-300';
+        pinIconInner = `${pinNum}📸`;
+        statusBadgeHtml = `<span class="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded shadow-2xs flex items-center gap-1"><i class="fa-solid fa-camera text-amber-600"></i> ถ่ายแล้ว (รอส่ง)</span>`;
+      }
+
       const pinIcon = L.divIcon({
         html: `
-          <div class="slts-map-pin-marker" title="หมุดที่ ${pinNum}: ${stop.caseNumber}">
-            <div class="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center font-bold text-[10px] shadow-md border-2 border-white ring-2 ring-rose-300">
-              ${pinNum}
+          <div class="slts-map-pin-marker" title="หมุดที่ ${pinNum}: ${stop.caseNumber} (${delStatus})">
+            <div class="w-6 h-6 rounded-full ${pinBgClass} text-white flex items-center justify-center font-bold text-[9px] shadow-md border-2 border-white ring-2">
+              ${pinIconInner}
             </div>
           </div>
         `,
@@ -19454,21 +20248,45 @@ window.initMobileModalMapInstance = function() {
         popupAnchor: [0, -24]
       });
       const safeCase = (stop.caseNumber || '').replace(/'/g, "\\'");
+      const displayPhoto = stop.capturedPhotoUrl || stop.imageUrl || '';
+      const safePhoto = displayPhoto.replace(/'/g, "\\'");
+
+      let captureBtnHtml = `
+        <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
+          <i class="fa-solid fa-camera"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
+        </button>
+      `;
+      if (delStatus === 'uploaded') {
+        captureBtnHtml = `
+          <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-gray-600 hover:bg-gray-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
+            <i class="fa-solid fa-camera-rotate"></i> ถ่ายภาพซ้ำจุดนี้
+          </button>
+        `;
+      } else if (delStatus === 'captured_offline') {
+        captureBtnHtml = `
+          <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
+            <i class="fa-solid fa-camera-rotate"></i> ถ่ายภาพใหม่จุดนี้
+          </button>
+        `;
+      }
+
       const popupHtml = `
         <div class="text-xs space-y-1.5 p-1 max-w-[220px]">
-          <div class="font-bold text-gray-900 flex items-center justify-between gap-1">
+          <div class="font-bold text-gray-900 flex items-center justify-between gap-1 flex-wrap">
             <span>#${pinNum} ${stop.caseNumber}</span>
+            ${statusBadgeHtml}
           </div>
-          ${stop.imageUrl ? `
-            <div class="w-full h-24 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer shadow-2xs" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${stop.imageUrl.replace(/'/g, "\\'")}', '${safeCase}')" title="แตะดูรูปภาพขนาดเต็ม">
-              <img src="${stop.imageUrl}" alt="รูปประกอบ" class="w-full h-full object-cover">
+          ${displayPhoto ? `
+            <div class="w-full h-24 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer shadow-2xs relative group" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${safeCase}')" title="แตะดูรูปภาพขนาดเต็ม">
+              <img src="${displayPhoto}" alt="รูปประกอบ" class="w-full h-full object-cover">
+              <div class="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px] font-bold">
+                <i class="fa-solid fa-magnifying-glass-plus mr-1"></i> ดูรูปภาพ
+              </div>
             </div>
           ` : ''}
           <p class="text-[11px] text-gray-600 leading-snug">${stop.locationText}</p>
           <div class="flex flex-col gap-1.5 pt-1">
-            <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
-              <i class="fa-solid fa-camera"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
-            </button>
+            ${captureBtnHtml}
             <a href="https://www.google.com/maps/dir/?api=1&destination=${sLat},${sLng}" target="_blank" class="w-full py-0.5 text-center inline-flex items-center justify-center gap-1 text-[10px] text-blue-600 font-bold hover:underline">
               <i class="fa-solid fa-location-arrow"></i> นำทางจุดนี้ด้วย Google Maps
             </a>
@@ -19613,8 +20431,43 @@ window.renderMobileRouteList = function() {
     const hasPin = stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && stop.lat > 0 && stop.lng > 0;
     const currentPin = hasPin ? pinCounter++ : null;
     const distText = hasPin ? `+ ${(stop.legDistanceKm || 0).toFixed(1)} กม.` : 'ไม่มีหมุด';
-    const itemClass = isExact ? 'border-emerald-200 bg-emerald-50/50' : (isNear ? 'border-amber-200 bg-amber-50/50' : 'border-gray-200 bg-white');
-    const badgeBg = isExact ? 'bg-emerald-600 text-white' : (isNear ? 'bg-amber-500 text-white' : 'bg-gray-300 text-gray-700');
+    const delStatus = stop.deliveryStatus || 'pending';
+
+    let itemClass = isExact ? 'border-emerald-200 bg-emerald-50/50' : (isNear ? 'border-amber-200 bg-amber-50/50' : 'border-gray-200 bg-white');
+    let badgeBg = isExact ? 'bg-emerald-600 text-white' : (isNear ? 'bg-amber-500 text-white' : 'bg-gray-300 text-gray-700');
+    let statusPillHtml = '';
+
+    if (delStatus === 'uploaded') {
+      itemClass = 'border-gray-300 bg-gray-100/75 text-gray-700';
+      badgeBg = 'bg-gray-500 text-white';
+      statusPillHtml = `<span class="text-[10px] font-bold text-gray-600 bg-gray-200/90 border border-gray-300 px-1.5 py-0.2 rounded-md flex items-center gap-1"><i class="fa-solid fa-cloud-check text-gray-500"></i> ส่ง Server แล้ว</span>`;
+    } else if (delStatus === 'captured_offline') {
+      itemClass = 'border-amber-300 bg-amber-50/80';
+      badgeBg = 'bg-amber-500 text-white';
+      statusPillHtml = `<span class="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded-md flex items-center gap-1"><i class="fa-solid fa-camera text-amber-600"></i> ถ่ายแล้ว (รอส่ง)</span>`;
+    }
+
+    let captureBtnHtml = `
+      <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 shadow-2xs transition cursor-pointer">
+        <i class="fa-solid fa-camera text-[10px]"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
+      </button>
+    `;
+    if (delStatus === 'uploaded') {
+      captureBtnHtml = `
+        <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="flex-1 py-1.5 px-2 bg-gray-600 hover:bg-gray-700 active:scale-95 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 shadow-2xs transition cursor-pointer">
+          <i class="fa-solid fa-camera-rotate text-[10px]"></i> ถ่ายภาพซ้ำจุดนี้
+        </button>
+      `;
+    } else if (delStatus === 'captured_offline') {
+      captureBtnHtml = `
+        <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="flex-1 py-1.5 px-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 shadow-2xs transition cursor-pointer">
+          <i class="fa-solid fa-camera-rotate text-[10px]"></i> ถ่ายภาพใหม่จุดนี้
+        </button>
+      `;
+    }
+
+    const displayPhoto = stop.capturedPhotoUrl || stop.imageUrl || '';
+    const safePhoto = displayPhoto.replace(/'/g, "\\'");
 
     return `
       <div class="p-2.5 rounded-2xl border flex items-start gap-2 text-xs transition shadow-2xs ${itemClass}">
@@ -19623,10 +20476,13 @@ window.renderMobileRouteList = function() {
         </span>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between gap-1 mb-0.5">
-            <span class="font-bold text-xs ${isExact ? 'text-emerald-900' : (isNear ? 'text-amber-950' : 'text-gray-900')} truncate">${stop.caseNumber}</span>
-            <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-100/80 border-emerald-200' : (isNear ? 'text-amber-800 bg-amber-100/80 border-amber-200' : 'text-gray-500 bg-gray-100 border-gray-200')} px-1.5 py-0.2 rounded-md border flex-shrink-0">
-              ${distText}
-            </span>
+            <span class="font-bold text-xs ${delStatus === 'uploaded' ? 'text-gray-900' : (delStatus === 'captured_offline' ? 'text-amber-950' : (isExact ? 'text-emerald-900' : (isNear ? 'text-amber-950' : 'text-gray-900')))} truncate">${stop.caseNumber}</span>
+            <div class="flex items-center gap-1 flex-shrink-0">
+              ${statusPillHtml}
+              <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-100/80 border-emerald-200' : (isNear ? 'text-amber-800 bg-amber-100/80 border-amber-200' : 'text-gray-500 bg-gray-100 border-gray-200')} px-1.5 py-0.2 rounded-md border flex-shrink-0">
+                ${distText}
+              </span>
+            </div>
           </div>
           <p class="text-[11px] text-gray-700 leading-snug truncate">${stop.locationText}</p>
           <div class="flex items-center justify-between mt-1 text-[10px]">
@@ -19638,14 +20494,12 @@ window.renderMobileRouteList = function() {
             ` : ''}
           </div>
           <div class="mt-2 pt-1.5 border-t border-gray-100 flex items-center gap-1.5">
-            <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 shadow-2xs transition cursor-pointer">
-              <i class="fa-solid fa-camera text-[10px]"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
-            </button>
+            ${captureBtnHtml}
           </div>
         </div>
-        ${stop.imageUrl ? `
-          <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 shrink-0 self-center cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${stop.imageUrl.replace(/'/g, "\\'")}', '${(stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'")}')" title="แตะดูรูปภาพประกอบ">
-            <img src="${stop.imageUrl}" alt="รูปประกอบ" class="w-full h-full object-cover" loading="lazy">
+        ${displayPhoto ? `
+          <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 shrink-0 self-center cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${(stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'")}')" title="แตะดูรูปภาพประกอบ">
+            <img src="${displayPhoto}" alt="รูปประกอบ" class="w-full h-full object-cover" loading="lazy">
           </div>
         ` : ''}
         <div class="flex items-center gap-1 flex-shrink-0 self-center">

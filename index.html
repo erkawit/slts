@@ -54,6 +54,9 @@
     }
   </script>
 
+  <!-- JSZip for Batch Photo Download -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="css/style.css?v=20260904_19">
 </head>
@@ -91,6 +94,11 @@
         <button type="button" id="tabBtnMap" onclick="switchTab('map')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2">
           <i class="fa-solid fa-map-location-dot text-rose-500"></i>
           <span>แผนที่และหมุด</span>
+        </button>
+        <button type="button" id="tabBtnRouteBatch" onclick="switchTab('route_batch')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="ดูรายการส่งหมายรอบนี้">
+          <i class="fa-solid fa-route text-indigo-600"></i>
+          <span>รายการส่งหมายรอบนี้</span>
+          <span id="routeBatchBadgeCount" class="hidden px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">0</span>
         </button>
         <button type="button" id="tabBtnUsers" onclick="switchTab('users')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2">
           <i class="fa-solid fa-users-gear text-purple-600"></i>
@@ -1012,6 +1020,112 @@
         </div>
 
       </div>
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- TAB 5: รายการส่งหมายรอบนี้ (Route Delivery Batch - PC View) -->
+    <!-- ========================================================= -->
+    <div id="tabContentRouteBatch" class="tab-pane hidden w-full space-y-4">
+      
+      <!-- Batch Top Summary Card -->
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-6">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-gray-100 pb-5">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2.5">
+              <span class="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-lg font-bold shadow-xs">
+                <i class="fa-solid fa-route"></i>
+              </span>
+              <div>
+                <h2 class="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <span>รายการส่งหมายรอบนี้</span>
+                  <span id="routeBatchTotalBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-bold">0 รายการ</span>
+                </h2>
+                <p id="routeBatchSubtitle" class="text-xs text-gray-500">ลำดับเส้นทางการส่งหมายตามแผนที่โครงข่ายถนนจริง</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" id="btnDownloadBatchZip" onclick="downloadRouteBatchZip()" class="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+              <i class="fa-solid fa-file-zipper text-base"></i>
+              <span id="btnDownloadBatchZipText">ดาวน์โหลดรูปภาพทั้งหมด (0 รูป) .ZIP</span>
+            </button>
+            <button type="button" onclick="refreshRouteBatchData()" class="px-3.5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-xs sm:text-sm rounded-xl transition flex items-center gap-1.5 cursor-pointer" title="รีเฟรชข้อมูลล่าสุด">
+              <i class="fa-solid fa-rotate-right"></i>
+              <span>รีเฟรช</span>
+            </button>
+            <button type="button" onclick="confirmClearBatchHistory()" class="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-semibold text-xs sm:text-sm rounded-xl transition flex items-center gap-1.5 cursor-pointer" title="ล้างประวัติการส่งหมายรอบนี้">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>ล้างประวัติรอบนี้</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Downloaded Info Banner (แสดงเมื่อเคยมีการกดดาวน์โหลดแล้วเลือกไม่ล้างประวัติ) -->
+        <div id="batchDownloadNotice" class="hidden mt-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center justify-between gap-2 shadow-2xs">
+          <div class="flex items-center gap-2">
+            <i class="fa-solid fa-circle-check text-emerald-600 text-sm"></i>
+            <span id="batchDownloadNoticeText" class="font-medium">ได้มีการดาวน์โหลดรูปทั้งหมดไปเมื่อวันที่ - เวลา - น.</span>
+          </div>
+          <span class="text-[11px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md font-semibold shrink-0">กดดาวน์โหลดซ้ำได้ตลอดเวลา</span>
+        </div>
+
+        <!-- Summary Statistics Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+          <div class="p-3 bg-blue-50/70 border border-blue-100 rounded-xl">
+            <p class="text-[11px] text-blue-700 font-medium">🏛️ จุดเริ่มต้น / เส้นทาง</p>
+            <p id="routeBatchStartText" class="text-xs font-bold text-gray-900 truncate mt-0.5">ศาลจังหวัดอุดรธานี</p>
+          </div>
+          <div class="p-3 bg-slate-50 border border-gray-200 rounded-xl">
+            <p class="text-[11px] text-gray-500 font-medium">📋 จำนวนหมายทั้งหมด</p>
+            <p id="routeBatchTotalCountText" class="text-sm font-extrabold text-gray-900 mt-0.5">0 จุด</p>
+          </div>
+          <div class="p-3 bg-amber-50/80 border border-amber-200 rounded-xl">
+            <p class="text-[11px] text-amber-800 font-medium">📸 ถ่ายรูปแล้ว (รอส่ง)</p>
+            <p id="routeBatchCapturedCountText" class="text-sm font-extrabold text-amber-700 mt-0.5">0 จุด</p>
+          </div>
+          <div class="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl">
+            <p class="text-[11px] text-emerald-800 font-medium">☁️ นำส่ง Server แล้ว</p>
+            <p id="routeBatchUploadedCountText" class="text-sm font-extrabold text-emerald-700 mt-0.5">0 จุด</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Batch Table Card -->
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5 sm:p-6 overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse min-w-[750px]">
+            <thead>
+              <tr class="border-b border-gray-200 bg-gray-50/80 text-[11px] font-bold text-gray-600 uppercase tracking-wider">
+                <th class="py-3 px-3 text-center w-16">ลำดับที่</th>
+                <th class="py-3 px-3 w-40">เลขคดี / ประเภท</th>
+                <th class="py-3 px-4">สถานที่ส่งหมาย</th>
+                <th class="py-3 px-3 text-center w-36">สถานะ</th>
+                <th class="py-3 px-3 text-center w-40">วันที่/เวลานำส่ง</th>
+                <th class="py-3 px-3 text-center w-28">รูปภาพ</th>
+                <th class="py-3 px-3 text-center w-24">นำทาง</th>
+              </tr>
+            </thead>
+            <tbody id="routeBatchTableBody" class="divide-y divide-gray-100 text-xs">
+              <!-- Rendered dynamically by renderRouteBatchTab -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Empty State Container -->
+        <div id="routeBatchEmptyState" class="hidden py-12 text-center text-gray-400">
+          <i class="fa-solid fa-route text-4xl mb-3 text-gray-300"></i>
+          <p class="text-sm font-bold text-gray-600">ยังไม่มีรายการส่งหมายในรอบนี้</p>
+          <p class="text-xs text-gray-400 mt-1 max-w-sm mx-auto">ท่านสามารถวางแผนเส้นทางและจัดลำดับหมายได้ที่แท็บ "แผนที่และหมุด"</p>
+          <div class="mt-4">
+            <button type="button" onclick="switchTab('map')" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 shadow-sm cursor-pointer">
+              <i class="fa-solid fa-map-location-dot"></i> ไปที่แผนที่และหมุด
+            </button>
+          </div>
+        </div>
+      </div>
+
     </div>
 
   </main>
