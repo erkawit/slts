@@ -1284,6 +1284,17 @@
     </button>
   </aside>
 
+  <!-- ========================================================= -->
+  <!-- FLOATING MOBILE ROUTE WIDGET: ป้ายลอยตัวแสดงเส้นทางส่งหมายสำหรับหน้าจอมือถือ (แสดงเมื่อมีเส้นทาง) -->
+  <!-- ========================================================= -->
+  <aside id="floatingMobileRouteWidget" aria-label="เส้นทางการส่งหมาย" class="fixed bottom-16 sm:bottom-5 left-4 sm:left-5 z-40 hidden select-none">
+    <button type="button" onclick="showMobileRouteMapModal()" class="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 active:scale-95 text-white rounded-full shadow-2xl px-3.5 py-2 sm:px-4 sm:py-2.5 flex items-center gap-2 sm:gap-2.5 text-xs font-bold transition-all border-2 border-white/50 cursor-pointer animate-pulse" title="เปิดดูแผนที่และเส้นทางส่งหมาย">
+      <i class="fa-solid fa-route text-xs sm:text-sm"></i>
+      <span>เส้นทางส่งหมาย: <b id="floatingMobileRouteCount" class="font-mono text-xs sm:text-sm underline">0</b> จุด</span>
+      <span class="bg-white text-emerald-800 text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full font-bold shadow-xs">เปิดดู</span>
+    </button>
+  </aside>
+
   <!-- Dedicated Custom Landscape HUD Toast Overlay (จัดวางตรงกลางจอตามขนาดความกว้าง/ความยาวแนวนอน) -->
   <div id="sltsLandscapeToast" class="slts-landscape-toast-overlay" style="display: none;">
     <div id="sltsLandscapeToastCard" class="slts-landscape-toast-card">

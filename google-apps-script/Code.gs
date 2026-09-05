@@ -38,19 +38,87 @@ function doPost(e) {
     const spreadsheet = getTargetSpreadsheetFile(folder);
 
     // ==========================================
-    // ACTION: DEVICE_HANDOFF (การส่งข้อมูลพิกัดและเส้นทางข้ามอุปกรณ์ Cross-Device Handoff)
+    // ACTION: DEVICE_HANDOFF & SHARE_ROUTE (ส่งข้อมูลพิกัดและแชร์เส้นทางข้ามอุปกรณ์ / ข้ามบุคคล)
     // ==========================================
     if (data.action === "send_handoff" || data.action === "share_route") {
       const handoffSheet = getHandoffSheet(spreadsheet);
-      const targetUserId = String(data.target_user_id || data.user_id || data.username || 'anonymous').trim().toLowerCase();
+      let targetUserIds = [];
+      if (Array.isArray(data.target_user_ids) && data.target_user_ids.length > 0) {
+        targetUserIds = data.target_user_ids.map(function(u) { return String(u || '').trim().toLowerCase(); }).filter(Boolean);
+      } else if (data.target_user_id || data.user_id || data.username) {
+        targetUserIds = [String(data.target_user_id || data.user_id || data.username).trim().toLowerCase()];
+      } else {
+        targetUserIds = ['anonymous'];
+      }
+
       const fromUserId = String(data.from_user_id || data.sender_username || '').trim().toLowerCase();
       const fromUserName = String(data.from_user_name || data.sender_name || fromUserId).trim();
-      const handoffType = String(data.type || (fromUserId && fromUserId !== targetUserId ? 'share_route' : 'handoff')).trim();
+      const handoffType = String(data.type || (data.action === "share_route" ? 'share_route' : 'handoff')).trim();
+      const timestamp = Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss");
+      const hData = handoffSheet.getDataRange().getValues();
+
+      const stopsJsonStr = safeHandoffJsonStringify(data.stops || []);
+      const startJsonStr = safeHandoffJsonStringify(data.startLocation || '');
+      const endJsonStr = safeHandoffJsonStringify(data.endLocation || '');
+      const payloadJsonStr = safeHandoffJsonStringify(data);
+
+      targetUserIds.forEach(function(targetUserId) {
+        let foundRow = -1;
+        for (let i = hData.length - 1; i >= 1; i--) {
+          if (String(hData[i][0] || '').trim().toLowerCase() === targetUserId) {
+            foundRow = i + 1;
+            break;
+          }
+        }
+
+        const rowValues = [
+          targetUserId,
+          String(data.queryString || ''),
+          String(data.fullAddress || ''),
+          String(data.caseNumber || ''),
+          stopsJsonStr,
+          String(data.lat || ''),
+          String(data.lng || ''),
+          "pending",
+          timestamp,
+          timestamp,
+          fromUserId,
+          fromUserName,
+          handoffType,
+          startJsonStr,
+          endJsonStr,
+          payloadJsonStr
+        ];
+
+        if (foundRow !== -1) {
+          handoffSheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
+        } else {
+          handoffSheet.appendRow(rowValues);
+        }
+      });
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: handoffType === 'share_route' ? "Shared route sent to " + targetUserIds.length + " users" : "Handoff payload sent to pending state",
+        recipients_count: targetUserIds.length,
+        recipients: targetUserIds,
+        from_user_id: fromUserId,
+        from_user_name: fromUserName,
+        type: handoffType,
+        timestamp: timestamp
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ==========================================
+    // ACTION: SAVE_USER_ROUTE (บันทึกข้อมูลเส้นทางการส่งหมายบน Server เพื่อใช้งานได้จากทุกที่)
+    // ==========================================
+    if (data.action === "save_user_route") {
+      const handoffSheet = getHandoffSheet(spreadsheet);
+      const targetUserId = String(data.user_id || data.target_user_id || data.username || 'anonymous').trim().toLowerCase();
       const timestamp = Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss");
       const hData = handoffSheet.getDataRange().getValues();
 
       let foundRow = -1;
-      // Search backwards to update the most recent record for this user
       for (let i = hData.length - 1; i >= 1; i--) {
         if (String(hData[i][0] || '').trim().toLowerCase() === targetUserId) {
           foundRow = i + 1;
@@ -58,23 +126,28 @@ function doPost(e) {
         }
       }
 
+      const stopsJsonStr = safeHandoffJsonStringify(data.stops || []);
+      const startJsonStr = safeHandoffJsonStringify(data.startLocation || '');
+      const endJsonStr = safeHandoffJsonStringify(data.endLocation || '');
+      const payloadJsonStr = safeHandoffJsonStringify(data);
+
       const rowValues = [
         targetUserId,
         String(data.queryString || ''),
         String(data.fullAddress || ''),
         String(data.caseNumber || ''),
-        typeof data.stops === 'object' ? JSON.stringify(data.stops) : String(data.stops || '[]'),
+        stopsJsonStr,
         String(data.lat || ''),
         String(data.lng || ''),
-        "pending",
+        "active_route",
         timestamp,
         timestamp,
-        fromUserId,
-        fromUserName,
-        handoffType,
-        typeof data.startLocation === 'object' ? JSON.stringify(data.startLocation) : String(data.startLocation || ''),
-        typeof data.endLocation === 'object' ? JSON.stringify(data.endLocation) : String(data.endLocation || ''),
-        JSON.stringify(data)
+        targetUserId,
+        String(data.userName || data.name || targetUserId),
+        "user_saved_route",
+        startJsonStr,
+        endJsonStr,
+        payloadJsonStr
       ];
 
       if (foundRow !== -1) {
@@ -85,25 +158,30 @@ function doPost(e) {
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
-        message: handoffType === 'share_route' ? "Shared route sent to user" : "Handoff payload sent to pending state",
+        message: "Route saved to server successfully",
         user_id: targetUserId,
-        from_user_id: fromUserId,
-        from_user_name: fromUserName,
-        type: handoffType,
         timestamp: timestamp
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    if (data.action === "get_pending_handoff") {
+    if (data.action === "get_pending_handoff" || data.action === "get_user_route" || data.action === "get_latest_handoff") {
       const handoffSheet = getHandoffSheet(spreadsheet);
       const targetUserId = String(data.target_user_id || data.user_id || data.username || '').trim().toLowerCase();
       const hData = handoffSheet.getDataRange().getValues();
 
-      let pendingItem = null;
+      let matchedItem = null;
       for (let i = hData.length - 1; i >= 1; i--) {
         const uId = String(hData[i][0] || '').trim().toLowerCase();
         const status = String(hData[i][7] || '').trim().toLowerCase();
-        if ((!targetUserId || uId === targetUserId) && status === "pending") {
+        
+        if (!targetUserId || uId === targetUserId) {
+          if (data.action === "get_pending_handoff" && status !== "pending") {
+            continue;
+          }
+          if (status === "cleared") {
+            continue;
+          }
+
           let fullPayload = null;
           if (hData[i][15]) {
             try { fullPayload = JSON.parse(hData[i][15]); } catch (pe) {}
@@ -116,7 +194,21 @@ function doPost(e) {
             try { parsedStops = JSON.parse(hData[i][4] || '[]'); } catch (pe) { parsedStops = []; }
           }
 
-          pendingItem = {
+          let parsedStart = null;
+          if (fullPayload && fullPayload.startLocation) {
+            parsedStart = fullPayload.startLocation;
+          } else if (hData[i][13]) {
+            try { parsedStart = JSON.parse(hData[i][13]); } catch (pe) {}
+          }
+
+          let parsedEnd = null;
+          if (fullPayload && fullPayload.endLocation) {
+            parsedEnd = fullPayload.endLocation;
+          } else if (hData[i][14]) {
+            try { parsedEnd = JSON.parse(hData[i][14]); } catch (pe) {}
+          }
+
+          matchedItem = {
             user_id: hData[i][0],
             target_user_id: hData[i][0],
             queryString: hData[i][1],
@@ -131,8 +223,8 @@ function doPost(e) {
             from_user_id: hData[i][10] || (fullPayload ? fullPayload.from_user_id : ''),
             from_user_name: hData[i][11] || (fullPayload ? fullPayload.from_user_name : ''),
             type: hData[i][12] || (fullPayload ? fullPayload.type : 'handoff'),
-            startLocation: fullPayload ? fullPayload.startLocation : null,
-            endLocation: fullPayload ? fullPayload.endLocation : null,
+            startLocation: parsedStart,
+            endLocation: parsedEnd,
             isRoundTrip: fullPayload ? Boolean(fullPayload.isRoundTrip) : false,
             routeRoadPolyline: fullPayload ? fullPayload.routeRoadPolyline : null,
             totalDistanceKm: fullPayload ? fullPayload.totalDistanceKm : null,
@@ -144,8 +236,10 @@ function doPost(e) {
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
-        hasPending: Boolean(pendingItem),
-        handoff: pendingItem
+        hasPending: Boolean(matchedItem && matchedItem.status === "pending"),
+        hasRoute: Boolean(matchedItem && matchedItem.status !== "cleared"),
+        handoff: matchedItem,
+        route: matchedItem
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -159,16 +253,47 @@ function doPost(e) {
       for (let i = hData.length - 1; i >= 1; i--) {
         const uId = String(hData[i][0] || '').trim().toLowerCase();
         if (uId === targetUserId) {
-          handoffSheet.getRange(i + 1, 8).setValue("received");
+          const prevType = String(hData[i][12] || '').trim();
+          // หากเป็นการแชร์มาจากผู้อื่น ให้คงสถานะเป็น shared_active เพื่อให้เปิดใช้งานได้จนกว่าจะกดล้างเอง
+          const newStatus = (prevType === 'share_route') ? "shared_active" : "received";
+          handoffSheet.getRange(i + 1, 8).setValue(newStatus);
           handoffSheet.getRange(i + 1, 10).setValue(timestamp);
           updated = true;
+          break;
         }
       }
 
       return ContentService.createTextOutput(JSON.stringify({
         status: "success",
-        message: updated ? "Handoff status updated to received" : "User record not found",
+        message: updated ? "Handoff status updated" : "User record not found",
         updated: updated,
+        timestamp: timestamp
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ==========================================
+    // ACTION: CLEAR_USER_ROUTE / DISMISS_HANDOFF (ล้างข้อมูลเส้นทางส่งหมายเมื่อผู้ใช้กดล้างด้วยตนเอง)
+    // ==========================================
+    if (data.action === "clear_user_route" || data.action === "dismiss_handoff") {
+      const handoffSheet = getHandoffSheet(spreadsheet);
+      const targetUserId = String(data.target_user_id || data.user_id || data.username || '').trim().toLowerCase();
+      const timestamp = Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyy-MM-dd HH:mm:ss");
+      const hData = handoffSheet.getDataRange().getValues();
+
+      let cleared = false;
+      for (let i = hData.length - 1; i >= 1; i--) {
+        const uId = String(hData[i][0] || '').trim().toLowerCase();
+        if (uId === targetUserId) {
+          handoffSheet.getRange(i + 1, 8).setValue("cleared");
+          handoffSheet.getRange(i + 1, 10).setValue(timestamp);
+          cleared = true;
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: cleared ? "User route marked as cleared" : "User record not found",
+        cleared: cleared,
         timestamp: timestamp
       })).setMimeType(ContentService.MimeType.JSON);
     }
@@ -981,6 +1106,41 @@ function ensureUsersSheetHeaders(sheet) {
 }
 
 /**
+ * ป้องกันปัญหาตัวอักษรเกิน 50,000 ตัวอักษรต่อเซลล์ใน Google Sheets
+ */
+function safeHandoffJsonStringify(obj, maxLen) {
+  if (!obj) return '';
+  maxLen = maxLen || 45000;
+  let str = typeof obj === 'string' ? obj : JSON.stringify(obj);
+  if (str.length > maxLen) {
+    try {
+      if (typeof obj === 'object') {
+        const copy = JSON.parse(JSON.stringify(obj));
+        if (Array.isArray(copy)) {
+          copy.forEach(function(item) {
+            if (item && item.imageUrl && item.imageUrl.length > 300) delete item.imageUrl;
+          });
+        } else {
+          if (copy.stops && Array.isArray(copy.stops)) {
+            copy.stops.forEach(function(item) {
+              if (item && item.imageUrl && item.imageUrl.length > 300) delete item.imageUrl;
+            });
+          }
+          if (copy.routeRoadPolyline && Array.isArray(copy.routeRoadPolyline) && copy.routeRoadPolyline.length > 200) {
+            copy.routeRoadPolyline = copy.routeRoadPolyline.filter(function(_, idx) { return idx % 4 === 0; });
+          }
+        }
+        str = JSON.stringify(copy);
+      }
+    } catch (e) {}
+  }
+  if (str.length > maxLen) {
+    str = str.substring(0, maxLen);
+  }
+  return str;
+}
+
+/**
  * ดึงหรือสร้าง Sheet 'device_handoff' สำหรับเก็บข้อมูลพิกัดและเส้นทางส่งข้ามอุปกรณ์
  */
 function getHandoffSheet(spreadsheet) {
@@ -989,25 +1149,26 @@ function getHandoffSheet(spreadsheet) {
     sheet = spreadsheet.insertSheet(HANDOFF_SHEET_NAME);
   }
 
+  const headers = [
+    "user_id",
+    "queryString",
+    "fullAddress",
+    "caseNumber",
+    "stopsJson",
+    "lat",
+    "lng",
+    "status",
+    "timestamp",
+    "updated_at",
+    "from_user_id",
+    "from_user_name",
+    "type",
+    "startLocationJson",
+    "endLocationJson",
+    "payloadJson"
+  ];
+
   if (sheet.getLastRow() === 0) {
-    const headers = [
-      "user_id",
-      "queryString",
-      "fullAddress",
-      "caseNumber",
-      "stopsJson",
-      "lat",
-      "lng",
-      "status",
-      "timestamp",
-      "updated_at",
-      "from_user_id",
-      "from_user_name",
-      "type",
-      "startLocationJson",
-      "endLocationJson",
-      "payloadJson"
-    ];
     sheet.appendRow(headers);
 
     const headerRange = sheet.getRange(1, 1, 1, headers.length);
@@ -1016,6 +1177,11 @@ function getHandoffSheet(spreadsheet) {
     headerRange.setFontWeight("bold");
     headerRange.setHorizontalAlignment("center");
     sheet.setFrozenRows(1);
+  } else {
+    // ป้องกัน Exception: The number of columns in the range exceeds the number of columns in the sheet
+    if (sheet.getMaxColumns() < headers.length) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), headers.length - sheet.getMaxColumns());
+    }
   }
 
   return sheet;
@@ -1094,7 +1260,7 @@ function doGet(e) {
       }
     }
 
-    if (e.parameter.action === "get_pending_handoff" || e.parameter.action === "get_latest_handoff") {
+    if (e.parameter.action === "get_pending_handoff" || e.parameter.action === "get_latest_handoff" || e.parameter.action === "get_user_route") {
       try {
         const folder = DriveApp.getFolderById(FOLDER_ID);
         const ss = getTargetSpreadsheetFile(folder);
@@ -1112,6 +1278,9 @@ function doGet(e) {
           const isUserMatch = !targetUserId || uId === targetUserId;
           if (isUserMatch) {
             if (e.parameter.action === "get_pending_handoff" && status !== "pending") {
+              continue;
+            }
+            if (status === "cleared") {
               continue;
             }
 
@@ -1170,8 +1339,10 @@ function doGet(e) {
         return ContentService.createTextOutput(JSON.stringify({
           status: "success",
           hasPending: Boolean(latestItem && latestItem.status === "pending"),
+          hasRoute: Boolean(latestItem && latestItem.status !== "cleared"),
           hasData: Boolean(latestItem),
-          handoff: latestItem
+          handoff: latestItem,
+          route: latestItem
         })).setMimeType(ContentService.MimeType.JSON);
       } catch (err) {
         return ContentService.createTextOutput(JSON.stringify({

@@ -18005,10 +18005,22 @@ window.openShareRouteModal = async function() {
   const end = state.routeEndLocation;
   const distKm = state.calculatedRoadDistanceKm;
 
-  const userOptionsHtml = availableUsers.map(u => {
+  const usersChecklistHtml = availableUsers.map(u => {
     const uName = u.name || u.username;
     const uAffil = u.assignedCourt || u.courtCategory || 'เจ้าหน้าที่';
-    return `<option value="${escapeHtml(u.username)}">${escapeHtml(uName)} (@${escapeHtml(u.username)}) - ${escapeHtml(uAffil)}</option>`;
+    const safeUname = escapeHtml(u.username);
+    return `
+      <label class="share-user-row flex items-center gap-2.5 p-2 bg-white rounded-xl border border-gray-200 hover:bg-indigo-50/70 cursor-pointer transition select-none" data-username="${safeUname.toLowerCase()}" data-name="${escapeHtml(uName).toLowerCase()}">
+        <input type="checkbox" name="shareTargetUserCheckbox" value="${safeUname}" class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between gap-1">
+            <span class="font-bold text-gray-800 text-xs truncate">${escapeHtml(uName)}</span>
+            <span class="text-indigo-600 font-mono text-[10px] bg-indigo-50 px-1.5 py-0.2 rounded">@${safeUname}</span>
+          </div>
+          <p class="text-[10px] text-gray-500 truncate">${escapeHtml(uAffil)}</p>
+        </div>
+      </label>
+    `;
   }).join('');
 
   Swal.fire({
@@ -18018,22 +18030,36 @@ window.openShareRouteModal = async function() {
         <!-- สรุปเส้นทาง -->
         <div class="bg-indigo-50/90 p-3 rounded-2xl border border-indigo-200 text-indigo-950 space-y-1">
           <div class="flex items-center justify-between font-bold text-xs pb-1 border-b border-indigo-200/70">
-            <span>🗺️ สรุปข้อมูลเส้นทางที่จะแชร์</span>
-            <span class="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-mono">${stops.length} จุดหมาย</span>
+            <span>🗺️ ข้อมูลเส้นทางที่จะแชร์</span>
+            <span class="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-mono font-bold">${stops.length} จุดหมาย</span>
           </div>
           <p><strong>🏛️ จุดเริ่มต้น:</strong> ${escapeHtml(start.name)}</p>
           ${end && end.enabled ? `<p><strong>🏁 จุดสิ้นสุด:</strong> ${escapeHtml(end.name)}</p>` : (state.isRoundTrip ? `<p><strong>🔄 เส้นทาง:</strong> วนกลับจุดเริ่มต้น</p>` : '')}
-          ${distKm ? `<p><strong>🛣️ ระยะทางบนถนนจริง:</strong> <span class="font-mono font-bold">${distKm.toFixed(1)} กม.</span></p>` : ''}
+          ${distKm ? `<p><strong>🛣️ ระยะทางบนถนนจริง:</strong> <span class="font-mono font-bold text-gray-800">${distKm.toFixed(1)} กม.</span></p>` : ''}
         </div>
 
-        <!-- เลือกผู้รับ -->
+        <!-- เลือกผู้รับแบบ Multi-Select -->
         <div>
-          <label class="block font-bold text-gray-700 mb-1">
-            <i class="fa-solid fa-user-check text-indigo-600 mr-1"></i> เลือกผู้รับเส้นทาง:
-          </label>
-          <select id="shareTargetUserSelect" class="w-full p-2.5 bg-white border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none">
-            ${userOptionsHtml}
-          </select>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="font-bold text-gray-800 flex items-center gap-1">
+              <i class="fa-solid fa-users text-indigo-600"></i> เลือกผู้รับเส้นทาง:
+              <span id="selectedShareCountBadge" class="text-[10px] font-semibold text-indigo-700 bg-indigo-100 px-1.5 py-0.2 rounded-full">เลือก 0 ท่าน</span>
+            </label>
+            <button type="button" id="btnToggleSelectAllShare" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer">
+              เลือกทั้งหมด
+            </button>
+          </div>
+
+          <!-- ช่องค้นหาผู้ใช้งาน -->
+          <div class="relative mb-2">
+            <input type="text" id="shareUserSearchInput" placeholder="ค้นหาชื่อ หรือ @username..." class="w-full pl-7 pr-3 py-1.5 bg-white border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none">
+            <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-gray-400 text-[10px]"></i>
+          </div>
+
+          <!-- รายการผู้ใช้พร้อม Checkbox -->
+          <div id="shareUserChecklist" class="max-h-44 overflow-y-auto space-y-1.5 border border-gray-200 rounded-xl p-2 bg-gray-50/50 slts-swal-body-scroll">
+            ${usersChecklistHtml}
+          </div>
         </div>
 
         <!-- ข้อความเพิ่มเติม -->
@@ -18041,11 +18067,11 @@ window.openShareRouteModal = async function() {
           <label class="block font-bold text-gray-700 mb-1">
             <i class="fa-solid fa-message text-gray-500 mr-1"></i> หมายเหตุถึงผู้รับ (ไม่บังคับ):
           </label>
-          <textarea id="shareRouteNoteInput" rows="2" placeholder="เช่น ฝากส่งหมายรอบบ่ายนี้ต่อด้วยครับ, จุดที่ 3-5 อยู่ในซอยแคบ" class="w-full p-2.5 bg-white border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none resize-none"></textarea>
+          <textarea id="shareRouteNoteInput" rows="2" placeholder="เช่น ฝากส่งหมายรอบบ่ายนี้ต่อด้วยครับ, มีจุดแก้ไขพิกัดแล้ว" class="w-full p-2.5 bg-white border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 outline-none resize-none"></textarea>
         </div>
 
         <p class="text-[11px] text-gray-500 italic pt-1 border-t border-gray-200">
-          <i class="fa-solid fa-circle-info text-indigo-500 mr-1"></i> เมื่อแชร์แล้ว ผู้รับจะได้รับการแจ้งเตือนอัตโนมัติในหน้า "แผนที่และหมุด" และสามารถกดยืนยันรับเข้าเพื่อเปิดเส้นทางได้ทันที
+          <i class="fa-solid fa-circle-info text-indigo-500 mr-1"></i> สามารถเลือกผู้รับได้หลายคนพร้อมกัน ข้อมูลเส้นทางจะถูกเก็บไว้ที่ผู้รับจนกว่าผู้รับจะกดล้างข้อมูลด้วยตนเอง
         </p>
       </div>
     `,
@@ -18059,36 +18085,82 @@ window.openShareRouteModal = async function() {
       confirmButton: 'text-xs py-2.5 px-4 font-bold shadow-md',
       cancelButton: 'text-xs py-2.5 px-4'
     },
+    didOpen: () => {
+      const searchInput = document.getElementById('shareUserSearchInput');
+      const toggleAllBtn = document.getElementById('btnToggleSelectAllShare');
+      const badge = document.getElementById('selectedShareCountBadge');
+      const checkboxes = Array.from(document.querySelectorAll('input[name="shareTargetUserCheckbox"]'));
+      const rows = Array.from(document.querySelectorAll('.share-user-row'));
+
+      const updateCount = () => {
+        const checkedCount = checkboxes.filter(cb => cb.checked).length;
+        if (badge) badge.textContent = `เลือก ${checkedCount} ท่าน`;
+      };
+
+      checkboxes.forEach(cb => {
+        cb.addEventListener('change', updateCount);
+      });
+
+      if (searchInput) {
+        searchInput.addEventListener('input', () => {
+          const q = searchInput.value.trim().toLowerCase();
+          rows.forEach(r => {
+            const u = r.getAttribute('data-username') || '';
+            const n = r.getAttribute('data-name') || '';
+            const match = !q || u.includes(q) || n.includes(q);
+            r.style.display = match ? 'flex' : 'none';
+          });
+        });
+      }
+
+      let allSelected = false;
+      if (toggleAllBtn) {
+        toggleAllBtn.addEventListener('click', () => {
+          allSelected = !allSelected;
+          checkboxes.forEach(cb => {
+            const row = cb.closest('.share-user-row');
+            if (row && row.style.display !== 'none') {
+              cb.checked = allSelected;
+            }
+          });
+          toggleAllBtn.textContent = allSelected ? 'ยกเลิกเลือกทั้งหมด' : 'เลือกทั้งหมด';
+          updateCount();
+        });
+      }
+    },
     preConfirm: () => {
-      const selectEl = document.getElementById('shareTargetUserSelect');
+      const checkedBoxes = Array.from(document.querySelectorAll('input[name="shareTargetUserCheckbox"]:checked'));
       const noteEl = document.getElementById('shareRouteNoteInput');
-      const targetUser = selectEl ? selectEl.value.trim() : '';
-      if (!targetUser) {
-        Swal.showValidationMessage('กรุณาเลือกผู้รับเส้นทาง');
+      const targetUserIds = checkedBoxes.map(cb => cb.value.trim()).filter(Boolean);
+      if (targetUserIds.length === 0) {
+        Swal.showValidationMessage('กรุณาเลือกผู้รับเส้นทางอย่างน้อย 1 ท่าน');
         return false;
       }
       return {
-        targetUserId: targetUser,
+        targetUserIds: targetUserIds,
         note: noteEl ? noteEl.value.trim() : ''
       };
     }
   }).then(async (result) => {
     if (!result.isConfirmed || !result.value) return;
 
-    const { targetUserId, note } = result.value;
-    const targetUserObj = availableUsers.find(u => (u.username || '').toLowerCase() === targetUserId.toLowerCase());
-    const targetUserName = targetUserObj ? (targetUserObj.name || targetUserId) : targetUserId;
-
+    const { targetUserIds, note } = result.value;
     const cleanStops = cleanStopsForStorage(stops);
     const primaryStop = cleanStops[0] || {};
     const fromUserId = (state.currentUser.username || '').trim();
     const fromUserName = state.currentUser.name || fromUserId;
 
+    const recipientNames = targetUserIds.map(tid => {
+      const u = availableUsers.find(u => (u.username || '').toLowerCase() === tid.toLowerCase());
+      return u ? (u.name || tid) : tid;
+    });
+
     const payload = {
       action: 'share_route',
       type: 'share_route',
-      user_id: targetUserId,
-      target_user_id: targetUserId,
+      target_user_ids: targetUserIds,
+      user_id: targetUserIds[0],
+      target_user_id: targetUserIds[0],
       from_user_id: fromUserId,
       from_user_name: fromUserName,
       note: note,
@@ -18105,16 +18177,23 @@ window.openShareRouteModal = async function() {
       timestamp: new Date().toISOString()
     };
 
-    // ส่ง LocalStorage และ BroadcastChannel
-    try {
-      localStorage.setItem('slts_device_handoff_' + targetUserId.toLowerCase(), JSON.stringify(payload));
-      localStorage.setItem('slts_handoff_event', Date.now().toString());
-      if (window.BroadcastChannel) {
+    // ส่ง LocalStorage และ BroadcastChannel สำหรับผู้รับแต่ละคน
+    targetUserIds.forEach(tid => {
+      try {
+        const userPayload = { ...payload, user_id: tid, target_user_id: tid };
+        localStorage.setItem('slts_device_handoff_' + tid.toLowerCase(), JSON.stringify(userPayload));
+        localStorage.setItem('slts_user_route_' + tid.toLowerCase(), JSON.stringify(userPayload));
+      } catch (e) {}
+    });
+    localStorage.setItem('slts_handoff_event', Date.now().toString());
+
+    if (window.BroadcastChannel) {
+      try {
         const bc = new BroadcastChannel('slts_device_handoff');
         bc.postMessage(payload);
         bc.close();
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
 
     // ส่งไปยัง Database Google Apps Script
     if (state.appsScriptUrl && navigator.onLine) {
@@ -18123,15 +18202,15 @@ window.openShareRouteModal = async function() {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload)
-        }).catch(() => {});
+        }).catch(err => console.warn('share_route GAS POST warning:', err));
       } catch (err) {
         console.warn('share_route GAS POST warning:', err);
       }
     }
 
-    logServerActivity('MAP_ROUTE_SHARED', `แชร์เส้นทาง ${cleanStops.length} จุดหมาย ให้ @${targetUserId} (${targetUserName}) โดย @${fromUserId}`, {
+    logServerActivity('MAP_ROUTE_SHARED', `แชร์เส้นทาง ${cleanStops.length} จุดหมาย ให้ ${targetUserIds.length} ท่าน (${targetUserIds.map(u => '@' + u).join(', ')}) โดย @${fromUserId}`, {
       from: fromUserId,
-      to: targetUserId,
+      recipients: targetUserIds,
       stopsCount: cleanStops.length
     });
 
@@ -18140,11 +18219,11 @@ window.openShareRouteModal = async function() {
       title: 'แชร์เส้นทางเรียบร้อยแล้ว!',
       html: `
         <div class="text-left text-xs space-y-2 bg-indigo-50 p-3.5 rounded-2xl border border-indigo-200 mt-2">
-          <p><strong>ผู้รับ:</strong> <span class="text-indigo-700 font-bold">${escapeHtml(targetUserName)} (@${escapeHtml(targetUserId)})</span></p>
+          <p><strong>ผู้รับ (${targetUserIds.length} ท่าน):</strong> <span class="text-indigo-700 font-bold">${escapeHtml(recipientNames.join(', '))}</span></p>
           <p><strong>จำนวนจุดหมาย:</strong> <span class="text-emerald-700 font-bold">${cleanStops.length} รายการ</span></p>
           ${note ? `<p><strong>หมายเหตุ:</strong> <span class="italic text-gray-700">"${escapeHtml(note)}"</span></p>` : ''}
           <p class="text-[11px] text-gray-500 pt-1.5 border-t border-indigo-200">
-            ระบบได้ส่งเส้นทางไปยังบัญชี @${escapeHtml(targetUserId)} เรียบร้อยแล้ว เมื่อผู้รับเปิดหน้าแผนที่จะได้รับการแจ้งเตือนทันที
+            ระบบได้ส่งข้อมูลเส้นทางไปยังผู้รับทุกคนเรียบร้อยแล้ว และข้อมูลจะถูกจัดเก็บไว้ที่ผู้รับจนกว่าผู้รับจะกดล้างข้อมูล
           </p>
         </div>
       `,
@@ -18280,17 +18359,93 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
     }
   }
 
-  // 7. แจ้งเตือน Toast
-  const displayCase = stop.caseNumber || (prefix && caseNo ? `${prefix}${caseNo}/${caseYear}` : 'รายการหมาย');
-  Swal.fire({
-    toast: true,
-    position: 'top',
-    icon: 'success',
-    title: `📸 วางข้อมูลหมาย: ${displayCase}`,
-    text: isMobile ? 'เข้าสู่โหมดกล้องพร้อมถ่ายภาพทันที' : 'นำเข้าข้อมูลลงฟอร์มบันทึกส่งหมายเรียบร้อยแล้ว',
-    timer: 3500,
-    showConfirmButton: false
-  });
+  // 7. นำเข้าข้อมูลเรียบร้อย ไม่ต้องแสดง Little Notification ตามความต้องการของผู้ใช้งาน
+};
+
+/**
+ * บันทึกข้อมูลเส้นทางล่าสุดของผู้ใช้งานขึ้น Google Sheet บน Server (ถาวร ใช้งานได้จากทุกที่)
+ */
+window.saveRouteToServer = async function(routeData = null) {
+  if (!state.appsScriptUrl || !navigator.onLine) return;
+  const userId = (state.currentUser?.username || '').trim().toLowerCase();
+  if (!userId) return;
+
+  const stops = routeData?.stops || cleanStopsForStorage(state.currentRouteStops || []);
+  if (!stops || stops.length === 0) return;
+
+  const start = routeData?.startLocation || state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี', lat: 17.4138, lng: 102.7872 };
+  const end = routeData?.endLocation || state.routeEndLocation;
+  const primaryStop = stops[0] || {};
+
+  const payload = {
+    action: 'save_user_route',
+    user_id: userId,
+    target_user_id: userId,
+    userName: state.currentUser.name || userId,
+    queryString: primaryStop.locationText || '',
+    fullAddress: primaryStop.locationText || '',
+    caseNumber: primaryStop.caseNumber || '',
+    stops: stops,
+    startLocation: start,
+    endLocation: end,
+    isRoundTrip: Boolean(state.isRoundTrip),
+    routeRoadPolyline: state.mapRoutePolylineCoords || null,
+    totalDistanceKm: state.calculatedRoadDistanceKm || null,
+    status: 'active_route',
+    timestamp: new Date().toISOString()
+  };
+
+  try {
+    fetch(state.appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    }).catch(e => console.warn('saveRouteToServer warning:', e));
+  } catch (e) {
+    console.warn('saveRouteToServer error:', e);
+  }
+};
+
+/**
+ * ดึงข้อมูลเส้นทางล่าสุดที่ Active อยู่จาก Server เพื่อซิงค์ข้ามอุปกรณ์และเครื่องอื่นๆ
+ */
+window.fetchActiveRouteFromServer = async function() {
+  const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+  if (!isUserLoggedIn || !state.appsScriptUrl || !navigator.onLine) return;
+  const userId = (state.currentUser.username || '').trim().toLowerCase();
+  if (!userId) return;
+
+  try {
+    const url = `${state.appsScriptUrl}?action=get_user_route&user_id=${encodeURIComponent(userId)}&_t=${Date.now()}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    const data = await res.json();
+    if (data && data.status === 'success' && data.hasRoute && data.route) {
+      const r = data.route;
+      if (r.timestamp !== window.dismissedHandoffTime && Array.isArray(r.stops) && r.stops.length > 0) {
+        if (!state.currentRouteStops || state.currentRouteStops.length === 0) {
+          state.currentRouteStops = r.stops;
+          if (r.startLocation) state.routeStartLocation = r.startLocation;
+          if (r.endLocation) state.routeEndLocation = r.endLocation;
+          if (r.isRoundTrip !== undefined) state.isRoundTrip = r.isRoundTrip;
+          if (r.routeRoadPolyline && Array.isArray(r.routeRoadPolyline)) {
+            state.routeRoadPolylineCoords = r.routeRoadPolyline;
+            state.mapRoutePolylineCoords = r.routeRoadPolyline;
+            localStorage.setItem('slts_shared_route_polyline', JSON.stringify(r.routeRoadPolyline));
+          }
+          if (r.totalDistanceKm) state.calculatedRoadDistanceKm = r.totalDistanceKm;
+
+          localStorage.setItem('slts_shared_route_stops', JSON.stringify(r.stops));
+          if (r.startLocation) localStorage.setItem('slts_shared_route_start', JSON.stringify(r.startLocation));
+          if (r.endLocation) localStorage.setItem('slts_shared_route_end', JSON.stringify(r.endLocation));
+          localStorage.setItem('slts_user_route_' + userId, JSON.stringify(r));
+
+          updateMobileRouteMapButtonBadge(r.stops.length);
+        }
+      }
+    }
+  } catch (e) {
+    // silent background fetch
+  }
 };
 
 /**
@@ -18304,15 +18459,18 @@ window.dismissedHandoffTime = null;
 window.initMobileHandoffReceiver = function() {
   if (handoffPollInterval) clearInterval(handoffPollInterval);
 
+  const currentUserId = (state.currentUser?.username || '').trim().toLowerCase();
+
   // 1. BroadcastChannel Listener (Real-time ทันที < 10ms ข้ามแท็บ/เบราว์เซอร์)
   if (window.BroadcastChannel) {
     try {
       const bc = new BroadcastChannel('slts_device_handoff');
       bc.onmessage = (event) => {
         if (event.data) {
-          const currentUserId = (state.currentUser?.username || '').trim().toLowerCase();
+          const uId = (state.currentUser?.username || '').trim().toLowerCase();
           const targetUserId = (event.data.user_id || event.data.target_user_id || '').trim().toLowerCase();
-          if (currentUserId && targetUserId && currentUserId === targetUserId) {
+          const targetUserIds = Array.isArray(event.data.target_user_ids) ? event.data.target_user_ids.map(u => String(u).toLowerCase()) : [];
+          if (uId && (targetUserId === uId || targetUserIds.includes(uId))) {
             applyReceivedHandoff(event.data);
           }
         }
@@ -18322,14 +18480,27 @@ window.initMobileHandoffReceiver = function() {
 
   // 2. ตรวจสอบข้อมูลเมื่อมี Storage Event ข้ามแท็บ/เบราว์เซอร์
   window.addEventListener('storage', (e) => {
-    if (e.key && (e.key.startsWith('slts_device_handoff_') || e.key === 'slts_handoff_event' || e.key === 'slts_latest_handoff')) {
+    if (e.key && (e.key.startsWith('slts_device_handoff_') || e.key.startsWith('slts_user_route_') || e.key === 'slts_handoff_event' || e.key === 'slts_latest_handoff')) {
       checkLocalHandoffData();
     }
   });
 
-  // 3. ตรวจสอบและซิงค์แคชเดิมทันทีเมื่อเริ่มต้นระบบ
-  checkHandoffForCurrentUser();
-  const cachedStops = localStorage.getItem('slts_shared_route_stops');
+  // 3. ตรวจสอบและซิงค์แคชเดิมทันทีเมื่อเริ่มต้นระบบ (รองรับโหมด Offline 100%)
+  let cachedStops = localStorage.getItem('slts_shared_route_stops');
+  if (!cachedStops && currentUserId) {
+    const userCached = localStorage.getItem('slts_user_route_' + currentUserId);
+    if (userCached) {
+      try {
+        const uParsed = JSON.parse(userCached);
+        if (uParsed && Array.isArray(uParsed.stops) && uParsed.stops.length > 0) {
+          cachedStops = JSON.stringify(uParsed.stops);
+          if (uParsed.startLocation) state.routeStartLocation = uParsed.startLocation;
+          if (uParsed.endLocation) state.routeEndLocation = uParsed.endLocation;
+        }
+      } catch (e) {}
+    }
+  }
+
   if (cachedStops) {
     try {
       const parsed = JSON.parse(cachedStops);
@@ -18352,7 +18523,11 @@ window.initMobileHandoffReceiver = function() {
     try { state.routeRoadPolylineCoords = JSON.parse(cachedPolyline); } catch (e) {}
   }
 
-  // 4. Polling ตรวจสอบจาก Database (Google Apps Script API) ทุก 2.5 วินาที สำหรับผู้ใช้ที่ล็อกอินอยู่
+  // 4. ตรวจสอบข้อมูลจาก Server (Handoff และ Route เดิมที่เซฟไว้)
+  checkHandoffForCurrentUser();
+  fetchActiveRouteFromServer();
+
+  // 5. Polling ตรวจสอบจาก Database (Google Apps Script API) ทุก 2.5 วินาที สำหรับผู้ใช้ที่ล็อกอินอยู่
   handoffPollInterval = setInterval(() => {
     checkHandoffForCurrentUser();
   }, 2500);
@@ -18365,14 +18540,25 @@ function checkLocalHandoffData() {
   try {
     let raw = localStorage.getItem('slts_device_handoff_' + userId);
     if (!raw) {
+      raw = localStorage.getItem('slts_user_route_' + userId);
+    }
+    if (!raw) {
       raw = localStorage.getItem('slts_latest_handoff');
     }
     if (!raw) return;
 
     const handoff = JSON.parse(raw);
     const targetUserId = (handoff.user_id || handoff.target_user_id || '').trim().toLowerCase();
-    if (targetUserId === userId && handoff.status === 'pending' && handoff.timestamp !== lastReceivedHandoffTime && handoff.timestamp !== window.dismissedHandoffTime) {
+    const targetUserIds = Array.isArray(handoff.target_user_ids) ? handoff.target_user_ids.map(u => String(u).toLowerCase()) : [];
+    const isTarget = targetUserId === userId || targetUserIds.includes(userId);
+
+    if (isTarget && handoff.status === 'pending' && handoff.timestamp !== lastReceivedHandoffTime && handoff.timestamp !== window.dismissedHandoffTime) {
       applyReceivedHandoff(handoff);
+    } else if (isTarget && (handoff.status === 'shared_active' || handoff.status === 'active_route')) {
+      if ((!state.currentRouteStops || state.currentRouteStops.length === 0) && Array.isArray(handoff.stops) && handoff.stops.length > 0) {
+        state.currentRouteStops = handoff.stops;
+        updateMobileRouteMapButtonBadge(handoff.stops.length);
+      }
     }
   } catch (e) {
     console.warn('checkLocalHandoffData error:', e);
@@ -18412,9 +18598,11 @@ function applyReceivedHandoff(handoff) {
   if (!handoff) return;
   const currentUserId = (state.currentUser?.username || '').trim().toLowerCase();
   const targetUserId = (handoff.user_id || handoff.target_user_id || '').trim().toLowerCase();
+  const targetUserIds = Array.isArray(handoff.target_user_ids) ? handoff.target_user_ids.map(u => String(u).toLowerCase()) : [];
 
-  // ตรวจสอบความถูกต้องตาม User ที่ส่งมาตรงกันเท่านั้น
-  if (!currentUserId || !targetUserId || currentUserId !== targetUserId) {
+  // ตรวจสอบความถูกต้องตาม User ที่ส่งมาตรงกัน หรืออยู่ในรายการผู้รับที่ถูกแชร์มา
+  const isTarget = currentUserId && (targetUserId === currentUserId || targetUserIds.includes(currentUserId));
+  if (!isTarget) {
     return;
   }
 
@@ -18486,10 +18674,11 @@ function applyReceivedHandoff(handoff) {
           }).catch(() => {});
         }
 
-        // นำเข้าข้อมูลเส้นทางและหมุด
-        handoff.status = 'received';
+        // นำเข้าข้อมูลเส้นทางและหมุด (ตั้งสถานะเป็น shared_active เพื่อคงอยู่จนกว่าจะกดล้าง)
+        handoff.status = 'shared_active';
         try {
           localStorage.setItem('slts_device_handoff_' + currentUserId, JSON.stringify(handoff));
+          localStorage.setItem('slts_user_route_' + currentUserId, JSON.stringify(handoff));
           localStorage.setItem('slts_latest_handoff', JSON.stringify(handoff));
         } catch (e) {}
 
@@ -18517,6 +18706,9 @@ function applyReceivedHandoff(handoff) {
         if (handoff.totalDistanceKm) {
           state.calculatedRoadDistanceKm = handoff.totalDistanceKm;
         }
+
+        // เซฟลง Server เป็น Active Route เพื่อซิงค์ข้ามอุปกรณ์
+        saveRouteToServer();
 
         updateMobileRouteMapButtonBadge(handoff.stops ? handoff.stops.length : 0);
 
@@ -18563,10 +18755,11 @@ function applyReceivedHandoff(handoff) {
     }).catch(() => {});
   }
 
-  // 2. อัปเดต Local Storage และ State ให้ตรงตามที่ส่งมาทั้งหมด
-  handoff.status = 'received';
+  // 2. อัปเดต Local Storage และ State ให้ตรงตามที่ส่งมาทั้งหมด (คงอยู่จนกว่าจะกดล้าง)
+  handoff.status = 'active_route';
   try {
     localStorage.setItem('slts_device_handoff_' + currentUserId, JSON.stringify(handoff));
+    localStorage.setItem('slts_user_route_' + currentUserId, JSON.stringify(handoff));
     localStorage.setItem('slts_latest_handoff', JSON.stringify(handoff));
     if (handoff.stops && handoff.stops.length > 0) {
       state.currentRouteStops = handoff.stops;
@@ -18593,6 +18786,9 @@ function applyReceivedHandoff(handoff) {
       state.calculatedRoadDistanceKm = handoff.totalDistanceKm;
     }
   } catch (e) {}
+
+  // เซฟลง Server เป็น Active Route เพื่อซิงค์ข้ามอุปกรณ์
+  saveRouteToServer();
 
   // 3. ปรับปรุงข้อมูลในฟอร์มและ GPS ให้ตรงกับหมายแรกที่ได้รับ
   if (handoff.stops && handoff.stops.length > 0) {
@@ -18696,9 +18892,21 @@ window.updateMobileRouteMapButtonBadge = function(count) {
   const pill = document.getElementById('mobileHandoffPillBanner');
   const pillTitle = document.getElementById('mobileHandoffPillTitle');
   const pillSub = document.getElementById('mobileHandoffPillSub');
+  const floatingWidget = document.getElementById('floatingMobileRouteWidget');
+  const floatingCount = document.getElementById('floatingMobileRouteCount');
 
   if (txt) {
-    txt.textContent = stopsCount > 0 ? `แผนที่ (${stopsCount})` : 'แผนที่';
+    if (stopsCount > 0) {
+      txt.textContent = `${stopsCount}`;
+      txt.classList.remove('hidden');
+    } else {
+      txt.textContent = '0';
+      txt.classList.add('hidden');
+    }
+  }
+
+  if (floatingCount) {
+    floatingCount.textContent = `${stopsCount}`;
   }
 
   if (stopsCount > 0) {
@@ -18712,12 +18920,18 @@ window.updateMobileRouteMapButtonBadge = function(count) {
         pillSub.textContent = `คดี: ${state.currentRouteStops[0].caseNumber || '-'} • แตะเพื่อเปิดดูแผนที่`;
       }
     }
+    if (floatingWidget) {
+      floatingWidget.classList.remove('hidden');
+    }
   } else {
     if (btn) {
       btn.classList.remove('animate-pulse');
     }
     if (pill) {
       pill.classList.add('hidden');
+    }
+    if (floatingWidget) {
+      floatingWidget.classList.add('hidden');
     }
   }
 };
@@ -18731,26 +18945,33 @@ window.clearMobileRouteHandoff = function(event) {
     event.preventDefault();
   }
 
-  // 1. เคลียร์ State และ LocalStorage ของเส้นทางส่งหมาย
+  // 1. เคลียร์ State และ LocalStorage ของเส้นทางส่งหมายทั้งหมด
   state.currentRouteStops = [];
+  state.routeRoadPolylineCoords = [];
+  state.mapRoutePolylineCoords = [];
+  state.calculatedRoadDistanceKm = 0;
   localStorage.removeItem('slts_shared_route_stops');
+  localStorage.removeItem('slts_shared_route_polyline');
+  localStorage.removeItem('slts_shared_route_start');
+  localStorage.removeItem('slts_shared_route_end');
 
   const userId = (state.currentUser?.username || '').trim().toLowerCase();
   if (userId) {
     localStorage.removeItem('slts_device_handoff_' + userId);
+    localStorage.removeItem('slts_user_route_' + userId);
   }
   localStorage.removeItem('slts_latest_handoff');
 
   // บันทึก timestamp ที่ถูกล้าง เพื่อไม่ให้ Polling ดึงซ้ำมาอีก
-  window.dismissedHandoffTime = lastReceivedHandoffTime;
+  window.dismissedHandoffTime = lastReceivedHandoffTime || Date.now().toString();
 
-  // 2. แจ้ง Server ผ่าน API เพื่อปลด pending handoff (ถ้ามี)
+  // 2. แจ้ง Server ผ่าน API เพื่อปลด pending handoff และล้าง active route
   if (state.appsScriptUrl && navigator.onLine && userId) {
     fetch(state.appsScriptUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
-        action: 'dismiss_handoff',
+        action: 'clear_user_route',
         user_id: userId,
         timestamp: new Date().toISOString()
       })
@@ -18766,14 +18987,14 @@ window.clearMobileRouteHandoff = function(event) {
     position: 'top',
     icon: 'success',
     title: 'ล้างเส้นทางส่งหมายเรียบร้อยแล้ว',
-    text: 'ปิดการแจ้งเตือนและกลับสู่หน้าจอกล้องปกติ',
+    text: 'รีเซ็ตข้อมูลเส้นทางและกลับสู่โหมดปกติ',
     timer: 2000,
     showConfirmButton: false
   });
 };
 
 /**
- * ตรวจสอบว่ามีรายการส่งหมายส่งมาจากหน้าจอ Desktop หรือผู้ใช้อื่น ตาม User ที่ล็อกอินตรงกันหรือไม่
+ * ตรวจสอบว่ามีรายการส่งหมายส่งมาจากหน้าจอ Desktop หรือผู้ใช้อื่น หรือมีเส้นทางค้างอยู่หรือไม่
  */
 function hasDesktopHandoffForCurrentUser() {
   const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
@@ -18783,19 +19004,19 @@ function hasDesktopHandoffForCurrentUser() {
   if (!currentUserId) return false;
 
   try {
-    const raw = localStorage.getItem('slts_device_handoff_' + currentUserId);
+    const raw = localStorage.getItem('slts_device_handoff_' + currentUserId) || localStorage.getItem('slts_user_route_' + currentUserId);
     if (raw) {
       const parsed = JSON.parse(raw);
-      const isTargetUser = (parsed.user_id || parsed.userId || parsed.targetUserId || parsed.target_user_id || '').toLowerCase() === currentUserId;
-      const isFromHandoff = parsed.sender === 'desktop' || parsed.action === 'send_handoff' || parsed.type === 'handoff' || parsed.type === 'share_route' || parsed.action === 'share_route';
+      const isTargetUser = (parsed.user_id || parsed.userId || parsed.targetUserId || parsed.target_user_id || '').toLowerCase() === currentUserId ||
+        (Array.isArray(parsed.target_user_ids) && parsed.target_user_ids.map(u => String(u).toLowerCase()).includes(currentUserId));
       const hasStops = Array.isArray(parsed.stops) && parsed.stops.length > 0;
-      if (isTargetUser && isFromHandoff && hasStops) {
+      if (isTargetUser && hasStops) {
         return true;
       }
     }
   } catch (e) {}
 
-  return false;
+  return Boolean(state.currentRouteStops && state.currentRouteStops.length > 0);
 }
 
 window.showMobileRouteMapModal = function() {
@@ -18845,7 +19066,7 @@ window.showMobileRouteMapModal = function() {
       <div class="slts-province-modal flex flex-col h-[88dvh] overflow-hidden bg-gray-50">
         <!-- Header -->
         <div class="slts-modal-header flex-shrink-0 px-3.5 py-2.5 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white flex items-center justify-between shadow-sm">
-          <!-- ปุ่มรีเฟรชข้อมูลเส้นทาง (ย้ายมาไว้ทางซ้ายตามข้อ 3) -->
+          <!-- ปุ่มรีเฟรชข้อมูลเส้นทาง -->
           <button type="button" onclick="showMobileRouteMapModal()" class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs font-bold transition cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
             <i class="fa-solid fa-rotate-right"></i>
           </button>
@@ -18854,14 +19075,14 @@ window.showMobileRouteMapModal = function() {
             <p class="text-[10px] text-blue-100 truncate">📍 จ.${prov} (${stops.length} จุดหมาย)</p>
           </div>
           <div class="flex items-center gap-1.5 flex-shrink-0">
-            <!-- ปุ่ม 'ล้าง' จะแสดงผลก็ต่อเมื่อมีรายการส่งมาจากหน้าจอ Desktop (> 768px) ตาม User ตรงกันเท่านั้น (ตามข้อ 2) -->
-            ${hasHandoffFromDesktop ? `
+            <!-- ปุ่ม 'ล้าง' แสดงผลเมื่อมีรายการส่งหมายอยู่ในแผนที่ -->
+            ${(stops.length > 0 || hasHandoffFromDesktop) ? `
               <button type="button" onclick="clearMobileRouteHandoff(); window.handleMobileModalBackOrClose();" class="px-2 py-1.5 bg-rose-500/80 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="ล้างเส้นทางส่งหมาย">
                 <i class="fa-solid fa-trash-can text-[10px]"></i>
                 <span class="text-[10px]">ล้าง</span>
               </button>
             ` : ''}
-            <!-- ปุ่มกากบาทเพื่อปิดการแสดงผล Pop Up แผนที่ (รองรับการย้อนกลับตามข้อ 1) -->
+            <!-- ปุ่มกากบาทเพื่อปิดการแสดงผล Pop Up แผนที่ -->
             <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs font-bold transition cursor-pointer" title="ปิดหน้าต่างแผนที่">
               <i class="fa-solid fa-xmark text-sm"></i>
             </button>
@@ -18935,14 +19156,18 @@ window.initMobileModalMapInstance = function() {
     window.mobileModalMap = null;
   }
 
-  const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872 };
+  const defaultStart = { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872 };
+  let start = state.routeStartLocation || defaultStart;
+  if (!start.lat || !start.lng || isNaN(start.lat) || isNaN(start.lng) || Number(start.lat) <= 0 || Number(start.lng) <= 0) {
+    start = defaultStart;
+  }
   const stops = state.currentRouteStops || [];
   const end = state.routeEndLocation;
 
   window.mobileModalMap = L.map('mobileModalLeafletMap', {
     zoomControl: true,
     attributionControl: false
-  }).setView([start.lat, start.lng], 12);
+  }).setView([Number(start.lat), Number(start.lng)], 12);
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19
@@ -18964,16 +19189,18 @@ window.initMobileModalMapInstance = function() {
     iconAnchor: [14, 28],
     popupAnchor: [0, -28]
   });
-  L.marker([start.lat, start.lng], { icon: startIcon })
+  L.marker([Number(start.lat), Number(start.lng)], { icon: startIcon })
     .addTo(window.mobileModalMarkersLayer)
     .bindPopup(`<div class="p-2.5 font-bold text-xs text-blue-900">🏛️ จุดเริ่มต้น: ${start.name}<p class="text-[10px] font-normal text-gray-500 font-mono mt-0.5">${Number(start.lat).toFixed(4)}, ${Number(start.lng).toFixed(4)}</p></div>`);
 
   // 2. วาดหมุดจุดส่งหมาย (Stops) ในลำดับที่ตรงกัน
-  const waypoints = [[start.lat, start.lng]];
+  const waypoints = [[Number(start.lat), Number(start.lng)]];
   let pinNum = 1;
 
   stops.forEach((stop, stopIndex) => {
-    if (stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && stop.lat > 0 && stop.lng > 0) {
+    const sLat = parseFloat(stop.lat);
+    const sLng = parseFloat(stop.lng);
+    if (!isNaN(sLat) && !isNaN(sLng) && sLat > 0 && sLng > 0) {
       const pinIcon = L.divIcon({
         html: `
           <div class="slts-map-pin-marker" title="หมุดที่ ${pinNum}: ${stop.caseNumber}">
@@ -19003,23 +19230,25 @@ window.initMobileModalMapInstance = function() {
             <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
               <i class="fa-solid fa-camera"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
             </button>
-            <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="w-full py-0.5 text-center inline-flex items-center justify-center gap-1 text-[10px] text-blue-600 font-bold hover:underline">
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${sLat},${sLng}" target="_blank" class="w-full py-0.5 text-center inline-flex items-center justify-center gap-1 text-[10px] text-blue-600 font-bold hover:underline">
               <i class="fa-solid fa-location-arrow"></i> นำทางจุดนี้ด้วย Google Maps
             </a>
           </div>
         </div>
       `;
-      L.marker([stop.lat, stop.lng], { icon: pinIcon })
+      L.marker([sLat, sLng], { icon: pinIcon })
         .addTo(window.mobileModalMarkersLayer)
         .bindPopup(popupHtml);
-      waypoints.push([stop.lat, stop.lng]);
+      waypoints.push([sLat, sLng]);
       pinNum++;
     }
   });
 
   // 3. วาดหมุดจุดสิ้นสุด (End Location) ให้ตรงกับหน้าจอคอมพิวเตอร์
-  if (end && end.enabled && end.lat && end.lng) {
-    waypoints.push([end.lat, end.lng]);
+  if (end && end.enabled && end.lat && end.lng && !isNaN(end.lat) && !isNaN(end.lng) && Number(end.lat) > 0 && Number(end.lng) > 0) {
+    const eLat = Number(end.lat);
+    const eLng = Number(end.lng);
+    waypoints.push([eLat, eLng]);
     const endIcon = L.divIcon({
       html: `
         <div class="slts-map-pin-marker" title="จุดสิ้นสุด: ${end.name}">
@@ -19033,11 +19262,11 @@ window.initMobileModalMapInstance = function() {
       iconAnchor: [14, 28],
       popupAnchor: [0, -28]
     });
-    L.marker([end.lat, end.lng], { icon: endIcon })
+    L.marker([eLat, eLng], { icon: endIcon })
       .addTo(window.mobileModalMarkersLayer)
-      .bindPopup(`<div class="p-2.5 font-bold text-xs text-indigo-900">🏁 จุดสิ้นสุด: ${end.name}<p class="text-[10px] font-normal text-gray-500 font-mono mt-0.5">${Number(end.lat).toFixed(4)}, ${Number(end.lng).toFixed(4)}</p></div>`);
+      .bindPopup(`<div class="p-2.5 font-bold text-xs text-indigo-900">🏁 จุดสิ้นสุด: ${end.name}<p class="text-[10px] font-normal text-gray-500 font-mono mt-0.5">${eLat.toFixed(4)}, ${eLng.toFixed(4)}</p></div>`);
   } else if (state.isRoundTrip && waypoints.length > 1) {
-    waypoints.push([start.lat, start.lng]);
+    waypoints.push([Number(start.lat), Number(start.lng)]);
   }
 
   // 4. การลากเส้นทางบนถนนสัญจรจริงของชุมชน (Real Drivable Road Route)
