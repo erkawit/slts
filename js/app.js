@@ -12868,9 +12868,19 @@ window.saveCurrentRouteStopsHistory = function(stops) {
   if (!stops) stops = state.currentRouteStops || [];
   try {
     const cleanStops = cleanStopsForStorage(stops);
+    let routeStartTime = localStorage.getItem('slts_route_start_time');
+    if (cleanStops.length > 0) {
+      if (!routeStartTime) {
+        routeStartTime = new Date().toISOString();
+        localStorage.setItem('slts_route_start_time', routeStartTime);
+      }
+    } else {
+      localStorage.removeItem('slts_route_start_time');
+    }
     const dataToSave = {
       stops: cleanStops,
       savedAt: new Date().toISOString(),
+      routeStartTime: routeStartTime || new Date().toISOString(),
       province: state.selectedProvince || 'อุดรธานี',
       startLocation: state.routeStartLocation,
       endLocation: state.routeEndLocation,
@@ -12892,6 +12902,11 @@ window.loadSavedRouteStopsHistory = function() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && Array.isArray(parsed.stops) && parsed.stops.length > 0) {
+        if (parsed.routeStartTime || parsed.savedAt) {
+          if (!localStorage.getItem('slts_route_start_time')) {
+            localStorage.setItem('slts_route_start_time', parsed.routeStartTime || parsed.savedAt);
+          }
+        }
         state.currentRouteStops = parsed.stops.map(s => {
           if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
             const p = getStopDisplayPhotoData(s);
@@ -19469,6 +19484,8 @@ window.clearMobileRouteHandoff = function(event) {
   localStorage.removeItem('slts_shared_route_polyline');
   localStorage.removeItem('slts_shared_route_start');
   localStorage.removeItem('slts_shared_route_end');
+  localStorage.removeItem('slts_saved_route_stops');
+  localStorage.removeItem('slts_route_start_time');
 
   const userId = (state.currentUser?.username || '').trim().toLowerCase();
   if (userId) {
@@ -19643,6 +19660,270 @@ window.setRouteStopDeliveryStatus = function(caseNumber, status, extra = {}) {
   }
 };
 
+/**
+ * แปลงสตริง วันที่-เวลา เป็น Epoch Timestamp (มิลลิวินาที)
+ * รองรับ: ISO, ว/ด/ปีกึ่งพุทธ, และ วันที่ภาษาไทย เช่น "5 ก.ย. 2569 13:45:00"
+ */
+function parseDateToTime(dateInput) {
+  if (!dateInput) return 0;
+  if (typeof dateInput === 'number') return dateInput;
+  const str = String(dateInput).trim();
+  if (!str || str === '-') return 0;
+
+  // 1. รูปแบบไทยชื่อเดือนย่อ: "25 ส.ค. 2569 11:36:36" หรือ "5 ก.ย. 2569 13:45"
+  const thaiMonths = {
+    'ม.ค.': 0, 'ก.พ.': 1, 'มี.ค.': 2, 'เม.ย.': 3, 'พ.ค.': 4, 'มิ.ย.': 5,
+    'ก.ค.': 6, 'ส.ค.': 7, 'ก.ย.': 8, 'ต.ค.': 9, 'พ.ย.': 10, 'ธ.ค.': 11
+  };
+  const thaiMatch = str.match(/^(\d{1,2})\s+([^\s\d]+)\s+(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (thaiMatch) {
+    const day = parseInt(thaiMatch[1], 10);
+    const mStr = thaiMatch[2];
+    let year = parseInt(thaiMatch[3], 10);
+    if (year > 2400) year -= 543;
+    const month = thaiMonths[mStr] !== undefined ? thaiMonths[mStr] : -1;
+    if (month >= 0) {
+      const h = parseInt(thaiMatch[4] || '0', 10);
+      const m = parseInt(thaiMatch[5] || '0', 10);
+      const s = parseInt(thaiMatch[6] || '0', 10);
+      return new Date(year, month, day, h, m, s).getTime();
+    }
+  }
+
+  // 2. รูปแบบ Slash DD/MM/YYYY: "05/09/2569 13:45:00" หรือ "05/09/2026 13:45:00"
+  // ต้องตรวจจับก่อน Date.parse เพราะ Date.parse จะมองเป็น MM/DD/YYYY (แบบอเมริกัน)
+  const slashMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (slashMatch) {
+    const day = parseInt(slashMatch[1], 10);
+    const month = parseInt(slashMatch[2], 10) - 1;
+    let year = parseInt(slashMatch[3], 10);
+    if (year > 2400) year -= 543;
+    const h = parseInt(slashMatch[4] || '0', 10);
+    const m = parseInt(slashMatch[5] || '0', 10);
+    const s = parseInt(slashMatch[6] || '0', 10);
+    return new Date(year, month, day, h, m, s).getTime();
+  }
+
+  // 3. รูปแบบ ISO หรือ Date มาตรฐาน
+  const direct = Date.parse(str);
+  if (!isNaN(direct) && direct > 0) {
+    const d = new Date(direct);
+    if (d.getFullYear() > 2400) {
+      d.setFullYear(d.getFullYear() - 543);
+      return d.getTime();
+    }
+    return direct;
+  }
+
+  return 0;
+}
+
+/**
+ * ดึงเวลาเริ่มต้นของรอบการส่งหมายปัจจุบัน (Timestamp ms)
+ */
+function getRouteStartTime() {
+  // 1. จาก localStorage slts_route_start_time
+  let startStr = localStorage.getItem('slts_route_start_time');
+  if (startStr) {
+    const t = parseDateToTime(startStr);
+    if (t > 0) return t;
+  }
+
+  // 2. จาก slts_saved_route_stops
+  try {
+    const saved = JSON.parse(localStorage.getItem('slts_saved_route_stops') || '{}');
+    if (saved && saved.routeStartTime) {
+      const t = parseDateToTime(saved.routeStartTime);
+      if (t > 0) return t;
+    }
+    if (saved && saved.savedAt) {
+      const t = parseDateToTime(saved.savedAt);
+      if (t > 0) return t;
+    }
+  } catch (e) {}
+
+  // 3. จาก slts_user_route_{uId}
+  const uId = getRouteDeliveryUserKey();
+  try {
+    const uRoute = JSON.parse(localStorage.getItem('slts_user_route_' + uId) || '{}');
+    if (uRoute && (uRoute.routeStartTime || uRoute.timestamp)) {
+      const t = parseDateToTime(uRoute.routeStartTime || uRoute.timestamp);
+      if (t > 0) return t;
+    }
+  } catch (e) {}
+
+  return 0;
+}
+
+/**
+ * ตรวจสอบและดึงข้อมูลภาพถ่ายที่ถูกถ่ายและนำเข้าสู่ระบบใหม่ในรอบนี้เท่านั้น (ไม่ใช่ประวัติเดิม)
+ */
+window.getNewlyUploadedPhotoForStop = function(stop) {
+  if (!stop) return null;
+  const sCase = String(stop.caseNumber || '').trim();
+  const normCase = sCase.replace(/\s+/g, '');
+  if (!normCase) return null;
+
+  const uId = getRouteDeliveryUserKey();
+  const statusMap = getRouteStopStatusMap(uId);
+  const mapped = statusMap[sCase] || statusMap[normCase];
+  const routeStartTime = getRouteStartTime();
+
+  // 1. ตรวจสอบถ้าสถานะใน Stop เป็น 'uploaded' ในรอบนี้
+  if (stop.deliveryStatus === 'uploaded') {
+    const photoUrl = stop.capturedPhotoUrl || (mapped && (mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl)) || stop.imageUrl;
+    if (photoUrl) {
+      return {
+        url: photoUrl,
+        deliveryStatus: 'uploaded',
+        uploadedAt: stop.uploadedAt || (mapped && mapped.uploadedAt) || ''
+      };
+    }
+  }
+
+  // 2. ตรวจสอบใน statusMap
+  if (mapped && mapped.deliveryStatus === 'uploaded') {
+    const photoUrl = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl || stop.capturedPhotoUrl || stop.imageUrl;
+    if (photoUrl) {
+      return {
+        url: photoUrl,
+        deliveryStatus: 'uploaded',
+        uploadedAt: mapped.uploadedAt || mapped.updatedAt || ''
+      };
+    }
+  }
+
+  // 3. ตรวจสอบใน Google Sheet แถวที่เพิ่งบันทึกในรอบนี้
+  const sheetRows = state.allSheetRows || [];
+  if (sheetRows.length > 0 && routeStartTime > 0) {
+    const matchingRows = sheetRows.filter(r => {
+      const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
+      return rCase === normCase;
+    });
+    if (matchingRows.length > 0) {
+      matchingRows.sort((a, b) => {
+        const tA = parseDateToTime(a['วันที่และเวลา'] || a['timestamp'] || a['วัน-เวลาบันทึก']);
+        const tB = parseDateToTime(b['วันที่และเวลา'] || b['timestamp'] || b['วัน-เวลาบันทึก']);
+        return tB - tA;
+      });
+      const newestRow = matchingRows[0];
+      const newestTime = parseDateToTime(newestRow['วันที่และเวลา'] || newestRow['timestamp'] || newestRow['วัน-เวลาบันทึก']);
+      if (newestTime >= (routeStartTime - 600000) && (newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ'])) {
+        return {
+          url: newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ'],
+          deliveryStatus: 'uploaded',
+          uploadedAt: newestRow['วันที่และเวลา'] || newestRow['timestamp'] || ''
+        };
+      }
+    }
+  }
+
+  return null;
+};
+
+/**
+ * ดาวน์โหลดไฟล์รูปภาพเดี่ยวโดยตรง ไม่ต้องบีบอัดเป็น .ZIP
+ */
+window.downloadSingleImageFile = async function(url, filename) {
+  if (!url) {
+    Swal.fire('ข้อผิดพลาด', 'ไม่พบลิงก์หรือข้อมูลรูปภาพสำหรับดาวน์โหลด', 'error');
+    return false;
+  }
+
+  const safeFilename = filename || `summons_photo_${Date.now()}.jpg`;
+
+  // กรณี Data URL (Base64)
+  if (url.startsWith('data:image')) {
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = safeFilename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 1000);
+      return true;
+    } catch (e) {
+      console.warn('Direct base64 download failed, trying blob conversion:', e);
+    }
+  }
+
+  // แปลง Google Drive URL เป็น Direct Link ความละเอียดสูง
+  let fetchUrl = url;
+  const driveMatch = fetchUrl.match(/id=([a-zA-Z0-9_-]+)/) || fetchUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch && driveMatch[1]) {
+    fetchUrl = `https://lh3.googleusercontent.com/d/${driveMatch[1]}=w1600`;
+  }
+
+  Swal.fire({
+    title: 'กำลังดาวน์โหลดรูปภาพ...',
+    text: safeFilename,
+    allowOutsideClick: false,
+    didOpen: () => {
+      Swal.showLoading();
+    }
+  });
+
+  try {
+    const res = await fetch(fetchUrl);
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = safeFilename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }, 1500);
+    Swal.close();
+    return true;
+  } catch (err) {
+    console.warn('Direct fetch failed, falling back to canvas base64 conversion:', err);
+    try {
+      const b64 = await urlToBase64ViaImage(fetchUrl);
+      const a = document.createElement('a');
+      a.href = b64;
+      a.download = safeFilename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 1500);
+      Swal.close();
+      return true;
+    } catch (err2) {
+      console.error('All download methods failed:', err2);
+      Swal.close();
+      window.open(fetchUrl, '_blank');
+      return true;
+    }
+  }
+};
+
+/**
+ * ดาวน์โหลดรูปภาพเฉพาะจุดส่งหมายรายการนั้นๆ
+ */
+window.downloadSingleStopPhoto = async function(index) {
+  const stops = state.currentRouteStops || [];
+  const stop = stops[index];
+  if (!stop) {
+    Swal.fire('ข้อผิดพลาด', 'ไม่พบข้อมูลจุดส่งหมาย', 'error');
+    return;
+  }
+
+  const newPhoto = getNewlyUploadedPhotoForStop(stop);
+  if (!newPhoto || !newPhoto.url || newPhoto.deliveryStatus !== 'uploaded') {
+    Swal.fire('ยังไม่มีรูปภาพที่นำส่ง', 'รายการนี้ยังไม่มีการถ่ายภาพและนำส่งขึ้นระบบในรอบนี้', 'info');
+    return;
+  }
+
+  const sCase = (stop.caseNumber || `Stop_${index + 1}`).replace(/[\/\\?%*:|"<>]/g, '-');
+  const seq = String(index + 1).padStart(2, '0');
+  const fileName = `ลำดับที่_${seq}_คดี_${sCase}.jpg`;
+
+  await downloadSingleImageFile(newPhoto.url, fileName);
+};
+
 window.syncStopsWithDeliveryStatus = function(stops) {
   if (!Array.isArray(stops) || stops.length === 0) return stops;
   const uId = getRouteDeliveryUserKey();
@@ -19651,6 +19932,7 @@ window.syncStopsWithDeliveryStatus = function(stops) {
   // ดึงประวัติจาก Google Sheet และคิวอัปโหลดมาตรวจสอบ
   const sheetRows = state.allSheetRows || [];
   const bgQueue = typeof getBackgroundQueue === 'function' ? getBackgroundQueue() : [];
+  const routeStartTime = getRouteStartTime();
 
   stops.forEach((stop) => {
     const sCase = String(stop.caseNumber || '').trim();
@@ -19664,17 +19946,33 @@ window.syncStopsWithDeliveryStatus = function(stops) {
       if (mapped.capturedPhotoUrl) stop.capturedPhotoUrl = mapped.capturedPhotoUrl;
     }
 
-    // ตรวจสอบว่ามีข้อมูลใน Google Sheet หรือไม่ (ส่งขึ้น Server แล้ว)
+    // ตรวจสอบว่ามีข้อมูลใน Google Sheet หรือไม่ (เฉพาะที่เพิ่งบันทึก/ส่งขึ้น Server ในรอบนี้เท่านั้น ไม่ดึงประวัติเก่า)
     if (stop.deliveryStatus !== 'uploaded' && sheetRows.length > 0) {
-      const matchRow = sheetRows.find(r => {
+      const matchingRows = sheetRows.filter(r => {
         const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
         return rCase && rCase === normCase;
       });
-      if (matchRow) {
-        stop.deliveryStatus = 'uploaded';
-        stop.uploadedAt = matchRow['วันที่และเวลา'] || matchRow['timestamp'] || new Date().toISOString();
-        if (!stop.imageUrl && (matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'])) {
-          stop.imageUrl = matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'];
+
+      if (matchingRows.length > 0) {
+        matchingRows.sort((a, b) => {
+          const tA = parseDateToTime(a['วันที่และเวลา'] || a['timestamp'] || a['วัน-เวลาบันทึก']);
+          const tB = parseDateToTime(b['วันที่และเวลา'] || b['timestamp'] || b['วัน-เวลาบันทึก']);
+          return tB - tA;
+        });
+        const newestRow = matchingRows[0];
+        const newestTime = parseDateToTime(newestRow['วันที่และเวลา'] || newestRow['timestamp'] || newestRow['วัน-เวลาบันทึก']);
+
+        const isFromThisRound = (routeStartTime > 0 && newestTime >= (routeStartTime - 600000)) ||
+                                (stop.deliveryStatus === 'captured_offline') ||
+                                (mapped && (mapped.capturedAt || mapped.deliveryStatus));
+
+        if (isFromThisRound) {
+          stop.deliveryStatus = 'uploaded';
+          stop.uploadedAt = newestRow['วันที่และเวลา'] || newestRow['timestamp'] || new Date().toISOString();
+          if (newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ']) {
+            stop.capturedPhotoUrl = newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ'];
+            stop.imageUrl = newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ'];
+          }
         }
       }
     }
@@ -19776,15 +20074,9 @@ window.renderRouteBatchTab = function() {
     } else if (s.deliveryStatus === 'captured_offline') {
       capturedCount++;
     }
-    if (getStopDisplayPhotoData(s).hasPhoto) {
+    const newPhoto = getNewlyUploadedPhotoForStop(s);
+    if (newPhoto && newPhoto.url && newPhoto.deliveryStatus === 'uploaded') {
       photosCount++;
-    } else {
-      const sCase = String(s.caseNumber || '').trim().replace(/\s+/g, '');
-      const hasQueueImg = (typeof getBackgroundQueue === 'function' ? getBackgroundQueue() : []).some(q => {
-        const qCase = String(q.caseNumber || '').trim().replace(/\s+/g, '');
-        return qCase === sCase && q.payload?.imageBase64;
-      });
-      if (hasQueueImg) photosCount++;
     }
   });
 
@@ -19817,13 +20109,25 @@ window.renderRouteBatchTab = function() {
   const uploadedCountEl = document.getElementById('routeBatchUploadedCountText');
   if (uploadedCountEl) uploadedCountEl.textContent = `${uploadedCount} จุด`;
 
-  // อัปเดตปุ่มดาวน์โหลดรูปภาพ ZIP
+  // อัปเดตปุ่มดาวน์โหลดรูปภาพทั้งหมด
   const zipBtnText = document.getElementById('btnDownloadBatchZipText');
-  if (zipBtnText) zipBtnText.textContent = `ดาวน์โหลดรูปภาพทั้งหมด (${photosCount} รูป) .ZIP`;
-
   const btnZip = document.getElementById('btnDownloadBatchZip');
-  if (btnZip) {
-    btnZip.disabled = photosCount === 0;
+  if (btnZip && zipBtnText) {
+    btnZip.disabled = (photosCount === 0);
+    const icon = btnZip.querySelector('i');
+    if (photosCount === 0) {
+      zipBtnText.textContent = `ดาวน์โหลดรูปภาพทั้งหมด (0 รูป)`;
+      btnZip.title = 'ยังไม่มีรูปภาพที่ถ่ายและนำเข้าสู่ระบบใหม่ในรอบนี้';
+      if (icon) icon.className = 'fa-solid fa-file-zipper text-base';
+    } else if (photosCount === 1) {
+      zipBtnText.textContent = `ดาวน์โหลดรูปภาพ (1 รูป) ไฟล์รูปภาพ`;
+      btnZip.title = 'คลิกดาวน์โหลดไฟล์รูปภาพ (ไม่ต้องบีบอัด ZIP)';
+      if (icon) icon.className = 'fa-solid fa-image text-base';
+    } else {
+      zipBtnText.textContent = `ดาวน์โหลดรูปภาพทั้งหมด (${photosCount} รูป) .ZIP`;
+      btnZip.title = 'คลิกดาวน์โหลดรูปภาพทั้งหมดเป็นไฟล์ .ZIP';
+      if (icon) icon.className = 'fa-solid fa-file-zipper text-base';
+    }
   }
 
   // ป้ายแจ้งเตือนประวัติการดาวน์โหลด
@@ -19859,10 +20163,8 @@ window.renderRouteBatchTab = function() {
     const locText = stop.locationText || `${stop.houseNo || ''} ${stop.moo || ''} ${stop.subdistrict || ''} ${stop.district || ''}`.trim() || '-';
     const safeLoc = locText.replace(/'/g, "\\'");
 
-    const photoData = getStopDisplayPhotoData(stop);
-    let displayImg = photoData.rawUrl;
-    let thumbImg = photoData.thumbUrl;
-    let fallbackImg = photoData.fallbackUrl;
+    const newPhotoData = getNewlyUploadedPhotoForStop(stop);
+    let displayImg = newPhotoData ? newPhotoData.url : '';
     let timestampText = '-';
 
     if (stop.uploadedAt) {
@@ -19879,16 +20181,12 @@ window.renderRouteBatchTab = function() {
       } else {
         timestampText = stop.capturedAt;
       }
-    }
-
-    if (timestampText === '-') {
-      const normCase = sCase.replace(/\s+/g, '');
-      const matchRow = (state.allSheetRows || []).find(r => {
-        const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
-        return rCase === normCase;
-      });
-      if (matchRow && (matchRow['วันที่และเวลา'] || matchRow['timestamp'] || matchRow['วัน-เวลาบันทึก'])) {
-        timestampText = matchRow['วันที่และเวลา'] || matchRow['timestamp'] || matchRow['วัน-เวลาบันทึก'];
+    } else if (newPhotoData && newPhotoData.uploadedAt) {
+      const d = new Date(newPhotoData.uploadedAt);
+      if (!isNaN(d.getTime())) {
+        timestampText = d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+      } else {
+        timestampText = newPhotoData.uploadedAt;
       }
     }
 
@@ -19905,9 +20203,16 @@ window.renderRouteBatchTab = function() {
     }
 
     // คอลัมน์รูปภาพ
-    let imgHtml = `<span class="text-gray-300 text-xs">-</span>`;
-    if (photoData.hasPhoto) {
+    let imgHtml = `<span class="text-gray-300 text-xs font-mono">-</span>`;
+    if (newPhotoData && newPhotoData.url) {
       const safeImg = displayImg.replace(/'/g, "\\'");
+      let thumbImg = displayImg;
+      let fallbackImg = displayImg;
+      const driveMatch = displayImg.match(/id=([a-zA-Z0-9_-]+)/) || displayImg.match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (driveMatch && driveMatch[1]) {
+        thumbImg = `https://lh3.googleusercontent.com/d/${driveMatch[1]}=w400`;
+        fallbackImg = `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w400`;
+      }
       imgHtml = `
         <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 mx-auto cursor-pointer shadow-2xs hover:scale-105 active:scale-95 transition group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeImg}', '${safeCase}', '${safeLoc}', '${timestampText}', '${stop.lat || ''}', '${stop.lng || ''}')" title="คลิกดูภาพขนาดเต็ม">
           <img src="${thumbImg}" alt="${safeCase}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${fallbackImg}'; } else { this.onerror = null; this.src = 'img/logo.png'; }">
@@ -19915,6 +20220,16 @@ window.renderRouteBatchTab = function() {
             <i class="fa-solid fa-magnifying-glass-plus"></i>
           </div>
         </div>
+      `;
+    }
+
+    // คอลัมน์ดาวน์โหลด (เฉพาะรายการที่ถ่ายและนำส่งขึ้น Server แล้วเท่านั้น)
+    let downloadColHtml = `<span class="text-gray-300 text-xs font-mono">-</span>`;
+    if (newPhotoData && newPhotoData.deliveryStatus === 'uploaded' && newPhotoData.url) {
+      downloadColHtml = `
+        <button type="button" onclick="downloadSingleStopPhoto(${index})" class="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg text-[11px] transition inline-flex items-center gap-1 border border-emerald-200 cursor-pointer shadow-2xs hover:scale-105 active:scale-95" title="ดาวน์โหลดภาพถ่ายคดี ${safeCase}">
+          <i class="fa-solid fa-download"></i> ดาวน์โหลด
+        </button>
       `;
     }
 
@@ -19951,6 +20266,9 @@ window.renderRouteBatchTab = function() {
           ${imgHtml}
         </td>
         <td class="py-3 px-3 text-center">
+          ${downloadColHtml}
+        </td>
+        <td class="py-3 px-3 text-center">
           ${navHtml}
         </td>
       </tr>
@@ -19961,42 +20279,55 @@ window.renderRouteBatchTab = function() {
 };
 
 window.downloadRouteBatchZip = async function() {
-  if (typeof JSZip === 'undefined') {
-    Swal.fire('เกิดข้อผิดพลาด', 'ไลบรารี JSZip ยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง', 'error');
-    return;
-  }
-
   const stops = state.currentRouteStops || [];
   if (stops.length === 0) {
     Swal.fire('ไม่พบรายการส่งหมาย', 'ยังไม่มีรายการส่งหมายในรอบนี้', 'info');
     return;
   }
 
-  // รวบรวมรูปภาพทั้งหมด
+  // รวบรวมเฉพาะรายการที่มีการถ่ายภาพและนำเข้าสู่ระบบใหม่ในรอบนี้เท่านั้น (uploaded)
   const photoItems = [];
   stops.forEach((stop, index) => {
-    let imgUrl = stop.capturedPhotoUrl || stop.imageUrl || '';
-    if (!imgUrl) {
-      const sCase = String(stop.caseNumber || '').trim().replace(/\s+/g, '');
-      const matchRow = (state.allSheetRows || []).find(r => {
-        const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
-        return rCase === sCase && (r['ลิงก์รูปภาพ'] || r['รูปภาพ']);
-      });
-      if (matchRow) {
-        imgUrl = matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'];
-      }
-    }
-    if (imgUrl) {
+    const newPhoto = getNewlyUploadedPhotoForStop(stop);
+    if (newPhoto && newPhoto.url && newPhoto.deliveryStatus === 'uploaded') {
       photoItems.push({
         index: index + 1,
         caseNumber: (stop.caseNumber || `Stop_${index + 1}`).replace(/[\/\\?%*:|"<>]/g, '-'),
-        url: imgUrl
+        url: newPhoto.url
       });
     }
   });
 
+  // หากยังไม่มีการถ่ายภาพและนำส่งใหม่ในรอบนี้
   if (photoItems.length === 0) {
-    Swal.fire('ยังไม่มีรูปภาพ', 'ไม่พบรูปภาพที่ถ่ายในรายการส่งหมายรอบนี้', 'info');
+    Swal.fire({
+      icon: 'info',
+      title: 'ยังไม่มีรูปภาพที่นำส่ง',
+      text: 'ไม่พบรูปภาพที่มีการถ่ายและนำเข้าสู่ระบบใหม่ในรอบนี้ หากยังไม่มีการถ่ายภาพจะไม่สามารถดาวน์โหลดได้',
+      confirmButtonText: 'รับทราบ',
+      confirmButtonColor: '#2563eb'
+    });
+    return;
+  }
+
+  // หากมีเพียง 1 รายการ -> ดาวน์โหลดเป็นไฟล์รูปภาพธรรมดา ไม่ต้องทำเป็น Zip file (ตาม Requirement)
+  if (photoItems.length === 1) {
+    const item = photoItems[0];
+    const seq = String(item.index).padStart(2, '0');
+    const fileName = `ลำดับที่_${seq}_คดี_${item.caseNumber}.jpg`;
+    
+    const success = await downloadSingleImageFile(item.url, fileName);
+    if (success) {
+      setTimeout(() => {
+        promptPostDownloadCleanupModal();
+      }, 700);
+    }
+    return;
+  }
+
+  // หากมีตั้งแต่ 2 รายการขึ้นไป -> บีบอัดเป็น .ZIP ด้วย JSZip
+  if (typeof JSZip === 'undefined') {
+    Swal.fire('เกิดข้อผิดพลาด', 'ไลบรารี JSZip ยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง', 'error');
     return;
   }
 
@@ -20004,7 +20335,7 @@ window.downloadRouteBatchZip = async function() {
     title: 'กำลังบีบอัดไฟล์ ZIP...',
     html: `
       <div class="space-y-3 p-2">
-        <p class="text-xs text-gray-600">กำลังรวบรวมและบีบอัดรูปภาพจำนวน ${photoItems.length} รูป</p>
+        <p class="text-xs text-gray-600">กำลังรวบรวมและบีบอัดรูปภาพจำนวน ${photoItems.length} รูป (นำเข้าใหม่ในรอบนี้)</p>
         <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
           <div id="zipProgressBar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 10%"></div>
         </div>
@@ -20079,7 +20410,9 @@ window.downloadRouteBatchZip = async function() {
       URL.revokeObjectURL(url);
     }, 1000);
 
-    // ป๊อปอัปแจ้งเตือนยืนยันหลังดาวน์โหลดเสร็จสิ้น (ตาม Requirement ข้อ 5)
+    Swal.close();
+
+    // ป๊อปอัปแจ้งเตือนยืนยันหลังดาวน์โหลดเสร็จสิ้น
     setTimeout(() => {
       promptPostDownloadCleanupModal();
     }, 600);
@@ -20111,6 +20444,8 @@ window.promptPostDownloadCleanupModal = function() {
       }
       localStorage.removeItem('slts_batch_downloaded_at_' + userId);
       localStorage.removeItem('slts_route_stop_status_' + userId);
+      localStorage.removeItem('slts_saved_route_stops');
+      localStorage.removeItem('slts_route_start_time');
       renderRouteBatchTab();
       Swal.fire({
         icon: 'success',
@@ -20161,6 +20496,8 @@ window.confirmClearBatchHistory = function() {
       }
       localStorage.removeItem('slts_batch_downloaded_at_' + userId);
       localStorage.removeItem('slts_route_stop_status_' + userId);
+      localStorage.removeItem('slts_saved_route_stops');
+      localStorage.removeItem('slts_route_start_time');
       renderRouteBatchTab();
     }
   });
