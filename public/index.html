@@ -153,15 +153,13 @@
       <!-- Right Header Controls -->
       <div class="flex items-center space-x-2">
 
-        <!-- Tablet Mode Switch Widget (แสดงเฉพาะอุปกรณ์ประเภท Tablet เท่านั้น) -->
+        <!-- Tablet Mode Switch Button (แสดงเฉพาะอุปกรณ์ประเภท Tablet ในโหมด PC) -->
         <div id="tabletModeToggleContainer" class="hidden items-center">
-          <div class="tablet-mode-switch-wrapper" title="สลับโหมดการทำงาน: เปิด = PC, ปิด = มือถือ">
-            <span id="tabletModeLabel" class="text-[11px] text-gray-700 font-bold">โหมด PC</span>
-            <label class="tablet-switch">
-              <input type="checkbox" id="tabletModeToggleCheckbox" onchange="handleTabletModeSwitchToggle(this.checked)">
-              <span class="tablet-slider"></span>
-            </label>
-          </div>
+          <button id="btnTabletSwitchToMobile" type="button" onclick="switchTabletMode('mobile')" class="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs border border-emerald-500/40 transition cursor-pointer" title="สลับไปยังโหมดกล้องถ่ายภาพ (Mobile)">
+            <i class="fa-solid fa-camera text-xs"></i>
+            <span class="hidden sm:inline">เปิดกล้องถ่ายภาพ</span>
+            <span class="sm:hidden">กล้อง</span>
+          </button>
         </div>
         
         <!-- Network & Offline Queue Status Badge -->
@@ -1313,19 +1311,14 @@
         </button>
       </div>
 
-      <!-- Tablet Mode Switch Widget on Camera Top Bar (แสดงเฉพาะบน Tablet) -->
-      <div id="cameraTabletModeToggleContainer" class="hidden items-center">
-        <div class="tablet-mode-switch-wrapper !bg-black/60 !border-white/20 !text-white !py-1 !px-2.5 shadow-md" title="สลับโหมดการทำงาน: เปิด = PC, ปิด = มือถือ">
-          <span id="cameraTabletModeLabel" class="text-[10px] text-gray-200 font-bold hidden min-[480px]:inline">โหมดมือถือ</span>
-          <label class="tablet-switch !w-10 !h-5.5">
-            <input type="checkbox" id="cameraTabletModeToggleCheckbox" onchange="handleTabletModeSwitchToggle(this.checked)">
-            <span class="tablet-slider"></span>
-          </label>
-        </div>
-      </div>
-
       <!-- Right Buttons (ใช้สัญลักษณ์ไอคอนแทนข้อความ ตามข้อ 5) -->
       <div class="flex items-center gap-1.5 flex-nowrap">
+        <!-- ปุ่มสลับไปยังโหมด PC สำหรับ Tablet สวยงาม คมชัด เข้ากับ UX/UI ของระบบกล้อง -->
+        <button id="btnTabletSwitchToPc" type="button" onclick="switchTabletMode('pc')" class="gyro-rotate hidden h-8 sm:h-9 px-2.5 sm:px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white rounded-xl text-xs font-bold items-center gap-1.5 transition border border-blue-400/50 shadow-md cursor-pointer whitespace-nowrap" title="สลับไปยังโหมดคอมพิวเตอร์ (PC)">
+          <i class="fa-solid fa-desktop text-xs sm:text-sm"></i>
+          <span class="hidden min-[420px]:inline font-semibold">โหมด PC</span>
+        </button>
+
         <!-- 4.2: ฟอร์มแก้ไขข้อมูลส่งหมาย -->
         <button id="btnEditMobileForm" type="button" onclick="showMobileSummonsFormModal(true)" class="gyro-rotate w-8 h-8 sm:w-9 sm:h-9 bg-blue-600/95 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center transition border border-blue-400/50 shadow-md cursor-pointer" title="ฟอร์มแก้ไขข้อมูลส่งหมาย">
           <i class="fa-solid fa-file-pen text-xs sm:text-sm"></i>
@@ -1350,7 +1343,7 @@
     </div>
 
     <!-- Floating Top Handoff Notification Pill Banner on Camera -->
-    <div id="mobileHandoffPillBanner" class="hidden absolute top-14 left-3 right-3 z-40 animate-bounce">
+    <div id="mobileHandoffPillBanner" class="hidden absolute top-14 left-3 right-3 z-40 transition-opacity duration-500">
       <div class="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white p-2.5 rounded-2xl shadow-2xl border border-emerald-300 flex items-center justify-between gap-2">
         <div onclick="showMobileRouteMapModal()" class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer active:scale-98 transition" title="แตะเพื่อเปิดแผนที่">
           <span class="w-7 h-7 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 text-white text-xs">
@@ -1465,16 +1458,7 @@
     </button>
   </aside>
 
-  <!-- ========================================================= -->
-  <!-- FLOATING MOBILE ROUTE WIDGET: ป้ายลอยตัวแสดงเส้นทางส่งหมายสำหรับหน้าจอมือถือ (แสดงเมื่อมีเส้นทาง) -->
-  <!-- ========================================================= -->
-  <aside id="floatingMobileRouteWidget" aria-label="เส้นทางการส่งหมาย" class="fixed bottom-16 sm:bottom-5 left-4 sm:left-5 z-40 hidden select-none">
-    <button type="button" onclick="showMobileRouteMapModal()" class="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 active:scale-95 text-white rounded-full shadow-2xl px-3.5 py-2 sm:px-4 sm:py-2.5 flex items-center gap-2 sm:gap-2.5 text-xs font-bold transition-all border-2 border-white/50 cursor-pointer animate-pulse" title="เปิดดูแผนที่และเส้นทางส่งหมาย">
-      <i class="fa-solid fa-route text-xs sm:text-sm"></i>
-      <span>เส้นทางส่งหมาย: <b id="floatingMobileRouteCount" class="font-mono text-xs sm:text-sm underline">0</b> จุด</span>
-      <span class="bg-white text-emerald-800 text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full font-bold shadow-xs">เปิดดู</span>
-    </button>
-  </aside>
+
 
   <!-- Dedicated Custom Landscape HUD Toast Overlay (จัดวางตรงกลางจอตามขนาดความกว้าง/ความยาวแนวนอน) -->
   <div id="sltsLandscapeToast" class="slts-landscape-toast-overlay" style="display: none;">

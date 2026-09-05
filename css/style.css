@@ -1768,6 +1768,42 @@ body.swal2-toast-shown .swal2-popup,
 }
 
 /* ================================================================
+   Tablet Safari Safe Area & Top Bar Fix
+   ลดระดับแถบด้านบนลงมาเล็กน้อย ไม่ให้ซ้อนทับกับ Safari Toolbar / Status Bar
+   ================================================================ */
+.is-tablet-device .camera-top-bar,
+.is-tablet-device #cameraTopBar,
+.is-tablet-safari .camera-top-bar,
+.is-tablet-safari #cameraTopBar {
+  padding-top: max(38px, calc(env(safe-area-inset-top, 0px) + 22px)) !important;
+}
+
+.is-tablet-device header,
+.is-tablet-safari header {
+  padding-top: max(14px, calc(env(safe-area-inset-top, 0px) + 8px)) !important;
+}
+
+@supports (-webkit-touch-callout: none) {
+  /* iPad / iPadOS WebKit */
+  @media (min-width: 600px) and (max-width: 1366px) {
+    .camera-top-bar,
+    #cameraTopBar {
+      padding-top: max(38px, calc(env(safe-area-inset-top, 0px) + 22px)) !important;
+    }
+    header {
+      padding-top: max(14px, calc(env(safe-area-inset-top, 0px) + 8px)) !important;
+    }
+  }
+}
+
+/* ซ่อน Floating Mobile Route Widget ถาวรเพื่อไม่ให้บดบังปุ่มกดกล้องที่มุมซ้ายล่าง */
+#floatingMobileRouteWidget {
+  display: none !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
+/* ================================================================
    Camera Screen & Modals Responsive Landscape Layout
    เมื่อหมุนจอแนวนอน: ย้าย 3 ปุ่มชัตเตอร์ไปแนวตั้งชิดขอบขวา, ปรับ Top Bar และปรับขนาด Modal ไม่ให้ล้นจอ
    ================================================================ */

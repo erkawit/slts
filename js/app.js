@@ -2961,40 +2961,49 @@ window.isMobileView = function() {
 };
 
 /**
- * เริ่มต้นการแสดงผลสวิตช์ Tablet Dual-Mode
+ * เริ่มต้นการแสดงผลสวิตช์ Tablet Dual-Mode สวยงาม สบายตา ตาม UX/UI ของระบบ
  */
 window.initTabletModeSwitch = function() {
   const isTablet = isTabletDevice();
   const headerContainer = document.getElementById('tabletModeToggleContainer');
-  const cameraContainer = document.getElementById('cameraTabletModeToggleContainer');
+  const cameraBtn = document.getElementById('btnTabletSwitchToPc');
 
   if (!isTablet) {
-    if (headerContainer) headerContainer.classList.add('hidden');
-    if (cameraContainer) cameraContainer.classList.add('hidden');
+    if (headerContainer) {
+      headerContainer.classList.add('hidden');
+      headerContainer.classList.remove('flex');
+    }
+    if (cameraBtn) {
+      cameraBtn.classList.add('hidden');
+      cameraBtn.classList.remove('flex');
+    }
     return;
   }
 
-  const currentMode = getTabletMode();
+  const currentMode = getTabletMode(); // 'pc' หรือ 'mobile'
   const isPc = currentMode === 'pc';
 
+  // ในโหมด PC ให้แสดงปุ่ม "เปิดกล้องถ่ายภาพ" ใน Header
   if (headerContainer) {
-    headerContainer.classList.remove('hidden');
-    headerContainer.classList.add('flex');
-  }
-  if (cameraContainer) {
-    cameraContainer.classList.remove('hidden');
-    cameraContainer.classList.add('flex');
+    if (isPc) {
+      headerContainer.classList.remove('hidden');
+      headerContainer.classList.add('flex');
+    } else {
+      headerContainer.classList.add('hidden');
+      headerContainer.classList.remove('flex');
+    }
   }
 
-  const headerChk = document.getElementById('tabletModeToggleCheckbox');
-  const cameraChk = document.getElementById('cameraTabletModeToggleCheckbox');
-  const headerLabel = document.getElementById('tabletModeLabel');
-  const cameraLabel = document.getElementById('cameraTabletModeLabel');
-
-  if (headerChk) headerChk.checked = isPc;
-  if (cameraChk) cameraChk.checked = isPc;
-  if (headerLabel) headerLabel.textContent = isPc ? 'โหมด PC' : 'โหมด Mobile';
-  if (cameraLabel) cameraLabel.textContent = isPc ? 'โหมด PC' : 'โหมด Mobile';
+  // ในโหมด Mobile ให้แสดงปุ่ม "โหมด PC" บน Camera Top Bar
+  if (cameraBtn) {
+    if (!isPc) {
+      cameraBtn.classList.remove('hidden');
+      cameraBtn.classList.add('flex');
+    } else {
+      cameraBtn.classList.add('hidden');
+      cameraBtn.classList.remove('flex');
+    }
+  }
 };
 
 /**
@@ -3018,7 +3027,7 @@ window.switchTabletMode = function(targetMode) {
     transitionText.textContent = isSwitchingToPc ? 'สลับไปยังโหมด PC' : 'สลับไปยังโหมด Mobile';
   }
   if (transitionIcon) {
-    transitionIcon.className = isSwitchingToPc ? 'fa-solid fa-desktop text-white' : 'fa-solid fa-mobile-screen-button text-white';
+    transitionIcon.className = isSwitchingToPc ? 'fa-solid fa-desktop text-white' : 'fa-solid fa-camera text-white';
   }
 
   if (overlay) {
@@ -3026,15 +3035,7 @@ window.switchTabletMode = function(targetMode) {
   }
 
   localStorage.setItem('slts_tablet_mode', targetMode);
-
-  const headerChk = document.getElementById('tabletModeToggleCheckbox');
-  const cameraChk = document.getElementById('cameraTabletModeToggleCheckbox');
-  const headerLabel = document.getElementById('tabletModeLabel');
-  const cameraLabel = document.getElementById('cameraTabletModeLabel');
-  if (headerChk) headerChk.checked = isSwitchingToPc;
-  if (cameraChk) cameraChk.checked = isSwitchingToPc;
-  if (headerLabel) headerLabel.textContent = isSwitchingToPc ? 'โหมด PC' : 'โหมด Mobile';
-  if (cameraLabel) cameraLabel.textContent = isSwitchingToPc ? 'โหมด PC' : 'โหมด Mobile';
+  initTabletModeSwitch();
 
   setTimeout(async () => {
     try {
@@ -3052,6 +3053,7 @@ window.switchTabletMode = function(targetMode) {
         }
         updateDesktopNavCompactState();
       }
+      initTabletModeSwitch();
     } catch (e) {
       console.error('Error during tablet mode switch:', e);
     } finally {
@@ -3298,21 +3300,42 @@ function applySafariMobileCameraSafeAreas() {
   const ua = navigator.userAgent || '';
   const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const isSafari = (/Safari/i.test(ua) && !/Chrome|CriOS|Android|Edg/i.test(ua)) || isIOS;
+  const isTablet = typeof isTabletDevice === 'function' ? isTabletDevice() : (isIOS && window.innerWidth >= 600);
+
+  if (isTablet) {
+    document.documentElement.classList.add('is-tablet-device');
+    if (document.body) document.body.classList.add('is-tablet-device');
+    if (isSafari || isIOS) {
+      document.documentElement.classList.add('is-tablet-safari');
+      if (document.body) document.body.classList.add('is-tablet-safari');
+      const header = document.querySelector('header');
+      if (header) {
+        header.style.setProperty('padding-top', 'max(14px, calc(env(safe-area-inset-top, 0px) + 8px))');
+      }
+    }
+  }
 
   if (isSafari || isIOS) {
     document.documentElement.classList.add('is-safari-device');
     const topBar = document.getElementById('cameraTopBar') || elements.cameraTopBar;
     if (topBar) {
       topBar.classList.add('safari-camera-top-bar');
-      if (window.innerWidth < 768) {
+      if (isTablet) {
+        // บน Tablet ผ่าน Safari: ปรับลดระดับบาร์ด้านบนลงมาเล็กน้อยเพื่อไม่ให้ซ้อนทับกับ Safari Toolbar / Status Bar
+        topBar.style.setProperty('padding-top', 'max(38px, calc(env(safe-area-inset-top, 0px) + 22px))', 'important');
+      } else if (window.innerWidth < 768) {
         topBar.style.setProperty('padding-top', 'max(54px, calc(env(safe-area-inset-top, 0px) + 16px))', 'important');
       } else {
         topBar.style.removeProperty('padding-top');
       }
     }
     const handoffBanner = document.getElementById('mobileHandoffPillBanner');
-    if (handoffBanner && window.innerWidth < 768) {
-      handoffBanner.style.setProperty('top', 'max(105px, calc(env(safe-area-inset-top, 0px) + 68px))', 'important');
+    if (handoffBanner) {
+      if (isTablet) {
+        handoffBanner.style.setProperty('top', 'max(85px, calc(env(safe-area-inset-top, 0px) + 52px))', 'important');
+      } else if (window.innerWidth < 768) {
+        handoffBanner.style.setProperty('top', 'max(105px, calc(env(safe-area-inset-top, 0px) + 68px))', 'important');
+      }
     }
   }
 }
@@ -20159,11 +20182,18 @@ function applyReceivedHandoff(handoff) {
     // อัปเดตสถานะและจำนวนจุดส่งหมายบนปุ่มแผนที่หน้าจอมือถือ
     updateMobileRouteMapButtonBadge(stopsCount);
 
-    // แสดงแถบสีเขียวลอยตัว 4 วินาที แล้วจางหายไปอย่างราบรื่น
+    // ตรวจสอบว่าเคยแสดงการแจ้งเตือนของชุดข้อมูลส่งหมายนี้ไปแล้วหรือยัง (แสดง 3 วินาที fade out และไม่แสดงซ้ำ)
+    const handoffKey = String(handoff.id || handoff.timestamp || (handoff.stops ? handoff.stops.length + '_' + (handoff.stops[0]?.caseNumber || '') : Date.now()));
+    const lastSeenHandoffKey = localStorage.getItem('slts_last_seen_handoff');
+
     const pill = document.getElementById('mobileHandoffPillBanner');
     const pillTitle = document.getElementById('mobileHandoffPillTitle');
     const pillSub = document.getElementById('mobileHandoffPillSub');
-    if (pill) {
+
+    // ถ้ายังไม่เคยแสดงผล ให้แสดง 3 วินาทีแล้ว fade out ทันที และไม่แสดงซ้ำอีกในครั้งต่อไป
+    if (pill && handoffKey !== lastSeenHandoffKey) {
+      localStorage.setItem('slts_last_seen_handoff', handoffKey);
+
       if (pillTitle) {
         pillTitle.textContent = isShareRoute
           ? `📲 ได้รับเส้นทางแชร์จาก ${senderName} (${stopsCount} จุดหมาย)`
@@ -20173,17 +20203,19 @@ function applyReceivedHandoff(handoff) {
         const firstCase = (handoff.stops && handoff.stops[0]) ? handoff.stops[0].caseNumber : '';
         pillSub.textContent = firstCase ? `คดี: ${firstCase} • แตะเพื่อเปิดดูแผนที่` : 'แตะเพื่อเปิดดูแผนที่';
       }
+
       pill.classList.remove('hidden');
-      pill.style.transition = 'opacity 0.6s ease';
+      pill.style.transition = 'opacity 0.5s ease-out';
       pill.style.opacity = '1';
+
       if (window._mobileHandoffPillTimer) clearTimeout(window._mobileHandoffPillTimer);
       window._mobileHandoffPillTimer = setTimeout(() => {
         pill.style.opacity = '0';
         setTimeout(() => {
           pill.classList.add('hidden');
           pill.style.opacity = '1';
-        }, 600);
-      }, 4000);
+        }, 500);
+      }, 3000); // แสดงผล 3 วินาทีแล้ว fade out ทันที
     }
 
     return; // จบการทำงานบนมือถือ ไม่แสดง modal กลางจอ
@@ -20502,16 +20534,6 @@ window.updateMobileRouteMapButtonBadge = function(count) {
     if (btn) {
       btn.classList.add('animate-pulse');
     }
-    if (pill) {
-      pill.classList.remove('hidden');
-      if (pillTitle) pillTitle.textContent = `📲 มีเส้นทางส่งหมาย ${stopsCount} จุดหมาย`;
-      if (pillSub && state.currentRouteStops && state.currentRouteStops[0]) {
-        pillSub.textContent = `คดี: ${state.currentRouteStops[0].caseNumber || '-'} • แตะเพื่อเปิดดูแผนที่`;
-      }
-    }
-    if (floatingWidget) {
-      floatingWidget.classList.remove('hidden');
-    }
   } else {
     if (btn) {
       btn.classList.remove('animate-pulse');
@@ -20519,9 +20541,11 @@ window.updateMobileRouteMapButtonBadge = function(count) {
     if (pill) {
       pill.classList.add('hidden');
     }
-    if (floatingWidget) {
-      floatingWidget.classList.add('hidden');
-    }
+  }
+
+  // ซ่อน Floating Mobile Route Widget ที่มุมซ้ายล่างถาวร ไม่ให้แสดงผลเพื่อไม่ให้บดบังปุ่มกดกล้อง
+  if (floatingWidget) {
+    floatingWidget.classList.add('hidden');
   }
 };
 
@@ -20533,6 +20557,18 @@ window.clearMobileRouteHandoff = function(event) {
     event.stopPropagation();
     event.preventDefault();
   }
+
+  // ปิดแถบเตือนด้านบนทันทีและบันทึกว่าถูกล้างแล้ว
+  const pill = document.getElementById('mobileHandoffPillBanner');
+  if (pill) {
+    if (window._mobileHandoffPillTimer) clearTimeout(window._mobileHandoffPillTimer);
+    pill.style.opacity = '0';
+    setTimeout(() => {
+      pill.classList.add('hidden');
+      pill.style.opacity = '1';
+    }, 250);
+  }
+  localStorage.setItem('slts_last_seen_handoff', 'cleared_' + Date.now());
 
   // 1. เคลียร์ State และ LocalStorage ของเส้นทางส่งหมายทั้งหมด
   state.currentRouteStops = [];
