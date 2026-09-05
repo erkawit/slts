@@ -504,6 +504,31 @@ table.dataTable tbody td {
   background: rgba(0, 0, 0, 0.65) !important;
 }
 
+/* ป้องกันแถบสีเข้มพื้นหลังพาดผ่านจากบนลงล่างสำหรับ Toast Notification บน PC */
+body.swal2-toast-shown .swal2-container,
+body.swal2-toast-shown .swal2-container.swal2-backdrop-show,
+.swal2-container:has(.swal2-toast),
+.swal2-container.swal2-top-end,
+.swal2-container.swal2-top-right {
+  background: transparent !important;
+  background-color: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  height: auto !important;
+  bottom: auto !important;
+  width: auto !important;
+  max-width: 100vw !important;
+  pointer-events: none !important;
+}
+
+body.swal2-toast-shown .swal2-popup,
+.swal2-container:has(.swal2-toast) .swal2-toast {
+  pointer-events: auto !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+}
+
 /* Custom Logo Loading Box */
 .logo-loading-box {
   display: flex;
@@ -573,7 +598,7 @@ table.dataTable tbody td {
 /* ================================================================
    SweetAlert2 — 80% Fullscreen Modal Base & Top Alignment on Mobile
    ================================================================ */
-.swal2-container,
+.swal2-container:not(.swal2-top-end):not(.swal2-top-right),
 .slts-swal-top-container {
   z-index: 10000000 !important;
   align-items: flex-start !important;

@@ -833,6 +833,12 @@ function renderBackgroundQueueModalContent() {
 
   let html = '';
 
+  const getManualUploadBadge = (it) => {
+    return (it && it.isManualUpload)
+      ? `<span class="text-[9px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.5 rounded-full border border-purple-200 inline-flex items-center gap-1 shrink-0"><i class="fa-solid fa-file-arrow-up text-[8px]"></i>อัปโหลดรูปเอง</span>`
+      : '';
+  };
+
   // 1. กรณีเครื่องออฟไลน์: แสดงรายการทั้งหมดในคิวในสถานะรอเชื่อมต่อเน็ต
   if (!isOnline && total > 0) {
     html += `
@@ -846,10 +852,11 @@ function renderBackgroundQueueModalContent() {
       html += `
         <div class="p-3.5 rounded-2xl border border-amber-200 bg-amber-50/40 shadow-xs space-y-1.5 text-left transition-all">
           <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="w-6 h-6 rounded-full bg-amber-500 text-white font-bold text-xs flex items-center justify-center shadow-xs">${idx + 1}</span>
               <span class="font-bold text-sm text-gray-900 font-mono"><i class="fa-solid fa-gavel mr-1 text-amber-600"></i>${item.caseNumber}</span>
               <span class="text-[10px] text-gray-500">${item.courtType || ''}</span>
+              ${getManualUploadBadge(item)}
             </div>
             <span class="text-[10px] font-bold text-amber-800 bg-white px-2 py-0.5 rounded-full border border-amber-200 shadow-2xs flex items-center gap-1">
               <i class="fa-solid fa-clock text-amber-600"></i>
@@ -872,10 +879,11 @@ function renderBackgroundQueueModalContent() {
     html += `
       <div class="p-3.5 rounded-2xl border-2 border-blue-400 bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-blue-50/90 shadow-sm space-y-2 text-left transition-all">
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">1</span>
             <span class="font-bold text-sm text-blue-900 font-mono"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i>${activeItem.caseNumber}</span>
             <span class="text-[10px] text-gray-500">${activeItem.courtType || ''}</span>
+            ${getManualUploadBadge(activeItem)}
           </div>
           <span class="text-[11px] font-bold text-blue-700 bg-white px-2.5 py-0.5 rounded-full border border-blue-200 shadow-2xs flex items-center gap-1.5 animate-pulse">
             <i class="fa-solid fa-spinner fa-spin text-blue-600 text-[10px]"></i>
@@ -904,10 +912,11 @@ function renderBackgroundQueueModalContent() {
       html += `
         <div class="p-3 rounded-2xl border border-gray-200 bg-gray-50/80 hover:bg-gray-50 transition space-y-1.5 text-left">
           <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="w-6 h-6 rounded-full bg-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center">${i + 1}</span>
               <span class="font-bold text-sm text-gray-800 font-mono">${item.caseNumber}</span>
               <span class="text-[10px] text-gray-500">${item.courtType || ''}</span>
+              ${getManualUploadBadge(item)}
             </div>
             <span class="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
               <i class="fa-solid fa-clock text-amber-600"></i>
@@ -937,12 +946,13 @@ function renderBackgroundQueueModalContent() {
     completed.slice(0, 5).forEach((item) => {
       html += `
         <div class="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 text-left flex items-center justify-between gap-2">
-          <div class="flex items-center gap-2 min-w-0">
+          <div class="flex items-center gap-2 min-w-0 flex-wrap">
             <span class="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
               <i class="fa-solid fa-check"></i>
             </span>
             <span class="font-bold text-xs text-emerald-900 font-mono truncate">${item.caseNumber}</span>
             <span class="text-[10px] text-gray-500 truncate hidden sm:inline">${item.locationText || ''}</span>
+            ${getManualUploadBadge(item)}
           </div>
           <span class="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
             สำเร็จ 100%
@@ -3344,17 +3354,8 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
   const isMobile = window.innerWidth <= 768;
   const shouldShowLoading = false;
 
-  // บนหน้าจอมือถือ หากมีการสั่งโหลดข้อมูลสด (forceRefresh) ให้แสดงเป็น Toast เล็กๆ แจ้งสถานะแบบไม่บล็อกหน้าจอ
-  if (isMobile && forceRefresh && !silent) {
-    Swal.fire({
-      toast: true,
-      position: 'top',
-      icon: 'info',
-      title: 'กำลังซิงค์ประวัติหมายในเบื้องหลัง...',
-      timer: 2000,
-      showConfirmButton: false
-    });
-  } else if (elements.cacheStatusBadge) {
+  // บนหน้าจอมือถือ ไม่ต้องแสดง Toast ซิงค์ข้อมูลเบื้องหลังเพื่อลดการรบกวนผู้ใช้
+  if (!isMobile && elements.cacheStatusBadge) {
     elements.cacheStatusBadge.className = 'text-blue-700 font-medium bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200 animate-pulse';
     elements.cacheStatusBadge.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1 text-blue-600"></i>กำลังซิงค์ข้อมูล...`;
   }
@@ -3425,16 +3426,7 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
     updateCacheBadgeUI(false, timeStr);
     renderDataTable(rows);
 
-    if (isMobile && forceRefresh && !silent) {
-      Swal.fire({
-        toast: true,
-        position: 'top',
-        icon: 'success',
-        title: 'อัปเดตประวัติหมายเรียบร้อยแล้ว',
-        timer: 2000,
-        showConfirmButton: false
-      });
-    }
+    // บนมือถือไม่แสดง Little Notification ตามคำสั่งผู้ใช้
     return;
   }
 
@@ -3446,31 +3438,37 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
       const timeStr = new Date(lastFetchTime).toLocaleTimeString('th-TH');
       updateCacheBadgeUI(true, timeStr);
 
-      const Toast = Swal.mixin({
-        toast: true,
-        position: isMobile ? 'top' : 'top-end',
-        showConfirmButton: false,
-        timer: 3500,
-        timerProgressBar: true
-      });
-      Toast.fire({
-        icon: 'info',
-        title: 'กำลังแสดงข้อมูลแคชล่าสุดในเครื่อง'
-      });
+      if (!isMobile) {
+        const Toast = Swal.mixin({
+          toast: true,
+          position: 'top-end',
+          backdrop: false,
+          showConfirmButton: false,
+          timer: 3000,
+          timerProgressBar: true
+        });
+        Toast.fire({
+          icon: 'info',
+          title: 'กำลังแสดงข้อมูลแคชล่าสุดในเครื่อง'
+        });
+      }
       return;
     } catch (e) {}
   }
 
   // 4. หากไม่มีแคชเลย และดึงข้อมูลไม่สำเร็จ
-  Swal.fire({
-    toast: true,
-    position: isMobile ? 'top' : 'top-end',
-    icon: 'warning',
-    title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
-    text: 'ระบบจะลองดึงข้อมูลใหม่อีกครั้งในรอบถัดไป',
-    timer: 3000,
-    showConfirmButton: false
-  });
+  if (!isMobile) {
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      backdrop: false,
+      icon: 'warning',
+      title: 'ยังไม่สามารถเชื่อมต่อข้อมูลสดได้',
+      text: 'ระบบจะลองดึงข้อมูลใหม่อีกครั้งในรอบถัดไป',
+      timer: 3000,
+      showConfirmButton: false
+    });
+  }
 };
 
 function updateCacheBadgeUI(isFromCache, timeStr) {
@@ -8327,16 +8325,273 @@ window.showCaseSubRecordsModal = function(caseNumber) {
   });
 };
 
+/// -------------------------------------------------------------------------
+// Modal เลือกแนบรูปภาพสำหรับ Mobile (Mobile Manual Photo Upload)
+// -------------------------------------------------------------------------
+window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
+  let selectedDataUrl = existingDataUrl || (state.attachedManualUpload?.attachedImage) || window._mobileManualUploadDataUrl || null;
+  let extractedLat = state.attachedManualUpload?.lat || null;
+  let extractedLng = state.attachedManualUpload?.lng || null;
+
+  Swal.fire({
+    title: `<div class="flex items-center justify-center gap-2 text-base font-bold text-gray-900">
+      <i class="fa-solid fa-cloud-arrow-up text-emerald-600"></i>
+      <span>แนบภาพถ่ายส่งหมาย</span>
+    </div>`,
+    html: `
+      <div class="text-left text-xs space-y-3 p-1">
+        <p class="text-gray-600 text-[11px]">เลือกไฟล์รูปภาพที่ถ่ายไว้จากคลังภาพ เพื่อนำเข้าข้อมูลและส่งเข้าคิวอัปโหลดเบื้องหลัง</p>
+        
+        <!-- File Input (hidden) -->
+        <input type="file" id="mobileUploadPhotoInput" accept="image/*" class="hidden">
+        
+        <!-- Dropzone / Picker Card -->
+        <div id="mobileUploadDropzone" onclick="document.getElementById('mobileUploadPhotoInput').click()" class="border-2 border-dashed ${selectedDataUrl ? 'border-emerald-400 bg-emerald-50/50' : 'border-gray-300 bg-gray-50/80 hover:bg-emerald-50/30'} rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer transition text-center min-h-[160px]">
+          <div id="mobileUploadPlaceholder" class="${selectedDataUrl ? 'hidden' : 'block'} space-y-2">
+            <div class="w-14 h-14 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl shadow-xs">
+              <i class="fa-solid fa-image"></i>
+            </div>
+            <div>
+              <p class="font-bold text-gray-800 text-xs">แตะเพื่อเลือกรูปภาพ</p>
+              <p class="text-[10px] text-gray-400 mt-0.5">รองรับไฟล์ภาพ JPG, PNG, WEBP จากเครื่อง</p>
+            </div>
+          </div>
+
+          <div id="mobileUploadPreviewBox" class="${selectedDataUrl ? 'block' : 'hidden'} space-y-2.5 w-full">
+            <div class="relative max-w-full max-h-56 mx-auto rounded-xl overflow-hidden bg-black/5 flex items-center justify-center shadow-inner">
+              <img id="mobileUploadPreviewImg" src="${selectedDataUrl || ''}" class="max-h-52 max-w-full object-contain rounded-xl">
+            </div>
+            <div class="flex items-center justify-between text-[11px] text-gray-600 px-1">
+              <span id="mobileUploadFileInfo" class="truncate font-semibold text-emerald-800"><i class="fa-solid fa-circle-check text-emerald-600 mr-1"></i>เลือกรูปภาพเรียบร้อย</span>
+              <button type="button" onclick="event.stopPropagation(); document.getElementById('mobileUploadPhotoInput').click();" class="px-2.5 py-1.5 bg-white hover:bg-gray-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 shadow-2xs shrink-0 flex items-center gap-1 transition cursor-pointer">
+                <i class="fa-solid fa-arrows-rotate"></i> แนบรูปอื่น
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="mobileUploadGpsInfo" class="p-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-[11px] flex items-center gap-2">
+          <i class="fa-solid fa-location-crosshairs text-blue-600 shrink-0"></i>
+          <span id="mobileUploadGpsText">${(extractedLat && extractedLng) ? `พบพิกัดในรูปถ่าย: ${extractedLat.toFixed(6)}, ${extractedLng.toFixed(6)}` : 'ระบบจะสกัดพิกัด GPS จากรูปภาพ หรือใช้พิกัดจากเครื่องอัตโนมัติ'}</span>
+        </div>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-arrow-right mr-1.5"></i> ยืนยันรูปและไปกรอกข้อมูล',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#059669',
+    cancelButtonColor: '#6b7280',
+    customClass: {
+      popup: 'rounded-3xl p-4 max-w-[92vw]',
+      confirmButton: 'text-xs py-2.5 px-4 font-bold shadow-md',
+      cancelButton: 'text-xs py-2.5 px-3'
+    },
+    didOpen: () => {
+      const fileInput = document.getElementById('mobileUploadPhotoInput');
+      const previewBox = document.getElementById('mobileUploadPreviewBox');
+      const placeholder = document.getElementById('mobileUploadPlaceholder');
+      const previewImg = document.getElementById('mobileUploadPreviewImg');
+      const fileInfo = document.getElementById('mobileUploadFileInfo');
+      const gpsText = document.getElementById('mobileUploadGpsText');
+
+      fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+          Swal.showValidationMessage('กรุณาเลือกเฉพาะไฟล์รูปภาพ');
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          selectedDataUrl = ev.target.result;
+          window._mobileManualUploadDataUrl = selectedDataUrl;
+          if (previewImg) previewImg.src = selectedDataUrl;
+          if (previewBox) previewBox.classList.remove('hidden');
+          if (placeholder) placeholder.classList.add('hidden');
+          const sizeKb = Math.round(file.size / 1024);
+          if (fileInfo) fileInfo.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600 mr-1"></i>${escapeHtml(file.name)} (${sizeKb} KB)`;
+
+          // สกัดพิกัด EXIF GPS ถ้ามี
+          if (typeof exifr !== 'undefined') {
+            try {
+              const gps = await exifr.gps(file);
+              if (gps && gps.latitude && gps.longitude) {
+                extractedLat = gps.latitude;
+                extractedLng = gps.longitude;
+                if (gpsText) {
+                  gpsText.innerHTML = `<b class="text-emerald-700"><i class="fa-solid fa-satellite mr-1"></i>พบพิกัดในรูปถ่าย:</b> ${extractedLat.toFixed(6)}, ${extractedLng.toFixed(6)}`;
+                }
+              }
+            } catch (exErr) {
+              console.warn('exifr extraction failed:', exErr);
+            }
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    },
+    preConfirm: () => {
+      if (!selectedDataUrl) {
+        Swal.showValidationMessage('กรุณาเลือกไฟล์รูปภาพก่อนกดยืนยัน');
+        return false;
+      }
+      return {
+        dataUrl: selectedDataUrl,
+        lat: extractedLat,
+        lng: extractedLng
+      };
+    }
+  }).then((res) => {
+    if (res.isConfirmed && res.value) {
+      window._mobileManualUploadDataUrl = res.value.dataUrl;
+      showMobileSummonsFormModal(false, false, {
+        attachedImage: res.value.dataUrl,
+        lat: res.value.lat,
+        lng: res.value.lng
+      });
+    }
+  });
+};
+
+// -------------------------------------------------------------------------
+// บันทึกและส่งเข้าคิวอัปโหลดเบื้องหลังสำหรับรูปที่อัปโหลดเองบนมือถือ
+// -------------------------------------------------------------------------
+window.submitMobileManualUploadForm = async function() {
+  const v = validateAndExtractModalForm();
+  if (!v) return;
+
+  const manualData = state.attachedManualUpload;
+  if (!manualData || !manualData.attachedImage) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ไม่พบรูปภาพ',
+      text: 'กรุณาแนบรูปภาพส่งหมายก่อนบันทึก'
+    });
+    return;
+  }
+
+  // ปิด modal ทันที (Instant Form Release)
+  Swal.close();
+  applyModalFormValues(v);
+
+  try {
+    const img = new Image();
+    img.src = manualData.attachedImage;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+
+    const caseNumber = getFormattedCaseNumber();
+    const locationText = getFullLocationText();
+    const currentHeading = window.compassManager ? window.compassManager.getHeading() : 0;
+
+    let coordsLat = state.lat;
+    let coordsLng = state.lng;
+    if (v.coords) {
+      const parts = v.coords.split(/[,;\s]+/).map(p => parseFloat(p)).filter(p => !isNaN(p));
+      if (parts.length >= 2) {
+        coordsLat = parts[0];
+        coordsLng = parts[1];
+      }
+    } else if (manualData.lat && manualData.lng) {
+      coordsLat = manualData.lat;
+      coordsLng = manualData.lng;
+    }
+
+    const finalProvince = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || localStorage.getItem('slts_selected_province') || 'อุดรธานี';
+    const finalDistrict = v.district || state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : '') || '';
+    const finalSubdistrict = v.subdistrict || state.selectedSubdistrict || (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || '';
+
+    const payloadData = {
+      caseNumber: caseNumber,
+      courtType: elements.courtTypeSelect ? elements.courtTypeSelect.value : (v.courtType || ''),
+      province: finalProvince,
+      district: finalDistrict,
+      subdistrict: finalSubdistrict,
+      locationType: v.locType || (elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน'),
+      locationText: locationText,
+      lat: coordsLat,
+      lng: coordsLng,
+      heading: currentHeading,
+      dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+      uploader: state.currentUser?.username || '',
+      uploadedBy: state.currentUser?.username || '',
+      user_id: state.currentUser?.username || '',
+      uploaderRole: state.currentUser?.role || 'user',
+      isManualUpload: true
+    };
+
+    const watermarkedResult = await WatermarkEngine.renderWatermark(img, payloadData);
+    const baseFilename = caseNumber.replace(/\//g, '-');
+    const imageFilename = baseFilename + '.jpg';
+
+    const compressedImageBase64 = await compressImageToMax1MB(watermarkedResult.dataUrl);
+
+    const uploadPayload = {
+      action: 'upload_image',
+      ...payloadData,
+      fileName: imageFilename,
+      imageBase64: compressedImageBase64
+    };
+
+    // ส่งเข้า Unified Multi-Tier Background Queue (100% เบื้องหลัง)
+    const enqueued = enqueueBackgroundUpload({
+      caseNumber: caseNumber,
+      courtType: payloadData.courtType,
+      locationText: locationText,
+      fileName: imageFilename,
+      payload: uploadPayload,
+      isManualUpload: true
+    });
+
+    if (typeof setRouteStopDeliveryStatus === 'function') {
+      setRouteStopDeliveryStatus(caseNumber, 'captured_offline', {
+        capturedAt: new Date().toISOString(),
+        capturedPhotoUrl: compressedImageBase64
+      });
+    }
+
+    if (enqueued && navigator.onLine) {
+      processBackgroundQueue();
+    }
+
+    // รีเซ็ตสถานะและฟอร์ม
+    state.attachedManualUpload = null;
+    window._mobileManualUploadDataUrl = null;
+    resetFormForNextCase();
+
+    // อัปเดตตัวเลขบนปุ่มอัพโหลดเบื้องหลัง
+    updateBackgroundQueueUI();
+
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(40);
+    }
+  } catch (err) {
+    console.error('submitMobileManualUploadForm error:', err);
+  }
+};
+
 // -------------------------------------------------------------------------
 // SweetAlert Form บันทึกข้อมูลส่งหมาย 80% สำหรับ Mobile
 // -------------------------------------------------------------------------
-window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape = false) {
+window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape = false, manualUploadData = null) {
   if (!allowLandscape && typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('กรอกหรือแก้ไขข้อมูลหมาย')) {
     return;
   }
   if (!state.selectedProvince) {
     showProvinceSelectorModal(true);
     return;
+  }
+
+  if (manualUploadData && manualUploadData.attachedImage) {
+    state.attachedManualUpload = manualUploadData;
+    window._mobileManualUploadDataUrl = manualUploadData.attachedImage;
+  } else if (!isEditing && !manualUploadData) {
+    // ถ้าไม่ได้เปิดแบบแก้ไขและไม่ได้ส่งรูปแนบมา ให้ล้างรูปแนบเก่า
+    state.attachedManualUpload = null;
   }
 
   // หากจังหวัดที่เลือกไม่ตรงกับข้อมูลจังหวัดที่สังกัดส่งหมาย จากข้อมูล user ที่ล็อกอินใช้งานอยู่
@@ -8387,7 +8642,10 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
   const curMoo = (state.tempModalValues?.moo !== undefined) ? state.tempModalValues.moo : (elements.mooInput?.value || '');
   const curAdminName = state.tempModalValues?.adminName || elements.localAdminNameInput?.value || 'ที่ทำการปกครองส่วนท้องถิ่น';
   const curOtherLoc = (state.tempModalValues?.otherLocName !== undefined) ? state.tempModalValues.otherLocName : (elements.customOtherLocationName?.value || '');
-  const curCoords = (state.tempModalValues?.coords !== undefined) ? state.tempModalValues.coords : (elements.coordinatesInput?.value || (state.lat ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : ''));
+  
+  const curCoords = (manualUploadData && manualUploadData.lat && manualUploadData.lng)
+    ? `${Number(manualUploadData.lat).toFixed(6)}, ${Number(manualUploadData.lng).toFixed(6)}`
+    : ((state.tempModalValues?.coords !== undefined) ? state.tempModalValues.coords : (elements.coordinatesInput?.value || (state.lat ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : '')));
 
   const currentThaiYear = new Date().getFullYear() + 543;
   let yearOpts = '';
@@ -8427,31 +8685,23 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
     `;
   });
 
-  // ปุ่มค้นหาที่มุมซ้ายบน (Active เมื่อออนไลน์ / Disabled เมื่อออฟไลน์)
-  const searchBtnHtml = isOnline
-    ? `<button type="button" onclick="saveTempModalFormState(); showMobileHistorySearchModal();" class="slts-header-search-icon-btn" title="คลิกเพื่อค้นหาประวัติการส่งหมาย">
-         <i class="fa-solid fa-magnifying-glass"></i>
-       </button>`
-    : `<button type="button" disabled class="slts-header-search-icon-btn opacity-40 cursor-not-allowed pointer-events-none" title="ค้นหาประวัติได้เฉพาะเมื่อเชื่อมต่ออินเทอร์เน็ต">
-         <i class="fa-solid fa-magnifying-glass text-gray-300"></i>
-       </button>`;
-
-  const searchBadge = isOnline
-    ? `<span class="text-[10px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 px-1.5 py-0.2 rounded font-normal inline-flex items-center gap-1"><i class="fa-solid fa-magnifying-glass text-[8px]"></i>ค้นหา</span>`
-    : `<span class="text-[10px] bg-amber-500/30 text-amber-200 border border-amber-400/40 px-1.5 py-0.2 rounded font-normal inline-flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up text-[8px]"></i>ออฟไลน์</span>`;
-
-  const headerTitleAction = isOnline ? `onclick="saveTempModalFormState(); showMobileHistorySearchModal();" title="คลิกเพื่อค้นหาประวัติการส่งหมาย"` : '';
+  // ปุ่มอัปโหลดรูปภาพที่มุมซ้ายบน (แทนที่ปุ่มค้นหาเดิม)
+  const uploadBtnHtml = `
+    <button type="button" onclick="saveTempModalFormState(); showMobileUploadPhotoModal();" class="slts-header-search-icon-btn bg-emerald-600/90 hover:bg-emerald-600 text-white shadow-xs cursor-pointer" title="อัปโหลดภาพถ่ายส่งหมาย (เลือกไฟล์ภาพจากเครื่อง)">
+      <i class="fa-solid fa-cloud-arrow-up text-white"></i>
+    </button>
+  `;
 
   Swal.fire({
     html: `
       <div class="slts-form-modal">
         <!-- Header -->
         <div class="slts-modal-header">
-          <!-- ปุ่มค้นหาข้อมูลประวัติส่งหมาย ที่มุมซ้ายบน (Disabled เมื่อออฟไลน์) -->
+          <!-- ปุ่มอัปโหลดข้อมูลภาพถ่ายส่งหมาย ที่มุมซ้ายบน -->
           <div class="flex items-center gap-1">
-            ${searchBtnHtml}
+            ${uploadBtnHtml}
           </div>
-          <div class="flex-1 ${isOnline ? 'cursor-pointer' : ''}" ${headerTitleAction}>
+          <div class="flex-1">
             <h2 class="slts-modal-title flex items-center gap-1.5">
               <span>${isEditing ? 'แก้ไขข้อมูลหมาย' : 'บันทึกข้อมูลส่งหมาย'}</span>
             </h2>
@@ -8518,64 +8768,65 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
 
             <!-- ศาลปกติ -->
             <div id="m_provCourtBox" class="${isOtherCourt ? 'hidden' : 'block'} space-y-1.5">
-              <div class="slts-case-row">
-                <input type="text" id="m_prefix" list="m_prefixList" value="${curPrefix}" placeholder="อักษร เช่น ผบE" class="slts-input slts-input-prefix" autocomplete="off" oninput="handleModalPrefixInput(this.value)">
-                <datalist id="m_prefixList">
-                  ${prefixDatalistHtml}
-                </datalist>
-                <input type="text" id="m_caseNo" value="${curCaseNo}" placeholder="เลขคดี *" inputmode="numeric" class="slts-input slts-input-caseno">
-                <span class="slts-case-sep">/</span>
-                <select id="m_caseYear" class="slts-select slts-select-year">
+              <label class="slts-label">เลขคดี (อักษร / เลข / ปี) <span class="slts-required">*</span></label>
+              <div class="flex items-stretch gap-1">
+                <div class="relative w-24 shrink-0">
+                  <input type="text" id="m_prefix" list="m_prefixList" value="${curPrefix}" placeholder="อักษร" class="slts-input font-bold text-blue-700 text-center uppercase" autocomplete="off" oninput="handleModalPrefixInput(this.value)">
+                  <datalist id="m_prefixList">
+                    ${prefixDatalistHtml}
+                  </datalist>
+                </div>
+                <input type="text" id="m_caseNo" value="${curCaseNo}" placeholder="เลขคดี เช่น 2100" inputmode="numeric" class="slts-input flex-1 font-bold text-gray-900 text-center">
+                <span class="flex items-center px-1 text-gray-400 font-bold">/</span>
+                <select id="m_caseYear" class="slts-input w-24 shrink-0 font-bold text-gray-800 text-center cursor-pointer">
                   ${yearOpts}
                 </select>
               </div>
+
               <!-- แถบเลือกอักษรนำหน้าด่วน -->
               <div class="slts-prefix-chips-container">
-                <span class="slts-prefix-chips-label"><i class="fa-solid fa-list-check text-[9px] mr-1"></i>เลือกอักษร:</span>
+                <span class="slts-prefix-chips-label"><i class="fa-solid fa-bolt text-[9px] mr-1"></i>ด่วน:</span>
                 <div class="slts-prefix-chips-wrap" id="m_prefixChips">
                   ${prefixChipsHtml}
                 </div>
               </div>
             </div>
 
-            <!-- หมายศาลอื่น -->
-            <div id="m_otherCourtBox" class="${isOtherCourt ? 'flex' : 'hidden'} slts-case-row">
-              <span class="slts-case-prefix-tag">ต</span>
-              <input type="text" id="m_otherCaseNo" value="${curOtherCaseNo}" placeholder="เลขคดี *" inputmode="numeric" class="slts-input slts-input-caseno">
-              <span class="slts-case-sep">/</span>
-              <select id="m_otherCaseYear" class="slts-select slts-select-year">
-                ${otherYearOpts}
-              </select>
+            <!-- หมายศาลอื่น (หมาย ต.) -->
+            <div id="m_otherCourtBox" class="${isOtherCourt ? 'block' : 'hidden'} space-y-1.5">
+              <label class="slts-label">เลขคดีหมายศาลอื่น (หมาย ต.) <span class="slts-required">*</span></label>
+              <div class="flex items-stretch gap-1">
+                <span class="flex items-center px-3 bg-blue-50 border border-blue-200 text-blue-700 font-bold text-xs rounded-xl select-none shrink-0">ต</span>
+                <input type="text" id="m_otherCaseNo" value="${curOtherCaseNo}" placeholder="เลขคดี เช่น 2100" inputmode="numeric" class="slts-input flex-1 font-bold text-gray-900 text-center">
+                <span class="flex items-center px-1 text-gray-400 font-bold">/</span>
+                <select id="m_otherCaseYear" class="slts-input w-24 shrink-0 font-bold text-gray-800 text-center cursor-pointer">
+                  ${otherYearOpts}
+                </select>
+              </div>
             </div>
 
-            <!-- ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี เช่น ล.1-2) -->
-            <div class="slts-field-stack mt-2">
+            <!-- ข้อมูลเพิ่มเติมต่อท้ายเลขคดี -->
+            <div class="pt-1">
               <label class="slts-label flex items-center justify-between">
-                <span><i class="fa-solid fa-circle-info text-blue-500 mr-1"></i>ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)</span>
+                <span>ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)</span>
                 <span class="text-[10px] text-gray-400 font-normal">ไม่บังคับ</span>
               </label>
-              <input 
-                type="text" 
-                id="m_caseExtra" 
-                value="${curCaseExtra}" 
-                placeholder="เช่น ล.1-2, จำเลยที่ 1-2 (เว้นวรรค 1 เคาะต่อท้ายเลขคดี)" 
-                class="slts-input" 
-                autocomplete="off"
-              >
+              <input type="text" id="m_caseExtra" value="${curCaseExtra}" placeholder="เช่น ล.1-2, จำเลยที่ 1 (เว้น 1 เคาะต่อท้ายเลขคดี)" class="slts-input text-xs">
             </div>
           </div>
 
-          <!-- Section: ที่ตั้งส่งหมาย -->
+          <!-- Section: ประเภทสถานที่ -->
           <div class="slts-form-section">
             <div class="slts-section-label">
-              <i class="fa-solid fa-house text-emerald-600"></i> สถานที่ส่งหมาย
+              <i class="fa-solid fa-house-chimney text-emerald-600"></i> สถานที่ส่งหมาย
             </div>
+            
             <div class="slts-field-stack">
               <label class="slts-label">ประเภทสถานที่ <span class="slts-required">*</span></label>
-              <select id="m_locType" class="slts-select" onchange="handleModalLocTypeChange(this.value)">
+              <select id="m_locType" class="slts-input font-bold cursor-pointer" onchange="handleModalLocTypeChange(this.value)">
                 <option value="หมายบ้าน" ${curLocType === 'หมายบ้าน' ? 'selected' : ''}>หมายบ้าน</option>
-                <option value="ที่ทำการปกครองส่วนท้องถิ่น" ${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'selected' : ''}>ที่ทำการปกครองส่วนท้องถิ่น</option>
-                <option value="อื่นๆ" ${curLocType === 'อื่นๆ' ? 'selected' : ''}>อื่นๆ</option>
+                <option value="ที่ทำการปกครองส่วนท้องถิ่น" ${curLocType === 'ที่ทำการปกครองส่วนท้องถิ่น' ? 'selected' : ''}>ที่ทำการปกครองส่วนท้องถิ่น (อบต. / เทศบาล)</option>
+                <option value="อื่นๆ" ${curLocType === 'อื่นๆ' ? 'selected' : ''}>อื่นๆ (ระบุสถานที่)</option>
               </select>
             </div>
 
@@ -8622,14 +8873,42 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
             <input type="text" id="m_coords" value="${curCoords}" placeholder="เช่น 17.4144, 102.7882" class="slts-input slts-input-mono">
           </div>
 
+          ${state.attachedManualUpload && state.attachedManualUpload.attachedImage ? `
+            <!-- Card แสดงรูปภาพที่แนบและปุ่มย้อนกลับ -->
+            <div class="slts-form-section bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-300 p-2.5 rounded-2xl flex items-center justify-between gap-2 shadow-xs">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <img src="${state.attachedManualUpload.attachedImage}" class="w-12 h-12 rounded-xl object-cover border border-emerald-400 shrink-0 shadow-2xs">
+                <div class="min-w-0 text-left">
+                  <div class="flex items-center gap-1">
+                    <span class="text-[10px] bg-emerald-600 text-white font-bold px-1.5 py-0.2 rounded-full">มีรูปภาพแนบอยู่</span>
+                    <span class="text-[10px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.2 rounded-full border border-purple-200">อัปโหลดรูปเอง</span>
+                  </div>
+                  <p class="text-[10px] text-gray-500 truncate mt-0.5">พร้อมส่งเข้าคิวอัปโหลดเบื้องหลัง</p>
+                </div>
+              </div>
+              <button type="button" onclick="saveTempModalFormState(); showMobileUploadPhotoModal('${state.attachedManualUpload.attachedImage}')" class="px-2.5 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 text-xs font-bold rounded-xl border border-emerald-300 shadow-2xs shrink-0 flex items-center gap-1 transition cursor-pointer">
+                <i class="fa-solid fa-arrow-left text-[10px]"></i> ย้อนกลับ
+              </button>
+            </div>
+          ` : ''}
+
         </form>
 
         <!-- Confirm button -->
-        <div class="slts-form-footer">
-          <button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { state.tempModalValues = v; Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
-            <i class="fa-solid fa-camera mr-1.5"></i> ยืนยันข้อมูลและเปิดกล้องถ่ายภาพ
-          </button>
-          ${isEditing ? '<button type="button" class="slts-cancel-btn" onclick="Swal.close()"><i class="fa-solid fa-xmark mr-1"></i> กลับไปยังกล้อง</button>' : ''}
+        <div class="slts-form-footer flex flex-col gap-2">
+          ${state.attachedManualUpload && state.attachedManualUpload.attachedImage ? `
+            <button type="button" class="slts-confirm-btn bg-emerald-600 hover:bg-emerald-700 active:scale-98" onclick="submitMobileManualUploadForm()">
+              <i class="fa-solid fa-cloud-arrow-up mr-1.5"></i> ยืนยันข้อมูลและส่งเข้าคิวอัปโหลดเบื้องหลัง
+            </button>
+            <button type="button" class="slts-cancel-btn" onclick="saveTempModalFormState(); showMobileUploadPhotoModal('${state.attachedManualUpload.attachedImage}')">
+              <i class="fa-solid fa-arrow-left mr-1"></i> ย้อนกลับไปหน้าเลือกแนบรูป
+            </button>
+          ` : `
+            <button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { state.tempModalValues = v; Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
+              <i class="fa-solid fa-camera mr-1.5"></i> ยืนยันข้อมูลและเปิดกล้องถ่ายภาพ
+            </button>
+            ${isEditing ? '<button type="button" class="slts-cancel-btn" onclick="Swal.close()"><i class="fa-solid fa-xmark mr-1"></i> กลับไปยังกล้อง</button>' : ''}
+          `}
         </div>
       </div>
     `,
@@ -13932,10 +14211,29 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
     yearOptions += `<option value="${yr}" ${isSelected ? 'selected' : ''}>${yr}</option>`;
   }
 
+  const lastCourtPrefix = (typeof localStorage !== 'undefined' ? (localStorage.getItem('slts_last_court_prefix') || 'อ') : 'อ').replace(/[0-9]/g, '') || 'อ';
   const courtType = initialData.courtType || (lastSaved && lastSaved.courtType) || `ศาลจังหวัด${currentProvince}`;
-  const isOtherCourt = (courtType === 'หมายศาลอื่น' || courtType.includes('หมายศาลอื่น'));
+  let courtCategoryVal = initialData.courtCategory || (lastSaved && lastSaved.courtCategory);
+  if (!courtCategoryVal) {
+    if (courtType === 'หมายศาลอื่น' || courtType.includes('หมายศาลอื่น')) {
+      courtCategoryVal = 'หมายศาลอื่น';
+    } else if (courtType === 'ศาลที่ไม่สังกัดภาค' || courtType.includes('ศาลที่ไม่สังกัดภาค') || (!courtType.startsWith('ศาลจังหวัด') && !courtType.startsWith('ศาลแขวง') && !courtType.startsWith('ศาลเยาวชน'))) {
+      courtCategoryVal = 'ศาลที่ไม่สังกัดภาค';
+    } else if (courtType.startsWith('ศาลแขวง')) {
+      courtCategoryVal = 'ศาลแขวง';
+    } else if (courtType.startsWith('ศาลเยาวชน')) {
+      courtCategoryVal = 'ศาลเยาวชนและครอบครัว';
+    } else {
+      courtCategoryVal = 'ศาลจังหวัด';
+    }
+  }
+  const isOtherCourt = (courtCategoryVal === 'หมายศาลอื่น');
+  const isUnaffiliated = (courtCategoryVal === 'ศาลที่ไม่สังกัดภาค');
   const locType = initialData.locationType || (lastSaved && lastSaved.locationType) || 'หมายบ้าน';
-  const prefixVal = (initialData.prefix !== undefined) ? initialData.prefix : ((lastSaved && lastSaved.prefix) || '');
+  const rawPrefix = (initialData.prefix !== undefined && initialData.prefix !== '') 
+    ? initialData.prefix 
+    : ((lastSaved && lastSaved.prefix) ? lastSaved.prefix : lastCourtPrefix);
+  const prefixVal = String(rawPrefix || '').replace(/[0-9]/g, '');
   const mooVal = (initialData.moo !== undefined) ? initialData.moo : ((lastSaved && lastSaved.moo) || '');
   const localAdminNameVal = initialData.localAdminName || (lastSaved && lastSaved.localAdminName) || 'ที่ทำการปกครองส่วนท้องถิ่น';
   const customOtherLocationNameVal = initialData.customOtherLocationName || (lastSaved && lastSaved.customOtherLocationName) || '';
@@ -13985,34 +14283,42 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
         </div>
 
         <!-- แถบประเภทศาล -->
-        <div class="flex items-stretch">
-          <input 
-            type="text" 
-            id="${prefix}courtNameInput" 
-            readonly 
-            class="flex-1 bg-gray-100 border border-gray-300 rounded-l-xl px-3 py-2 text-xs font-bold text-gray-800 cursor-default"
-            value="${courtType}"
-          >
-          <input type="hidden" id="${prefix}courtType" value="${courtType}">
-          <button 
-            type="button" 
-            onclick="openScheduleCourtTypeModal('${prefix}')" 
-            class="px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-r-xl border border-blue-600 transition flex items-center gap-1 shrink-0 cursor-pointer"
-          >
-            <i class="fa-solid fa-building-columns"></i>
-            <span>เลือกประเภทศาล</span>
-          </button>
+        <div class="space-y-1">
+          <div class="flex items-stretch">
+            <input 
+              type="text" 
+              id="${prefix}courtNameInput" 
+              ${isUnaffiliated ? '' : 'readonly'}
+              placeholder="${isUnaffiliated ? 'พิมพ์ชื่อศาล เช่น ศาลแพ่ง, ศาลอาญา, ศาลล้มละลายกลาง...' : ''}"
+              class="flex-1 ${isUnaffiliated ? 'bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100' : 'bg-gray-100 cursor-default'} border border-gray-300 rounded-l-xl px-3 py-2 text-xs font-bold text-gray-800 transition"
+              value="${courtType}"
+            >
+            <input type="hidden" id="${prefix}courtType" value="${courtType}">
+            <input type="hidden" id="${prefix}courtCategory" value="${courtCategoryVal}">
+            <button 
+              type="button" 
+              onclick="openScheduleCourtTypeModal('${prefix}')" 
+              class="px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold rounded-r-xl border border-blue-600 transition flex items-center gap-1 shrink-0 cursor-pointer"
+            >
+              <i class="fa-solid fa-building-columns"></i>
+              <span>เลือกประเภทศาล</span>
+            </button>
+          </div>
+          <div id="${prefix}unaffiliatedNotice" class="${isUnaffiliated ? 'block' : 'hidden'} text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-1.5 leading-snug">
+            <i class="fa-solid fa-circle-info mr-1 text-amber-600"></i><strong>ศาลที่ไม่สังกัดภาค:</strong> สามารถพิมพ์ระบุชื่อศาลได้เองในช่องด้านบน
+          </div>
         </div>
 
-        <!-- กรณี: ศาลประจำจังหวัด/ศาลแขวง/ศาลเยาวชน (อักษร + เลขคดี + / + ปี พ.ศ.) -->
+        <!-- กรณี: ศาลประจำจังหวัด/ศาลแขวง/ศาลเยาวชน/ศาลที่ไม่สังกัดภาค (อักษร + เลขคดี + / + ปี พ.ศ.) -->
         <div id="${prefix}udonCaseField" class="${!isOtherCourt ? 'flex' : 'hidden'} items-stretch">
           <div class="relative w-28 sm:w-36 flex-shrink-0">
             <input 
               type="text" 
               id="${prefix}udonPrefix" 
               list="${prefix}udonPrefixList" 
-              placeholder="อักษร เช่น ผบE" 
+              placeholder="อักษร เช่น ผบE, อ" 
               value="${prefixVal}"
+              oninput="this.value = this.value.replace(/[0-9]/g, '')"
               class="w-full h-full bg-white border border-r-0 border-gray-300 focus:border-blue-500 rounded-l-xl px-2.5 py-2 text-xs font-bold text-gray-800"
               autocomplete="off"
             >
@@ -14293,7 +14599,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
       </div>
 
       <!-- 4.2 รูปภาพประกอบการวางแผนเส้นทาง (สำหรับกรณีสร้างหมุดเอง หรือระบุภาพใหม่เพื่อส่งไปมือถือ) -->
-      <div class="bg-white p-3 rounded-xl border border-gray-200 space-y-2.5" id="${prefix}routePlanImageSection">
+      <div class="bg-white p-3 rounded-xl border border-gray-200 space-y-2.5 mb-6 pb-2" id="${prefix}routePlanImageSection">
         <div class="flex items-center justify-between">
           <label class="block font-bold text-gray-800 text-xs flex items-center gap-1.5">
             <i class="fa-regular fa-image text-emerald-600"></i>
@@ -14825,6 +15131,19 @@ function bindScheduleFormEvents(prefix = 'modal_') {
       if (typeof window.updateLocalAdminQuickPills === 'function') {
         window.updateLocalAdminQuickPills(prefix);
       }
+
+      // ซิงค์ชื่อศาลตามจังหวัดที่เลือก หากเป็นประเภทศาลทั่วไป (ศาลจังหวัด/แขวง/เยาวชน)
+      const courtCat = document.getElementById(`${prefix}courtCategory`)?.value || '';
+      const courtNameInput = document.getElementById(`${prefix}courtNameInput`);
+      const courtTypeInput = document.getElementById(`${prefix}courtType`);
+      if (courtCat && courtCat !== 'ศาลที่ไม่สังกัดภาค' && courtCat !== 'หมายศาลอื่น') {
+        let newTitle = `ศาลจังหวัด${p}`;
+        if (courtCat === 'ศาลแขวง') newTitle = `ศาลแขวง${p}`;
+        else if (courtCat === 'ศาลเยาวชนและครอบครัว') newTitle = `ศาลเยาวชนและครอบครัวจังหวัด${p}`;
+        if (courtNameInput) courtNameInput.value = newTitle;
+        if (courtTypeInput) courtTypeInput.value = newTitle;
+      }
+
       refreshSuggestions();
     });
 
@@ -14853,7 +15172,18 @@ function bindScheduleFormEvents(prefix = 'modal_') {
   if (mooEl) mooEl.addEventListener('input', refreshSuggestions);
   if (udonCaseEl) udonCaseEl.addEventListener('input', refreshSuggestions);
   if (otherCaseEl) otherCaseEl.addEventListener('input', refreshSuggestions);
-  if (prefixEl) prefixEl.addEventListener('input', refreshSuggestions);
+  if (prefixEl) {
+    prefixEl.addEventListener('input', () => {
+      prefixEl.value = prefixEl.value.replace(/[0-9]/g, '');
+      const cleanP = prefixEl.value.trim();
+      if (cleanP) {
+        try {
+          localStorage.setItem('slts_last_court_prefix', cleanP);
+        } catch (e) {}
+      }
+      refreshSuggestions();
+    });
+  }
   if (udonYearEl) udonYearEl.addEventListener('change', refreshSuggestions);
   if (otherYearEl) otherYearEl.addEventListener('change', refreshSuggestions);
   if (locTypeEl) locTypeEl.addEventListener('change', refreshSuggestions);
@@ -15208,18 +15538,55 @@ window.openScheduleCourtTypeModal = function(prefix = 'modal_') {
   const prov = document.getElementById(`${prefix}province`)?.value || 'อุดรธานี';
   const overlay = document.getElementById(`${prefix}courtPickerOverlay`);
   const listContainer = document.getElementById(`${prefix}courtOptionsList`);
-  const currentCourt = document.getElementById(`${prefix}courtType`)?.value || `ศาลจังหวัด${prov}`;
+  const currentCategory = document.getElementById(`${prefix}courtCategory`)?.value || '';
+  const currentCourt = document.getElementById(`${prefix}courtNameInput`)?.value || document.getElementById(`${prefix}courtType`)?.value || `ศาลจังหวัด${prov}`;
 
   const courtOptions = [
-    { title: `ศาลจังหวัด${prov}`, category: 'ศาลจังหวัด', desc: `ศาลชั้นต้นประจำจังหวัด${prov} (คดี ผบE, พE, ผบ, พ, อ...)`, icon: 'fa-landmark', badge: 'ประจำจังหวัด', color: 'blue' },
-    { title: `ศาลแขวง${prov}`, category: 'ศาลแขวง', desc: `คดีมโนสาเร่ / คดีแขวง ประจำ${prov} (คดี ผบ, พ, ม, มย...)`, icon: 'fa-scale-balanced', badge: 'ศาลแขวง', color: 'indigo' },
-    { title: `ศาลเยาวชนและครอบครัวจังหวัด${prov}`, category: 'ศาลเยาวชนและครอบครัว', desc: `คดีเยาวชนและครอบครัวจังหวัด${prov} (คดี ย, ร, รส...)`, icon: 'fa-children', badge: 'คดีครอบครัว', color: 'purple' },
-    { title: 'หมายศาลอื่น (ศาลที่ไม่สังกัดภาค / หมายข้ามเขต)', category: 'หมายศาลอื่น', desc: 'ศาลแพ่ง, ศาลอาญา, ศาลล้มละลาย หรือหมายส่งข้ามเขต (คดี ต)', icon: 'fa-building-columns', badge: 'หมายศาลอื่น (ต)', color: 'emerald' }
+    { 
+      title: 'ศาลที่ไม่สังกัดภาค', 
+      category: 'ศาลที่ไม่สังกัดภาค', 
+      desc: 'พิมพ์ระบุชื่อศาลได้เอง เช่น ศาลแพ่ง, ศาลอาญา, ศาลล้มละลายกลาง', 
+      icon: 'fa-landmark-dome', 
+      badge: 'ไม่สังกัดภาค', 
+      color: 'amber' 
+    },
+    { 
+      title: `ศาลจังหวัด${prov}`, 
+      category: 'ศาลจังหวัด', 
+      desc: `ศาลชั้นต้นประจำจังหวัด${prov} (คดี ผบE, พE, ผบ, พ, อ...)`, 
+      icon: 'fa-landmark', 
+      badge: 'ประจำจังหวัด', 
+      color: 'blue' 
+    },
+    { 
+      title: `ศาลแขวง${prov}`, 
+      category: 'ศาลแขวง', 
+      desc: `คดีมโนสาเร่ / คดีแขวง ประจำ${prov} (คดี ผบ, พ, ม, มย...)`, 
+      icon: 'fa-scale-balanced', 
+      badge: 'ศาลแขวง', 
+      color: 'indigo' 
+    },
+    { 
+      title: `ศาลเยาวชนและครอบครัวจังหวัด${prov}`, 
+      category: 'ศาลเยาวชนและครอบครัว', 
+      desc: `คดีเยาวชนและครอบครัวจังหวัด${prov} (คดี ย, ร, รส...)`, 
+      icon: 'fa-children', 
+      badge: 'คดีครอบครัว', 
+      color: 'purple' 
+    },
+    { 
+      title: 'หมายศาลอื่น (หมาย ต.)', 
+      category: 'หมายศาลอื่น', 
+      desc: 'หมายส่งข้ามเขตจากศาลอื่น (เลขคดีขึ้นต้นด้วย ต. เสมอ)', 
+      icon: 'fa-stamp', 
+      badge: 'หมายศาลอื่น (ต)', 
+      color: 'emerald' 
+    }
   ];
 
   if (listContainer) {
     listContainer.innerHTML = courtOptions.map(opt => {
-      const isSelected = (opt.title === currentCourt || (opt.category === 'หมายศาลอื่น' && currentCourt.includes('หมายศาลอื่น')));
+      const isSelected = (currentCategory === opt.category) || (!currentCategory && (opt.title === currentCourt || (opt.category === 'หมายศาลอื่น' && currentCourt.includes('หมายศาลอื่น'))));
       return `
         <button 
           type="button" 
@@ -15263,28 +15630,85 @@ window.closeScheduleCourtOverlay = function(prefix) {
 window.selectScheduleCourtChoice = function(prefix, category, title) {
   const courtNameInput = document.getElementById(`${prefix}courtNameInput`);
   const courtTypeInput = document.getElementById(`${prefix}courtType`);
+  const courtCategoryInput = document.getElementById(`${prefix}courtCategory`);
   const udonField = document.getElementById(`${prefix}udonCaseField`);
   const otherField = document.getElementById(`${prefix}otherCourtCaseField`);
+  const unaffiliatedNotice = document.getElementById(`${prefix}unaffiliatedNotice`);
+  const udonPrefix = document.getElementById(`${prefix}udonPrefix`);
 
-  if (courtNameInput) courtNameInput.value = title;
-  if (courtTypeInput) courtTypeInput.value = title;
+  if (courtCategoryInput) courtCategoryInput.value = category;
 
-  const isOther = (category === 'หมายศาลอื่น' || title.includes('หมายศาลอื่น'));
-  if (udonField && otherField) {
-    if (isOther) {
+  const savedPrefix = (typeof localStorage !== 'undefined' ? (localStorage.getItem('slts_last_court_prefix') || 'อ') : 'อ').replace(/[0-9]/g, '') || 'อ';
+
+  if (category === 'ศาลที่ไม่สังกัดภาค') {
+    if (courtNameInput) {
+      courtNameInput.readOnly = false;
+      courtNameInput.classList.remove('bg-gray-100', 'cursor-default');
+      courtNameInput.classList.add('bg-white', 'focus:border-blue-500', 'focus:ring-2', 'focus:ring-blue-100');
+      courtNameInput.placeholder = 'พิมพ์ระบุชื่อศาล เช่น ศาลแพ่ง, ศาลอาญา, ศาลล้มละลายกลาง...';
+      if (!courtNameInput.value || courtNameInput.value.startsWith('ศาลจังหวัด') || courtNameInput.value.startsWith('ศาลแขวง') || courtNameInput.value.startsWith('ศาลเยาวชน') || courtNameInput.value.includes('หมายศาลอื่น')) {
+        courtNameInput.value = '';
+      }
+      setTimeout(() => courtNameInput.focus(), 150);
+    }
+    if (courtTypeInput) courtTypeInput.value = courtNameInput?.value || 'ศาลที่ไม่สังกัดภาค';
+    if (unaffiliatedNotice) unaffiliatedNotice.classList.remove('hidden');
+
+    if (udonField && otherField) {
+      udonField.classList.remove('hidden');
+      udonField.classList.add('flex');
+      otherField.classList.add('hidden');
+      otherField.classList.remove('flex');
+    }
+
+    if (udonPrefix) {
+      if (!udonPrefix.value || udonPrefix.value === 'ต') {
+        udonPrefix.value = savedPrefix;
+      }
+    }
+  } else if (category === 'หมายศาลอื่น') {
+    if (courtNameInput) {
+      courtNameInput.readOnly = true;
+      courtNameInput.classList.add('bg-gray-100', 'cursor-default');
+      courtNameInput.classList.remove('bg-white', 'focus:border-blue-500', 'focus:ring-2', 'focus:ring-blue-100');
+      courtNameInput.placeholder = '';
+      courtNameInput.value = 'หมายศาลอื่น';
+    }
+    if (courtTypeInput) courtTypeInput.value = 'หมายศาลอื่น';
+    if (unaffiliatedNotice) unaffiliatedNotice.classList.add('hidden');
+
+    if (udonField && otherField) {
       otherField.classList.remove('hidden');
       otherField.classList.add('flex');
       udonField.classList.add('hidden');
       udonField.classList.remove('flex');
       const otherCaseNo = document.getElementById(`${prefix}otherCaseNo`);
       if (otherCaseNo) otherCaseNo.focus();
-    } else {
+    }
+  } else {
+    // ศาลจังหวัด, ศาลแขวง, ศาลเยาวชนและครอบครัว
+    if (courtNameInput) {
+      courtNameInput.readOnly = true;
+      courtNameInput.classList.add('bg-gray-100', 'cursor-default');
+      courtNameInput.classList.remove('bg-white', 'focus:border-blue-500', 'focus:ring-2', 'focus:ring-blue-100');
+      courtNameInput.placeholder = '';
+      courtNameInput.value = title;
+    }
+    if (courtTypeInput) courtTypeInput.value = title;
+    if (unaffiliatedNotice) unaffiliatedNotice.classList.add('hidden');
+
+    if (udonField && otherField) {
       udonField.classList.remove('hidden');
       udonField.classList.add('flex');
       otherField.classList.add('hidden');
       otherField.classList.remove('flex');
-      const udonPrefix = document.getElementById(`${prefix}udonPrefix`);
-      if (udonPrefix) udonPrefix.focus();
+    }
+
+    if (udonPrefix) {
+      if (!udonPrefix.value || udonPrefix.value === 'ต') {
+        udonPrefix.value = savedPrefix;
+      }
+      udonPrefix.focus();
     }
   }
 
@@ -15298,8 +15722,19 @@ function extractSummonsFormData(prefix = 'modal_') {
   const province = document.getElementById(`${prefix}province`)?.value || 'อุดรธานี';
   const district = document.getElementById(`${prefix}district`)?.value || '';
   const subdistrict = document.getElementById(`${prefix}subdistrict`)?.value || '';
-  const courtType = document.getElementById(`${prefix}courtType`)?.value || `ศาลจังหวัด${province}`;
-  const isOther = (courtType === 'หมายศาลอื่น' || courtType.includes('หมายศาลอื่น'));
+  const courtCategory = document.getElementById(`${prefix}courtCategory`)?.value || '';
+  let courtType = document.getElementById(`${prefix}courtType`)?.value || `ศาลจังหวัด${province}`;
+
+  if (courtCategory === 'ศาลที่ไม่สังกัดภาค') {
+    const customName = (document.getElementById(`${prefix}courtNameInput`)?.value || '').trim();
+    courtType = customName || 'ศาลที่ไม่สังกัดภาค';
+  } else if (courtCategory === 'หมายศาลอื่น') {
+    courtType = 'หมายศาลอื่น';
+  } else {
+    courtType = (document.getElementById(`${prefix}courtNameInput`)?.value || courtType).trim();
+  }
+
+  const isOther = (courtCategory === 'หมายศาลอื่น' || courtType === 'หมายศาลอื่น' || courtType.includes('หมายศาลอื่น'));
 
   let prefixStr = '';
   let caseNo = '';
@@ -15310,9 +15745,14 @@ function extractSummonsFormData(prefix = 'modal_') {
     caseNo = (document.getElementById(`${prefix}otherCaseNo`)?.value || '').trim();
     caseYear = (document.getElementById(`${prefix}otherCaseYear`)?.value || '').trim();
   } else {
-    prefixStr = (document.getElementById(`${prefix}udonPrefix`)?.value || '').trim();
+    prefixStr = (document.getElementById(`${prefix}udonPrefix`)?.value || '').trim().replace(/[0-9]/g, '');
     caseNo = (document.getElementById(`${prefix}udonCaseNo`)?.value || '').trim();
     caseYear = (document.getElementById(`${prefix}udonCaseYear`)?.value || '').trim();
+    if (prefixStr) {
+      try {
+        localStorage.setItem('slts_last_court_prefix', prefixStr);
+      } catch (e) {}
+    }
   }
 
   const caseExtra = (document.getElementById(`${prefix}caseExtraInput`)?.value || '').trim();
@@ -15356,6 +15796,7 @@ function extractSummonsFormData(prefix = 'modal_') {
     district,
     subdistrict,
     courtType,
+    courtCategory: courtCategory || (isOther ? 'หมายศาลอื่น' : 'ศาลจังหวัด'),
     prefix: prefixStr,
     caseNo,
     caseYear,
@@ -16213,6 +16654,7 @@ window.openMapAreaSelectorModal = function() {
           id: 'stop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
           caseNumber: data.caseNumber || `${data.prefix}${data.caseNo}/${data.caseYear}`.trim() || 'หมายส่ง',
           courtType: data.courtType,
+          courtCategory: data.courtCategory || (data.courtType === 'หมายศาลอื่น' ? 'หมายศาลอื่น' : 'ศาลจังหวัด'),
           prefix: data.prefix,
           caseNo: data.caseNo,
           caseYear: data.caseYear,
@@ -16560,7 +17002,7 @@ window.openAddRouteStopModal = function(editIndex = null) {
   Swal.fire({
     title: `<div class="flex items-center justify-center gap-2 text-base font-bold text-gray-900"><i class="fa-solid fa-${isEditing ? 'pen-to-square' : 'plus'} text-blue-600"></i> ${isEditing ? `แก้ไขรายการส่งหมาย (ลำดับที่ ${editIndex + 1})` : 'เพิ่มรายการส่งหมายใหม่'}</div>`,
     html: `
-      <div class="p-1 max-h-[70vh] sm:max-h-[74vh] overflow-y-auto pr-1.5 slts-swal-body-scroll text-left">
+      <div class="p-1 pb-10 max-h-[75vh] sm:max-h-[78vh] overflow-y-auto pr-2 slts-swal-body-scroll text-left">
         ${getSummonsFormHtml('quick_', initialData)}
       </div>
     `,
@@ -16615,6 +17057,7 @@ window.openAddRouteStopModal = function(editIndex = null) {
         id: isEditing ? state.currentRouteStops[editIndex].id : ('stop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6)),
         caseNumber: data.caseNumber || (data.prefix || data.caseNo ? `${data.prefix}${data.caseNo}/${data.caseYear}`.trim() : (data.localAdminName || data.customOtherLocationName || 'หมายส่ง')),
         courtType: data.courtType,
+        courtCategory: data.courtCategory || (data.courtType === 'หมายศาลอื่น' ? 'หมายศาลอื่น' : 'ศาลจังหวัด'),
         prefix: data.prefix,
         caseNo: data.caseNo,
         caseYear: data.caseYear,
@@ -16659,6 +17102,7 @@ window.openAddRouteStopModal = function(editIndex = null) {
         district: data.district,
         subdistrict: data.subdistrict,
         courtType: data.courtType,
+        courtCategory: data.courtCategory || (data.courtType === 'หมายศาลอื่น' ? 'หมายศาลอื่น' : 'ศาลจังหวัด'),
         prefix: data.prefix,
         caseYear: data.caseYear,
         locationType: data.locationType,
@@ -16668,6 +17112,7 @@ window.openAddRouteStopModal = function(editIndex = null) {
       };
       try {
         localStorage.setItem('slts_last_schedule_form', JSON.stringify(state.lastScheduleFormData));
+        if (data.prefix) localStorage.setItem('slts_last_court_prefix', data.prefix);
       } catch (e) {}
 
       initLeafletMapInstance();
@@ -18471,25 +18916,47 @@ window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
     stopsCount: stops.length
   });
 
-  Swal.fire({
-    icon: 'success',
-    title: 'ส่งไปแสดงผลบนมือถือเรียบร้อย!',
-    html: `
-      <div class="text-left text-xs space-y-2 bg-violet-50 p-3.5 rounded-2xl border border-violet-200 mt-2">
-        <p><strong>ผู้รับ:</strong> <span class="text-violet-700 font-bold">@${userId} (${userName})</span></p>
-        <p><strong>จุดเริ่มต้น:</strong> <span class="text-blue-700 font-semibold">${start.name}</span></p>
-        ${end && end.enabled ? `<p><strong>จุดสิ้นสุด:</strong> <span class="text-indigo-700 font-semibold">${end.name}</span></p>` : (state.isRoundTrip ? `<p><strong>เส้นทาง:</strong> <span class="text-emerald-700 font-semibold">วนกลับจุดเริ่มต้น</span></p>` : '')}
-        <p><strong>รายการส่งหมาย:</strong> <span class="text-emerald-700 font-bold">${cleanStops.length} รายการ</span></p>
-        ${roadDistKm ? `<p><strong>ระยะทางบนถนนจริง:</strong> <span class="font-mono text-gray-800 font-bold">${roadDistKm.toFixed(1)} กม.</span></p>` : ''}
-        <p class="text-[11px] text-gray-500 pt-1.5 border-t border-violet-200">
-          <i class="fa-solid fa-mobile-screen-button mr-1 text-violet-600"></i> อัปเดตไปยังหน้าจอมือถือแบบ Real-time เรียบร้อยแล้ว
-        </p>
-      </div>
-    `,
-    confirmButtonText: 'ตกลง',
-    confirmButtonColor: '#7c3aed',
-    timer: 4500
-  });
+  // แจ้งเตือนเมื่อส่งต่อเส้นทาง: PC แสดงมุมขวาบน / มือถือแสดงแถบเขียว 2 วิ
+  showHandoffSentFeedback('ส่งไปแสดงผลบนมือถือเรียบร้อย!', `ผู้รับ: @${userId} (${cleanStops.length} จุดหมาย)`);
+};
+
+/**
+ * แสดงการแจ้งเตือนเมื่อมีการส่งต่อเส้นทางหรือแชร์ข้อมูล:
+ * - บน PC: แสดงที่มุมขวาบน (top-end) โดยไม่มีแถบพื้นหลังสีเข้ม
+ * - บนมือถือ: แสดงเป็นแถบสีเขียวลอยตัวขึ้นมา 2 วินาที
+ */
+window.showHandoffSentFeedback = function(message, detailText = '') {
+  if (window.innerWidth <= 768) {
+    const pill = document.getElementById('mobileHandoffPillBanner');
+    const pillTitle = document.getElementById('mobileHandoffPillTitle');
+    const pillSub = document.getElementById('mobileHandoffPillSub');
+    if (pill) {
+      if (pillTitle) pillTitle.textContent = `📤 ${message}`;
+      if (pillSub) pillSub.textContent = detailText || 'ส่งข้อมูลเรียบร้อยแล้ว';
+      pill.classList.remove('hidden');
+      pill.style.transition = 'opacity 0.4s ease';
+      pill.style.opacity = '1';
+      if (window._mobileHandoffPillTimer) clearTimeout(window._mobileHandoffPillTimer);
+      window._mobileHandoffPillTimer = setTimeout(() => {
+        pill.style.opacity = '0';
+        setTimeout(() => {
+          pill.classList.add('hidden');
+          pill.style.opacity = '1';
+        }, 500);
+      }, 2000);
+    }
+  } else {
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      backdrop: false,
+      icon: 'success',
+      title: message,
+      text: detailText,
+      timer: 3000,
+      showConfirmButton: false
+    });
+  }
 };
 
 /**
@@ -18772,22 +19239,8 @@ window.openShareRouteModal = async function() {
       stopsCount: cleanStops.length
     });
 
-    Swal.fire({
-      icon: 'success',
-      title: 'แชร์เส้นทางเรียบร้อยแล้ว!',
-      html: `
-        <div class="text-left text-xs space-y-2 bg-indigo-50 p-3.5 rounded-2xl border border-indigo-200 mt-2">
-          <p><strong>ผู้รับ (${targetUserIds.length} ท่าน):</strong> <span class="text-indigo-700 font-bold">${escapeHtml(recipientNames.join(', '))}</span></p>
-          <p><strong>จำนวนจุดหมาย:</strong> <span class="text-emerald-700 font-bold">${cleanStops.length} รายการ</span></p>
-          ${note ? `<p><strong>หมายเหตุ:</strong> <span class="italic text-gray-700">"${escapeHtml(note)}"</span></p>` : ''}
-          <p class="text-[11px] text-gray-500 pt-1.5 border-t border-indigo-200">
-            ระบบได้ส่งข้อมูลเส้นทางไปยังผู้รับทุกคนเรียบร้อยแล้ว และข้อมูลจะถูกจัดเก็บไว้ที่ผู้รับจนกว่าผู้รับจะกดล้างข้อมูล
-          </p>
-        </div>
-      `,
-      confirmButtonText: 'ตกลง',
-      confirmButtonColor: '#4f46e5'
-    });
+    // แจ้งเตือนเมื่อแชร์เส้นทาง: PC แสดงมุมขวาบน / มือถือแสดงแถบเขียว 2 วิ
+    showHandoffSentFeedback('แชร์เส้นทางเรียบร้อยแล้ว!', `แชร์ ${cleanStops.length} จุดหมาย ให้ ${targetUserIds.length} ท่านเรียบร้อย`);
   });
 };
 
@@ -19286,6 +19739,93 @@ function applyReceivedHandoff(handoff) {
   const endName = handoff.endLocation?.enabled ? handoff.endLocation.name : (handoff.isRoundTrip ? 'วนกลับจุดเริ่มต้น' : 'จุดส่งหมายสุดท้าย');
   const distText = handoff.totalDistanceKm ? ` • ระยะทาง ${handoff.totalDistanceKm.toFixed(1)} กม.` : '';
 
+  const applyHandoffDataToState = () => {
+    handoff.status = isShareRoute ? 'shared_active' : 'active';
+    try {
+      localStorage.setItem('slts_device_handoff_' + currentUserId, JSON.stringify(handoff));
+      localStorage.setItem('slts_user_route_' + currentUserId, JSON.stringify(handoff));
+      localStorage.setItem('slts_latest_handoff', JSON.stringify(handoff));
+    } catch (e) {}
+
+    if (handoff.stops && handoff.stops.length > 0) {
+      state.currentRouteStops = handoff.stops;
+      localStorage.setItem('slts_shared_route_stops', JSON.stringify(state.currentRouteStops));
+      saveCurrentRouteStopsHistory(state.currentRouteStops);
+    }
+    if (handoff.startLocation) {
+      state.routeStartLocation = handoff.startLocation;
+      localStorage.setItem('slts_shared_route_start', JSON.stringify(handoff.startLocation));
+    }
+    if (handoff.endLocation) {
+      state.routeEndLocation = handoff.endLocation;
+      localStorage.setItem('slts_shared_route_end', JSON.stringify(handoff.endLocation));
+    }
+    if (handoff.isRoundTrip !== undefined) {
+      state.isRoundTrip = handoff.isRoundTrip;
+    }
+    if (handoff.routeRoadPolyline && Array.isArray(handoff.routeRoadPolyline)) {
+      state.routeRoadPolylineCoords = handoff.routeRoadPolyline;
+      state.mapRoutePolylineCoords = handoff.routeRoadPolyline;
+      localStorage.setItem('slts_shared_route_polyline', JSON.stringify(handoff.routeRoadPolyline));
+    }
+    if (handoff.totalDistanceKm) {
+      state.calculatedRoadDistanceKm = handoff.totalDistanceKm;
+    }
+  };
+
+  // -------------------------------------------------------------
+  // บนหน้าจอมือถือ (<= 768px):
+  // ไม่ต้องแสดง modal กลางหน้าจอ ให้แสดงแถบสีเขียวลอยตัวขึ้นมา 3-5 วินาที
+  // แล้วจางหายไปอย่างราบรื่น และให้แสดงจำนวนจุดส่งหมายที่ปุ่มแผนที่ด้วย
+  // -------------------------------------------------------------
+  if (window.innerWidth <= 768) {
+    if (state.appsScriptUrl && navigator.onLine) {
+      fetch(state.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'ack_handoff',
+          user_id: currentUserId,
+          timestamp: new Date().toISOString()
+        })
+      }).catch(() => {});
+    }
+
+    applyHandoffDataToState();
+
+    // อัปเดตสถานะและจำนวนจุดส่งหมายบนปุ่มแผนที่หน้าจอมือถือ
+    updateMobileRouteMapButtonBadge(stopsCount);
+
+    // แสดงแถบสีเขียวลอยตัว 4 วินาที แล้วจางหายไปอย่างราบรื่น
+    const pill = document.getElementById('mobileHandoffPillBanner');
+    const pillTitle = document.getElementById('mobileHandoffPillTitle');
+    const pillSub = document.getElementById('mobileHandoffPillSub');
+    if (pill) {
+      if (pillTitle) {
+        pillTitle.textContent = isShareRoute
+          ? `📲 ได้รับเส้นทางแชร์จาก ${senderName} (${stopsCount} จุดหมาย)`
+          : `📲 ได้รับเส้นทางส่งหมาย ${stopsCount} จุดหมาย`;
+      }
+      if (pillSub) {
+        const firstCase = (handoff.stops && handoff.stops[0]) ? handoff.stops[0].caseNumber : '';
+        pillSub.textContent = firstCase ? `คดี: ${firstCase} • แตะเพื่อเปิดดูแผนที่` : 'แตะเพื่อเปิดดูแผนที่';
+      }
+      pill.classList.remove('hidden');
+      pill.style.transition = 'opacity 0.6s ease';
+      pill.style.opacity = '1';
+      if (window._mobileHandoffPillTimer) clearTimeout(window._mobileHandoffPillTimer);
+      window._mobileHandoffPillTimer = setTimeout(() => {
+        pill.style.opacity = '0';
+        setTimeout(() => {
+          pill.classList.add('hidden');
+          pill.style.opacity = '1';
+        }, 600);
+      }, 4000);
+    }
+
+    return; // จบการทำงานบนมือถือ ไม่แสดง modal กลางจอ
+  }
+
   // -------------------------------------------------------------
   // กรณีที่ 1: เป็นการแชร์เส้นทางการส่งหมายมาจากผู้ใช้อื่น (Share Route)
   // -------------------------------------------------------------
@@ -19394,15 +19934,18 @@ function applyReceivedHandoff(handoff) {
           }
         }
 
-        Swal.fire({
-          toast: true,
-          position: 'top',
-          icon: 'success',
-          title: 'เปิดเส้นทางเรียบร้อยแล้ว',
-          text: `นำเข้าเส้นทางจาก ${senderName} (${stopsCount} จุดหมาย)`,
-          timer: 3500,
-          showConfirmButton: false
-        });
+        if (window.innerWidth > 768) {
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            backdrop: false,
+            icon: 'success',
+            title: 'เปิดเส้นทางเรียบร้อยแล้ว',
+            text: `นำเข้าเส้นทางจาก ${senderName} (${stopsCount} จุดหมาย)`,
+            timer: 3500,
+            showConfirmButton: false
+          });
+        }
       }
     });
     return;
@@ -19495,15 +20038,18 @@ function applyReceivedHandoff(handoff) {
       const prov = state.selectedProvince || 'อุดรธานี';
       provTextEl.textContent = `📍 จ.${prov} (${handoff.stops ? handoff.stops.length : 0} จุดหมาย)`;
     }
-    Swal.fire({
-      toast: true,
-      position: 'top',
-      icon: 'success',
-      title: '📲 ได้รับข้อมูลเส้นทางส่งหมายแบบ Real-time',
-      text: `จุดเริ่มต้น: ${handoff.startLocation?.name || 'จุดตั้งต้น'} • ${handoff.stops ? handoff.stops.length : 0} จุดหมาย`,
-      timer: 3000,
-      showConfirmButton: false
-    });
+    if (window.innerWidth > 768) {
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        backdrop: false,
+        icon: 'success',
+        title: '📲 ได้รับข้อมูลเส้นทางส่งหมายแบบ Real-time',
+        text: `จุดเริ่มต้น: ${handoff.startLocation?.name || 'จุดตั้งต้น'} • ${handoff.stops ? handoff.stops.length : 0} จุดหมาย`,
+        timer: 3000,
+        showConfirmButton: false
+      });
+    }
   } else {
     Swal.fire({
       icon: 'info',
