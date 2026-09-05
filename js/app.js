@@ -12850,13 +12850,6 @@ function cleanStopsForStorage(stops) {
         clean[key] = s[key];
       }
     }
-    // ตรวจสอบและดึงภาพถ่ายเติมลงใน clean.imageUrl หากยังไม่มี เพื่อให้การส่ง Handoff/แชร์เส้นทางมีรูปภาพติดไปด้วยเสมอ
-    if (!clean.imageUrl && typeof getStopDisplayPhotoData === 'function') {
-      const p = getStopDisplayPhotoData(clean);
-      if (p && p.hasPhoto) {
-        clean.imageUrl = p.rawUrl;
-      }
-    }
     return clean;
   });
 }
@@ -12908,10 +12901,6 @@ window.loadSavedRouteStopsHistory = function() {
           }
         }
         state.currentRouteStops = parsed.stops.map(s => {
-          if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
-            const p = getStopDisplayPhotoData(s);
-            if (p && p.hasPhoto) s.imageUrl = p.rawUrl;
-          }
           return s;
         });
         if (parsed.province) state.selectedProvince = parsed.province;
@@ -12926,10 +12915,6 @@ window.loadSavedRouteStopsHistory = function() {
       const parsedStops = JSON.parse(shared);
       if (Array.isArray(parsedStops) && parsedStops.length > 0) {
         state.currentRouteStops = parsedStops.map(s => {
-          if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
-            const p = getStopDisplayPhotoData(s);
-            if (p && p.hasPhoto) s.imageUrl = p.rawUrl;
-          }
           return s;
         });
         return state.currentRouteStops;
@@ -13349,45 +13334,14 @@ window.extractRowImageUrl = extractRowImageUrl;
  */
 function getStopDisplayPhotoData(stop) {
   if (!stop) return { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false };
-  let photo = (stop.capturedPhotoUrl || stop.imageUrl || stop.customRoutePlanImg || stop.selectedRefImg || '').trim();
 
-  // หากไม่มีรูปที่ตัว stop ให้ค้นหาจากฐานข้อมูลชีต state.allSheetRows ด้วยเลขคดี
-  if (!photo && stop.caseNumber && stop.caseNumber !== '-') {
-    const cleanCase = String(stop.caseNumber).replace(/[\s\.\/\-\_]/g, '').toLowerCase();
-    let rows = (state.allSheetRows && state.allSheetRows.length > 0) ? state.allSheetRows : [];
-    if (!rows || rows.length === 0) {
-      try {
-        const cached = localStorage.getItem(CACHE_KEY_SHEET_DATA);
-        if (cached) rows = JSON.parse(cached);
-      } catch (e) {}
-    }
-    if (rows && rows.length > 0) {
-      const match = rows.find(r => {
-        const rowCase = String(r['เลขคดี'] || r.caseNumber || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
-        return rowCase && (rowCase === cleanCase || rowCase.includes(cleanCase) || cleanCase.includes(rowCase));
-      });
-      if (match) {
-        photo = extractRowImageUrl(match);
-        if (photo) {
-          stop.imageUrl = photo; // แคชไว้บน stop
-        }
-      }
-    }
-  }
+  // ตรวจสอบรูปภาพที่ถ่ายและนำส่งในรอบนี้ หรือรูปที่กำหนดในการวางแผน
+  const newPhoto = typeof getNewlyUploadedPhotoForStop === 'function' ? getNewlyUploadedPhotoForStop(stop) : null;
+  let photo = (newPhoto ? newPhoto.url : '') || (stop.capturedPhotoUrl || '').trim();
 
-  // หากยังไม่มีรูป ให้ตรวจสอบประวัติที่บันทึกออฟไลน์ใน localStorage
-  if (!photo && stop.caseNumber && stop.caseNumber !== '-') {
-    try {
-      const offlineList = JSON.parse(localStorage.getItem('slts_offline_records') || '[]');
-      const cleanCase = String(stop.caseNumber).replace(/[\s\.\/\-\_]/g, '').toLowerCase();
-      const offlineMatch = offlineList.find(r => {
-        const offCase = String(r.caseNumber || r['เลขคดี'] || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
-        return offCase && (offCase === cleanCase || offCase.includes(cleanCase) || cleanCase.includes(offCase));
-      });
-      if (offlineMatch) {
-        photo = offlineMatch.capturedPhotoUrl || offlineMatch.imageUrl || offlineMatch.photoDataUrl || '';
-      }
-    } catch (e) {}
+  // หากไม่มี ให้ดูว่ามีรูปภาพที่ระบุสำหรับวางแผนเส้นทางโดยเฉพาะหรือไม่
+  if (!photo && stop.customRoutePlanImg) {
+    photo = String(stop.customRoutePlanImg).trim();
   }
 
   if (!photo) {
@@ -13526,8 +13480,8 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
         matchType: matchType,
         matchNote: matchNote,
         locationText: locationText || matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || '-',
-        imageUrl: extractRowImageUrl(matched),
-        dateTime: formatThaiDateDisplay(matched['วัน-เวลาบันทึก'] || matched['Timestamp'] || ''),
+        imageUrl: '',
+        dateTime: '',
         subdistrict: matched['ตำบล'] || subdistrict,
         district: matched['อำเภอ'] || district,
         province: getRowProvince(matched) || province,
@@ -15683,8 +15637,12 @@ function convertParsedRecordsToStops(records, province = 'อุดรธาน�
       province: province || matchRes.province || '',
       lat: matchRes.lat,
       lng: matchRes.lng,
-      imageUrl: matchRes.imageUrl || '',
-      dateTime: matchRes.dateTime || '',
+      imageUrl: '',
+      dateTime: '',
+      deliveryStatus: 'pending',
+      capturedPhotoUrl: null,
+      uploadedAt: null,
+      capturedAt: null,
       matchType: matchRes.matchType,
       matchNote: matchRes.matchNote,
       isMatched: matchRes.matchType === 'exact',
@@ -15996,8 +15954,12 @@ window.openMapAreaSelectorModal = function() {
           province,
           lat: hasCoords ? lat : null,
           lng: hasCoords ? lng : null,
-          imageUrl: extractRowImageUrl(r),
-          dateTime: formatThaiDateDisplay(r['วัน-เวลาบันทึก'] || r['Timestamp'] || ''),
+          imageUrl: '',
+          dateTime: '',
+          deliveryStatus: 'pending',
+          capturedPhotoUrl: null,
+          uploadedAt: null,
+          capturedAt: null,
           matchType: hasCoords ? 'exact' : 'none',
           matchNote: hasCoords ? 'ตรงกับประวัติ (พบพิกัดจริง)' : 'ไม่มีหมุดในระบบ',
           isMatched: hasCoords,
@@ -16155,7 +16117,7 @@ window.openMapAreaSelectorModal = function() {
         let lng = data.selectedLng;
         let matchType = (lat && lng) ? 'exact' : 'none';
         let matchNote = data.selectedRefNote || (lat && lng ? 'กำหนดพิกัดเอง' : '');
-        let imageUrl = data.customRoutePlanImg || data.selectedRefImg || '';
+        let imageUrl = data.customRoutePlanImg || '';
 
         if (!lat || !lng) {
           const matchRes = matchSingleCaseWithHistory(
@@ -16171,7 +16133,6 @@ window.openMapAreaSelectorModal = function() {
           lng = matchRes.lng;
           matchType = matchRes.matchType;
           matchNote = matchRes.matchNote;
-          if (!imageUrl) imageUrl = matchRes.imageUrl || '';
         }
 
         const stopItem = {
@@ -16194,7 +16155,11 @@ window.openMapAreaSelectorModal = function() {
           lat: lat,
           lng: lng,
           imageUrl: imageUrl,
-          dateTime: data.dateTime || '',
+          dateTime: '',
+          deliveryStatus: 'pending',
+          capturedPhotoUrl: null,
+          uploadedAt: null,
+          capturedAt: null,
           matchType: matchType,
           matchNote: matchNote,
           isMatched: Boolean(lat && lng),
@@ -16476,15 +16441,28 @@ window.openMapAreaSelectorModal = function() {
   }).then((res) => {
     if (res.isConfirmed && res.value) {
       if (res.value.isManualSchedule) {
-        state.currentRouteStops = res.value.stops;
+        const freshStops = (res.value.stops || []).map(s => ({
+          ...s,
+          imageUrl: s.customRoutePlanImg ? s.customRoutePlanImg : '',
+          dateTime: '',
+          deliveryStatus: 'pending',
+          capturedPhotoUrl: null,
+          uploadedAt: null,
+          capturedAt: null
+        }));
+        state.currentRouteStops = freshStops;
+        localStorage.setItem('slts_route_start_time', new Date().toISOString());
+        const uId = getRouteDeliveryUserKey();
+        localStorage.removeItem('slts_route_stop_status_' + uId);
+        saveCurrentRouteStopsHistory(freshStops);
         const badgeEl = document.getElementById('mapAreaCurrentBadge');
-        if (badgeEl) badgeEl.textContent = `📋 ตารางส่งหมาย (${res.value.stops.length} รายการ)`;
+        if (badgeEl) badgeEl.textContent = `📋 ตารางส่งหมาย (${freshStops.length} รายการ)`;
         initLeafletMapInstance();
         recalculateRouteFromStops(true);
 
-        logServerActivity('MAP_SCHEDULE_CONFIRMED', `กำหนดรายการตารางส่งหมาย ${res.value.stops.length} รายการ (เลขคดี: ${res.value.stops.map(s => s.caseNumber).slice(0, 7).join(', ')}${res.value.stops.length > 7 ? '...' : ''})`, {
-          stopsCount: res.value.stops.length,
-          cases: res.value.stops.map(s => s.caseNumber)
+        logServerActivity('MAP_SCHEDULE_CONFIRMED', `กำหนดรายการตารางส่งหมาย ${freshStops.length} รายการ (เลขคดี: ${freshStops.map(s => s.caseNumber).slice(0, 7).join(', ')}${freshStops.length > 7 ? '...' : ''})`, {
+          stopsCount: freshStops.length,
+          cases: freshStops.map(s => s.caseNumber)
         });
       } else {
         state.currentMapFilter = res.value;
@@ -16536,7 +16514,7 @@ window.openAddRouteStopModal = function(editIndex = null) {
       let lng = data.selectedLng;
       let matchType = (lat && lng) ? 'exact' : 'none';
       let matchNote = data.selectedRefNote || (lat && lng ? 'กำหนดพิกัดเอง' : '');
-      let imageUrl = data.customRoutePlanImg || data.selectedRefImg || '';
+      let imageUrl = data.customRoutePlanImg || '';
 
       // หากผู้ใช้ไม่ได้คลิกเลือกหมุดอ้างอิงเอง และไม่ได้ระบุพิกัด ให้ประมวลผลหมุดอ้างอิงตามลำดับความใกล้เคียงในพื้นที่เดียวกัน
       if (!lat || !lng) {
@@ -16553,7 +16531,6 @@ window.openAddRouteStopModal = function(editIndex = null) {
         lng = matchRes.lng;
         matchType = matchRes.matchType;
         matchNote = matchRes.matchNote;
-        if (!imageUrl) imageUrl = matchRes.imageUrl || '';
       }
 
       const stopItem = {
@@ -16576,7 +16553,11 @@ window.openAddRouteStopModal = function(editIndex = null) {
         lat: lat,
         lng: lng,
         imageUrl: imageUrl,
-        dateTime: data.dateTime || '',
+        dateTime: isEditing ? (state.currentRouteStops[editIndex]?.dateTime || '') : '',
+        deliveryStatus: isEditing ? (state.currentRouteStops[editIndex]?.deliveryStatus || 'pending') : 'pending',
+        capturedPhotoUrl: isEditing ? (state.currentRouteStops[editIndex]?.capturedPhotoUrl || null) : null,
+        uploadedAt: isEditing ? (state.currentRouteStops[editIndex]?.uploadedAt || null) : null,
+        capturedAt: isEditing ? (state.currentRouteStops[editIndex]?.capturedAt || null) : null,
         matchType: matchType,
         matchNote: matchNote,
         isMatched: Boolean(lat && lng),
@@ -17389,12 +17370,16 @@ window.renderMapAndPins = function(province, district, subdistrict) {
         no: idx + 1,
         raw: r,
         caseNumber: (r['เลขคดี'] || '-').trim(),
-        dateTime: formatThaiDateDisplay(r['วัน-เวลาบันทึก'] || r['Timestamp'] || ''),
+        dateTime: '',
         locationText: r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || (r['อำเภอ'] ? `อ.${r['อำเภอ']} ต.${r['ตำบล'] || ''}` : '-'),
         district: (r['อำเภอ'] || '').trim(),
         subdistrict: (r['ตำบล'] || '').trim(),
         province: getRowProvince(r) || province,
-        imageUrl: extractRowImageUrl(r),
+        imageUrl: '',
+        deliveryStatus: 'pending',
+        capturedPhotoUrl: null,
+        uploadedAt: null,
+        capturedAt: null,
         lat: lat,
         lng: lng,
         matchType: 'exact',
@@ -17411,6 +17396,10 @@ window.renderMapAndPins = function(province, district, subdistrict) {
   const hasEnd = Boolean(state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng);
   const orderedStops = optimizeStopsSequence(validStops, state.routeStartLocation.lat, state.routeStartLocation.lng, hasEnd ? state.routeEndLocation.lat : null, hasEnd ? state.routeEndLocation.lng : null, state.isRoundTrip);
   state.currentRouteStops = orderedStops;
+  localStorage.setItem('slts_route_start_time', new Date().toISOString());
+  const uId = getRouteDeliveryUserKey();
+  localStorage.removeItem('slts_route_stop_status_' + uId);
+  saveCurrentRouteStopsHistory(orderedStops);
 
   logServerActivity('MAP_FILTER_AREA', `กรองดูหมุดพื้นที่ จ.${province} > อ.${district || 'ทุกอำเภอ'} > ต.${subdistrict || 'ทุกตำบล'} (พบ ${validStops.length} หมุด)`, {
     province,
@@ -17431,6 +17420,7 @@ window.renderMapAndPins = function(province, district, subdistrict) {
     }).then(roadOrderedStops => {
       if (roadOrderedStops && roadOrderedStops.length > 0) {
         state.currentRouteStops = roadOrderedStops;
+        saveCurrentRouteStopsHistory(roadOrderedStops);
         recalculateRouteFromStops(true);
       }
     }).catch(() => {});
@@ -17606,10 +17596,11 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
 
       const safeCase = (stop.caseNumber || '').replace(/'/g, "\\'");
       const safeLoc = (stop.locationText || '').replace(/'/g, "\\'");
-      const safeDate = (stop.dateTime || '').replace(/'/g, "\\'");
-      const rawImgUrl = (stop.imageUrl || '').replace(/'/g, "\\'");
-      const directThumbUrl = getDirectDriveImageUrl(stop.imageUrl, 800);
-      const fallbackThumbUrl = getDriveFallbackThumbnailUrl(stop.imageUrl, 800);
+      const photoData = typeof getStopDisplayPhotoData === 'function' ? getStopDisplayPhotoData(stop) : { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false };
+      const rawImgUrl = photoData.rawUrl ? photoData.rawUrl.replace(/'/g, "\\'") : '';
+      const directThumbUrl = photoData.hasPhoto ? photoData.thumbUrl : '';
+      const fallbackThumbUrl = photoData.hasPhoto ? photoData.fallbackUrl : '';
+      const safeDate = (photoData.hasPhoto && (stop.uploadedAt || stop.capturedAt || stop.dateTime)) ? String(stop.uploadedAt || stop.capturedAt || stop.dateTime).replace(/'/g, "\\'") : '';
 
       const popupHtml = `
         <div class="p-3 space-y-2 text-xs font-sans">
@@ -17621,8 +17612,8 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
           <p class="text-gray-700 text-xs leading-relaxed"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${stop.locationText}</p>
           <p class="text-[10px] text-gray-500"><i class="fa-solid fa-route text-blue-500 mr-1"></i>+${legDist.toFixed(1)} กม. จากจุดก่อนหน้า</p>
 
-          ${stop.dateTime ? `
-            <p class="text-[10px] text-emerald-700 font-semibold"><i class="fa-solid fa-calendar-check mr-1"></i>ประวัติส่งเมื่อ: ${stop.dateTime}</p>
+          ${safeDate ? `
+            <p class="text-[10px] text-emerald-700 font-semibold"><i class="fa-solid fa-calendar-check mr-1"></i>ส่งเมื่อ: ${safeDate}</p>
           ` : ''}
 
           ${directThumbUrl ? `
@@ -19190,13 +19181,7 @@ function applyReceivedHandoff(handoff) {
         } catch (e) {}
 
         if (handoff.stops && handoff.stops.length > 0) {
-          state.currentRouteStops = handoff.stops.map(s => {
-            if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
-              const p = getStopDisplayPhotoData(s);
-              if (p && p.hasPhoto) s.imageUrl = p.rawUrl;
-            }
-            return s;
-          });
+          state.currentRouteStops = handoff.stops;
           localStorage.setItem('slts_shared_route_stops', JSON.stringify(state.currentRouteStops));
           saveCurrentRouteStopsHistory(state.currentRouteStops);
         }
@@ -19275,13 +19260,7 @@ function applyReceivedHandoff(handoff) {
     localStorage.setItem('slts_user_route_' + currentUserId, JSON.stringify(handoff));
     localStorage.setItem('slts_latest_handoff', JSON.stringify(handoff));
     if (handoff.stops && handoff.stops.length > 0) {
-      state.currentRouteStops = handoff.stops.map(s => {
-        if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
-          const p = getStopDisplayPhotoData(s);
-          if (p && p.hasPhoto) s.imageUrl = p.rawUrl;
-        }
-        return s;
-      });
+      state.currentRouteStops = handoff.stops;
       localStorage.setItem('slts_shared_route_stops', JSON.stringify(state.currentRouteStops));
       saveCurrentRouteStopsHistory(state.currentRouteStops);
     }
@@ -19771,7 +19750,7 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
 
   // 1. ตรวจสอบถ้าสถานะใน Stop เป็น 'uploaded' ในรอบนี้
   if (stop.deliveryStatus === 'uploaded') {
-    const photoUrl = stop.capturedPhotoUrl || (mapped && (mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl)) || stop.imageUrl;
+    const photoUrl = stop.capturedPhotoUrl || (mapped && (mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl)) || (stop.uploadedAt ? stop.imageUrl : '');
     if (photoUrl) {
       return {
         url: photoUrl,
@@ -19783,7 +19762,7 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
 
   // 2. ตรวจสอบใน statusMap
   if (mapped && mapped.deliveryStatus === 'uploaded') {
-    const photoUrl = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl || stop.capturedPhotoUrl || stop.imageUrl;
+    const photoUrl = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl || stop.capturedPhotoUrl || ((mapped.uploadedAt || stop.uploadedAt) ? stop.imageUrl : '');
     if (photoUrl) {
       return {
         url: photoUrl,
@@ -19939,7 +19918,7 @@ window.syncStopsWithDeliveryStatus = function(stops) {
     const normCase = sCase.replace(/\s+/g, '');
     const mapped = statusMap[sCase] || statusMap[normCase];
 
-    if (mapped && mapped.deliveryStatus) {
+    if (mapped && mapped.deliveryStatus && mapped.deliveryStatus !== 'pending') {
       stop.deliveryStatus = mapped.deliveryStatus;
       if (mapped.capturedAt) stop.capturedAt = mapped.capturedAt;
       if (mapped.uploadedAt) stop.uploadedAt = mapped.uploadedAt;
@@ -19962,9 +19941,7 @@ window.syncStopsWithDeliveryStatus = function(stops) {
         const newestRow = matchingRows[0];
         const newestTime = parseDateToTime(newestRow['วันที่และเวลา'] || newestRow['timestamp'] || newestRow['วัน-เวลาบันทึก']);
 
-        const isFromThisRound = (routeStartTime > 0 && newestTime >= (routeStartTime - 600000)) ||
-                                (stop.deliveryStatus === 'captured_offline') ||
-                                (mapped && (mapped.capturedAt || mapped.deliveryStatus));
+        const isFromThisRound = (routeStartTime > 0 && newestTime >= (routeStartTime - 600000));
 
         if (isFromThisRound) {
           stop.deliveryStatus = 'uploaded';
