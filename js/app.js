@@ -13333,29 +13333,46 @@ window.extractRowImageUrl = extractRowImageUrl;
  * รองรับทั้ง PC และ Mobile และดึงจากฐานข้อมูล Google Sheet อัตโนมัติหากจุดหมายไม่มีรูปแนบมา
  */
 function getStopDisplayPhotoData(stop) {
-  if (!stop) return { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false };
+  if (!stop) return { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false, isReference: false };
 
-  // ตรวจสอบรูปภาพที่ถ่ายและนำส่งในรอบนี้ หรือรูปที่กำหนดในการวางแผน
+  const refImg = String(stop.planImageUrl || stop.customRoutePlanImg || '').trim();
+
+  // 1. ตรวจสอบรูปภาพที่ถ่ายจากโหมดกล้องในมือถือในรอบนี้ (ส่ง Server แล้ว หรือ ถ่ายรอส่ง)
   const newPhoto = typeof getNewlyUploadedPhotoForStop === 'function' ? getNewlyUploadedPhotoForStop(stop) : null;
-  let photo = (newPhoto ? newPhoto.url : '') || (stop.capturedPhotoUrl || '').trim();
+  let captured = (newPhoto ? newPhoto.url : '') || (stop.capturedPhotoUrl || '').trim();
 
-  // หากไม่มี ให้ดูว่ามีรูปภาพที่ระบุสำหรับวางแผนเส้นทางโดยเฉพาะหรือไม่
-  if (!photo && stop.customRoutePlanImg) {
-    photo = String(stop.customRoutePlanImg).trim();
+  // ป้องกันกรณี capturedPhotoUrl ไปชี้ที่รูปภาพอ้างอิง
+  if (captured && (captured === refImg)) {
+    captured = '';
   }
 
-  if (!photo) {
-    return { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false };
+  if (captured) {
+    const thumbUrl = getDirectDriveImageUrl(captured, 400);
+    const fallbackUrl = getDriveFallbackThumbnailUrl(captured, 400);
+    return {
+      rawUrl: captured,
+      thumbUrl: thumbUrl || captured,
+      fallbackUrl: fallbackUrl || captured,
+      hasPhoto: true,
+      isReference: false
+    };
   }
 
-  const thumbUrl = getDirectDriveImageUrl(photo, 400);
-  const fallbackUrl = getDriveFallbackThumbnailUrl(photo, 400);
-  return {
-    rawUrl: photo,
-    thumbUrl: thumbUrl || photo,
-    fallbackUrl: fallbackUrl || photo,
-    hasPhoto: true
-  };
+  // 2. หากไม่มีรูปที่ถ่ายจากกล้อง ให้ดูรูปภาพอ้างอิงประกอบการวางแผนเส้นทาง (จากแผนที่และหมุด)
+  const candidateRef = refImg || (!stop.capturedPhotoUrl && !stop.uploadedAt ? String(stop.imageUrl || '').trim() : '');
+  if (candidateRef) {
+    const thumbUrl = getDirectDriveImageUrl(candidateRef, 400);
+    const fallbackUrl = getDriveFallbackThumbnailUrl(candidateRef, 400);
+    return {
+      rawUrl: candidateRef,
+      thumbUrl: thumbUrl || candidateRef,
+      fallbackUrl: fallbackUrl || candidateRef,
+      hasPhoto: true,
+      isReference: true
+    };
+  }
+
+  return { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false, isReference: false };
 }
 window.getStopDisplayPhotoData = getStopDisplayPhotoData;
 
@@ -13574,7 +13591,8 @@ function compressImageFileToDataUrl(file, maxDimension = 900, quality = 0.72) {
  * และได้รับ URL ถาวรสำหรับส่งต่อให้มือถือเปิดดูภาพได้
  */
 async function uploadRouteReferenceImageToServer(stopItem) {
-  if (!stopItem || !stopItem.imageUrl || !stopItem.imageUrl.startsWith('data:image/')) return;
+  const refImg = stopItem.planImageUrl || stopItem.customRoutePlanImg || stopItem.imageUrl;
+  if (!stopItem || !refImg || !refImg.startsWith('data:image/')) return;
   const targetUrl = state.appsScriptUrl || (typeof API_URL !== 'undefined' ? API_URL : '');
   if (!targetUrl || !navigator.onLine) return;
 
@@ -13585,7 +13603,7 @@ async function uploadRouteReferenceImageToServer(stopItem) {
       caseNumber: stopItem.caseNumber || '',
       locationText: stopItem.locationText || '',
       fileName: `route_ref_${(stopItem.caseNumber || 'stop').replace(/[^\w]/g, '_')}_${Date.now()}.jpg`,
-      imageBase64: stopItem.imageUrl
+      imageBase64: refImg
     };
 
     const res = await fetch(targetUrl, {
@@ -13594,7 +13612,9 @@ async function uploadRouteReferenceImageToServer(stopItem) {
     });
     const json = await res.json();
     if (json && json.status === 'success' && json.imageUrl) {
-      stopItem.imageUrl = json.imageUrl;
+      stopItem.planImageUrl = json.imageUrl;
+      stopItem.customRoutePlanImg = json.imageUrl;
+      stopItem.imageUrl = '';
       console.log('[Route Stop] Reference image uploaded to Server:', json.imageUrl);
       if (typeof saveCurrentRouteStopsHistory === 'function') {
         saveCurrentRouteStopsHistory();
@@ -13866,6 +13886,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
   const mooVal = (initialData.moo !== undefined) ? initialData.moo : ((lastSaved && lastSaved.moo) || '');
   const localAdminNameVal = initialData.localAdminName || (lastSaved && lastSaved.localAdminName) || 'ที่ทำการปกครองส่วนท้องถิ่น';
   const customOtherLocationNameVal = initialData.customOtherLocationName || (lastSaved && lastSaved.customOtherLocationName) || '';
+  const planImgVal = initialData.planImageUrl || initialData.customRoutePlanImg || initialData.imageUrl || '';
 
   return `
     <div class="relative space-y-3.5 text-xs text-left" id="${prefix}formRoot">
@@ -14229,9 +14250,9 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
         </div>
 
         <!-- กล่อง Preview รูปภาพที่เลือก -->
-        <div id="${prefix}routePlanImgPreviewContainer" class="${initialData.imageUrl ? 'flex' : 'hidden'} items-center gap-3 p-2 bg-gray-50 border border-gray-200 rounded-xl">
+        <div id="${prefix}routePlanImgPreviewContainer" class="${planImgVal ? 'flex' : 'hidden'} items-center gap-3 p-2 bg-gray-50 border border-gray-200 rounded-xl">
           <div class="relative w-14 h-14 rounded-lg overflow-hidden bg-gray-200 shrink-0 border border-gray-300">
-            <img id="${prefix}routePlanImgPreview" src="${initialData.imageUrl || ''}" alt="รูปประกอบ" class="w-full h-full object-cover cursor-pointer" onclick="if(window.viewPhotoModal && this.src) window.viewPhotoModal(this.src, 'รูปภาพประกอบเส้นทาง')">
+            <img id="${prefix}routePlanImgPreview" src="${planImgVal || ''}" alt="รูปประกอบ" class="w-full h-full object-cover cursor-pointer" onclick="if(window.viewPhotoModal && this.src) window.viewPhotoModal(this.src, 'รูปภาพประกอบเส้นทาง')">
           </div>
           <div class="flex-1 min-w-0 text-xs">
             <p class="font-bold text-gray-800 truncate" id="${prefix}routePlanImgFileName">รูปภาพประกอบเส้นทาง</p>
@@ -14243,7 +14264,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
         </div>
 
         <!-- ปุ่มเลือกรูปภาพประกอบ -->
-        <div id="${prefix}routePlanImgPickerBox" class="${initialData.imageUrl ? 'hidden' : 'block'}">
+        <div id="${prefix}routePlanImgPickerBox" class="${planImgVal ? 'hidden' : 'block'}">
           <label class="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-emerald-500 hover:bg-emerald-50/40 rounded-xl py-3 px-4 cursor-pointer transition group">
             <div class="flex items-center gap-2 text-gray-600 group-hover:text-emerald-700 font-medium text-xs">
               <i class="fa-solid fa-cloud-arrow-up text-base text-gray-400 group-hover:text-emerald-600"></i>
@@ -14260,7 +14281,7 @@ function getSummonsFormHtml(prefix = 'modal_', initialData = {}) {
           </label>
         </div>
 
-        <input type="hidden" id="${prefix}routePlanImageDataUrl" value="${initialData.imageUrl || ''}">
+        <input type="hidden" id="${prefix}routePlanImageDataUrl" value="${planImgVal || ''}">
       </div>
 
       <!-- 5. Inline Court Picker Overlay (ไม่ปิด Modal หลัก ไม่เด้งออก) -->
@@ -16154,7 +16175,9 @@ window.openMapAreaSelectorModal = function() {
           province: data.province,
           lat: lat,
           lng: lng,
-          imageUrl: imageUrl,
+          planImageUrl: imageUrl,
+          customRoutePlanImg: imageUrl,
+          imageUrl: '',
           dateTime: '',
           deliveryStatus: 'pending',
           capturedPhotoUrl: null,
@@ -16443,7 +16466,9 @@ window.openMapAreaSelectorModal = function() {
       if (res.value.isManualSchedule) {
         const freshStops = (res.value.stops || []).map(s => ({
           ...s,
-          imageUrl: s.customRoutePlanImg ? s.customRoutePlanImg : '',
+          planImageUrl: s.customRoutePlanImg || s.planImageUrl || '',
+          customRoutePlanImg: s.customRoutePlanImg || s.planImageUrl || '',
+          imageUrl: '',
           dateTime: '',
           deliveryStatus: 'pending',
           capturedPhotoUrl: null,
@@ -16552,7 +16577,9 @@ window.openAddRouteStopModal = function(editIndex = null) {
         province: data.province,
         lat: lat,
         lng: lng,
-        imageUrl: imageUrl,
+        planImageUrl: imageUrl || (isEditing ? (state.currentRouteStops[editIndex]?.planImageUrl || state.currentRouteStops[editIndex]?.customRoutePlanImg || '') : ''),
+        customRoutePlanImg: imageUrl || (isEditing ? (state.currentRouteStops[editIndex]?.customRoutePlanImg || state.currentRouteStops[editIndex]?.planImageUrl || '') : ''),
+        imageUrl: '',
         dateTime: isEditing ? (state.currentRouteStops[editIndex]?.dateTime || '') : '',
         deliveryStatus: isEditing ? (state.currentRouteStops[editIndex]?.deliveryStatus || 'pending') : 'pending',
         capturedPhotoUrl: isEditing ? (state.currentRouteStops[editIndex]?.capturedPhotoUrl || null) : null,
@@ -17873,12 +17900,15 @@ function renderRouteSidebarList(stops, totalDistKm) {
           const safeRawImg = photoData.rawUrl.replace(/'/g, "\\'");
           const safeCaseNo = (stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'");
           const safeLocText = (stop.locationText || '').replace(/'/g, "\\'");
-          const safeDateTime = (stop.dateTime || '').replace(/'/g, "\\'");
+          const safeDateTime = photoData.isReference ? 'ภาพอ้างอิงประกอบการจัดเส้นทาง' : ((stop.dateTime || stop.uploadedAt || '').replace(/'/g, "\\'"));
           const sLat = (stop.lat !== null && stop.lat !== undefined) ? stop.lat : '';
           const sLng = (stop.lng !== null && stop.lng !== undefined) ? stop.lng : '';
           return `
-            <div class="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 shrink-0 cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition mt-0.5 group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeRawImg}', '${safeCaseNo}', '${safeLocText}', '${safeDateTime}', '${sLat}', '${sLng}')" title="คลิกดูรูปภาพประกอบ">
+            <div class="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 border ${photoData.isReference ? 'border-blue-300 ring-1 ring-blue-200' : 'border-emerald-300 ring-1 ring-emerald-200'} shrink-0 cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition mt-0.5 group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeRawImg}', '${safeCaseNo}', '${safeLocText}', '${safeDateTime}', '${sLat}', '${sLng}')" title="${photoData.isReference ? 'ภาพอ้างอิงประกอบการจัดเส้นทาง' : 'คลิกดูภาพส่งหมาย'}">
               <img src="${photoData.thumbUrl}" alt="รูป" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${photoData.fallbackUrl}'; } else { this.parentElement.style.display = 'none'; }">
+              <span class="absolute bottom-0 inset-x-0 text-[7px] text-center font-bold py-0.2 leading-none text-white ${photoData.isReference ? 'bg-blue-600/85' : 'bg-emerald-600/85'}">
+                ${photoData.isReference ? 'อ้างอิง' : 'ส่งหมาย'}
+              </span>
               <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[9px]">
                 <i class="fa-solid fa-magnifying-glass-plus"></i>
               </div>
@@ -18273,7 +18303,7 @@ window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
 
   // หากมีรายการ Stop ที่ยังมีรูปภาพแบบ Base64 ให้ทำการอัปโหลดขึ้น Server เพื่อให้ได้ URL ขนาดเล็กก่อนส่ง Handoff
   const rawTargetStops = targetStop ? [targetStop] : stops;
-  const base64Stops = rawTargetStops.filter(s => s && s.imageUrl && s.imageUrl.startsWith('data:image/'));
+  const base64Stops = rawTargetStops.filter(s => s && ((s.planImageUrl && s.planImageUrl.startsWith('data:image/')) || (s.customRoutePlanImg && s.customRoutePlanImg.startsWith('data:image/')) || (s.imageUrl && s.imageUrl.startsWith('data:image/'))));
   if (base64Stops.length > 0 && navigator.onLine) {
     await Promise.all(base64Stops.map(s => uploadRouteReferenceImageToServer(s)));
   }
@@ -19746,12 +19776,14 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
   const uId = getRouteDeliveryUserKey();
   const statusMap = getRouteStopStatusMap(uId);
   const mapped = statusMap[sCase] || statusMap[normCase];
-  const routeStartTime = getRouteStartTime();
 
-  // 1. ตรวจสอบถ้าสถานะใน Stop เป็น 'uploaded' ในรอบนี้
+  // รูปภาพอ้างอิงจากการวางแผนในแผนที่และหมุด (ห้ามนำมาใช้เป็นภาพส่งหมายเด็ดขาด!)
+  const refImgs = [stop.planImageUrl, stop.customRoutePlanImg].filter(Boolean);
+
+  // 1. ตรวจสอบถ้าสถานะใน Stop เป็น 'uploaded' ในรอบนี้ และมีรูปภาพจากกล้อง
   if (stop.deliveryStatus === 'uploaded') {
-    const photoUrl = stop.capturedPhotoUrl || (mapped && (mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl)) || (stop.uploadedAt ? stop.imageUrl : '');
-    if (photoUrl) {
+    const photoUrl = stop.capturedPhotoUrl || (mapped && (mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl));
+    if (photoUrl && !refImgs.includes(photoUrl)) {
       return {
         url: photoUrl,
         deliveryStatus: 'uploaded',
@@ -19762,38 +19794,13 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
 
   // 2. ตรวจสอบใน statusMap
   if (mapped && mapped.deliveryStatus === 'uploaded') {
-    const photoUrl = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl || stop.capturedPhotoUrl || ((mapped.uploadedAt || stop.uploadedAt) ? stop.imageUrl : '');
-    if (photoUrl) {
+    const photoUrl = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl || stop.capturedPhotoUrl;
+    if (photoUrl && !refImgs.includes(photoUrl)) {
       return {
         url: photoUrl,
         deliveryStatus: 'uploaded',
         uploadedAt: mapped.uploadedAt || mapped.updatedAt || ''
       };
-    }
-  }
-
-  // 3. ตรวจสอบใน Google Sheet แถวที่เพิ่งบันทึกในรอบนี้
-  const sheetRows = state.allSheetRows || [];
-  if (sheetRows.length > 0 && routeStartTime > 0) {
-    const matchingRows = sheetRows.filter(r => {
-      const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
-      return rCase === normCase;
-    });
-    if (matchingRows.length > 0) {
-      matchingRows.sort((a, b) => {
-        const tA = parseDateToTime(a['วันที่และเวลา'] || a['timestamp'] || a['วัน-เวลาบันทึก']);
-        const tB = parseDateToTime(b['วันที่และเวลา'] || b['timestamp'] || b['วัน-เวลาบันทึก']);
-        return tB - tA;
-      });
-      const newestRow = matchingRows[0];
-      const newestTime = parseDateToTime(newestRow['วันที่และเวลา'] || newestRow['timestamp'] || newestRow['วัน-เวลาบันทึก']);
-      if (newestTime >= (routeStartTime - 600000) && (newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ'])) {
-        return {
-          url: newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ'],
-          deliveryStatus: 'uploaded',
-          uploadedAt: newestRow['วันที่และเวลา'] || newestRow['timestamp'] || ''
-        };
-      }
     }
   }
 
@@ -19907,50 +19914,39 @@ window.syncStopsWithDeliveryStatus = function(stops) {
   if (!Array.isArray(stops) || stops.length === 0) return stops;
   const uId = getRouteDeliveryUserKey();
   const statusMap = getRouteStopStatusMap(uId);
-
-  // ดึงประวัติจาก Google Sheet และคิวอัปโหลดมาตรวจสอบ
-  const sheetRows = state.allSheetRows || [];
   const bgQueue = typeof getBackgroundQueue === 'function' ? getBackgroundQueue() : [];
-  const routeStartTime = getRouteStartTime();
+
+  let statusMapModified = false;
 
   stops.forEach((stop) => {
     const sCase = String(stop.caseNumber || '').trim();
     const normCase = sCase.replace(/\s+/g, '');
     const mapped = statusMap[sCase] || statusMap[normCase];
 
-    if (mapped && mapped.deliveryStatus && mapped.deliveryStatus !== 'pending') {
-      stop.deliveryStatus = mapped.deliveryStatus;
-      if (mapped.capturedAt) stop.capturedAt = mapped.capturedAt;
-      if (mapped.uploadedAt) stop.uploadedAt = mapped.uploadedAt;
-      if (mapped.capturedPhotoUrl) stop.capturedPhotoUrl = mapped.capturedPhotoUrl;
+    const refImgs = [stop.planImageUrl, stop.customRoutePlanImg].filter(Boolean);
+
+    // หากมี capturedPhotoUrl แต่ดันไปตรงกับรูปภาพอ้างอิง ให้ล้างออก
+    if (stop.capturedPhotoUrl && refImgs.includes(stop.capturedPhotoUrl)) {
+      stop.capturedPhotoUrl = null;
     }
 
-    // ตรวจสอบว่ามีข้อมูลใน Google Sheet หรือไม่ (เฉพาะที่เพิ่งบันทึก/ส่งขึ้น Server ในรอบนี้เท่านั้น ไม่ดึงประวัติเก่า)
-    if (stop.deliveryStatus !== 'uploaded' && sheetRows.length > 0) {
-      const matchingRows = sheetRows.filter(r => {
-        const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
-        return rCase && rCase === normCase;
-      });
+    if (mapped && mapped.deliveryStatus && mapped.deliveryStatus !== 'pending') {
+      const mappedPhoto = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl;
+      const isRealCameraPhoto = mappedPhoto && !refImgs.includes(mappedPhoto);
 
-      if (matchingRows.length > 0) {
-        matchingRows.sort((a, b) => {
-          const tA = parseDateToTime(a['วันที่และเวลา'] || a['timestamp'] || a['วัน-เวลาบันทึก']);
-          const tB = parseDateToTime(b['วันที่และเวลา'] || b['timestamp'] || b['วัน-เวลาบันทึก']);
-          return tB - tA;
-        });
-        const newestRow = matchingRows[0];
-        const newestTime = parseDateToTime(newestRow['วันที่และเวลา'] || newestRow['timestamp'] || newestRow['วัน-เวลาบันทึก']);
-
-        const isFromThisRound = (routeStartTime > 0 && newestTime >= (routeStartTime - 600000));
-
-        if (isFromThisRound) {
-          stop.deliveryStatus = 'uploaded';
-          stop.uploadedAt = newestRow['วันที่และเวลา'] || newestRow['timestamp'] || new Date().toISOString();
-          if (newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ']) {
-            stop.capturedPhotoUrl = newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ'];
-            stop.imageUrl = newestRow['ลิงก์รูปภาพ'] || newestRow['รูปภาพ'];
-          }
-        }
+      // หาก mapped ระบุว่าเป็น 'uploaded' แต่ไม่มีรูปถ่ายจริงจากกล้อง (เช่น ติดมาจากประวัติเดิม)
+      if (mapped.deliveryStatus === 'uploaded' && !isRealCameraPhoto && !stop.capturedPhotoUrl) {
+        stop.deliveryStatus = 'pending';
+        stop.uploadedAt = null;
+        stop.capturedAt = null;
+        delete statusMap[sCase];
+        if (normCase) delete statusMap[normCase];
+        statusMapModified = true;
+      } else {
+        stop.deliveryStatus = mapped.deliveryStatus;
+        if (mapped.capturedAt) stop.capturedAt = mapped.capturedAt;
+        if (mapped.uploadedAt) stop.uploadedAt = mapped.uploadedAt;
+        if (isRealCameraPhoto) stop.capturedPhotoUrl = mappedPhoto;
       }
     }
 
@@ -19962,11 +19958,27 @@ window.syncStopsWithDeliveryStatus = function(stops) {
       }
     }
 
+    // Self-healing: หาก stop.deliveryStatus === 'uploaded' แต่ไม่มี capturedPhotoUrl จากกล้อง
+    // ให้รีเซ็ตกลับเป็น 'pending' ทันที
+    if (stop.deliveryStatus === 'uploaded') {
+      const hasRealPhoto = stop.capturedPhotoUrl && !refImgs.includes(stop.capturedPhotoUrl);
+      if (!hasRealPhoto) {
+        stop.deliveryStatus = 'pending';
+        stop.uploadedAt = null;
+        stop.capturedAt = null;
+        stop.capturedPhotoUrl = null;
+      }
+    }
+
     // กำหนดค่าเริ่มต้นเป็น pending หากยังไม่มีสถานะ
     if (!stop.deliveryStatus) {
       stop.deliveryStatus = 'pending';
     }
   });
+
+  if (statusMapModified) {
+    saveRouteStopStatusMap(statusMap, uId);
+  }
 
   return stops;
 };
@@ -20181,7 +20193,8 @@ window.renderRouteBatchTab = function() {
 
     // คอลัมน์รูปภาพ
     let imgHtml = `<span class="text-gray-300 text-xs font-mono">-</span>`;
-    if (newPhotoData && newPhotoData.url) {
+    const photoData = typeof getStopDisplayPhotoData === 'function' ? getStopDisplayPhotoData(stop) : { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false, isReference: false };
+    if (newPhotoData && newPhotoData.url && newPhotoData.deliveryStatus === 'uploaded') {
       const safeImg = displayImg.replace(/'/g, "\\'");
       let thumbImg = displayImg;
       let fallbackImg = displayImg;
@@ -20191,8 +20204,20 @@ window.renderRouteBatchTab = function() {
         fallbackImg = `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w400`;
       }
       imgHtml = `
-        <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 mx-auto cursor-pointer shadow-2xs hover:scale-105 active:scale-95 transition group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeImg}', '${safeCase}', '${safeLoc}', '${timestampText}', '${stop.lat || ''}', '${stop.lng || ''}')" title="คลิกดูภาพขนาดเต็ม">
+        <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-emerald-300 ring-1 ring-emerald-200 mx-auto cursor-pointer shadow-2xs hover:scale-105 active:scale-95 transition group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeImg}', '${safeCase}', '${safeLoc}', '${timestampText}', '${stop.lat || ''}', '${stop.lng || ''}')" title="คลิกดูภาพส่งหมาย">
           <img src="${thumbImg}" alt="${safeCase}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${fallbackImg}'; } else { this.onerror = null; this.src = 'img/logo.png'; }">
+          <span class="absolute bottom-0 inset-x-0 text-[8px] text-center font-bold py-0.5 leading-none text-white bg-emerald-600/85">ภาพส่งหมาย</span>
+          <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px]">
+            <i class="fa-solid fa-magnifying-glass-plus"></i>
+          </div>
+        </div>
+      `;
+    } else if (photoData.hasPhoto && photoData.isReference) {
+      const safeImg = photoData.rawUrl.replace(/'/g, "\\'");
+      imgHtml = `
+        <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-blue-300 ring-1 ring-blue-200 mx-auto cursor-pointer shadow-2xs hover:scale-105 active:scale-95 transition group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeImg}', '${safeCase}', '${safeLoc}', 'ภาพอ้างอิงประกอบการจัดเส้นทาง', '${stop.lat || ''}', '${stop.lng || ''}')" title="ภาพอ้างอิงประกอบการจัดเส้นทาง (ยังไม่ได้ส่งหมาย)">
+          <img src="${photoData.thumbUrl}" alt="${safeCase}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${photoData.fallbackUrl}'; } else { this.onerror = null; this.src = 'img/logo.png'; }">
+          <span class="absolute bottom-0 inset-x-0 text-[8px] text-center font-bold py-0.5 leading-none text-white bg-blue-600/85">ภาพอ้างอิง</span>
           <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px]">
             <i class="fa-solid fa-magnifying-glass-plus"></i>
           </div>
@@ -20699,15 +20724,18 @@ window.initMobileModalMapInstance = function() {
     const sLng = parseFloat(stop.lng);
     if (!isNaN(sLat) && !isNaN(sLng) && sLat > 0 && sLng > 0) {
       const delStatus = stop.deliveryStatus || 'pending';
+      const photoData = getStopDisplayPhotoData(stop);
+      const hasCameraDelivery = (delStatus === 'uploaded' || delStatus === 'captured_offline') && !photoData.isReference;
+
       let pinBgClass = 'bg-rose-600 ring-rose-300';
       let pinIconInner = `${pinNum}`;
       let statusBadgeHtml = '';
 
-      if (delStatus === 'uploaded') {
+      if (hasCameraDelivery && delStatus === 'uploaded') {
         pinBgClass = 'bg-gray-500 ring-gray-300';
         pinIconInner = `${pinNum}✓`;
         statusBadgeHtml = `<span class="text-[10px] font-bold text-gray-700 bg-gray-100 border border-gray-300 px-1.5 py-0.5 rounded shadow-2xs flex items-center gap-1"><i class="fa-solid fa-cloud-check text-gray-500"></i> ส่ง Server แล้ว</span>`;
-      } else if (delStatus === 'captured_offline') {
+      } else if (hasCameraDelivery && delStatus === 'captured_offline') {
         pinBgClass = 'bg-amber-500 ring-amber-300';
         pinIconInner = `${pinNum}📸`;
         statusBadgeHtml = `<span class="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded shadow-2xs flex items-center gap-1"><i class="fa-solid fa-camera text-amber-600"></i> ถ่ายแล้ว (รอส่ง)</span>`;
@@ -20727,23 +20755,22 @@ window.initMobileModalMapInstance = function() {
         popupAnchor: [0, -24]
       });
       const safeCase = (stop.caseNumber || '').replace(/'/g, "\\'");
-      const photoData = getStopDisplayPhotoData(stop);
       const safePhoto = photoData.rawUrl.replace(/'/g, "\\'");
       const safeLoc = (stop.locationText || '').replace(/'/g, "\\'");
-      const safeDate = (stop.dateTime || '').replace(/'/g, "\\'");
+      const safeDate = photoData.isReference ? 'ภาพอ้างอิงประกอบการจัดเส้นทาง' : ((stop.dateTime || stop.uploadedAt || '').replace(/'/g, "\\'"));
 
       let captureBtnHtml = `
         <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
           <i class="fa-solid fa-camera"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
         </button>
       `;
-      if (delStatus === 'uploaded') {
+      if (hasCameraDelivery && delStatus === 'uploaded') {
         captureBtnHtml = `
           <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-gray-600 hover:bg-gray-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
             <i class="fa-solid fa-camera-rotate"></i> ถ่ายภาพซ้ำจุดนี้
           </button>
         `;
-      } else if (delStatus === 'captured_offline') {
+      } else if (hasCameraDelivery && delStatus === 'captured_offline') {
         captureBtnHtml = `
           <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
             <i class="fa-solid fa-camera-rotate"></i> ถ่ายภาพใหม่จุดนี้
@@ -20758,8 +20785,11 @@ window.initMobileModalMapInstance = function() {
             ${statusBadgeHtml}
           </div>
           ${photoData.hasPhoto ? `
-            <div class="w-full h-24 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer shadow-2xs relative group" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${safeCase}', '${safeLoc}', '${safeDate}', '${sLat}', '${sLng}')" title="แตะดูรูปภาพขนาดเต็ม">
+            <div class="w-full h-24 rounded-lg overflow-hidden bg-gray-100 border ${photoData.isReference ? 'border-blue-300 ring-1 ring-blue-200' : 'border-emerald-300 ring-1 ring-emerald-200'} cursor-pointer shadow-2xs relative group" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${safeCase}', '${safeLoc}', '${safeDate}', '${sLat}', '${sLng}')" title="${photoData.isReference ? 'ภาพอ้างอิงประกอบการจัดเส้นทาง' : 'แตะดูรูปภาพขนาดเต็ม'}">
               <img src="${photoData.thumbUrl}" alt="รูปประกอบ" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${photoData.fallbackUrl}'; } else { this.parentElement.style.display = 'none'; }">
+              <span class="absolute bottom-0 inset-x-0 text-[8px] text-center font-bold py-0.5 leading-none text-white ${photoData.isReference ? 'bg-blue-600/85' : 'bg-emerald-600/85'}">
+                ${photoData.isReference ? 'ภาพอ้างอิง' : 'ภาพส่งหมาย'}
+              </span>
               <div class="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px] font-bold">
                 <i class="fa-solid fa-magnifying-glass-plus mr-1"></i> ดูรูปภาพ
               </div>
@@ -20913,16 +20943,18 @@ window.renderMobileRouteList = function() {
     const currentPin = hasPin ? pinCounter++ : null;
     const distText = hasPin ? `+ ${(stop.legDistanceKm || 0).toFixed(1)} กม.` : 'ไม่มีหมุด';
     const delStatus = stop.deliveryStatus || 'pending';
+    const photoData = getStopDisplayPhotoData(stop);
+    const hasCameraDelivery = (delStatus === 'uploaded' || delStatus === 'captured_offline') && !photoData.isReference;
 
     let itemClass = isExact ? 'border-emerald-200 bg-emerald-50/50' : (isNear ? 'border-amber-200 bg-amber-50/50' : 'border-gray-200 bg-white');
     let badgeBg = isExact ? 'bg-emerald-600 text-white' : (isNear ? 'bg-amber-500 text-white' : 'bg-gray-300 text-gray-700');
     let statusPillHtml = '';
 
-    if (delStatus === 'uploaded') {
+    if (hasCameraDelivery && delStatus === 'uploaded') {
       itemClass = 'border-gray-300 bg-gray-100/75 text-gray-700';
       badgeBg = 'bg-gray-500 text-white';
       statusPillHtml = `<span class="text-[10px] font-bold text-gray-600 bg-gray-200/90 border border-gray-300 px-1.5 py-0.2 rounded-md flex items-center gap-1"><i class="fa-solid fa-cloud-check text-gray-500"></i> ส่ง Server แล้ว</span>`;
-    } else if (delStatus === 'captured_offline') {
+    } else if (hasCameraDelivery && delStatus === 'captured_offline') {
       itemClass = 'border-amber-300 bg-amber-50/80';
       badgeBg = 'bg-amber-500 text-white';
       statusPillHtml = `<span class="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded-md flex items-center gap-1"><i class="fa-solid fa-camera text-amber-600"></i> ถ่ายแล้ว (รอส่ง)</span>`;
@@ -20933,13 +20965,13 @@ window.renderMobileRouteList = function() {
         <i class="fa-solid fa-camera text-[10px]"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
       </button>
     `;
-    if (delStatus === 'uploaded') {
+    if (hasCameraDelivery && delStatus === 'uploaded') {
       captureBtnHtml = `
         <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="flex-1 py-1.5 px-2 bg-gray-600 hover:bg-gray-700 active:scale-95 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 shadow-2xs transition cursor-pointer">
           <i class="fa-solid fa-camera-rotate text-[10px]"></i> ถ่ายภาพซ้ำจุดนี้
         </button>
       `;
-    } else if (delStatus === 'captured_offline') {
+    } else if (hasCameraDelivery && delStatus === 'captured_offline') {
       captureBtnHtml = `
         <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="flex-1 py-1.5 px-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 shadow-2xs transition cursor-pointer">
           <i class="fa-solid fa-camera-rotate text-[10px]"></i> ถ่ายภาพใหม่จุดนี้
@@ -20947,11 +20979,10 @@ window.renderMobileRouteList = function() {
       `;
     }
 
-    const photoData = getStopDisplayPhotoData(stop);
     const safePhoto = photoData.rawUrl.replace(/'/g, "\\'");
     const safeCaseNo = (stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'");
     const safeLocText = (stop.locationText || '').replace(/'/g, "\\'");
-    const safeDateTime = (stop.dateTime || '').replace(/'/g, "\\'");
+    const safeDateTime = photoData.isReference ? 'ภาพอ้างอิงประกอบการจัดเส้นทาง' : ((stop.dateTime || stop.uploadedAt || '').replace(/'/g, "\\'"));
     const sLat = (stop.lat !== null && stop.lat !== undefined) ? stop.lat : '';
     const sLng = (stop.lng !== null && stop.lng !== undefined) ? stop.lng : '';
 
@@ -20962,7 +20993,7 @@ window.renderMobileRouteList = function() {
         </span>
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between gap-1 mb-0.5">
-            <span class="font-bold text-xs ${delStatus === 'uploaded' ? 'text-gray-900' : (delStatus === 'captured_offline' ? 'text-amber-950' : (isExact ? 'text-emerald-900' : (isNear ? 'text-amber-950' : 'text-gray-900')))} truncate">${stop.caseNumber}</span>
+            <span class="font-bold text-xs ${hasCameraDelivery && delStatus === 'uploaded' ? 'text-gray-900' : (hasCameraDelivery && delStatus === 'captured_offline' ? 'text-amber-950' : (isExact ? 'text-emerald-900' : (isNear ? 'text-amber-950' : 'text-gray-900')))} truncate">${stop.caseNumber}</span>
             <div class="flex items-center gap-1 flex-shrink-0">
               ${statusPillHtml}
               <span class="text-[10px] font-semibold ${isExact ? 'text-emerald-700 bg-emerald-100/80 border-emerald-200' : (isNear ? 'text-amber-800 bg-amber-100/80 border-amber-200' : 'text-gray-500 bg-gray-100 border-gray-200')} px-1.5 py-0.2 rounded-md border flex-shrink-0">
@@ -20984,8 +21015,11 @@ window.renderMobileRouteList = function() {
           </div>
         </div>
         ${photoData.hasPhoto ? `
-          <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 shrink-0 self-center cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition relative group" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${safeCaseNo}', '${safeLocText}', '${safeDateTime}', '${sLat}', '${sLng}')" title="แตะดูรูปภาพประกอบ">
+          <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border ${photoData.isReference ? 'border-blue-300 ring-1 ring-blue-200' : 'border-emerald-300 ring-1 ring-emerald-200'} shrink-0 self-center cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition relative group" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${safeCaseNo}', '${safeLocText}', '${safeDateTime}', '${sLat}', '${sLng}')" title="${photoData.isReference ? 'ภาพอ้างอิงประกอบการวางแผน' : 'ภาพถ่ายการส่งหมาย'}">
             <img src="${photoData.thumbUrl}" alt="รูปประกอบ" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${photoData.fallbackUrl}'; } else { this.parentElement.style.display = 'none'; }">
+            <span class="absolute bottom-0 inset-x-0 text-[8px] text-center font-bold py-0.5 leading-none text-white ${photoData.isReference ? 'bg-blue-600/85' : 'bg-emerald-600/85'}">
+              ${photoData.isReference ? 'ภาพอ้างอิง' : 'ภาพส่งหมาย'}
+            </span>
             <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px]">
               <i class="fa-solid fa-magnifying-glass-plus"></i>
             </div>
