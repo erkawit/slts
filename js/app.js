@@ -6776,7 +6776,20 @@ function updateDistricts(provinceName, selectDistrict = null, selectSubdistrict 
     elements.districtSelect.appendChild(opt);
   });
 
-  const chosenDistrict = selectDistrict && districts.includes(selectDistrict) ? selectDistrict : (districts[0] || '');
+  const cleanSelDist = selectDistrict ? String(selectDistrict).replace(/^(?:อ\.|อำเภอ)\s*/, '').trim() : '';
+  let chosenDistrict = '';
+  if (cleanSelDist) {
+    if (districts.includes(cleanSelDist)) {
+      chosenDistrict = cleanSelDist;
+    } else {
+      const matched = districts.find(d => d.includes(cleanSelDist) || cleanSelDist.includes(d));
+      if (matched) chosenDistrict = matched;
+    }
+  }
+  if (!chosenDistrict) {
+    chosenDistrict = districts[0] || '';
+  }
+
   if (chosenDistrict) {
     elements.districtSelect.value = chosenDistrict;
     state.selectedDistrict = chosenDistrict;
@@ -6804,17 +6817,26 @@ function updateSubdistricts(provinceName, districtName, selectSubdistrict = null
     elements.subdistrictSelect.appendChild(opt);
   });
   
+  const cleanSelSub = selectSubdistrict ? String(selectSubdistrict).replace(/^(?:ต\.|ตำบล)\s*/, '').trim() : '';
   let chosenSub = '';
-  if (selectSubdistrict && subdistricts.includes(selectSubdistrict)) {
-    chosenSub = selectSubdistrict;
-  } else if (state.selectedSubdistrict && subdistricts.includes(state.selectedSubdistrict)) {
-    chosenSub = state.selectedSubdistrict;
-  } else if (localStorage.getItem('slts_selected_subdistrict') && subdistricts.includes(localStorage.getItem('slts_selected_subdistrict'))) {
-    chosenSub = localStorage.getItem('slts_selected_subdistrict');
-  } else if (elements.subdistrictSelect && elements.subdistrictSelect.value && subdistricts.includes(elements.subdistrictSelect.value)) {
-    chosenSub = elements.subdistrictSelect.value;
-  } else {
-    chosenSub = subdistricts[0] || '';
+  if (cleanSelSub) {
+    if (subdistricts.includes(cleanSelSub)) {
+      chosenSub = cleanSelSub;
+    } else {
+      const matched = subdistricts.find(s => s.includes(cleanSelSub) || cleanSelSub.includes(s));
+      if (matched) chosenSub = matched;
+    }
+  }
+  if (!chosenSub) {
+    if (state.selectedSubdistrict && subdistricts.includes(state.selectedSubdistrict)) {
+      chosenSub = state.selectedSubdistrict;
+    } else if (localStorage.getItem('slts_selected_subdistrict') && subdistricts.includes(localStorage.getItem('slts_selected_subdistrict'))) {
+      chosenSub = localStorage.getItem('slts_selected_subdistrict');
+    } else if (elements.subdistrictSelect && elements.subdistrictSelect.value && subdistricts.includes(elements.subdistrictSelect.value)) {
+      chosenSub = elements.subdistrictSelect.value;
+    } else {
+      chosenSub = subdistricts[0] || '';
+    }
   }
 
   if (chosenSub) {
@@ -8914,6 +8936,17 @@ function validateAndExtractModalForm() {
 function applyModalFormValues(val) {
   if (!val) return;
 
+  if (val.province) {
+    state.selectedProvince = val.province;
+    try { localStorage.setItem('slts_selected_province', val.province); } catch(e){}
+    if (elements.provinceSelect && elements.provinceSelect.value !== val.province) {
+      elements.provinceSelect.value = val.province;
+    }
+    if (typeof updateFloatingProvinceBadge === 'function') {
+      updateFloatingProvinceBadge();
+    }
+  }
+
   state.selectedDistrict = val.district;
   state.selectedSubdistrict = val.subdistrict;
   localStorage.setItem('slts_selected_district', val.district);
@@ -8923,12 +8956,12 @@ function applyModalFormValues(val) {
     elements.caseExtraInput.value = val.caseExtra || '';
   }
 
-  if (elements.districtSelect) {
-    elements.districtSelect.value = val.district;
-    updateSubdistricts(state.selectedProvince, val.district, val.subdistrict);
-  }
-  if (elements.subdistrictSelect) {
-    elements.subdistrictSelect.value = val.subdistrict;
+  const activeProv = val.province || state.selectedProvince || localStorage.getItem('slts_selected_province') || 'อุดรธานี';
+  if (typeof updateDistricts === 'function') {
+    updateDistricts(activeProv, val.district, val.subdistrict);
+  } else {
+    if (elements.districtSelect && val.district) elements.districtSelect.value = val.district;
+    if (elements.subdistrictSelect && val.subdistrict) elements.subdistrictSelect.value = val.subdistrict;
   }
 
   const isOther = val.courtCategory === 'ศาลอื่น' || val.courtCategory === 'หมายศาลอื่น' || val.courtType === 'ศาลอื่น';
@@ -8967,24 +9000,28 @@ function applyModalFormValues(val) {
     saveCasePrefix(val.prefix);
   }
 
-  if (elements.locationTypeSelect) elements.locationTypeSelect.value = val.locType;
-  if (val.locType === 'หมายบ้าน') {
+  let locType = val.locType;
+  if (locType === 'สถานที่อื่นๆ') locType = 'อื่นๆ';
+  if (!locType) locType = 'หมายบ้าน';
+  if (elements.locationTypeSelect) elements.locationTypeSelect.value = locType;
+
+  if (locType === 'หมายบ้าน') {
     elements.houseAddressFields?.classList.remove('hidden');
     elements.localAdminAddressFields?.classList.add('hidden');
     elements.customOtherAddressFields?.classList.add('hidden');
-    if (elements.houseNoInput) elements.houseNoInput.value = val.houseNo;
-    if (elements.mooInput) elements.mooInput.value = val.moo;
-  } else if (val.locType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
+    if (elements.houseNoInput) elements.houseNoInput.value = val.houseNo || '';
+    if (elements.mooInput) elements.mooInput.value = val.moo || '';
+  } else if (locType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
     elements.houseAddressFields?.classList.add('hidden');
     elements.localAdminAddressFields?.classList.remove('hidden');
     elements.customOtherAddressFields?.classList.add('hidden');
-    if (elements.localAdminNameInput) elements.localAdminNameInput.value = val.adminName;
-    saveLocalAdminName(val.adminName);
+    if (elements.localAdminNameInput) elements.localAdminNameInput.value = val.adminName || '';
+    if (val.adminName) saveLocalAdminName(val.adminName);
   } else {
     elements.houseAddressFields?.classList.add('hidden');
     elements.localAdminAddressFields?.classList.add('hidden');
     elements.customOtherAddressFields?.classList.remove('hidden');
-    if (elements.customOtherLocationName) elements.customOtherLocationName.value = val.otherLocName;
+    if (elements.customOtherLocationName) elements.customOtherLocationName.value = val.otherLocName || '';
   }
 
   if (val.coords && elements.coordinatesInput) {
@@ -9063,13 +9100,20 @@ function getFormattedCaseNumber() {
   if (isOther) {
     const caseNo = (elements.otherCaseNoInput ? elements.otherCaseNoInput.value : '').trim();
     const year = elements.otherCaseYearSelect ? elements.otherCaseYearSelect.value : '';
-    return caseNo ? `ต${caseNo}/${year}${extraSuffix}` : '';
+    if (caseNo) return `ต${caseNo}/${year}${extraSuffix}`;
   } else {
     const prefix = (elements.udonPrefixInput ? elements.udonPrefixInput.value : '').trim();
     const caseNo = (elements.udonCaseNoInput ? elements.udonCaseNoInput.value : '').trim();
     const year = elements.udonCaseYearSelect ? elements.udonCaseYearSelect.value : '';
-    return (prefix && caseNo) ? `${prefix}${caseNo}/${year}${extraSuffix}` : '';
+    if (prefix && caseNo) return `${prefix}${caseNo}/${year}${extraSuffix}`;
+    if (caseNo && year) return `${caseNo}/${year}${extraSuffix}`;
+    if (caseNo) return `${caseNo}${extraSuffix}`;
   }
+
+  if (state.activeRouteStopTarget?.caseNumber) {
+    return state.activeRouteStopTarget.caseNumber;
+  }
+  return '';
 }
 
 function initFormEventListeners() {
@@ -9978,18 +10022,27 @@ function getFullLocationText() {
   const distPrefix = isBkk ? '' : 'อ.';
   const provSuffix = province ? ` จ.${province}` : '';
 
+  let addressPart = '';
   if (locationType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
-    const adminText = (elements.localAdminNameInput?.value || 'ที่ทำการปกครองส่วนท้องถิ่น').trim();
-    return `${adminText} ${subPrefix}${subdistrict} ${distPrefix}${district}${provSuffix}`.trim();
+    addressPart = (elements.localAdminNameInput?.value || 'ที่ทำการปกครองส่วนท้องถิ่น').trim();
   } else if (locationType === 'อื่นๆ') {
-    const otherText = (elements.customOtherLocationName?.value || 'อื่นๆ').trim();
-    return `${otherText} ${subPrefix}${subdistrict} ${distPrefix}${district}${provSuffix}`.trim();
+    addressPart = (elements.customOtherLocationName?.value || 'อื่นๆ').trim();
   } else {
     const houseNo = elements.houseNoInput ? elements.houseNoInput.value.trim() : '';
     const moo = elements.mooInput ? elements.mooInput.value.trim() : '';
     const mooText = moo ? ` ม.${moo}` : '';
-    return `${houseNo}${mooText} ${subPrefix}${subdistrict} ${distPrefix}${district}${provSuffix}`.trim();
+    addressPart = `${houseNo}${mooText}`.trim();
   }
+
+  // Fallback if addressPart is empty and we have active stop locationText
+  if (!addressPart && state.activeRouteStopTarget?.locationText) {
+    return state.activeRouteStopTarget.locationText;
+  }
+
+  const subText = subdistrict ? ` ${subPrefix}${subdistrict}` : '';
+  const distText = district ? ` ${distPrefix}${district}` : '';
+  const full = `${addressPart}${subText}${distText}${provSuffix}`.trim();
+  return full || (state.activeRouteStopTarget?.locationText || '');
 }
 
 function detectMobileOS() {
@@ -11888,27 +11941,27 @@ function isFormValidForCapture() {
 
   if (isOther) {
     const otherNo = (elements.otherCaseNoInput ? elements.otherCaseNoInput.value : '').trim();
-    if (!otherNo) return false;
+    if (!otherNo && !state.activeRouteStopTarget?.caseNumber) return false;
   } else {
     const prefix = (elements.udonPrefixInput ? elements.udonPrefixInput.value : '').trim();
     const caseNo = (elements.udonCaseNoInput ? elements.udonCaseNoInput.value : '').trim();
-    if (!prefix || !caseNo) return false;
+    if (!caseNo && !state.activeRouteStopTarget?.caseNumber) return false;
     if (courtCategory === 'ศาลที่ไม่สังกัดภาค') {
       const customCourt = (elements.courtNameInput ? elements.courtNameInput.value : '').trim();
-      if (!customCourt) return false;
+      if (!customCourt && !state.activeRouteStopTarget?.caseNumber) return false;
     }
   }
 
   const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
   if (locationType === 'หมายบ้าน') {
     const houseNo = elements.houseNoInput ? elements.houseNoInput.value.trim() : '';
-    if (!houseNo) return false;
+    if (!houseNo && !state.activeRouteStopTarget?.locationText) return false;
   } else if (locationType === 'อื่นๆ') {
     const otherLoc = elements.customOtherLocationName ? elements.customOtherLocationName.value.trim() : '';
-    if (!otherLoc) return false;
+    if (!otherLoc && !state.activeRouteStopTarget?.locationText) return false;
   } else if (locationType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
     const adminName = elements.localAdminNameInput ? elements.localAdminNameInput.value.trim() : '';
-    if (!adminName) return false;
+    if (!adminName && !state.activeRouteStopTarget?.locationText) return false;
   }
 
   return true;
@@ -12051,8 +12104,8 @@ function startLiveCameraHUD() {
       const lngFormatted = hasCoords ? `${Math.abs(state.lng).toFixed(4)}°${state.lng >= 0 ? 'E' : 'W'}` : '';
       const dirText = window.compassManager ? window.compassManager.getDirectionText(curHeading) : 'N';
 
-      const caseNum = getFormattedCaseNumber();
-      const locText = getFullLocationText();
+      const caseNum = getFormattedCaseNumber() || state.activeRouteStopTarget?.caseNumber || '';
+      const locText = getFullLocationText() || state.activeRouteStopTarget?.locationText || '';
       const isReady = isFormValidForCapture();
 
       if (elements.liveBadgeDate) elements.liveBadgeDate.textContent = `📅  ${dateStr}`;
@@ -12066,10 +12119,10 @@ function startLiveCameraHUD() {
         }
       }
       if (elements.liveBadgeLocation) {
-        elements.liveBadgeLocation.textContent = isReady && locText ? `🏠  ${locText}` : (locText || `🏠  (กด "ฟอร์มข้อมูล" เพื่อระบุสถานที่)`);
+        elements.liveBadgeLocation.textContent = locText ? `🏠  ${locText}` : `🏠  (กด "ฟอร์มข้อมูล" เพื่อระบุสถานที่)`;
       }
       if (elements.liveBadgeCase) {
-        elements.liveBadgeCase.textContent = isReady && caseNum ? `⚖️  เลขคดี: ${caseNum}` : `⚖️  เลขคดี: (กด "ฟอร์มข้อมูล")`;
+        elements.liveBadgeCase.textContent = caseNum ? `⚖️  เลขคดี: ${caseNum}` : `⚖️  เลขคดี: (กด "ฟอร์มข้อมูล")`;
       }
 
       updateCaptureButtonState();
@@ -17918,7 +17971,7 @@ function renderRouteSidebarList(stops, totalDistKm) {
 
         <!-- Quick Action Buttons (Camera/Form, Edit, Delete, Up, Down, Send to Mobile) -->
         <div class="flex items-center gap-0.5 flex-shrink-0">
-          <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="p-1 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer" title="เปิดฟอร์มบันทึกส่งหมายและถ่ายภาพจุดนี้">
+          <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="p-1 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer" title="ถ่ายภาพหมายนี้">
             <i class="fa-solid fa-camera text-xs"></i>
           </button>
           <button type="button" onclick="sendSingleStopToMobileHandoff(${index})" class="hidden md:inline-flex p-1 text-violet-600 hover:bg-violet-50 rounded cursor-pointer" title="ส่งพิกัดศูนย์กลางหมู่บ้านของหมายนี้ไปมือถือ (Handoff)">
@@ -18754,7 +18807,8 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
   state.activeRouteStopTarget = {
     index: typeof stopIndex === 'number' ? stopIndex : 0,
     caseNumber: stop.caseNumber,
-    id: stop.id
+    id: stop.id,
+    locationText: stop.locationText
   };
 
   // 1. ปิด Modals อื่นๆ ที่เปิดอยู่
@@ -18763,6 +18817,7 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
   }
 
   // 2. สกัดข้อมูลประเภทศาลและเลขคดี
+  let rawCase = (stop.caseNumber || '').trim();
   let prefix = (stop.prefix || '').trim();
   let caseNo = (stop.caseNo || '').trim();
   let caseYear = (stop.caseYear || '').trim();
@@ -18772,61 +18827,136 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
   let otherCaseNo = (stop.otherCaseNo || '').trim();
   let otherCaseYear = (stop.otherCaseYear || '').trim();
 
-  if (!caseNo && stop.caseNumber) {
-    const rawCase = stop.caseNumber.trim();
-    // Regex จับแพทเทิร์นเลขคดี เช่น ผบ.123/2567, ผบ123/2567, มส.55/67
-    const m = rawCase.match(/^([^\d\/]+)?\s*(\d+)\s*\/\s*(\d{2,4})/);
-    if (m) {
-      prefix = (m[1] || '').trim();
-      caseNo = m[2] || '';
-      caseYear = m[3] || '';
-      if (caseYear.length === 2) caseYear = '25' + caseYear;
-    }
-  }
-
   // ตรวจสอบศาลอื่น / หมาย ต.
-  const isOtherCourt = (prefix && prefix.toLowerCase().startsWith('ต') && prefix.length <= 2) || courtType === 'ศาลอื่น' || courtCategory === 'หมายศาลอื่น' || courtCategory === 'ศาลอื่น';
+  const isOtherCourt = /^หมาย\s*ต\.?|^ต\.?\s*\d+/i.test(rawCase) ||
+                       (prefix && prefix.toLowerCase().startsWith('ต') && prefix.length <= 2) ||
+                       courtType === 'ศาลอื่น' ||
+                       courtCategory === 'หมายศาลอื่น' ||
+                       courtCategory === 'ศาลอื่น';
+
   if (isOtherCourt) {
     courtCategory = 'ศาลอื่น';
     courtType = 'ศาลอื่น';
-    if (!otherCaseNo) otherCaseNo = caseNo;
-    if (!otherCaseYear) otherCaseYear = caseYear;
+    if (!otherCaseNo && rawCase) {
+      const mOther = rawCase.match(/(\d+)\s*[\/\-]\s*(\d{2,4})/);
+      if (mOther) {
+        otherCaseNo = mOther[1];
+        otherCaseYear = mOther[2];
+        if (otherCaseYear.length === 2) otherCaseYear = '25' + otherCaseYear;
+      } else {
+        otherCaseNo = rawCase.replace(/[^\d]/g, '');
+      }
+    }
+    if (!otherCaseYear) {
+      otherCaseYear = String(new Date().getFullYear() + 543);
+    }
+  } else {
+    if (!caseNo && rawCase) {
+      // Regex จับแพทเทิร์นเลขคดี เช่น ผบ.123/2567, ผบ123/2567, มส.55/67, 123/2567
+      const m = rawCase.match(/^([^\d\/\-\s]+(?:\s*[^\d\/\-\s]+)*)?\s*(\d+)\s*[\/\-]\s*(\d{2,4})/);
+      if (m) {
+        prefix = (m[1] || '').trim().replace(/[\.\s]/g, '');
+        caseNo = m[2] || '';
+        caseYear = m[3] || '';
+        if (caseYear.length === 2) caseYear = '25' + caseYear;
+      } else {
+        const mSimple = rawCase.match(/^([^\d\s]+)?\s*(\d+)/);
+        if (mSimple) {
+          prefix = (mSimple[1] || '').trim().replace(/[\.\s]/g, '');
+          caseNo = mSimple[2] || '';
+        } else {
+          caseNo = rawCase;
+        }
+      }
+    }
+    if (!prefix) {
+      prefix = (elements.udonPrefixInput?.value || '').trim() || 'ผบ';
+    }
+    if (!caseYear) {
+      caseYear = String(new Date().getFullYear() + 543);
+    }
   }
 
   // 3. สกัดข้อมูลสถานที่และที่อยู่
-  const prov = stop.province || state.selectedProvince || 'อุดรธานี';
-  const dist = stop.district || state.selectedDistrict || '';
-  const subdist = stop.subdistrict || state.selectedSubdistrict || '';
+  let prov = (stop.province || '').trim();
+  let dist = (stop.district || '').trim();
+  let subdist = (stop.subdistrict || '').trim();
 
-  let locType = stop.locationType || stop.locType || 'หมายบ้าน';
-  let adminName = stop.localAdminName || stop.adminName || '';
-  let otherLocName = stop.customOtherLocationName || stop.otherLocName || '';
-  let houseNo = (stop.houseNo || '').trim();
-  let moo = (stop.moo || '').trim();
+  if (stop.raw) {
+    if (!prov && typeof getRowProvince === 'function') prov = (getRowProvince(stop.raw) || stop.raw['จังหวัด'] || '').trim();
+    if (!dist) dist = (stop.raw['อำเภอ'] || '').trim();
+    if (!subdist) subdist = (stop.raw['ตำบล'] || '').trim();
+  }
 
-  if (!houseNo && !adminName && !otherLocName && stop.locationText) {
-    if (stop.locationText.includes('ที่ทำการ') || stop.locationText.includes('อบต.') || stop.locationText.includes('เทศบาล')) {
+  const locTextFull = (stop.locationText || '').trim();
+  if (!prov && locTextFull) {
+    const mProv = locTextFull.match(/(?:จ\.|จังหวัด)\s*([^\s,]+)/);
+    if (mProv) prov = mProv[1].trim();
+  }
+  if (!dist && locTextFull) {
+    const mDist = locTextFull.match(/(?:อ\.|อำเภอ)\s*([^\s,]+)/);
+    if (mDist) dist = mDist[1].trim();
+  }
+  if (!subdist && locTextFull) {
+    const mSub = locTextFull.match(/(?:ต\.|ตำบล)\s*([^\s,]+)/);
+    if (mSub) subdist = mSub[1].trim();
+  }
+
+  if (!prov) prov = state.selectedProvince || localStorage.getItem('slts_selected_province') || 'อุดรธานี';
+  if (!dist) dist = state.selectedDistrict || '';
+  if (!subdist) subdist = state.selectedSubdistrict || '';
+
+  prov = prov.replace(/^(?:จ\.|จังหวัด)\s*/, '').trim();
+  dist = dist.replace(/^(?:อ\.|อำเภอ)\s*/, '').trim();
+  subdist = subdist.replace(/^(?:ต\.|ตำบล)\s*/, '').trim();
+
+  let locType = stop.locationType || stop.locType || (stop.raw ? stop.raw['ประเภทสถานที่'] : '') || '';
+  let adminName = stop.localAdminName || stop.adminName || (stop.raw ? stop.raw['ที่ทำการปกครองส่วนท้องถิ่น'] : '') || '';
+  let otherLocName = stop.customOtherLocationName || stop.otherLocName || (stop.raw ? stop.raw['สถานที่อื่นๆ'] : '') || '';
+  let houseNo = (stop.houseNo || (stop.raw ? stop.raw['บ้านเลขที่'] : '') || '').trim();
+  let moo = (stop.moo || (stop.raw ? stop.raw['หมู่'] || stop.raw['หมู่ที่'] : '') || '').trim();
+
+  if (locType === 'สถานที่อื่นๆ') locType = 'อื่นๆ';
+
+  if (!houseNo && !adminName && !otherLocName && locTextFull) {
+    if (locTextFull.includes('ที่ทำการ') || locTextFull.includes('อบต.') || locTextFull.includes('เทศบาล') || locTextFull.includes('อบจ.')) {
       locType = 'ที่ทำการปกครองส่วนท้องถิ่น';
-      adminName = stop.locationText;
+      adminName = locTextFull.split(/[\s,]+ต\.|[\s,]+อ\.|[\s,]+จ\./)[0].trim() || locTextFull;
     } else {
-      const houseMatch = stop.locationText.match(/บ้านเลขที่\s*([^\s,]+)/);
-      const mooMatch = stop.locationText.match(/หมู่ที่?\s*(\d+)/);
-      if (houseMatch) houseNo = houseMatch[1];
-      if (mooMatch) moo = mooMatch[1];
+      const houseMatch = locTextFull.match(/(?:บ้านเลขที่\s*)?([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)/);
+      const mooMatch = locTextFull.match(/(?:หมู่(?:\s*ที่)?|ม\.?)\s*(\d+)/);
+      if (houseMatch) houseNo = houseMatch[1].trim();
+      if (mooMatch) moo = mooMatch[1].trim();
       if (!houseMatch && !mooMatch) {
-        locType = 'สถานที่อื่นๆ';
-        otherLocName = stop.locationText;
+        locType = 'อื่นๆ';
+        otherLocName = locTextFull.split(/[\s,]+ต\.|[\s,]+อ\.|[\s,]+จ\./)[0].trim() || locTextFull;
+      } else {
+        locType = 'หมายบ้าน';
       }
     }
   }
 
-  // 4. พิกัดละติจูด-ลองจิจูด
-  let coordsStr = '';
-  if (stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && stop.lat > 0 && stop.lng > 0) {
-    state.lat = parseFloat(stop.lat);
-    state.lng = parseFloat(stop.lng);
-    coordsStr = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+  if (!locType) {
+    if (adminName) locType = 'ที่ทำการปกครองส่วนท้องถิ่น';
+    else if (houseNo) locType = 'หมายบ้าน';
+    else if (otherLocName) locType = 'อื่นๆ';
+    else locType = 'หมายบ้าน';
   }
+
+  if (locType === 'หมายบ้าน' && !houseNo) {
+    if (otherLocName || locTextFull) {
+      locType = 'อื่นๆ';
+      otherLocName = otherLocName || locTextFull;
+    } else {
+      houseNo = '-';
+    }
+  }
+
+  // 4. พิกัดให้อ้างอิงจาก Location Service (GPS ของเครื่องสดๆ) ตามความต้องการของผู้ใช้งาน
+  if (typeof fetchCurrentLocation === 'function') {
+    fetchCurrentLocation(true, false);
+  }
+  const coordsStr = (state.lat && state.lng) ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : '';
 
   const formData = {
     province: prov,
@@ -18856,6 +18986,17 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
   if (coordsStr && elements.coordinatesInput) {
     elements.coordinatesInput.value = coordsStr;
   }
+
+  // อัปเดตข้อมูลบน Live Badge มุมขวาล่างทันทีให้เห็นข้อมูลทันทีที่เปิดกล้อง
+  const displayCase = getFormattedCaseNumber() || stop.caseNumber || (isOtherCourt ? `ต${otherCaseNo}/${otherCaseYear}` : `${prefix}${caseNo}/${caseYear}`);
+  const displayLoc = getFullLocationText() || stop.locationText || '';
+  if (elements.liveBadgeCase && displayCase) {
+    elements.liveBadgeCase.textContent = `⚖️  เลขคดี: ${displayCase}`;
+  }
+  if (elements.liveBadgeLocation && displayLoc) {
+    elements.liveBadgeLocation.textContent = `🏠  ${displayLoc}`;
+  }
+  updateCaptureButtonState();
 
   // 6. เปิดกล้องทันทีบนมือถือ หรือสลับไปยังฟอร์มบน Desktop
   const isMobile = window.innerWidth <= 768;
@@ -20761,7 +20902,7 @@ window.initMobileModalMapInstance = function() {
 
       let captureBtnHtml = `
         <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
-          <i class="fa-solid fa-camera"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
+          <i class="fa-solid fa-camera"></i> ถ่ายภาพหมายนี้
         </button>
       `;
       if (hasCameraDelivery && delStatus === 'uploaded') {
@@ -20962,7 +21103,7 @@ window.renderMobileRouteList = function() {
 
     let captureBtnHtml = `
       <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 shadow-2xs transition cursor-pointer">
-        <i class="fa-solid fa-camera text-[10px]"></i> บันทึกส่งหมาย & ถ่ายภาพจุดนี้
+        <i class="fa-solid fa-camera text-[10px]"></i> ถ่ายภาพหมายนี้
       </button>
     `;
     if (hasCameraDelivery && delStatus === 'uploaded') {
