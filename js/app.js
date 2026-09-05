@@ -12871,33 +12871,168 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 /**
- * จัดลำดับเส้นทางแบบวงรอบ 2-Opt TSP (ป้องกันเส้นทางตัดกัน/ทับกัน และวนกลับมาจบที่จุดเริ่มต้น)
+ * คำนวณจัดลำดับเส้นทางส่งหมายบนโครงข่ายถนนสัญจรจริง (OSRM Trip API / Real Road TSP)
+ * รองรับการเดินทางแบบวงรอบปิด (Round Trip) จากจุดเริ่มต้น วนรอบทุกจุด และกลับมาจุดเริ่มต้น
+ * หรือเดินทางไปยังจุดสิ้นสุดเฉพาะที่กำหนดไว้ (Custom End Destination)
+ * โดยไม่มีการวิ่งสลับเส้นทางไปมา (No Criss-crossing)
  */
-function optimizeStopsSequence(stops, startLat = null, startLng = null) {
+async function optimizeRouteSequenceRealRoad(options = {}) {
+  const stops = options.stops || state.currentRouteStops || [];
   if (!stops || stops.length <= 1) return stops;
 
-  const stopsWithCoords = stops.filter(s => s.lat && s.lng && !isNaN(s.lat) && !isNaN(s.lng) && s.lat > 0 && s.lng > 0);
-  const stopsWithoutCoords = stops.filter(s => !s.lat || !s.lng || isNaN(s.lat) || isNaN(s.lng) || s.lat <= 0 || s.lng <= 0);
+  const start = options.startLocation || state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี', lat: 17.4138, lng: 102.7872 };
+  const end = options.endLocation || state.routeEndLocation;
+  const isRoundTripExplicit = options.isRoundTrip !== undefined ? options.isRoundTrip : Boolean(state.isRoundTrip);
+
+  const stopsWithCoords = stops.filter(s => s.lat && s.lng && !isNaN(s.lat) && !isNaN(s.lng) && Number(s.lat) > 0 && Number(s.lng) > 0);
+  const stopsWithoutCoords = stops.filter(s => !s.lat || !s.lng || isNaN(s.lat) || isNaN(s.lng) || Number(s.lat) <= 0 || Number(s.lng) <= 0);
 
   if (stopsWithCoords.length <= 1) return stops;
 
-  const hubLat = (startLat !== null && !isNaN(startLat)) ? startLat : (stopsWithCoords[0]?.lat || 17.4138);
-  const hubLng = (startLng !== null && !isNaN(startLng)) ? startLng : (stopsWithCoords[0]?.lng || 102.7872);
+  // ตรวจสอบว่าจุดสิ้นสุดเป็นตำแหน่งเดียวกับจุดเริ่มต้นหรือไม่
+  const hasCustomEnd = Boolean(end && end.enabled && end.lat && end.lng && !isNaN(end.lat) && !isNaN(end.lng) && Number(end.lat) > 0 && Number(end.lng) > 0);
+  const distStartEnd = hasCustomEnd ? calculateHaversineDistance(start.lat, start.lng, end.lat, end.lng) : 0;
+  const isEndSameAsStart = hasCustomEnd && distStartEnd < 0.05; // ห่างกันไม่เกิน 50 เมตร ถือเป็นจุดเดียวกัน
 
-  // ขั้นที่ 1: จัดเรียงจุดตามมุมเรเดียนรอบจุดเริ่มต้น (Polar Angle Sweep) เพื่อสร้างเส้นรอบวงเริ่มต้นที่ลื่นไหล
-  const withAngles = stopsWithCoords.map(s => {
-    const dLat = s.lat - hubLat;
-    const dLng = s.lng - hubLng;
-    const angle = Math.atan2(dLng, dLat);
-    return { stop: s, angle };
-  });
+  // หากจุดสิ้นสุดเป็นตำแหน่งเดียวกับจุดเริ่มต้น หรือเลือก Round Trip ให้ทำการคำนวณแบบวนรอบ (Loop)
+  const isRoundTrip = isRoundTripExplicit || isEndSameAsStart || !hasCustomEnd;
 
-  withAngles.sort((a, b) => a.angle - b.angle);
-  let tour = withAngles.map(item => item.stop);
+  // 1. พยายามเรียกใช้ OSRM Trip API (Real Road TSP) เมื่อเชื่อมต่ออินเทอร์เน็ตได้
+  if (navigator.onLine) {
+    try {
+      let coordsForQuery = [];
+      let queryParams = '';
 
-  // ขั้นที่ 2: รัน 2-Opt Algorithm เพื่อแก้เส้นทางที่ตัดกันหรือทับซ้อนกัน (Uncrossing intersecting segments)
+      if (isRoundTrip) {
+        // วนรอบกลับจุดเริ่มต้น: Waypoint แรกคือ Start และให้ roundtrip=true
+        coordsForQuery = [start, ...stopsWithCoords];
+        queryParams = 'source=first&roundtrip=true&overview=full&geometries=geojson&steps=false';
+      } else if (hasCustomEnd && !isEndSameAsStart) {
+        // มีจุดสิ้นสุดเฉพาะที่ต่างจากจุดเริ่มต้น: Waypoint แรกคือ Start, Waypoint สุดท้ายคือ End
+        coordsForQuery = [start, ...stopsWithCoords, end];
+        queryParams = 'source=first&destination=last&roundtrip=false&overview=full&geometries=geojson&steps=false';
+      } else {
+        coordsForQuery = [start, ...stopsWithCoords];
+        queryParams = 'source=first&roundtrip=false&overview=full&geometries=geojson&steps=false';
+      }
+
+      const coordString = coordsForQuery.map(c => `${Number(c.lng).toFixed(6)},${Number(c.lat).toFixed(6)}`).join(';');
+      const mirror1 = `https://router.project-osrm.org/trip/v1/driving/${coordString}?${queryParams}`;
+      const mirror2 = `https://routing.openstreetmap.de/routed-car/trip/v1/driving/${coordString}?${queryParams}`;
+
+      let osrmData = null;
+      try {
+        const res1 = await fetch(mirror1, { signal: AbortSignal.timeout(6000) });
+        if (res1.ok) {
+          const json1 = await res1.json();
+          if (json1.code === 'Ok' && json1.waypoints && json1.waypoints.length > 0) {
+            osrmData = json1;
+          }
+        }
+      } catch (e1) {}
+
+      if (!osrmData) {
+        try {
+          const res2 = await fetch(mirror2, { signal: AbortSignal.timeout(6000) });
+          if (res2.ok) {
+            const json2 = await res2.json();
+            if (json2.code === 'Ok' && json2.waypoints && json2.waypoints.length > 0) {
+              osrmData = json2;
+            }
+          }
+        } catch (e2) {}
+      }
+
+      if (osrmData && osrmData.waypoints) {
+        // จัดลำดับจุดตามผลลัพธ์ของ OSRM Trip
+        // waypoints จะเรียงตามลำดับการเดินทางจริงบนถนน
+        const ordered = [];
+        const trip = (osrmData.trips && osrmData.trips[0]) ? osrmData.trips[0] : null;
+
+        osrmData.waypoints.forEach(wp => {
+          const originalIdx = wp.waypoint_index;
+          // waypoint_index 0 คือ Start
+          // หากมี custom end (ไม่ใช่ roundtrip) ตัวสุดท้ายจะเป็น End
+          if (originalIdx > 0 && originalIdx <= stopsWithCoords.length) {
+            ordered.push(stopsWithCoords[originalIdx - 1]);
+          }
+        });
+
+        if (ordered.length === stopsWithCoords.length) {
+          // เก็บข้อมูล Polyline ถนนจริง และระยะทางรวม เพื่อให้แผนที่แสดงผลได้ทันที
+          if (trip) {
+            if (trip.geometry && trip.geometry.coordinates) {
+              state.routeRoadPolylineCoords = trip.geometry.coordinates.map(pt => [pt[1], pt[0]]);
+              state.mapRoutePolylineCoords = state.routeRoadPolylineCoords;
+              try {
+                localStorage.setItem('slts_shared_route_polyline', JSON.stringify(state.routeRoadPolylineCoords));
+              } catch (e) {}
+            }
+            if (trip.distance) {
+              state.calculatedRoadDistanceKm = trip.distance / 1000;
+            }
+
+            // นำระยะทางของแต่ละช่วง (Leg) บนถนนจริงไปใส่ในแต่ละจุด
+            if (Array.isArray(trip.legs)) {
+              ordered.forEach((stop, idx) => {
+                if (trip.legs[idx] && trip.legs[idx].distance !== undefined) {
+                  stop.legDistanceKm = trip.legs[idx].distance / 1000;
+                }
+              });
+            }
+          }
+
+          stopsWithoutCoords.forEach(s => { s.legDistanceKm = 0; });
+          return [...ordered, ...stopsWithoutCoords];
+        }
+      }
+    } catch (apiErr) {
+      console.warn('OSRM Trip API failed, falling back to local TSP:', apiErr);
+    }
+  }
+
+  // 2. Offline Fallback Algorithm (Nearest Insertion + 2-Opt Untangling)
+  return optimizeStopsSequenceOffline(stopsWithCoords, stopsWithoutCoords, start, end, isRoundTrip, hasCustomEnd && !isEndSameAsStart);
+}
+
+/**
+ * อัลกอริทึมจัดลำดับเส้นทางออฟไลน์ (Nearest Insertion + 2-Opt Untangling)
+ * ป้องกันการวิ่งสลับไปมาและตัดเส้นทางที่ไขว้กันออกไป
+ */
+function optimizeStopsSequenceOffline(stopsWithCoords, stopsWithoutCoords, start, end, isRoundTrip, hasCustomEnd) {
+  if (stopsWithCoords.length <= 1) return [...stopsWithCoords, ...stopsWithoutCoords];
+
+  const hubLat = Number(start.lat);
+  const hubLng = Number(start.lng);
+  const endLat = hasCustomEnd ? Number(end.lat) : hubLat;
+  const endLng = hasCustomEnd ? Number(end.lng) : hubLng;
+
+  // 1. สร้างเส้นทางเริ่มต้นด้วย Nearest Neighbor Insertion เพื่อจัดกลุ่มจุดใกล้เคียง
+  let unvisited = [...stopsWithCoords];
+  let tour = [];
+
+  let curLat = hubLat;
+  let curLng = hubLng;
+
+  while (unvisited.length > 0) {
+    let nearestIdx = -1;
+    let minDist = Infinity;
+    for (let i = 0; i < unvisited.length; i++) {
+      const d = calculateHaversineDistance(curLat, curLng, unvisited[i].lat, unvisited[i].lng);
+      if (d < minDist) {
+        minDist = d;
+        nearestIdx = i;
+      }
+    }
+    const nextStop = unvisited.splice(nearestIdx, 1)[0];
+    tour.push(nextStop);
+    curLat = nextStop.lat;
+    curLng = nextStop.lng;
+  }
+
+  // 2. รัน 2-Opt Untangling Algorithm เพื่อแก้ปัญหาเส้นทางวิ่งตัดกัน/ทับซ้อนกัน
   let improved = true;
-  let maxIterations = 60;
+  let maxIterations = 80;
   let iteration = 0;
 
   while (improved && iteration < maxIterations) {
@@ -12909,7 +13044,11 @@ function optimizeStopsSequence(stops, startLat = null, startLng = null) {
         const prevA = (i === 0) ? { lat: hubLat, lng: hubLng } : tour[i - 1];
         const a = tour[i];
         const b = tour[k];
-        const nextB = (k === tour.length - 1) ? { lat: hubLat, lng: hubLng } : tour[k + 1];
+        const nextB = (k === tour.length - 1) 
+          ? (isRoundTrip ? { lat: hubLat, lng: hubLng } : (hasCustomEnd ? { lat: endLat, lng: endLng } : null))
+          : tour[k + 1];
+
+        if (!nextB) continue;
 
         const currentDist = calculateHaversineDistance(prevA.lat, prevA.lng, a.lat, a.lng) +
                             calculateHaversineDistance(b.lat, b.lng, nextB.lat, nextB.lng);
@@ -12931,19 +13070,41 @@ function optimizeStopsSequence(stops, startLat = null, startLng = null) {
   }
 
   // คำนวณระยะทางแต่ละช่วง
-  let prevLat = hubLat;
-  let prevLng = hubLng;
+  let prevL = hubLat;
+  let prevG = hubLng;
   tour.forEach((s) => {
-    s.legDistanceKm = calculateHaversineDistance(prevLat, prevLng, s.lat, s.lng);
-    prevLat = s.lat;
-    prevLng = s.lng;
+    s.legDistanceKm = calculateHaversineDistance(prevL, prevG, s.lat, s.lng);
+    prevL = s.lat;
+    prevG = s.lng;
   });
 
-  stopsWithoutCoords.forEach(s => {
-    s.legDistanceKm = 0;
-  });
-
+  stopsWithoutCoords.forEach(s => { s.legDistanceKm = 0; });
   return [...tour, ...stopsWithoutCoords];
+}
+
+/**
+ * ฟังก์ชันจัดลำดับเส้นทางแบบซิงโครนัส (Synchronous Wrapper สำหรับการเรียกใช้ทั่วไป)
+ */
+function optimizeStopsSequence(stops, startLat = null, startLng = null, endLat = null, endLng = null, isRoundTrip = true) {
+  if (!stops || stops.length <= 1) return stops;
+
+  const stopsWithCoords = stops.filter(s => s.lat && s.lng && !isNaN(s.lat) && !isNaN(s.lng) && Number(s.lat) > 0 && Number(s.lng) > 0);
+  const stopsWithoutCoords = stops.filter(s => !s.lat || !s.lng || isNaN(s.lat) || isNaN(s.lng) || Number(s.lat) <= 0 || Number(s.lng) <= 0);
+
+  if (stopsWithCoords.length <= 1) return stops;
+
+  const startObj = {
+    lat: (startLat !== null && !isNaN(startLat)) ? startLat : (state.routeStartLocation?.lat || 17.4138),
+    lng: (startLng !== null && !isNaN(startLng)) ? startLng : (state.routeStartLocation?.lng || 102.7872)
+  };
+
+  const hasEnd = endLat !== null && endLng !== null && !isNaN(endLat) && !isNaN(endLng) && Number(endLat) > 0 && Number(endLng) > 0;
+  const endObj = hasEnd ? { lat: endLat, lng: endLng, enabled: true } : (state.routeEndLocation || null);
+
+  const roundTrip = isRoundTrip !== undefined ? isRoundTrip : Boolean(state.isRoundTrip);
+  const hasCustomEnd = Boolean(endObj && endObj.enabled && endObj.lat && endObj.lng);
+
+  return optimizeStopsSequenceOffline(stopsWithCoords, stopsWithoutCoords, startObj, endObj, roundTrip, hasCustomEnd);
 }
 
 /**
@@ -16894,7 +17055,11 @@ window.openStartPointConfigModal = function() {
       state.routeStartLocation = res.value.startLocation;
       state.routeEndLocation = res.value.endLocation;
       updateStartLocationUI();
-      recalculateRouteFromStops();
+      if (state.currentRouteStops && state.currentRouteStops.length > 1) {
+        optimizeTripRoute();
+      } else {
+        recalculateRouteFromStops();
+      }
     }
   });
 };
@@ -16930,15 +17095,24 @@ function updateStartLocationUI() {
 window.clearCustomEndLocation = function() {
   state.routeEndLocation = { name: '', lat: null, lng: null, enabled: false };
   updateStartLocationUI();
-  recalculateRouteFromStops();
+  if (state.currentRouteStops && state.currentRouteStops.length > 1) {
+    optimizeTripRoute();
+  } else {
+    recalculateRouteFromStops();
+  }
 };
 
 /**
  * จัดการเมื่อติ๊กเลือกเดินทางวนกลับจุดเริ่มต้น (Round Trip)
  */
-window.handleRoundTripChange = function(checked) {
+window.handleRoundTripChange = async function(checked) {
   state.isRoundTrip = checked;
-  recalculateRouteFromStops();
+  // เมื่อเลือกหรือยกเลิกการเดินทางวนกลับจุดเริ่มต้น ให้ทำการจัดลำดับเส้นทางใหม่ให้สอดคล้องกันทันที
+  if (state.currentRouteStops && state.currentRouteStops.length > 1) {
+    await optimizeTripRoute();
+  } else {
+    recalculateRouteFromStops();
+  }
 };
 
 /**
@@ -17001,7 +17175,9 @@ window.renderMapAndPins = function(province, district, subdistrict) {
 
   initLeafletMapInstance();
 
-  const orderedStops = optimizeStopsSequence(validStops, state.routeStartLocation.lat, state.routeStartLocation.lng);
+  // จัดลำดับแบบซิงโครนัสเบื้องต้น
+  const hasEnd = Boolean(state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng);
+  const orderedStops = optimizeStopsSequence(validStops, state.routeStartLocation.lat, state.routeStartLocation.lng, hasEnd ? state.routeEndLocation.lat : null, hasEnd ? state.routeEndLocation.lng : null, state.isRoundTrip);
   state.currentRouteStops = orderedStops;
 
   logServerActivity('MAP_FILTER_AREA', `กรองดูหมุดพื้นที่ จ.${province} > อ.${district || 'ทุกอำเภอ'} > ต.${subdistrict || 'ทุกตำบล'} (พบ ${validStops.length} หมุด)`, {
@@ -17012,6 +17188,21 @@ window.renderMapAndPins = function(province, district, subdistrict) {
   });
 
   recalculateRouteFromStops(true);
+
+  // คำนวณจัดลำดับบนถนนจริงแบบ Async (Real Road TSP) ในพื้นหลังเพื่อความแม่นยำสูงสุด
+  if (validStops.length > 1) {
+    optimizeRouteSequenceRealRoad({
+      stops: validStops,
+      startLocation: state.routeStartLocation,
+      endLocation: state.routeEndLocation,
+      isRoundTrip: state.isRoundTrip
+    }).then(roadOrderedStops => {
+      if (roadOrderedStops && roadOrderedStops.length > 0) {
+        state.currentRouteStops = roadOrderedStops;
+        recalculateRouteFromStops(true);
+      }
+    }).catch(() => {});
+  }
 };
 
 /**
@@ -17260,7 +17451,10 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
   });
 
   // 3. จุดสิ้นสุดการเดินทาง (กำหนดเอง / Custom Destination หรือ วนกลับ Round Trip)
-  if (state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng) {
+  const isEndDefined = Boolean(state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng);
+  const isEndSameAsStart = isEndDefined && calculateHaversineDistance(start.lat, start.lng, state.routeEndLocation.lat, state.routeEndLocation.lng) < 0.05;
+
+  if (isEndDefined && !isEndSameAsStart) {
     const end = state.routeEndLocation;
     bounds.push([end.lat, end.lng]);
     polylineCoords.push([end.lat, end.lng]);
@@ -17291,7 +17485,7 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
     if (state.mapMarkerLayerGroup) {
       state.mapMarkerLayerGroup.addLayer(endMarker);
     }
-  } else if (state.isRoundTrip && polylineCoords.length > 1) {
+  } else if ((state.isRoundTrip || isEndSameAsStart) && polylineCoords.length > 1) {
     polylineCoords.push([start.lat, start.lng]);
     const returnDist = calculateHaversineDistance(prevLat, prevLng, start.lat, start.lng);
     totalDistanceKm += returnDist;
@@ -17634,19 +17828,64 @@ window.fitMapToAllPins = function() {
 };
 
 /**
- * คำนวณจัดลำดับเส้นทางใหม่
+ * คำนวณจัดลำดับเส้นทางใหม่บนโครงข่ายถนนสัญจรจริง (OSRM Real Road TSP)
+ * เดินทางจากจุดเริ่มต้น วนรอบจนมาถึงจุดสิ้นสุดที่กำหนดไว้ หรือวนกลับสู่จุดเริ่มต้น ไม่สลับเส้นทางไปมา
  */
-window.optimizeTripRoute = function() {
+window.optimizeTripRoute = async function() {
   if (!state.currentRouteStops || state.currentRouteStops.length === 0) return;
-  const orderedStops = optimizeStopsSequence(state.currentRouteStops, state.routeStartLocation.lat, state.routeStartLocation.lng);
-  state.currentRouteStops = orderedStops;
-  
-  logServerActivity('MAP_ROUTE_OPTIMIZE', `จัดลำดับเส้นทางส่งหมาย ${orderedStops.length} จุดหมาย (Nearest-Neighbor TSP)`, {
-    stopsCount: orderedStops.length,
-    cases: orderedStops.map(s => s.caseNumber).slice(0, 10)
-  });
 
-  recalculateRouteFromStops(true);
+  const btn = document.querySelector('button[onclick="optimizeTripRoute()"]');
+  let originalBtnHtml = '';
+  if (btn) {
+    originalBtnHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> <span>กำลังจัดลำดับ...</span>';
+    btn.disabled = true;
+  }
+
+  try {
+    const orderedStops = await optimizeRouteSequenceRealRoad({
+      stops: state.currentRouteStops,
+      startLocation: state.routeStartLocation,
+      endLocation: state.routeEndLocation,
+      isRoundTrip: state.isRoundTrip
+    });
+
+    state.currentRouteStops = orderedStops;
+
+    const hasEnd = Boolean(state.routeEndLocation && state.routeEndLocation.enabled && state.routeEndLocation.lat && state.routeEndLocation.lng);
+    const distStartEnd = hasEnd ? calculateHaversineDistance(state.routeStartLocation.lat, state.routeStartLocation.lng, state.routeEndLocation.lat, state.routeEndLocation.lng) : 0;
+    const isSameEnd = hasEnd && distStartEnd < 0.05;
+    const isRound = state.isRoundTrip || !hasEnd || isSameEnd;
+    const endName = (hasEnd && !isSameEnd) ? state.routeEndLocation.name : state.routeStartLocation.name;
+    const typeText = isRound ? `วงรอบปิด (วนกลับมาจบที่ ${state.routeStartLocation.name})` : `ไปสิ้นสุดที่ ${endName}`;
+
+    logServerActivity('MAP_ROUTE_OPTIMIZE', `จัดลำดับเส้นทางส่งหมาย ${orderedStops.length} จุดหมาย (${typeText}) บนถนนจริง`, {
+      stopsCount: orderedStops.length,
+      isRoundTrip: isRound,
+      cases: orderedStops.map(s => s.caseNumber).slice(0, 10)
+    });
+
+    recalculateRouteFromStops(true);
+
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: 'จัดลำดับเส้นทางบนถนนจริงเรียบร้อยแล้ว',
+      text: `คำนวณเส้นทางสัญจรจริง ${typeText} เรียงลำดับต่อเนื่อง ไม่สลับไปมา`,
+      timer: 3000,
+      showConfirmButton: false
+    });
+  } catch (err) {
+    console.error('optimizeTripRoute error:', err);
+    state.currentRouteStops = optimizeStopsSequence(state.currentRouteStops, state.routeStartLocation.lat, state.routeStartLocation.lng);
+    recalculateRouteFromStops(true);
+  } finally {
+    if (btn) {
+      btn.innerHTML = originalBtnHtml;
+      btn.disabled = false;
+    }
+  }
 };
 
 /**
