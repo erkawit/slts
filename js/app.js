@@ -44,8 +44,30 @@ const state = {
     } catch (e) {
       return null;
     }
+  })(),
+  allSheetRows: (function() {
+    try {
+      const cached = localStorage.getItem('slts_sheet_data_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
   })()
 };
+
+/**
+ * ฟังก์ชัน Escape HTML ป้องกัน XSS และ ReferenceError
+ */
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+window.escapeHtml = escapeHtml;
 
 // Cache Constants
 const CACHE_KEY_SHEET_DATA = 'slts_sheet_data_cache';
@@ -12828,6 +12850,13 @@ function cleanStopsForStorage(stops) {
         clean[key] = s[key];
       }
     }
+    // ตรวจสอบและดึงภาพถ่ายเติมลงใน clean.imageUrl หากยังไม่มี เพื่อให้การส่ง Handoff/แชร์เส้นทางมีรูปภาพติดไปด้วยเสมอ
+    if (!clean.imageUrl && typeof getStopDisplayPhotoData === 'function') {
+      const p = getStopDisplayPhotoData(clean);
+      if (p && p.hasPhoto) {
+        clean.imageUrl = p.rawUrl;
+      }
+    }
     return clean;
   });
 }
@@ -12863,20 +12892,32 @@ window.loadSavedRouteStopsHistory = function() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && Array.isArray(parsed.stops) && parsed.stops.length > 0) {
-        state.currentRouteStops = parsed.stops;
+        state.currentRouteStops = parsed.stops.map(s => {
+          if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
+            const p = getStopDisplayPhotoData(s);
+            if (p && p.hasPhoto) s.imageUrl = p.rawUrl;
+          }
+          return s;
+        });
         if (parsed.province) state.selectedProvince = parsed.province;
         if (parsed.startLocation) state.routeStartLocation = parsed.startLocation;
         if (parsed.endLocation) state.routeEndLocation = parsed.endLocation;
         if (parsed.isRoundTrip !== undefined) state.isRoundTrip = parsed.isRoundTrip;
-        return parsed.stops;
+        return state.currentRouteStops;
       }
     }
     const shared = localStorage.getItem('slts_shared_route_stops');
     if (shared) {
       const parsedStops = JSON.parse(shared);
       if (Array.isArray(parsedStops) && parsedStops.length > 0) {
-        state.currentRouteStops = parsedStops;
-        return parsedStops;
+        state.currentRouteStops = parsedStops.map(s => {
+          if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
+            const p = getStopDisplayPhotoData(s);
+            if (p && p.hasPhoto) s.imageUrl = p.rawUrl;
+          }
+          return s;
+        });
+        return state.currentRouteStops;
       }
     }
   } catch (e) {
@@ -13218,6 +13259,7 @@ function getDirectDriveImageUrl(rawUrl, size = 800) {
 
   return trimmed;
 }
+window.getDirectDriveImageUrl = getDirectDriveImageUrl;
 
 /**
  * ลิงก์สำรอง (Fallback) กรณี lh3 ไม่โหลด
@@ -13225,6 +13267,9 @@ function getDirectDriveImageUrl(rawUrl, size = 800) {
 function getDriveFallbackThumbnailUrl(rawUrl, size = 800) {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
   const trimmed = rawUrl.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('data:image') || trimmed.startsWith('blob:')) return trimmed;
+
   const match = trimmed.match(/id=([a-zA-Z0-9_-]+)/) ||
                 trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
                 trimmed.match(/id%3D([a-zA-Z0-9_-]+)/);
@@ -13234,15 +13279,116 @@ function getDriveFallbackThumbnailUrl(rawUrl, size = 800) {
   }
   return trimmed;
 }
+window.getDriveFallbackThumbnailUrl = getDriveFallbackThumbnailUrl;
 
 /**
- * ดึงลิงก์รูปภาพจากแถวข้อมูล Google Sheets
+ * ดึงลิงก์รูปภาพจากแถวข้อมูล Google Sheets หรือ Object หมาย
  */
 function extractRowImageUrl(r) {
   if (!r) return '';
-  const raw = r['ลิงก์รูปภาพใน Google Drive'] || r['ลิงก์รูปภาพ'] || r['Drive File ID'] || r['รูปภาพ'] || r['Image'] || r['photo'] || '';
-  return typeof raw === 'string' ? raw.trim() : '';
+  if (typeof r === 'string') return r.trim();
+  const candidates = [
+    r['ลิงก์รูปภาพใน Google Drive'],
+    r['ลิงก์รูปภาพ'],
+    r['ลิงค์รูปภาพ'],
+    r['ลิงก์ภาพถ่าย'],
+    r['ลิงค์ภาพถ่าย'],
+    r['รูปภาพ'],
+    r['ภาพถ่าย'],
+    r['Drive File ID'],
+    r['DriveFileId'],
+    r['File ID'],
+    r['fileId'],
+    r['fileUrl'],
+    r['imageUrl'],
+    r['photoUrl'],
+    r['Image'],
+    r['photo'],
+    r['Photo'],
+    r.imageUrl,
+    r.photoUrl,
+    r.capturedPhotoUrl,
+    r.fileUrl
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === 'string' && c.trim()) {
+      return c.trim();
+    }
+  }
+  for (const key of Object.keys(r)) {
+    const k = key.toLowerCase();
+    if (k.includes('รูป') || k.includes('ภาพ') || k.includes('photo') || k.includes('image') || k.includes('drive')) {
+      const val = r[key];
+      if (val && typeof val === 'string' && val.trim() && (val.includes('http') || val.includes('drive.google') || val.startsWith('data:image/') || /^[a-zA-Z0-9_-]{25,45}$/.test(val.trim()))) {
+        return val.trim();
+      }
+    }
+  }
+  return '';
 }
+window.extractRowImageUrl = extractRowImageUrl;
+
+/**
+ * ดึงข้อมูลรูปภาพสำหรับแสดงผลในรายการส่งหมาย (Thumbnail & Fullsize พร้อม Fallback)
+ * รองรับทั้ง PC และ Mobile และดึงจากฐานข้อมูล Google Sheet อัตโนมัติหากจุดหมายไม่มีรูปแนบมา
+ */
+function getStopDisplayPhotoData(stop) {
+  if (!stop) return { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false };
+  let photo = (stop.capturedPhotoUrl || stop.imageUrl || stop.customRoutePlanImg || stop.selectedRefImg || '').trim();
+
+  // หากไม่มีรูปที่ตัว stop ให้ค้นหาจากฐานข้อมูลชีต state.allSheetRows ด้วยเลขคดี
+  if (!photo && stop.caseNumber && stop.caseNumber !== '-') {
+    const cleanCase = String(stop.caseNumber).replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+    let rows = (state.allSheetRows && state.allSheetRows.length > 0) ? state.allSheetRows : [];
+    if (!rows || rows.length === 0) {
+      try {
+        const cached = localStorage.getItem(CACHE_KEY_SHEET_DATA);
+        if (cached) rows = JSON.parse(cached);
+      } catch (e) {}
+    }
+    if (rows && rows.length > 0) {
+      const match = rows.find(r => {
+        const rowCase = String(r['เลขคดี'] || r.caseNumber || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+        return rowCase && (rowCase === cleanCase || rowCase.includes(cleanCase) || cleanCase.includes(rowCase));
+      });
+      if (match) {
+        photo = extractRowImageUrl(match);
+        if (photo) {
+          stop.imageUrl = photo; // แคชไว้บน stop
+        }
+      }
+    }
+  }
+
+  // หากยังไม่มีรูป ให้ตรวจสอบประวัติที่บันทึกออฟไลน์ใน localStorage
+  if (!photo && stop.caseNumber && stop.caseNumber !== '-') {
+    try {
+      const offlineList = JSON.parse(localStorage.getItem('slts_offline_records') || '[]');
+      const cleanCase = String(stop.caseNumber).replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+      const offlineMatch = offlineList.find(r => {
+        const offCase = String(r.caseNumber || r['เลขคดี'] || '').replace(/[\s\.\/\-\_]/g, '').toLowerCase();
+        return offCase && (offCase === cleanCase || offCase.includes(cleanCase) || cleanCase.includes(offCase));
+      });
+      if (offlineMatch) {
+        photo = offlineMatch.capturedPhotoUrl || offlineMatch.imageUrl || offlineMatch.photoDataUrl || '';
+      }
+    } catch (e) {}
+  }
+
+  if (!photo) {
+    return { rawUrl: '', thumbUrl: '', fallbackUrl: '', hasPhoto: false };
+  }
+
+  const thumbUrl = getDirectDriveImageUrl(photo, 400);
+  const fallbackUrl = getDriveFallbackThumbnailUrl(photo, 400);
+  return {
+    rawUrl: photo,
+    thumbUrl: thumbUrl || photo,
+    fallbackUrl: fallbackUrl || photo,
+    hasPhoto: true
+  };
+}
+window.getStopDisplayPhotoData = getStopDisplayPhotoData;
 
 /**
  * ตรวจสอบเปรียบเทียบข้อมูลหมายกับประวัติส่งหมายในระบบ
@@ -17715,11 +17861,24 @@ function renderRouteSidebarList(stops, totalDistKm) {
           ${statusNote}
         </div>
 
-        ${stop.imageUrl ? `
-          <div class="w-9 h-9 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 shrink-0 cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition mt-0.5" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${stop.imageUrl.replace(/'/g, "\\'")}', '${(stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'")}')" title="คลิกดูรูปภาพประกอบ">
-            <img src="${stop.imageUrl}" alt="รูป" class="w-full h-full object-cover" loading="lazy">
-          </div>
-        ` : ''}
+        ${(function() {
+          const photoData = getStopDisplayPhotoData(stop);
+          if (!photoData.hasPhoto) return '';
+          const safeRawImg = photoData.rawUrl.replace(/'/g, "\\'");
+          const safeCaseNo = (stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'");
+          const safeLocText = (stop.locationText || '').replace(/'/g, "\\'");
+          const safeDateTime = (stop.dateTime || '').replace(/'/g, "\\'");
+          const sLat = (stop.lat !== null && stop.lat !== undefined) ? stop.lat : '';
+          const sLng = (stop.lng !== null && stop.lng !== undefined) ? stop.lng : '';
+          return `
+            <div class="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 shrink-0 cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition mt-0.5 group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeRawImg}', '${safeCaseNo}', '${safeLocText}', '${safeDateTime}', '${sLat}', '${sLng}')" title="คลิกดูรูปภาพประกอบ">
+              <img src="${photoData.thumbUrl}" alt="รูป" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${photoData.fallbackUrl}'; } else { this.parentElement.style.display = 'none'; }">
+              <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[9px]">
+                <i class="fa-solid fa-magnifying-glass-plus"></i>
+              </div>
+            </div>
+          `;
+        })()}
 
         <!-- Quick Action Buttons (Camera/Form, Edit, Delete, Up, Down, Send to Mobile) -->
         <div class="flex items-center gap-0.5 flex-shrink-0">
@@ -19016,9 +19175,15 @@ function applyReceivedHandoff(handoff) {
         } catch (e) {}
 
         if (handoff.stops && handoff.stops.length > 0) {
-          state.currentRouteStops = handoff.stops;
-          localStorage.setItem('slts_shared_route_stops', JSON.stringify(handoff.stops));
-          saveCurrentRouteStopsHistory(handoff.stops);
+          state.currentRouteStops = handoff.stops.map(s => {
+            if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
+              const p = getStopDisplayPhotoData(s);
+              if (p && p.hasPhoto) s.imageUrl = p.rawUrl;
+            }
+            return s;
+          });
+          localStorage.setItem('slts_shared_route_stops', JSON.stringify(state.currentRouteStops));
+          saveCurrentRouteStopsHistory(state.currentRouteStops);
         }
         if (handoff.startLocation) {
           state.routeStartLocation = handoff.startLocation;
@@ -19095,9 +19260,15 @@ function applyReceivedHandoff(handoff) {
     localStorage.setItem('slts_user_route_' + currentUserId, JSON.stringify(handoff));
     localStorage.setItem('slts_latest_handoff', JSON.stringify(handoff));
     if (handoff.stops && handoff.stops.length > 0) {
-      state.currentRouteStops = handoff.stops;
-      localStorage.setItem('slts_shared_route_stops', JSON.stringify(handoff.stops));
-      saveCurrentRouteStopsHistory(handoff.stops);
+      state.currentRouteStops = handoff.stops.map(s => {
+        if (!s.imageUrl && typeof getStopDisplayPhotoData === 'function') {
+          const p = getStopDisplayPhotoData(s);
+          if (p && p.hasPhoto) s.imageUrl = p.rawUrl;
+        }
+        return s;
+      });
+      localStorage.setItem('slts_shared_route_stops', JSON.stringify(state.currentRouteStops));
+      saveCurrentRouteStopsHistory(state.currentRouteStops);
     }
     if (handoff.startLocation) {
       state.routeStartLocation = handoff.startLocation;
@@ -19605,19 +19776,15 @@ window.renderRouteBatchTab = function() {
     } else if (s.deliveryStatus === 'captured_offline') {
       capturedCount++;
     }
-    if (s.capturedPhotoUrl || s.imageUrl) {
+    if (getStopDisplayPhotoData(s).hasPhoto) {
       photosCount++;
     } else {
       const sCase = String(s.caseNumber || '').trim().replace(/\s+/g, '');
-      const hasSheetImg = (state.allSheetRows || []).some(r => {
-        const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
-        return rCase === sCase && (r['ลิงก์รูปภาพ'] || r['รูปภาพ']);
-      });
       const hasQueueImg = (typeof getBackgroundQueue === 'function' ? getBackgroundQueue() : []).some(q => {
         const qCase = String(q.caseNumber || '').trim().replace(/\s+/g, '');
         return qCase === sCase && q.payload?.imageBase64;
       });
-      if (hasSheetImg || hasQueueImg) photosCount++;
+      if (hasQueueImg) photosCount++;
     }
   });
 
@@ -19692,7 +19859,10 @@ window.renderRouteBatchTab = function() {
     const locText = stop.locationText || `${stop.houseNo || ''} ${stop.moo || ''} ${stop.subdistrict || ''} ${stop.district || ''}`.trim() || '-';
     const safeLoc = locText.replace(/'/g, "\\'");
 
-    let displayImg = stop.capturedPhotoUrl || stop.imageUrl || '';
+    const photoData = getStopDisplayPhotoData(stop);
+    let displayImg = photoData.rawUrl;
+    let thumbImg = photoData.thumbUrl;
+    let fallbackImg = photoData.fallbackUrl;
     let timestampText = '-';
 
     if (stop.uploadedAt) {
@@ -19711,19 +19881,14 @@ window.renderRouteBatchTab = function() {
       }
     }
 
-    if (!displayImg || timestampText === '-') {
+    if (timestampText === '-') {
       const normCase = sCase.replace(/\s+/g, '');
       const matchRow = (state.allSheetRows || []).find(r => {
         const rCase = String(r['เลขคดี'] || r['caseNumber'] || '').trim().replace(/\s+/g, '');
         return rCase === normCase;
       });
-      if (matchRow) {
-        if (!displayImg && (matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'])) {
-          displayImg = matchRow['ลิงก์รูปภาพ'] || matchRow['รูปภาพ'];
-        }
-        if (timestampText === '-' && (matchRow['วันที่และเวลา'] || matchRow['timestamp'])) {
-          timestampText = matchRow['วันที่และเวลา'] || matchRow['timestamp'];
-        }
+      if (matchRow && (matchRow['วันที่และเวลา'] || matchRow['timestamp'] || matchRow['วัน-เวลาบันทึก'])) {
+        timestampText = matchRow['วันที่และเวลา'] || matchRow['timestamp'] || matchRow['วัน-เวลาบันทึก'];
       }
     }
 
@@ -19741,11 +19906,11 @@ window.renderRouteBatchTab = function() {
 
     // คอลัมน์รูปภาพ
     let imgHtml = `<span class="text-gray-300 text-xs">-</span>`;
-    if (displayImg) {
+    if (photoData.hasPhoto) {
       const safeImg = displayImg.replace(/'/g, "\\'");
       imgHtml = `
         <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 mx-auto cursor-pointer shadow-2xs hover:scale-105 active:scale-95 transition group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeImg}', '${safeCase}', '${safeLoc}', '${timestampText}', '${stop.lat || ''}', '${stop.lng || ''}')" title="คลิกดูภาพขนาดเต็ม">
-          <img src="${displayImg}" alt="${safeCase}" class="w-full h-full object-cover" loading="lazy" onerror="this.onerror=null; this.src='img/logo.png';">
+          <img src="${thumbImg}" alt="${safeCase}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${fallbackImg}'; } else { this.onerror = null; this.src = 'img/logo.png'; }">
           <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px]">
             <i class="fa-solid fa-magnifying-glass-plus"></i>
           </div>
@@ -20248,8 +20413,10 @@ window.initMobileModalMapInstance = function() {
         popupAnchor: [0, -24]
       });
       const safeCase = (stop.caseNumber || '').replace(/'/g, "\\'");
-      const displayPhoto = stop.capturedPhotoUrl || stop.imageUrl || '';
-      const safePhoto = displayPhoto.replace(/'/g, "\\'");
+      const photoData = getStopDisplayPhotoData(stop);
+      const safePhoto = photoData.rawUrl.replace(/'/g, "\\'");
+      const safeLoc = (stop.locationText || '').replace(/'/g, "\\'");
+      const safeDate = (stop.dateTime || '').replace(/'/g, "\\'");
 
       let captureBtnHtml = `
         <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${stopIndex})" class="w-full py-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer">
@@ -20276,9 +20443,9 @@ window.initMobileModalMapInstance = function() {
             <span>#${pinNum} ${stop.caseNumber}</span>
             ${statusBadgeHtml}
           </div>
-          ${displayPhoto ? `
-            <div class="w-full h-24 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer shadow-2xs relative group" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${safeCase}')" title="แตะดูรูปภาพขนาดเต็ม">
-              <img src="${displayPhoto}" alt="รูปประกอบ" class="w-full h-full object-cover">
+          ${photoData.hasPhoto ? `
+            <div class="w-full h-24 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer shadow-2xs relative group" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${safeCase}', '${safeLoc}', '${safeDate}', '${sLat}', '${sLng}')" title="แตะดูรูปภาพขนาดเต็ม">
+              <img src="${photoData.thumbUrl}" alt="รูปประกอบ" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${photoData.fallbackUrl}'; } else { this.parentElement.style.display = 'none'; }">
               <div class="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px] font-bold">
                 <i class="fa-solid fa-magnifying-glass-plus mr-1"></i> ดูรูปภาพ
               </div>
@@ -20466,8 +20633,13 @@ window.renderMobileRouteList = function() {
       `;
     }
 
-    const displayPhoto = stop.capturedPhotoUrl || stop.imageUrl || '';
-    const safePhoto = displayPhoto.replace(/'/g, "\\'");
+    const photoData = getStopDisplayPhotoData(stop);
+    const safePhoto = photoData.rawUrl.replace(/'/g, "\\'");
+    const safeCaseNo = (stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'");
+    const safeLocText = (stop.locationText || '').replace(/'/g, "\\'");
+    const safeDateTime = (stop.dateTime || '').replace(/'/g, "\\'");
+    const sLat = (stop.lat !== null && stop.lat !== undefined) ? stop.lat : '';
+    const sLng = (stop.lng !== null && stop.lng !== undefined) ? stop.lng : '';
 
     return `
       <div class="p-2.5 rounded-2xl border flex items-start gap-2 text-xs transition shadow-2xs ${itemClass}">
@@ -20497,9 +20669,12 @@ window.renderMobileRouteList = function() {
             ${captureBtnHtml}
           </div>
         </div>
-        ${displayPhoto ? `
-          <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 shrink-0 self-center cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${(stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'")}')" title="แตะดูรูปภาพประกอบ">
-            <img src="${displayPhoto}" alt="รูปประกอบ" class="w-full h-full object-cover" loading="lazy">
+        ${photoData.hasPhoto ? `
+          <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 shrink-0 self-center cursor-pointer shadow-2xs hover:opacity-90 active:scale-95 transition relative group" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${safePhoto}', '${safeCaseNo}', '${safeLocText}', '${safeDateTime}', '${sLat}', '${sLng}')" title="แตะดูรูปภาพประกอบ">
+            <img src="${photoData.thumbUrl}" alt="รูปประกอบ" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.dataset.fallback !== '1'){ this.dataset.fallback = '1'; this.src = '${photoData.fallbackUrl}'; } else { this.parentElement.style.display = 'none'; }">
+            <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px]">
+              <i class="fa-solid fa-magnifying-glass-plus"></i>
+            </div>
           </div>
         ` : ''}
         <div class="flex items-center gap-1 flex-shrink-0 self-center">
