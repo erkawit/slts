@@ -1825,6 +1825,194 @@ body.swal2-toast-shown .swal2-popup,
   z-index: 25 !important;
 }
 
+/* ================================================================
+   Hardware Landscape Layout for Mobile & Camera (เมื่อหมุนหน้าจอแนวนอนระดับ OS / Auto-Rotate ON)
+   จัดรูปแบบให้เหมือนโหมด Virtual Landscape (ภาพที่ 2) 100%:
+   - แถบเมนูด้านบน ย้ายไปเป็นแถบแนวตั้งชิดขอบซ้าย (Left Sidebar)
+   - แถบควบคุมชัตเตอร์ ย้ายไปเป็นแถบแนวตั้งชิดขอบขวา (Right Sidebar)
+   - เข็มทิศอยู่ที่มุมบนซ้าย, แผนที่ย่ออยู่ที่มุมล่างซ้าย, ข้อมูลสดอยู่ที่มุมล่างขวา
+   - ปุ่มและตัวหนังสือทุกตัวแสดงผลตรง ไม่หมุน 90 องศาซ้ำซ้อน
+   ================================================================ */
+body.hardware-landscape #cameraTopBar {
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 68px !important;
+  height: 100% !important;
+  padding: 0.75rem 0.5rem !important;
+  padding-left: max(0.5rem, calc(env(safe-area-inset-left, 0px) + 4px)) !important;
+  padding-right: 0.35rem !important;
+  display: flex !important;
+  flex-direction: column-reverse !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%) !important;
+  z-index: 30 !important;
+  border-radius: 0 !important;
+}
+
+body.hardware-landscape #cameraTopBar > div:first-child {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+body.hardware-landscape #cameraTopBar > div:last-child {
+  display: flex !important;
+  flex-direction: column-reverse !important;
+  align-items: center !important;
+  gap: 0.6rem !important;
+}
+
+body.hardware-landscape #cameraControlsContainer {
+  position: fixed !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 88px !important;
+  height: 100% !important;
+  padding: 1rem 0.5rem !important;
+  padding-right: max(0.75rem, calc(env(safe-area-inset-right, 0px) + 6px)) !important;
+  padding-left: 0.35rem !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 1.5rem !important;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%) !important;
+  z-index: 30 !important;
+}
+
+body.hardware-landscape #liveCompassWrapper {
+  top: 1rem !important;
+  left: max(5rem, calc(env(safe-area-inset-left, 0px) + 4.5rem)) !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+}
+
+body.hardware-landscape #liveMapWrapper {
+  bottom: 1rem !important;
+  left: max(5rem, calc(env(safe-area-inset-left, 0px) + 4.5rem)) !important;
+  top: auto !important;
+  right: auto !important;
+  transform: none !important;
+}
+
+body.hardware-landscape #liveBadgeWrapper {
+  bottom: 1rem !important;
+  right: max(6.25rem, calc(env(safe-area-inset-right, 0px) + 5.75rem)) !important;
+  top: auto !important;
+  left: auto !important;
+  transform: none !important;
+  max-width: min(55vw, 420px) !important;
+}
+
+body.hardware-landscape #cameraTopBar #btnCameraBgQueue,
+body.hardware-landscape #cameraTopBar #btnEditMobileForm,
+body.hardware-landscape #cameraTopBar #btnCameraCaseSearch,
+body.hardware-landscape #cameraTopBar #btnCameraRouteMap,
+body.hardware-landscape #cameraTopBar #btnCameraAuth,
+body.hardware-landscape #cameraTopBar #btnTabletSwitchToPc,
+body.hardware-landscape #btnFlipCamera,
+body.hardware-landscape #btnCapture,
+body.hardware-landscape #btnFlipOrientationQuick {
+  transform: none !important;
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  #cameraTopBar {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 68px !important;
+    height: 100% !important;
+    padding: 0.75rem 0.5rem !important;
+    padding-left: max(0.5rem, calc(env(safe-area-inset-left, 0px) + 4px)) !important;
+    padding-right: 0.35rem !important;
+    display: flex !important;
+    flex-direction: column-reverse !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    background: linear-gradient(to right, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%) !important;
+    z-index: 30 !important;
+    border-radius: 0 !important;
+  }
+
+  #cameraTopBar > div:first-child {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 0.5rem !important;
+  }
+
+  #cameraTopBar > div:last-child {
+    display: flex !important;
+    flex-direction: column-reverse !important;
+    align-items: center !important;
+    gap: 0.6rem !important;
+  }
+
+  #cameraControlsContainer {
+    position: fixed !important;
+    right: 0 !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    width: 88px !important;
+    height: 100% !important;
+    padding: 1rem 0.5rem !important;
+    padding-right: max(0.75rem, calc(env(safe-area-inset-right, 0px) + 6px)) !important;
+    padding-left: 0.35rem !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    gap: 1.5rem !important;
+    background: linear-gradient(to left, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%) !important;
+    z-index: 30 !important;
+  }
+
+  #liveCompassWrapper {
+    top: 1rem !important;
+    left: max(5rem, calc(env(safe-area-inset-left, 0px) + 4.5rem)) !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+  }
+
+  #liveMapWrapper {
+    bottom: 1rem !important;
+    left: max(5rem, calc(env(safe-area-inset-left, 0px) + 4.5rem)) !important;
+    top: auto !important;
+    right: auto !important;
+    transform: none !important;
+  }
+
+  #liveBadgeWrapper {
+    bottom: 1rem !important;
+    right: max(6.25rem, calc(env(safe-area-inset-right, 0px) + 5.75rem)) !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    max-width: min(55vw, 420px) !important;
+  }
+
+  #cameraTopBar #btnCameraBgQueue,
+  #cameraTopBar #btnEditMobileForm,
+  #cameraTopBar #btnCameraCaseSearch,
+  #cameraTopBar #btnCameraRouteMap,
+  #cameraTopBar #btnCameraAuth,
+  #cameraTopBar #btnTabletSwitchToPc,
+  #btnFlipCamera,
+  #btnCapture,
+  #btnFlipOrientationQuick {
+    transform: none !important;
+  }
+}
+
 @media (orientation: landscape) {
   /* ปรับขนาด Modal และฟอร์มข้อมูลในแนวนอน (max-h-[85vh] + overflow-y-auto ขยายกว้างเพื่อประสิทธิภาพสูงสุด) */
   .slts-swal-fullscreen-80 {
