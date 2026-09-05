@@ -1857,6 +1857,135 @@ body.swal2-toast-shown .swal2-popup,
   }
 }
 
+/* ================================================================
+   PC Compact Navigation Bar (เมื่อจอแคบลงบน PC)
+   ================================================================ */
+.desktop-nav-compact-container {
+  position: relative;
+}
+
+#desktopNavCompactMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 220px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 6px;
+  z-index: 60;
+}
+
+@media (min-width: 769px) and (max-width: 1250px) {
+  .tab-nav-btn .tab-label-text {
+    display: none;
+  }
+  .tab-nav-btn {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+}
+
+/* ================================================================
+   Tablet Dual-Mode Switch (สวิตช์เปิด/ปิด โหมด PC / Mobile)
+   ================================================================ */
+.tablet-mode-switch-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(243, 244, 246, 0.9);
+  padding: 4px 10px;
+  border-radius: 9999px;
+  border: 1px solid #e5e7eb;
+  font-size: 11px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.tablet-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.tablet-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.tablet-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #059669; /* สีเขียว: ปิด = โหมดมือถือ */
+  transition: background-color 0.2s;
+  border-radius: 24px;
+}
+
+.tablet-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: transform 0.2s;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.tablet-switch input:checked + .tablet-slider {
+  background-color: #2563eb; /* สีน้ำเงิน: เปิด = โหมด PC */
+}
+
+.tablet-switch input:checked + .tablet-slider:before {
+  transform: translateX(20px);
+}
+
+/* ================================================================
+   Tablet Fullscreen Black Transition Overlay
+   ================================================================ */
+#tabletModeTransitionOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: #000000;
+  z-index: 999999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease-in-out;
+}
+
+#tabletModeTransitionOverlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ================================================================
+   Performance Optimizations: ลด Animation & Transition ในฟอร์ม
+   ================================================================ */
+.slts-form-modal,
+.swal2-popup,
+.slts-route-modal-popup,
+.slts-mobile-search-popup {
+  animation: none !important;
+  transition: none !important;
+}
+
+.swal2-backdrop-show {
+  backdrop-filter: none !important;
+}
+
 
 
 

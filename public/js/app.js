@@ -1201,31 +1201,37 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  // ตรวจสอบและแสดงคำอธิบายคู่มือการใช้งานระบบสำหรับผู้ใช้ใหม่ (เฉพาะ Desktop >= 768px)
-  if (window.innerWidth >= 768 && localStorage.getItem('slts_onboarding_completed') !== 'true') {
+  // เริ่มต้นระบบ Tablet Mode Switch และ PC Compact Navigation Bar
+  if (typeof initTabletModeSwitch === 'function') initTabletModeSwitch();
+  if (typeof updateDesktopNavCompactState === 'function') updateDesktopNavCompactState();
+  window.addEventListener('resize', () => {
+    if (typeof updateDesktopNavCompactState === 'function') updateDesktopNavCompactState();
+  });
+
+  // ตรวจสอบและแสดงคำอธิบายคู่มือการใช้งานระบบสำหรับผู้ใช้ใหม่ (เฉพาะมุมมอง Desktop / โหมด PC)
+  if (!isMobileView() && localStorage.getItem('slts_onboarding_completed') !== 'true') {
     setTimeout(() => {
       showSystemOnboardingModal(false);
     }, 600);
   }
 
-  // กำหนดขั้นตอนเริ่มต้นตามขนาดหน้าจอ (Mobile vs Desktop)
+  // กำหนดขั้นตอนเริ่มต้นตามรูปแบบการใช้งาน (Mobile View vs Desktop/PC Mode)
   const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest' && !!state.currentUser.username;
 
-  if (window.innerWidth < 768) {
-    // จอมือถือ (< 768px): เมื่อเปิดเข้าใช้งานให้เข้าสู่โหมดกล้องทันทีเสมอ (ตามข้อ 1)
+  if (isMobileView()) {
+    // จอมือถือ หรือ Tablet โหมดมือถือ: เมื่อเปิดเข้าใช้งานให้เข้าสู่โหมดกล้องทันทีเสมอ
     openCameraModal().catch(e => console.warn('Camera open error:', e));
 
-    // หากไม่ได้อยู่ในสถานะล็อกอินอยู่ ให้มี Pop Up บังคับให้ล็อกอินไว้ด้านบนเสมอ (ตามข้อ 1)
+    // หากไม่ได้อยู่ในสถานะล็อกอินอยู่ ให้มี Pop Up บังคับให้ล็อกอินไว้ด้านบนเสมอ
     if (!isLoggedIn) {
       setTimeout(() => {
         openLoginModal(true);
       }, 350);
     } else {
-      // ต่อให้ปิดแอปไปก็ต้องกลับมาเปิดหน้าต่างค้นหาข้อมูลหมาย หากจังหวัดที่เลือกไม่ตรงกับจังหวัดรับผิดชอบ
       enforceProvinceBoundaryOnStartup();
     }
   } else {
-    // จอคอมพิวเตอร์ (>= 768px): แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
+    // จอคอมพิวเตอร์ หรือ Tablet โหมด PC: แสดงหน้าแบบฟอร์ม 2 คอลัมน์ตามเดิม
     switchTab('form');
 
     // ตรวจสอบการเข้าสู่ระบบ: หากยังไม่ได้ล็อกอิน ให้แสดง Pop Up ล็อกอินขึ้นมาบังทันที เพื่อป้องกันบุคคลภายนอกเข้าใช้งานระบบ
@@ -1235,7 +1241,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }, 250);
     }
 
-    // ตรวจสอบและขออนุญาตเข้าถึงกล้องในระบบสำหรับหน้าจอคอมพิวเตอร์ (> 768px)
+    // ตรวจสอบและขออนุญาตเข้าถึงกล้องในระบบสำหรับหน้าจอคอมพิวเตอร์ / โหมด PC
     setTimeout(() => {
       checkAndRequestCameraPermission(false);
     }, 400);
@@ -1725,8 +1731,9 @@ function updateAuthUI() {
     if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
   }
 
-  // Tab แผนที่และหมุด และแท็บรายการส่งหมายรอบนี้ (แสดงเฉพาะผู้ใช้งานที่ล็อกอินแล้วเท่านั้น บน Desktop)
-  if (isLoggedIn && isDesktop) {
+  // Tab แผนที่และหมุด และแท็บรายการส่งหมายรอบนี้ (แสดงเฉพาะผู้ใช้งานที่ล็อกอินแล้วเท่านั้น บน Desktop หรือ โหมด PC)
+  const isPcMode = (typeof isMobileView === 'function') ? !isMobileView() : isDesktop;
+  if (isLoggedIn && isPcMode) {
     if (elements.tabBtnMap) elements.tabBtnMap.classList.remove('hidden');
     if (elements.tabBtnRouteBatch) elements.tabBtnRouteBatch.classList.remove('hidden');
   } else {
@@ -1734,11 +1741,28 @@ function updateAuthUI() {
     if (elements.tabBtnRouteBatch) elements.tabBtnRouteBatch.classList.add('hidden');
   }
 
-  // Tab จัดการผู้ใช้งาน (แสดงเฉพาะ Admin และ Local Advisor บน Desktop)
-  if (canManageUsers && isDesktop) {
+  // Tab จัดการผู้ใช้งาน (แสดงเฉพาะ Admin และ Local Advisor บน Desktop หรือ โหมด PC)
+  if (canManageUsers && isPcMode) {
     elements.tabBtnUsers.classList.remove('hidden');
   } else {
     elements.tabBtnUsers.classList.add('hidden');
+  }
+
+  // ซิงค์การแสดงผลของเมนูใน Compact Navigation Bar
+  const compactMap = document.getElementById('compactTabBtnMap');
+  const compactRoute = document.getElementById('compactTabBtnRouteBatch');
+  const compactUsers = document.getElementById('compactTabBtnUsers');
+  if (compactMap) {
+    if (isLoggedIn && isPcMode) { compactMap.classList.remove('hidden'); compactMap.classList.add('flex'); }
+    else { compactMap.classList.add('hidden'); compactMap.classList.remove('flex'); }
+  }
+  if (compactRoute) {
+    if (isLoggedIn && isPcMode) { compactRoute.classList.remove('hidden'); compactRoute.classList.add('flex'); }
+    else { compactRoute.classList.add('hidden'); compactRoute.classList.remove('flex'); }
+  }
+  if (compactUsers) {
+    if (canManageUsers && isPcMode) { compactUsers.classList.remove('hidden'); compactUsers.classList.add('flex'); }
+    else { compactUsers.classList.add('hidden'); compactUsers.classList.remove('flex'); }
   }
 
   // ปรับแต่งการแสดงผลฟอร์มจัดการผู้ใช้และส่วนควบคุมตามระดับสิทธิ์
@@ -1927,6 +1951,13 @@ window.handleGlobalClick = function(e) {
   if (elements.userDropdownMenu && !elements.userDropdownMenu.classList.contains('hidden')) {
     if (!elements.userProfileContainer.contains(e.target)) {
       elements.userDropdownMenu.classList.add('hidden');
+    }
+  }
+  const compactMenu = document.getElementById('desktopNavCompactMenu');
+  const compactContainer = document.getElementById('desktopNavCompact');
+  if (compactMenu && !compactMenu.classList.contains('hidden')) {
+    if (compactContainer && !compactContainer.contains(e.target)) {
+      compactMenu.classList.add('hidden');
     }
   }
 };
@@ -2863,6 +2894,231 @@ window.deleteUser = function(username) {
 };
 
 // =========================================================================
+// 2.9 การตรวจจับอุปกรณ์, สลับโหมด Tablet และ PC Compact Navigation Bar
+// =========================================================================
+
+/**
+ * ตรวจสอบว่าเป็นสมาร์ตโฟน (Mobile Phone) หรือไม่ (ไม่รวม Tablet และ Desktop)
+ */
+window.isMobilePhone = function() {
+  const ua = navigator.userAgent || '';
+  const isIPad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroidTablet = /Android/i.test(ua) && !/Mobile/i.test(ua);
+  if (isIPad || isAndroidTablet) return false;
+
+  const isMobileUA = /Android.*Mobile|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  if (isMobileUA) return true;
+
+  const isDesktopOS = /Windows NT|Macintosh|X11|Linux x86_64/i.test(ua) && !isIPad;
+  if (isDesktopOS) return false;
+
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  return isTouch && window.innerWidth < 640;
+};
+
+/**
+ * ตรวจสอบว่าเป็นอุปกรณ์ Tablet หรือไม่ (iPad, Android Tablet, etc.)
+ */
+window.isTabletDevice = function() {
+  const ua = navigator.userAgent || '';
+  const isIPad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroidTablet = /Android/i.test(ua) && !/Mobile/i.test(ua);
+  if (isIPad || isAndroidTablet) return true;
+
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  const isDesktopOS = /Windows NT|X11|Linux x86_64/i.test(ua);
+  const isTabletScreen = isTouch && window.innerWidth >= 600 && window.innerWidth <= 1366;
+  if (!isDesktopOS && isTabletScreen && !/iPhone|iPod/i.test(ua)) return true;
+
+  // รองรับการทดสอบเจาะจง
+  if (window.location && window.location.search && window.location.search.includes('forceTablet=1')) return true;
+  if (localStorage.getItem('slts_force_tablet') === 'true') return true;
+
+  return false;
+};
+
+/**
+ * ดึงสถานะโหมด Tablet ปัจจุบัน ('pc' หรือ 'mobile')
+ */
+window.getTabletMode = function() {
+  return localStorage.getItem('slts_tablet_mode') || 'pc';
+};
+
+/**
+ * ตรวจสอบว่าควรแสดงผลในมุมมอง Mobile หรือไม่
+ * - ถ้าเป็น Tablet: ขึ้นอยู่กับโหมดที่เลือก (mobile vs pc)
+ * - ถ้าเป็น Mobile Phone: เป็นมุมมอง Mobile เสมอ
+ * - ถ้าเป็น PC / Desktop: เป็นมุมมอง PC เสมอ แม้ย่อหน้าต่างเล็ก
+ */
+window.isMobileView = function() {
+  if (isTabletDevice()) {
+    return getTabletMode() === 'mobile';
+  }
+  if (isMobilePhone()) {
+    return true;
+  }
+  return false;
+};
+
+/**
+ * เริ่มต้นการแสดงผลสวิตช์ Tablet Dual-Mode
+ */
+window.initTabletModeSwitch = function() {
+  const isTablet = isTabletDevice();
+  const headerContainer = document.getElementById('tabletModeToggleContainer');
+  const cameraContainer = document.getElementById('cameraTabletModeToggleContainer');
+
+  if (!isTablet) {
+    if (headerContainer) headerContainer.classList.add('hidden');
+    if (cameraContainer) cameraContainer.classList.add('hidden');
+    return;
+  }
+
+  const currentMode = getTabletMode();
+  const isPc = currentMode === 'pc';
+
+  if (headerContainer) {
+    headerContainer.classList.remove('hidden');
+    headerContainer.classList.add('flex');
+  }
+  if (cameraContainer) {
+    cameraContainer.classList.remove('hidden');
+    cameraContainer.classList.add('flex');
+  }
+
+  const headerChk = document.getElementById('tabletModeToggleCheckbox');
+  const cameraChk = document.getElementById('cameraTabletModeToggleCheckbox');
+  const headerLabel = document.getElementById('tabletModeLabel');
+  const cameraLabel = document.getElementById('cameraTabletModeLabel');
+
+  if (headerChk) headerChk.checked = isPc;
+  if (cameraChk) cameraChk.checked = isPc;
+  if (headerLabel) headerLabel.textContent = isPc ? 'โหมด PC' : 'โหมด Mobile';
+  if (cameraLabel) cameraLabel.textContent = isPc ? 'โหมด PC' : 'โหมด Mobile';
+};
+
+/**
+ * จัดการเมื่อผู้ใช้สลับสวิตช์ Tablet (ON = PC, OFF = Mobile)
+ */
+window.handleTabletModeSwitchToggle = function(isPcChecked) {
+  const targetMode = isPcChecked ? 'pc' : 'mobile';
+  switchTabletMode(targetMode);
+};
+
+/**
+ * สลับโหมด Tablet พร้อมแสดงหน้าจอ Transition สีดำเต็มจอ
+ */
+window.switchTabletMode = function(targetMode) {
+  const overlay = document.getElementById('tabletModeTransitionOverlay');
+  const transitionText = document.getElementById('tabletTransitionText');
+  const transitionIcon = document.getElementById('tabletTransitionIcon');
+
+  const isSwitchingToPc = targetMode === 'pc';
+  if (transitionText) {
+    transitionText.textContent = isSwitchingToPc ? 'สลับไปยังโหมด PC' : 'สลับไปยังโหมด Mobile';
+  }
+  if (transitionIcon) {
+    transitionIcon.className = isSwitchingToPc ? 'fa-solid fa-desktop text-white' : 'fa-solid fa-mobile-screen-button text-white';
+  }
+
+  if (overlay) {
+    overlay.classList.add('active');
+  }
+
+  localStorage.setItem('slts_tablet_mode', targetMode);
+
+  const headerChk = document.getElementById('tabletModeToggleCheckbox');
+  const cameraChk = document.getElementById('cameraTabletModeToggleCheckbox');
+  const headerLabel = document.getElementById('tabletModeLabel');
+  const cameraLabel = document.getElementById('cameraTabletModeLabel');
+  if (headerChk) headerChk.checked = isSwitchingToPc;
+  if (cameraChk) cameraChk.checked = isSwitchingToPc;
+  if (headerLabel) headerLabel.textContent = isSwitchingToPc ? 'โหมด PC' : 'โหมด Mobile';
+  if (cameraLabel) cameraLabel.textContent = isSwitchingToPc ? 'โหมด PC' : 'โหมด Mobile';
+
+  setTimeout(async () => {
+    try {
+      if (isSwitchingToPc) {
+        if (typeof closeCameraModal === 'function') {
+          closeCameraModal();
+        }
+        if (typeof switchTab === 'function') {
+          switchTab('form');
+        }
+        updateDesktopNavCompactState();
+      } else {
+        if (typeof openCameraModal === 'function') {
+          await openCameraModal();
+        }
+        updateDesktopNavCompactState();
+      }
+    } catch (e) {
+      console.error('Error during tablet mode switch:', e);
+    } finally {
+      setTimeout(() => {
+        if (overlay) {
+          overlay.classList.remove('active');
+        }
+      }, 300);
+    }
+  }, 400);
+};
+
+/**
+ * ปรับปรุงการแสดงผลของ Compact Navigation Bar บน PC
+ */
+window.updateDesktopNavCompactState = function() {
+  const desktopTabs = document.getElementById('desktopNavTabs');
+  const compactNav = document.getElementById('desktopNavCompact');
+  if (!desktopTabs || !compactNav) return;
+
+  if (isMobileView()) {
+    desktopTabs.classList.add('hidden');
+    desktopTabs.classList.remove('md:flex');
+    compactNav.classList.add('hidden');
+    compactNav.classList.remove('flex');
+    return;
+  }
+
+  // ในโหมด PC / Desktop (รวมถึง Tablet ในโหมด PC)
+  if (window.innerWidth < 850) {
+    desktopTabs.classList.add('hidden');
+    desktopTabs.classList.remove('md:flex');
+    compactNav.classList.remove('hidden');
+    compactNav.classList.add('flex');
+  } else {
+    desktopTabs.classList.remove('hidden');
+    desktopTabs.classList.add('md:flex');
+    compactNav.classList.add('hidden');
+    compactNav.classList.remove('flex');
+    const compactMenu = document.getElementById('desktopNavCompactMenu');
+    if (compactMenu) compactMenu.classList.add('hidden');
+  }
+};
+
+/**
+ * สลับการแสดง/ซ่อน Dropdown เมนูแบบย่อบน PC
+ */
+window.toggleDesktopCompactMenu = function(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('desktopNavCompactMenu');
+  if (menu) {
+    menu.classList.toggle('hidden');
+  }
+};
+
+/**
+ * สลับแท็บผ่าน Compact Nav และปิดเมนู Dropdown
+ */
+window.switchTabCompact = function(tabName) {
+  const menu = document.getElementById('desktopNavCompactMenu');
+  if (menu) menu.classList.add('hidden');
+  if (typeof switchTab === 'function') {
+    switchTab(tabName);
+  }
+};
+
+// =========================================================================
 // 3. การสลับหน้า Tab (Navigation System)
 // =========================================================================
 
@@ -2872,6 +3128,21 @@ window.switchTab = function(tabName) {
     pane.classList.add('hidden');
     pane.classList.remove('active');
   });
+
+  // อัปเดตสถานะปุ่มใน Compact Navigation Bar
+  const tabMeta = {
+    form: { label: 'บันทึกส่งหมาย', icon: '<i class="fa-solid fa-pen-to-square text-blue-600"></i>' },
+    table: { label: 'ตารางประวัติส่งหมาย', icon: '<i class="fa-solid fa-table-list text-emerald-600"></i>' },
+    map: { label: 'แผนที่และหมุด', icon: '<i class="fa-solid fa-map-location-dot text-rose-500"></i>' },
+    route_batch: { label: 'รายการส่งหมายรอบนี้', icon: '<i class="fa-solid fa-route text-indigo-600"></i>' },
+    users: { label: 'จัดการผู้ใช้งาน', icon: '<i class="fa-solid fa-users-gear text-purple-600"></i>' }
+  };
+  if (tabMeta[tabName]) {
+    const activeLabel = document.getElementById('compactNavActiveLabel');
+    const activeIcon = document.getElementById('compactNavActiveIcon');
+    if (activeLabel) activeLabel.textContent = tabMeta[tabName].label;
+    if (activeIcon) activeIcon.innerHTML = tabMeta[tabName].icon;
+  }
 
   if (tabName === 'form') {
     closeCameraModal();
@@ -2893,14 +3164,14 @@ window.switchTab = function(tabName) {
     // โหลดข้อมูลแบบ Smart Cache 1 นาที (ดึงข้อมูลรอในเบื้องหลังทันที)
     loadGoogleSheetData(false);
 
-    // บนหน้าจอ Desktop (> 768px): แสดง Pop Up ค้นหาข้อมูลเจาะจงทันทีเมื่อเข้าหน้าตารางทุกครั้ง
-    if (window.innerWidth > 768) {
+    // บนหน้าจอ Desktop หรือโหมด PC: แสดง Pop Up ค้นหาข้อมูลเจาะจงทันทีเมื่อเข้าหน้าตารางทุกครั้ง
+    if (!isMobileView()) {
       setTimeout(() => {
         openTargetSearchModal();
       }, 250);
     }
   } else if (tabName === 'map') {
-    if (window.innerWidth <= 768) return;
+    if (isMobileView()) return;
 
     // ตรวจสอบการเข้าสู่ระบบก่อนเข้าใช้งานแผนที่และหมุด
     if (!state.currentUser) {
@@ -5901,7 +6172,7 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
         </div>
 
         <div class="flex items-center justify-between text-[11px] text-gray-500 px-0.5">
-          <span id="mobileSearchResultCountText">แสดงรายการล่าสุด</span>
+          <span id="mobileSearchResultCountText">${initialQuery ? 'ผลการค้นหา' : 'พิมพ์คำค้นหาเพื่อแสดงรายการ'}</span>
         </div>
 
         <!-- รายการคดีแบบ ListView สำหรับจอมือถือ (ขยายพื้นที่ความสูงให้แสดงผลได้เต็มตา) -->
@@ -5957,6 +6228,24 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
       const renderList = (query = '') => {
         const q = query.trim().toLowerCase();
         const activeProv = (state.selectedProvince || 'อุดรธานี').trim();
+
+        // ตามข้อกำหนด: ไม่ต้องแสดงรายการเมื่อเข้าใช้งานทันที แต่ให้แสดงข้อมูลจากการพิมพ์ค้นหาเท่านั้น
+        if (!q) {
+          if (countTxt) {
+            countTxt.innerHTML = `<span>ค้นหาข้อมูลหมายใน จ.<b>${activeProv}</b> (พิมพ์เลขคดี หรือ ที่ตั้ง)</span>`;
+          }
+          container.innerHTML = `
+            <div class="p-8 text-center text-gray-400 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+              <div class="w-12 h-12 mx-auto rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-xl mb-3">
+                <i class="fa-solid fa-magnifying-glass"></i>
+              </div>
+              <p class="text-xs font-bold text-gray-700">พิมพ์คำค้นหาเพื่อแสดงรายการหมาย</p>
+              <p class="text-[11px] text-gray-400 mt-1">ระบุเลขคดี หรือชื่อสถานที่ / ตำบล / อำเภอ ในช่องค้นหาด้านบน</p>
+            </div>
+          `;
+          return;
+        }
+
         const allRows = state.allSheetRows || [];
 
         // 1. กรองเป็นข้อมูลของจังหวัดนั้นเท่านั้น เพื่อลดการดึงข้อมูลทั้งหมด
@@ -5969,7 +6258,7 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
         const filtered = provRows.filter(r => {
           const c = (r['เลขคดี'] || '').toLowerCase();
           const d = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || '').toLowerCase();
-          return !q || c.includes(q) || d.includes(q);
+          return c.includes(q) || d.includes(q);
         });
 
         // จัดกลุ่มตามเลขคดี (Group by Case Number) เพื่อแสดงรายการที่ไม่ซ้ำ
@@ -5984,9 +6273,7 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
 
         const uniqueCases = Array.from(groupMap.keys());
         if (countTxt) {
-          countTxt.innerHTML = q 
-            ? `<span>ค้นหาใน จ.<b>${activeProv}</b>: พบ <b>${uniqueCases.length}</b> คดี (${filtered.length} รายการหมาย)</span>` 
-            : `<span>ข้อมูล จ.<b>${activeProv}</b> (แสดง ${Math.min(uniqueCases.length, 20)} เลขคดีล่าสุด / ทั้งหมด ${uniqueCases.length} คดี)</span>`;
+          countTxt.innerHTML = `<span>ค้นหาใน จ.<b>${activeProv}</b>: พบ <b>${uniqueCases.length}</b> คดี (${filtered.length} รายการหมาย)</span>`;
         }
         container.innerHTML = '';
 
@@ -5995,13 +6282,13 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
             <div class="p-6 text-center text-gray-400 bg-gray-50 rounded-2xl border border-gray-200">
               <i class="fa-solid fa-folder-open text-3xl mb-2 text-gray-300"></i>
               <p class="text-xs font-semibold text-gray-600">ไม่พบข้อมูลหมายใน จ.${activeProv}</p>
-              ${q ? `<p class="text-[11px] text-gray-400 mt-1">คำค้นหา "${query}" ไม่พบในข้อมูล จ.${activeProv}</p>` : `<p class="text-[11px] text-gray-400 mt-1">ยังไม่มีข้อมูลบันทึกส่งหมายในพื้นที่จังหวัดนี้</p>`}
+              <p class="text-[11px] text-gray-400 mt-1">คำค้นหา "${query}" ไม่พบในข้อมูล จ.${activeProv}</p>
             </div>
           `;
           return;
         }
 
-        const displayKeys = q ? uniqueCases : uniqueCases.slice(0, 20);
+        const displayKeys = uniqueCases;
 
         displayKeys.forEach(caseNo => {
           const records = groupMap.get(caseNo);
@@ -8370,9 +8657,29 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
           </div>
         </div>
 
-        <div id="mobileUploadGpsInfo" class="p-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-[11px] flex items-center gap-2">
+        <div id="mobileUploadGpsInfo" class="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-[11px] flex items-center gap-2">
           <i class="fa-solid fa-location-crosshairs text-blue-600 shrink-0"></i>
-          <span id="mobileUploadGpsText">${(extractedLat && extractedLng) ? `พบพิกัดในรูปถ่าย: ${extractedLat.toFixed(6)}, ${extractedLng.toFixed(6)}` : 'ระบบจะสกัดพิกัด GPS จากรูปภาพ หรือใช้พิกัดจากเครื่องอัตโนมัติ'}</span>
+          <span id="mobileUploadGpsText">${(extractedLat && extractedLng) ? `พบพิกัดในรูปถ่าย: ${Number(extractedLat).toFixed(6)}, ${Number(extractedLng).toFixed(6)}` : 'ระบบจะสกัดพิกัด GPS จากรูปภาพ หรือสามารถพิมพ์ระบุด้านล่างได้'}</span>
+        </div>
+
+        <!-- กล่องพิมพ์แก้ไขพิกัด Latitude และ Longitude (ตามข้อกำหนด 1) -->
+        <div id="mobileUploadGpsInputBox" class="${(extractedLat && extractedLng) ? 'block' : 'hidden'} p-2.5 rounded-xl bg-blue-50/80 border border-blue-200 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-blue-900 text-xs flex items-center gap-1.5">
+              <i class="fa-solid fa-satellite text-blue-600"></i> พิกัดภาพถ่าย (พิมพ์แก้ไขได้)
+            </span>
+            <span class="text-[10px] text-blue-600 bg-blue-100/80 px-2 py-0.5 rounded-full font-semibold">แก้ไขได้</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[10px] text-gray-500 mb-0.5 font-semibold">ละติจูด (Latitude)</label>
+              <input type="number" step="any" id="mobileUploadLatInput" value="${extractedLat ? Number(extractedLat).toFixed(6) : ''}" placeholder="เช่น 17.412345" class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none">
+            </div>
+            <div>
+              <label class="block text-[10px] text-gray-500 mb-0.5 font-semibold">ลองจิจูด (Longitude)</label>
+              <input type="number" step="any" id="mobileUploadLngInput" value="${extractedLng ? Number(extractedLng).toFixed(6) : ''}" placeholder="เช่น 102.789012" class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none">
+            </div>
+          </div>
         </div>
       </div>
     `,
@@ -8393,6 +8700,9 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
       const previewImg = document.getElementById('mobileUploadPreviewImg');
       const fileInfo = document.getElementById('mobileUploadFileInfo');
       const gpsText = document.getElementById('mobileUploadGpsText');
+      const latInput = document.getElementById('mobileUploadLatInput');
+      const lngInput = document.getElementById('mobileUploadLngInput');
+      const gpsBox = document.getElementById('mobileUploadGpsInputBox');
 
       fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
@@ -8420,13 +8730,24 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
               if (gps && gps.latitude && gps.longitude) {
                 extractedLat = gps.latitude;
                 extractedLng = gps.longitude;
+                if (latInput) latInput.value = extractedLat.toFixed(6);
+                if (lngInput) lngInput.value = extractedLng.toFixed(6);
+                if (gpsBox) gpsBox.classList.remove('hidden');
                 if (gpsText) {
                   gpsText.innerHTML = `<b class="text-emerald-700"><i class="fa-solid fa-satellite mr-1"></i>พบพิกัดในรูปถ่าย:</b> ${extractedLat.toFixed(6)}, ${extractedLng.toFixed(6)}`;
+                }
+              } else {
+                if (gpsBox) gpsBox.classList.remove('hidden');
+                if (gpsText) {
+                  gpsText.innerHTML = `<span class="text-amber-700"><i class="fa-solid fa-circle-exclamation mr-1"></i>ไม่พบพิกัดในรูปถ่าย (สามารถพิมพ์ระบุเองด้านล่างได้)</span>`;
                 }
               }
             } catch (exErr) {
               console.warn('exifr extraction failed:', exErr);
+              if (gpsBox) gpsBox.classList.remove('hidden');
             }
+          } else {
+            if (gpsBox) gpsBox.classList.remove('hidden');
           }
         };
         reader.readAsDataURL(file);
@@ -8437,10 +8758,22 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
         Swal.showValidationMessage('กรุณาเลือกไฟล์รูปภาพก่อนกดยืนยัน');
         return false;
       }
+      const latInput = document.getElementById('mobileUploadLatInput');
+      const lngInput = document.getElementById('mobileUploadLngInput');
+      let finalLat = extractedLat;
+      let finalLng = extractedLng;
+      if (latInput && latInput.value.trim()) {
+        const pLat = parseFloat(latInput.value.trim());
+        if (!isNaN(pLat)) finalLat = pLat;
+      }
+      if (lngInput && lngInput.value.trim()) {
+        const pLng = parseFloat(lngInput.value.trim());
+        if (!isNaN(pLng)) finalLng = pLng;
+      }
       return {
         dataUrl: selectedDataUrl,
-        lat: extractedLat,
-        lng: extractedLng
+        lat: finalLat,
+        lng: finalLng
       };
     }
   }).then((res) => {
@@ -8643,9 +8976,13 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
   const curAdminName = state.tempModalValues?.adminName || elements.localAdminNameInput?.value || 'ที่ทำการปกครองส่วนท้องถิ่น';
   const curOtherLoc = (state.tempModalValues?.otherLocName !== undefined) ? state.tempModalValues.otherLocName : (elements.customOtherLocationName?.value || '');
   
+  const isManualUploadActive = !!(state.attachedManualUpload && state.attachedManualUpload.attachedImage);
+
   const curCoords = (manualUploadData && manualUploadData.lat && manualUploadData.lng)
     ? `${Number(manualUploadData.lat).toFixed(6)}, ${Number(manualUploadData.lng).toFixed(6)}`
-    : ((state.tempModalValues?.coords !== undefined) ? state.tempModalValues.coords : (elements.coordinatesInput?.value || (state.lat ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : '')));
+    : ((state.attachedManualUpload && state.attachedManualUpload.lat && state.attachedManualUpload.lng)
+      ? `${Number(state.attachedManualUpload.lat).toFixed(6)}, ${Number(state.attachedManualUpload.lng).toFixed(6)}`
+      : ((state.tempModalValues?.coords !== undefined) ? state.tempModalValues.coords : (elements.coordinatesInput?.value || (state.lat ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : ''))));
 
   const currentThaiYear = new Date().getFullYear() + 543;
   let yearOpts = '';
@@ -8685,12 +9022,14 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
     `;
   });
 
-  // ปุ่มอัปโหลดรูปภาพที่มุมซ้ายบน (แทนที่ปุ่มค้นหาเดิม)
-  const uploadBtnHtml = `
-    <button type="button" onclick="saveTempModalFormState(); showMobileUploadPhotoModal();" class="slts-header-search-icon-btn bg-emerald-600/90 hover:bg-emerald-600 text-white shadow-xs cursor-pointer" title="อัปโหลดภาพถ่ายส่งหมาย (เลือกไฟล์ภาพจากเครื่อง)">
-      <i class="fa-solid fa-cloud-arrow-up text-white"></i>
-    </button>
-  `;
+  // ปุ่มที่มุมซ้ายบน: ถ้าแนบรูปเข้ามาแล้ว ให้แสดงปุ่มยกเลิกอัปโหลด (กากบาทสีแดง) แทนปุ่มอัปโหลด
+  const uploadBtnHtml = isManualUploadActive
+    ? `<button type="button" onclick="cancelMobileManualUpload()" class="slts-header-search-icon-btn bg-rose-500 hover:bg-rose-600 text-white shadow-xs cursor-pointer" title="ยกเลิกการแนบรูปและกลับสู่ฟอร์มปกติ">
+         <i class="fa-solid fa-xmark text-white text-base"></i>
+       </button>`
+    : `<button type="button" onclick="saveTempModalFormState(); showMobileUploadPhotoModal();" class="slts-header-search-icon-btn bg-emerald-600/90 hover:bg-emerald-600 text-white shadow-xs cursor-pointer" title="อัปโหลดภาพถ่ายส่งหมาย (เลือกไฟล์ภาพจากเครื่อง)">
+         <i class="fa-solid fa-cloud-arrow-up text-white"></i>
+       </button>`;
 
   Swal.fire({
     html: `
@@ -8866,9 +9205,11 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
           <div class="slts-form-section">
             <div class="slts-section-label">
               <i class="fa-solid fa-satellite-dish text-violet-600"></i> พิกัด GPS
-              <button type="button" onclick="refreshModalCoordinates()" class="slts-gps-btn">
-                <i class="fa-solid fa-arrows-rotate"></i> ดึงพิกัดสด
-              </button>
+              ${isManualUploadActive ? '<span class="text-[10px] text-emerald-700 bg-emerald-100 font-semibold px-2 py-0.5 rounded-full ml-auto">พิกัดสกัดจากภาพถ่าย (พิมพ์แก้ไขได้)</span>' : `
+                <button type="button" onclick="refreshModalCoordinates()" class="slts-gps-btn">
+                  <i class="fa-solid fa-arrows-rotate"></i> ดึงพิกัดสด
+                </button>
+              `}
             </div>
             <input type="text" id="m_coords" value="${curCoords}" placeholder="เช่น 17.4144, 102.7882" class="slts-input slts-input-mono">
           </div>
@@ -8978,6 +9319,13 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
       }
     }
   });
+};
+
+// ยกเลิกการแนบภาพถ่ายส่งหมาย และกลับสู่แบบฟอร์มบันทึกการส่งหมายปกติ (ตามข้อกำหนด 2)
+window.cancelMobileManualUpload = function() {
+  state.attachedManualUpload = null;
+  window._mobileManualUploadDataUrl = null;
+  showMobileSummonsFormModal(false, false);
 };
 
 window.handleModalPrefixInput = function(val) {
@@ -16499,8 +16847,23 @@ window.openMapAreaSelectorModal = function() {
         const q = (query || '').trim().toLowerCase();
         const allRows = window.schedTableRawRows || [];
 
+        if (!q) {
+          window.currentFilteredSchedRows = [];
+          if (foundBadge) foundBadge.textContent = 'พิมพ์คำค้นหาเพื่อแสดงรายการ';
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="7" class="py-8 text-center text-gray-400 text-xs">
+                <i class="fa-solid fa-keyboard text-2xl mb-1 text-gray-300"></i>
+                <p class="font-semibold text-gray-600">พิมพ์คำค้นหาเพื่อแสดงรายการหมาย</p>
+                <p class="text-[11px] text-gray-400 mt-0.5">ระบุเลขคดี บ้านเลขที่ หรือพื้นที่ในช่องค้นหาด้านบน</p>
+              </td>
+            </tr>
+          `;
+          updateHeaderCheckboxState();
+          return;
+        }
+
         window.currentFilteredSchedRows = allRows.filter(r => {
-          if (!q) return true;
           // ตรวจสอบทุก column ใน object
           for (const key of Object.keys(r)) {
             if (key.startsWith('_')) continue;
