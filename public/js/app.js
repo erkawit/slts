@@ -3427,15 +3427,34 @@ function applyGyroOrientation(orientation, angle) {
 
   document.body.classList.remove('gyro-landscape-90', 'gyro-landscape-270', 'gyro-portrait', 'hardware-landscape');
 
+  const cameraControls = document.getElementById('cameraControlsContainer');
+  const cameraTopBar = document.getElementById('cameraTopBar') || (typeof elements !== 'undefined' ? elements.cameraTopBar : null);
+
   if (isHardwareLandscape) {
     // โหมดหน้าจอหมุนแนวนอนจริงระดับฮาร์ดแวร์ (Auto-Rotate ON):
     // สลับเป็นเลย์เอาต์ Native Camera แนวนอน (เหมือนภาพที่ 2): ท็อปบาร์อยู่ฝั่งซ้าย, ชัตเตอร์อยู่ฝั่งขวา
     // โดยองค์ประกอบทั้งหมดไม่ต้องหมุน 90 องศาซ้ำซ้อน เพราะหน้าจอถูกหมุนโดยระบบปฏิบัติการแล้ว
     document.body.classList.add('hardware-landscape');
+    if (cameraControls) {
+      cameraControls.style.setProperty('left', 'auto', 'important');
+      cameraControls.style.setProperty('right', '0px', 'important');
+    }
+    if (cameraTopBar) {
+      cameraTopBar.style.setProperty('left', '0px', 'important');
+      cameraTopBar.style.setProperty('right', 'auto', 'important');
+    }
     if (state.captureOrientation !== 'landscape' && typeof setCaptureOrientation === 'function') {
       setCaptureOrientation('landscape');
     }
   } else {
+    if (cameraControls) {
+      cameraControls.style.removeProperty('left');
+      cameraControls.style.removeProperty('right');
+    }
+    if (cameraTopBar) {
+      cameraTopBar.style.removeProperty('left');
+      cameraTopBar.style.removeProperty('right');
+    }
     // โหมดหน้าจออยู่ในแนวตั้ง (เช่น ตัวเครื่องเปิด Portrait Lock ไว้):
     // ใช้ Gyroscope Sensor หมุนองค์ประกอบในตำแหน่งเดิม (Virtual Landscape เหมือนภาพที่ 2)
     if (angle === 90) {
