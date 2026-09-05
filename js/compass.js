@@ -34,9 +34,66 @@ class CompassManager {
       }
     };
 
+    const handleMotionEvent = (e) => {
+      const acc = e.accelerationIncludingGravity || e.acceleration;
+      if (!acc) return;
+      const x = acc.x || 0;
+      const y = acc.y || 0;
+      const z = acc.z || 0;
+
+      // หากวางเครื่องนอนราบกับพื้น (|z| > 8.5 m/s²) ไม่เปลี่ยนสถานะ
+      if (Math.abs(z) > 8.5 && Math.abs(x) < 4.0 && Math.abs(y) < 4.0) {
+        return;
+      }
+
+      // หากแรงโน้มถ่วงตกที่แกน X ชัดเจน (เอียงซ้ายหรือขวา)
+      if (Math.abs(x) > 5.5 && Math.abs(y) < 5.0) {
+        if (x > 5.5) {
+          // Landscape Left (หัวเครื่องไปซ้าย)
+          this.setTargetTilt(90, 'landscape');
+        } else if (x < -5.5) {
+          // Landscape Right (หัวเครื่องไปขวา)
+          this.setTargetTilt(-90, 'landscape');
+        }
+      } else if (y > 5.0 && Math.abs(x) < 4.5) {
+        // Portrait ปกติ
+        this.setTargetTilt(0, 'portrait');
+      } else if (y < -5.0 && Math.abs(x) < 4.5) {
+        // Portrait กลับหัว
+        this.setTargetTilt(180, 'portrait');
+      }
+    };
+
     if (typeof window !== 'undefined') {
       window.addEventListener('deviceorientation', handleOrientationEvent, true);
       window.addEventListener('deviceorientationabsolute', handleOrientationEvent, true);
+      window.addEventListener('devicemotion', handleMotionEvent, true);
+    }
+  }
+
+  /**
+   * อัปเดตองศาการเอียงเครื่องแบบ Debounce พร้อมแจ้งเตือน Callback
+   */
+  setTargetTilt(newAngle, newOrientation) {
+    if (newAngle !== this.deviceAngle || newOrientation !== this.deviceOrientation) {
+      if (this._targetAngle !== newAngle || this._targetOrientation !== newOrientation) {
+        this._targetAngle = newAngle;
+        this._targetOrientation = newOrientation;
+        clearTimeout(this._tiltDebounceTimer);
+        this._tiltDebounceTimer = setTimeout(() => {
+          if (this._targetAngle !== null && (this._targetAngle !== this.deviceAngle || this._targetOrientation !== this.deviceOrientation)) {
+            this.deviceAngle = this._targetAngle;
+            this.deviceOrientation = this._targetOrientation;
+            this.notifyOrientationChange(this.deviceOrientation, this.deviceAngle);
+          }
+        }, 50);
+      }
+    } else {
+      this._targetAngle = null;
+      if (this._tiltDebounceTimer) {
+        clearTimeout(this._tiltDebounceTimer);
+        this._tiltDebounceTimer = null;
+      }
     }
   }
 
@@ -76,26 +133,7 @@ class CompassManager {
       }
     }
 
-    if (newAngle !== this.deviceAngle || newOrientation !== this.deviceOrientation) {
-      if (this._targetAngle !== newAngle || this._targetOrientation !== newOrientation) {
-        this._targetAngle = newAngle;
-        this._targetOrientation = newOrientation;
-        clearTimeout(this._tiltDebounceTimer);
-        this._tiltDebounceTimer = setTimeout(() => {
-          if (this._targetAngle !== null && (this._targetAngle !== this.deviceAngle || this._targetOrientation !== this.deviceOrientation)) {
-            this.deviceAngle = this._targetAngle;
-            this.deviceOrientation = this._targetOrientation;
-            this.notifyOrientationChange(this.deviceOrientation, this.deviceAngle);
-          }
-        }, 50);
-      }
-    } else {
-      this._targetAngle = null;
-      if (this._tiltDebounceTimer) {
-        clearTimeout(this._tiltDebounceTimer);
-        this._tiltDebounceTimer = null;
-      }
-    }
+    this.setTargetTilt(newAngle, newOrientation);
   }
 
   onOrientationChange(cb) {
@@ -120,16 +158,25 @@ class CompassManager {
 
   // ขออนุญาต Sensor บน iOS 13+
   async requestPermission() {
+    let granted = true;
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
       try {
         const response = await DeviceOrientationEvent.requestPermission();
-        return response === 'granted';
+        granted = (response === 'granted');
       } catch (err) {
         console.warn('DeviceOrientation permission error:', err);
-        return false;
+        granted = false;
       }
     }
-    return true;
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      try {
+        const motionResponse = await DeviceMotionEvent.requestPermission();
+        granted = granted || (motionResponse === 'granted');
+      } catch (err) {
+        console.warn('DeviceMotion permission error:', err);
+      }
+    }
+    return granted;
   }
 
   getHeading() {

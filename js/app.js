@@ -3395,6 +3395,21 @@ window.getDeviceInfo = function() {
   };
 };
 
+/**
+ * บังคับล็อกหน้าจอโทรศัพท์มือถือให้อยู่ในแนวตั้ง (Portrait Lock)
+ * เพื่อไม่ให้เลย์เอาต์หน้าจอหมุนตาม Hardware Screen แม้ผู้ใช้จะเปิด Auto-Rotate ในตัวเครื่องไว้ก็ตาม
+ */
+function lockScreenOrientationToPortrait() {
+  try {
+    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.lock === 'function') {
+      screen.orientation.lock('portrait').catch(() => {
+        // เบราว์เซอร์บางตัวอาจไม่อนุญาตถ้าไม่อยู่ในโหมด Fullscreen หรือผู้ใช้ยังไม่ได้แตะจอ ให้ข้ามได้
+      });
+    }
+  } catch (e) {}
+}
+window.lockScreenOrientationToPortrait = lockScreenOrientationToPortrait;
+
 function applyGyroOrientation(orientation, angle) {
   state.deviceAngle = angle;
   state.deviceOrientation = orientation;
@@ -3404,37 +3419,27 @@ function applyGyroOrientation(orientation, angle) {
     return;
   }
 
-  const isScreenLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || (window.innerWidth > window.innerHeight);
-
+  // ยึดแนวระบบการหมุนจาก Gyroscope Sensor ทางอ้อมเท่านั้น ไม่ใช่การหมุนจอ Hardware
   document.body.classList.remove('gyro-landscape-90', 'gyro-landscape-270', 'gyro-portrait');
 
-  if (isScreenLandscape) {
-    // หน้าจอหมุนตามจอแนวนอนจริงแล้ว: CSS @media (orientation: landscape) จัดการ
-    document.body.classList.add('gyro-portrait');
-    if (state.captureOrientation !== 'landscape' && typeof setCaptureOrientation === 'function') {
-      setCaptureOrientation('landscape');
-    }
+  if (angle === 90) {
+    document.body.classList.add('gyro-landscape-90');
+  } else if (angle === -90 || angle === 270) {
+    document.body.classList.add('gyro-landscape-270');
   } else {
-    // หน้าจออยู่ในแนวตั้ง (เช่น โทรศัพท์เปิด Portrait Lock ไว้):
-    if (angle === 90) {
-      document.body.classList.add('gyro-landscape-90');
-    } else if (angle === -90 || angle === 270) {
-      document.body.classList.add('gyro-landscape-270');
-    } else {
-      document.body.classList.add('gyro-portrait');
-    }
+    document.body.classList.add('gyro-portrait');
+  }
 
-    const targetMode = Math.abs(angle) === 90 ? 'landscape' : 'portrait';
-    if (state.captureOrientation !== targetMode && typeof setCaptureOrientation === 'function') {
-      setCaptureOrientation(targetMode);
-    }
+  const targetMode = (Math.abs(angle) === 90 || angle === 270) ? 'landscape' : 'portrait';
+  if (state.captureOrientation !== targetMode && typeof setCaptureOrientation === 'function') {
+    setCaptureOrientation(targetMode);
   }
 }
 window.applyGyroOrientation = applyGyroOrientation;
 
 /**
- * ตรวจสอบทิศทางการหมุนของตัวเครื่องจาก Gyroscope Sensor อย่างละเอียด
- * คืนค่า: 90 (หมุนซ้าย), 270 (หมุนขวา), 'native' (เบราว์เซอร์หมุนตาม OS), หรือ 0 (แนวตั้ง)
+ * ตรวจสอบทิศทางการหมุนของตัวเครื่องจาก Gyroscope Sensor อย่างละเอียด (ไม่ใช้ Hardware Screen Dimensions)
+ * คืนค่า: 90 (หมุนซ้าย), 270 (หมุนขวา), หรือ 0 (แนวตั้ง)
  */
 function getEffectiveGyroOrientation() {
   // 1. ตรวจสอบคลาสบน document.body ก่อน
@@ -3452,23 +3457,13 @@ function getEffectiveGyroOrientation() {
   if (state.deviceAngle === 90) return 90;
   if (state.deviceAngle === -90 || state.deviceAngle === 270) return 270;
 
-  // 4. ตรวจสอบกรณี native landscape บนหน้าจอขนาดเล็ก/มือถือ
-  const isMobile = window.innerWidth < 1024;
-  const isLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || 
-                      (screen.orientation && screen.orientation.type && screen.orientation.type.includes('landscape')) ||
-                      (window.innerWidth > window.innerHeight);
-
-  if (isMobile && isLandscape) {
-    return 'native';
-  }
-
   return 0;
 }
 window.getEffectiveGyroOrientation = getEffectiveGyroOrientation;
 
 /**
- * แสดง Toast แจ้งเตือนเมื่ออยู่ในโหมดแนวนอน โดยคำนวณตำแหน่งจากความกว้างและความยาวของหน้าจอแนวนอนแท้จริง
- * จัดวางกึ่งกลางหน้าจอแนวนอน (50% ของความกว้าง และ 50% ของความยาว) หมุนตาม Gyroscope หรือ Native Landscape
+ * แสดง Toast แจ้งเตือนเมื่ออยู่ในโหมดแนวนอน โดยคำนวณตำแหน่งจากความกว้างและความยาวของหน้าจอ
+ * จัดวางกึ่งกลางหน้าจอ หมุนตาม Gyroscope Sensor
  */
 function showLandscapeWarningToast(actionName = 'ใช้งานฟังก์ชันนี้') {
   let toastOverlay = document.getElementById('sltsLandscapeToast');
@@ -3494,11 +3489,10 @@ function showLandscapeWarningToast(actionName = 'ใช้งานฟังก�
     toastMsg.textContent = `กรุณาถือโทรศัพท์ในแนวตั้ง เพื่อ${actionName}`;
   }
 
-  // คำนวณความกว้างและความยาวของหน้าจอในมุมมองแนวนอน
+  // คำนวณความกว้างและความยาวของหน้าจอ
   const winW = window.innerWidth;
   const winH = window.innerHeight;
   const landscapeWidth = Math.max(winW, winH);
-  const landscapeHeight = Math.min(winW, winH);
 
   if (toastCard) {
     toastCard.style.maxWidth = `${Math.min(landscapeWidth * 0.85, 480)}px`;
@@ -3506,16 +3500,12 @@ function showLandscapeWarningToast(actionName = 'ใช้งานฟังก�
     toastCard.style.top = `${winH / 2}px`;
     toastCard.style.left = `${winW / 2}px`;
 
-    const isNativeLandscape = winW > winH;
-    const gyroMode = (typeof getEffectiveGyroOrientation === 'function') ? getEffectiveGyroOrientation() : 90;
+    const gyroMode = (typeof getEffectiveGyroOrientation === 'function') ? getEffectiveGyroOrientation() : 0;
 
-    if (!isNativeLandscape) {
-      if (gyroMode === 270) {
-        toastCard.style.transform = 'translate(-50%, -50%) rotate(-90deg)';
-      } else {
-        // default 90 (โทรศัพท์หมุนซ้าย)
-        toastCard.style.transform = 'translate(-50%, -50%) rotate(90deg)';
-      }
+    if (gyroMode === 270 || gyroMode === -90) {
+      toastCard.style.transform = 'translate(-50%, -50%) rotate(-90deg)';
+    } else if (gyroMode === 90) {
+      toastCard.style.transform = 'translate(-50%, -50%) rotate(90deg)';
     } else {
       toastCard.style.transform = 'translate(-50%, -50%) rotate(0deg)';
     }
@@ -3568,18 +3558,16 @@ window.handleLiveBadgeClick = function(e) {
 function initResponsiveUI() {
   const handleOrientationSync = () => {
     try {
-      const isLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || 
-                          (screen.orientation && screen.orientation.type && screen.orientation.type.includes('landscape')) ||
-                          (window.innerWidth > window.innerHeight);
-      const targetMode = isLandscape ? 'landscape' : 'portrait';
-      if (state.captureOrientation !== targetMode && typeof setCaptureOrientation === 'function') {
-        setCaptureOrientation(targetMode);
-      }
-      if (isLandscape) {
-        applyGyroOrientation('landscape', 0);
-      } else if (state.deviceAngle) {
-        applyGyroOrientation(state.deviceOrientation || 'portrait', state.deviceAngle);
-      }
+      lockScreenOrientationToPortrait();
+      // ยึดการหมุนจาก Gyroscope Sensor เท่านั้น ไม่ใช่หมุนจอ Hardware
+      const gyroAngle = (window.compassManager && typeof window.compassManager.getDeviceAngle === 'function')
+        ? window.compassManager.getDeviceAngle()
+        : (state.deviceAngle || 0);
+      const gyroOrientation = (window.compassManager && typeof window.compassManager.getDeviceOrientation === 'function')
+        ? window.compassManager.getDeviceOrientation()
+        : (state.deviceOrientation || 'portrait');
+
+      applyGyroOrientation(gyroOrientation, gyroAngle);
     } catch (e) {
       console.warn('Orientation sync error:', e);
     }
@@ -3593,18 +3581,12 @@ function initResponsiveUI() {
 
   window.addEventListener('resize', handleResize);
   window.addEventListener('orientationchange', handleResize);
-  if (window.matchMedia) {
-    try {
-      const mql = window.matchMedia('(orientation: landscape)');
-      if (mql.addEventListener) {
-        mql.addEventListener('change', handleResize);
-      } else if (mql.addListener) {
-        mql.addListener(handleResize);
-      }
-    } catch (e) {}
-  }
 
-  // ดักฟังการหมุนเครื่องจาก Gyroscope Sensor (รองรับแม้เปิด Portrait Lock)
+  // ดักแตะหน้าจอครั้งแรกเพื่อล็อกหน้าจอ Portrait ทันที (รองรับ Permissions Policy)
+  document.addEventListener('touchstart', () => lockScreenOrientationToPortrait(), { passive: true, once: true });
+  document.addEventListener('click', () => lockScreenOrientationToPortrait(), { passive: true, once: true });
+
+  // ดักฟังการหมุนเครื่องจาก Gyroscope Sensor (Indirect Sensor Detection)
   if (window.compassManager && typeof window.compassManager.onOrientationChange === 'function') {
     window.compassManager.onOrientationChange((orientation, angle) => {
       applyGyroOrientation(orientation, angle);
@@ -12665,9 +12647,13 @@ async function openCameraModal() {
     window.compassManager.requestPermission().catch(e => console.warn('Compass permission error:', e));
   }
 
-  // 2. ตรวจสอบโหมดเริ่มต้นตามหน้าจอจริง
-  const isLandscape = (window.matchMedia && window.matchMedia('(orientation: landscape)').matches) || (window.innerWidth > window.innerHeight);
-  setCaptureOrientation(isLandscape ? 'landscape' : 'portrait');
+  // 2. ตรวจสอบโหมดเริ่มต้นจาก Gyroscope Sensor เท่านั้น (ไม่ใช้การหมุนจอ Hardware)
+  lockScreenOrientationToPortrait();
+  const initialGyroAngle = (window.compassManager && typeof window.compassManager.getDeviceAngle === 'function')
+    ? window.compassManager.getDeviceAngle()
+    : (state.deviceAngle || 0);
+  const isGyroLandscape = Math.abs(initialGyroAngle) === 90 || initialGyroAngle === 270;
+  setCaptureOrientation(isGyroLandscape ? 'landscape' : 'portrait');
 
   if (elements.cameraModal) {
     elements.cameraModal.classList.remove('hidden');
@@ -13133,24 +13119,18 @@ async function captureAndProcessPhoto() {
     };
 
     let rotationDeg = 0;
-    const isScreenPortrait = window.innerWidth < window.innerHeight;
     const currentDeviceAngle = (window.compassManager && typeof window.compassManager.getDeviceAngle === 'function')
       ? window.compassManager.getDeviceAngle()
       : (state.deviceAngle || 0);
 
     if (state.captureOrientation === 'landscape') {
-      if (isScreenPortrait) {
-        // เมื่อหน้าจอโทรศัพท์เป็นแนวตั้ง แต่ผู้ใช้ถ่ายในโหมดแนวนอน (4:3):
-        // หากโทรศัพท์เอียงซ้าย (Landscape Left, deviceAngle = 90): ต้องหมุนทวนเข็ม -90 องศาเพื่อชดเชยการเอียง
-        // หากโทรศัพท์เอียงขวา (Landscape Right, deviceAngle = -90 หรือ 270): ต้องหมุนตามเข็ม +90 องศาเพื่อชดเชย
-        // ป้องกันบั๊กเดิมที่หมุน +90 ทำให้ภาพกลับหัว 180 องศา
-        if (currentDeviceAngle === -90 || currentDeviceAngle === 270) {
-          rotationDeg = 90;
-        } else {
-          rotationDeg = -90;
-        }
+      // ยึดการหมุนรูปถ่ายและลายน้ำตามการเอียงเครื่องจริงจาก Gyroscope Sensor 100% (ไม่ใช้การหมุนจอ Hardware)
+      // หากโทรศัพท์เอียงซ้าย (Landscape Left, deviceAngle = 90): หมุนทวนเข็ม -90 องศาเพื่อชดเชยการเอียง
+      // หากโทรศัพท์เอียงขวา (Landscape Right, deviceAngle = -90 หรือ 270): หมุนตามเข็ม +90 องศาเพื่อชดเชย
+      if (currentDeviceAngle === -90 || currentDeviceAngle === 270) {
+        rotationDeg = 90;
       } else {
-        rotationDeg = 0;
+        rotationDeg = -90;
       }
     } else {
       // โหมดแนวตั้ง (Portrait 3:4)
