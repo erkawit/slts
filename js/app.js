@@ -467,7 +467,42 @@ async function syncOfflineQueue(isManual = false) {
   processBackgroundQueue();
 }
 
-function recordCompletedSubmission(caseNumber, fileName) {
+function normalizeCaseForMatching(c) {
+  if (!c) return '';
+  let s = String(c).trim();
+  // ตัดคำนำหน้า เช่น "หมาย", "คดีหมายเลขดำที่", "คดีดำที่", "คดีหมายเลขแดงที่"
+  s = s.replace(/^หมาย\s*/i, '').replace(/^คดี(หมายเลข)?(ดำ|แดง)?(ที่)?\s*/i, '');
+  // ตัดเครื่องหมายวรรคตอน จุด ช่องว่าง ขีด เส้นใต้ วงเล็บ
+  s = s.replace(/[\s\.\-\_\(\)\[\]]/g, '');
+  // แปลงปี 2 หลักท้าย เช่น /69 -> /2569
+  s = s.replace(/\/(\d{2})$/, (m, y) => '/25' + y);
+  return s.toLowerCase();
+}
+window.normalizeCaseForMatching = normalizeCaseForMatching;
+
+function matchCaseNumbers(caseA, caseB) {
+  if (!caseA || !caseB) return false;
+  const sA = String(caseA).trim();
+  const sB = String(caseB).trim();
+  if (sA === sB) return true;
+  const normA = normalizeCaseForMatching(sA);
+  const normB = normalizeCaseForMatching(sB);
+  if (!normA || !normB) return false;
+  if (normA === normB) return true;
+
+  // ตรวจสอบกรณีเลขคดีและปีตรงกัน เช่น "123/2569" กับ "ผบ123/2569"
+  const mA = normA.match(/(\d+)\/(\d{4})/);
+  const mB = normB.match(/(\d+)\/(\d{4})/);
+  if (mA && mB && mA[1] === mB[1] && mA[2] === mB[2]) {
+    const prefA = normA.replace(/\d+\/\d{4}/, '');
+    const prefB = normB.replace(/\d+\/\d{4}/, '');
+    if (!prefA || !prefB || prefA === prefB) return true;
+  }
+  return false;
+}
+window.matchCaseNumbers = matchCaseNumbers;
+
+function recordCompletedSubmission(caseNumber, fileName, extra = {}) {
   try {
     let recent = JSON.parse(localStorage.getItem('slts_recent_submissions') || '[]');
     recent = recent.filter(r => (Date.now() - r.timestamp) < 900000); // 15 นาที
@@ -479,7 +514,8 @@ function recordCompletedSubmission(caseNumber, fileName) {
     if (typeof setRouteStopDeliveryStatus === 'function') {
       setRouteStopDeliveryStatus(caseNumber, 'uploaded', {
         uploadedAt: new Date().toISOString(),
-        fileName: fileName
+        fileName: fileName,
+        ...extra
       });
     }
   } catch (e) {}
@@ -1011,7 +1047,10 @@ async function processBackgroundQueue() {
         });
         if (alreadyExists) {
           console.log('[BgQueue] Verified: Item already recorded in Google Sheet! Skipping duplicate upload.', currentItem.caseNumber);
-          recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName);
+          recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName, {
+            originalCaseNumber: currentItem.originalCaseNumber,
+            routeStopIndex: currentItem.routeStopIndex
+          });
           removeBackgroundQueueItem(currentItem.id);
           isBgQueueWorkerRunning = false;
           setTimeout(processBackgroundQueue, 500);
@@ -1095,7 +1134,10 @@ async function processBackgroundQueue() {
     }
 
     // สำเร็จ! นำออกจากคิว
-    recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName);
+    recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName, {
+      originalCaseNumber: currentItem.originalCaseNumber,
+      routeStopIndex: currentItem.routeStopIndex
+    });
     removeBackgroundQueueItem(currentItem.id);
 
     // ทำงานเงียบ 100% เบื้องหลังโดยไม่มี Pop Up หรือ Toast รบกวน
@@ -4758,6 +4800,22 @@ function renderDataTable(rows, filterCriteria = null) {
 
   // ดึงประวัติอักษรนำหน้าเลขคดีจากชีตมาอัปเดต autocomplete
   extractPrefixesFromRows(rows);
+
+  // ซิงค์สถานะรายการส่งหมายล่าสุดข้ามอุปกรณ์ (ทั้ง PC และ Mobile) ทันทีที่มีข้อมูลใหม่
+  if (Array.isArray(state.currentRouteStops) && state.currentRouteStops.length > 0) {
+    if (typeof syncStopsWithDeliveryStatus === 'function') {
+      syncStopsWithDeliveryStatus(state.currentRouteStops);
+    }
+    if (document.getElementById('mobileMapRouteStopsList')) {
+      renderMobileRouteList();
+    }
+    if (window.mobileModalMap && document.getElementById('mobileModalLeafletMap')) {
+      initMobileModalMapInstance();
+    }
+    if (document.getElementById('tabContentRouteBatch') && !document.getElementById('tabContentRouteBatch').classList.contains('hidden')) {
+      renderRouteBatchTab();
+    }
+  }
 
   // 1. ทำลายและล้าง DataTable เดิมอย่างหมดจดเพื่อป้องกันรายการซ้ำ
   if ($.fn.DataTable.isDataTable('#summonsDataTable')) {
@@ -8927,9 +8985,15 @@ window.submitMobileManualUploadForm = async function() {
       imageBase64: compressedImageBase64
     };
 
+    const activeTarget = state.activeRouteStopTarget;
+    const origCaseNumber = activeTarget?.caseNumber || caseNumber;
+    const targetStopIndex = (activeTarget && typeof activeTarget.index === 'number') ? activeTarget.index : undefined;
+
     // ส่งเข้า Unified Multi-Tier Background Queue (100% เบื้องหลัง)
     const enqueued = enqueueBackgroundUpload({
       caseNumber: caseNumber,
+      originalCaseNumber: origCaseNumber,
+      routeStopIndex: targetStopIndex,
       courtType: payloadData.courtType,
       locationText: locationText,
       fileName: imageFilename,
@@ -8940,7 +9004,9 @@ window.submitMobileManualUploadForm = async function() {
     if (typeof setRouteStopDeliveryStatus === 'function') {
       setRouteStopDeliveryStatus(caseNumber, 'captured_offline', {
         capturedAt: new Date().toISOString(),
-        capturedPhotoUrl: compressedImageBase64
+        capturedPhotoUrl: compressedImageBase64,
+        originalCaseNumber: origCaseNumber,
+        routeStopIndex: targetStopIndex
       });
     }
 
@@ -13213,9 +13279,15 @@ async function captureAndProcessPhoto() {
       imageBase64: compressedImageBase64
     };
 
+    const activeTarget = state.activeRouteStopTarget;
+    const origCaseNumber = activeTarget?.caseNumber || caseNumber;
+    const targetStopIndex = (activeTarget && typeof activeTarget.index === 'number') ? activeTarget.index : undefined;
+
     // จัดการคิวผ่านระบบ Unified Multi-Tier Queue (ทำงานเบื้องหลัง 100%)
     const enqueued = enqueueBackgroundUpload({
       caseNumber: caseNumber,
+      originalCaseNumber: origCaseNumber,
+      routeStopIndex: targetStopIndex,
       courtType: payloadData.courtType,
       locationText: locationText,
       fileName: imageFilename,
@@ -13226,7 +13298,9 @@ async function captureAndProcessPhoto() {
     if (typeof setRouteStopDeliveryStatus === 'function') {
       setRouteStopDeliveryStatus(caseNumber, 'captured_offline', {
         capturedAt: new Date().toISOString(),
-        capturedPhotoUrl: compressedImageBase64
+        capturedPhotoUrl: compressedImageBase64,
+        originalCaseNumber: origCaseNumber,
+        routeStopIndex: targetStopIndex
       });
     }
 
@@ -13323,9 +13397,15 @@ async function handleFallbackFile(e) {
       imageBase64: compressedImageBase64
     };
 
+    const activeTarget = state.activeRouteStopTarget;
+    const origCaseNumber = activeTarget?.caseNumber || caseNumber;
+    const targetStopIndex = (activeTarget && typeof activeTarget.index === 'number') ? activeTarget.index : undefined;
+
     // 3. จัดการคิวผ่านระบบ Unified Multi-Tier Queue (ทำงานเบื้องหลัง 100%)
     const enqueued = enqueueBackgroundUpload({
       caseNumber: caseNumber,
+      originalCaseNumber: origCaseNumber,
+      routeStopIndex: targetStopIndex,
       courtType: payloadData.courtType,
       locationText: locationText,
       fileName: imageFilename,
@@ -13336,7 +13416,9 @@ async function handleFallbackFile(e) {
     if (typeof setRouteStopDeliveryStatus === 'function') {
       setRouteStopDeliveryStatus(caseNumber, 'captured_offline', {
         capturedAt: new Date().toISOString(),
-        capturedPhotoUrl: compressedImageBase64
+        capturedPhotoUrl: compressedImageBase64,
+        originalCaseNumber: origCaseNumber,
+        routeStopIndex: targetStopIndex
       });
     }
 
@@ -19973,10 +20055,17 @@ window.fetchActiveRouteFromServer = async function() {
         } else {
           // หากบนเครื่องมีข้อมูล stops อยู่แล้ว ให้ซิงค์สถานะการส่งหมายล่าสุดที่อัปเดตมาจาก Mobile
           let changed = false;
-          r.stops.forEach((serverStop) => {
-            const sCase = String(serverStop.caseNumber || '').trim().replace(/\s+/g, '');
-            if (!sCase) return;
-            const localStop = state.currentRouteStops.find(ls => String(ls.caseNumber || '').trim().replace(/\s+/g, '') === sCase);
+          r.stops.forEach((serverStop, sIdx) => {
+            const sCase = String(serverStop.caseNumber || '').trim();
+            const localStop = state.currentRouteStops.find((ls, lIdx) => {
+              if (sCase && typeof matchCaseNumbers === 'function' && matchCaseNumbers(ls.caseNumber, sCase)) {
+                return true;
+              }
+              if (sCase && String(ls.caseNumber || '').trim().replace(/\s+/g, '') === sCase.replace(/\s+/g, '')) {
+                return true;
+              }
+              return lIdx === sIdx && (!ls.caseNumber || !serverStop.caseNumber || ls.locationText === serverStop.locationText);
+            });
             if (localStop) {
               if (serverStop.deliveryStatus && serverStop.deliveryStatus !== 'pending') {
                 if (localStop.deliveryStatus !== serverStop.deliveryStatus) {
@@ -20779,20 +20868,28 @@ function saveRouteStopStatusMap(statusMap, userId = null) {
 }
 
 window.setRouteStopDeliveryStatus = function(caseNumber, status, extra = {}) {
-  if (!caseNumber) return;
+  if (!caseNumber && extra.routeStopIndex === undefined) return;
   const uId = getRouteDeliveryUserKey();
   const statusMap = getRouteStopStatusMap(uId);
-  const cleanCase = String(caseNumber).trim();
-  const normCase = cleanCase.replace(/\s+/g, '');
+  const cleanCase = String(caseNumber || '').trim();
+  const normCase = (typeof normalizeCaseForMatching === 'function') ? normalizeCaseForMatching(cleanCase) : cleanCase.replace(/\s+/g, '');
+  const origCase = extra.originalCaseNumber ? String(extra.originalCaseNumber).trim() : '';
+  const normOrig = origCase ? ((typeof normalizeCaseForMatching === 'function') ? normalizeCaseForMatching(origCase) : origCase.replace(/\s+/g, '')) : '';
 
-  const existing = statusMap[cleanCase] || statusMap[normCase] || {};
-  statusMap[cleanCase] = {
+  const existing = statusMap[cleanCase] || (normCase ? statusMap[normCase] : null) || (origCase ? statusMap[origCase] : null) || (normOrig ? statusMap[normOrig] : null) || {};
+  const statusEntry = {
     ...existing,
-    caseNumber: cleanCase,
+    caseNumber: cleanCase || origCase,
+    originalCaseNumber: origCase,
     deliveryStatus: status, // 'captured_offline' (สีส้ม) | 'uploaded' (สีเทา)
     updatedAt: new Date().toISOString(),
     ...extra
   };
+
+  if (cleanCase) statusMap[cleanCase] = statusEntry;
+  if (normCase) statusMap[normCase] = statusEntry;
+  if (origCase) statusMap[origCase] = statusEntry;
+  if (normOrig) statusMap[normOrig] = statusEntry;
   saveRouteStopStatusMap(statusMap, uId);
 
   // Sync to state.currentRouteStops
@@ -20800,11 +20897,19 @@ window.setRouteStopDeliveryStatus = function(caseNumber, status, extra = {}) {
     let changed = false;
     state.currentRouteStops.forEach((stop, idx) => {
       const sCase = String(stop.caseNumber || '').trim();
-      if (sCase === cleanCase || sCase.replace(/\s+/g, '') === normCase || (state.activeRouteStopTarget && state.activeRouteStopTarget.index === idx)) {
+      const isIndexMatch = (extra.routeStopIndex !== undefined && extra.routeStopIndex === idx) ||
+                           (state.activeRouteStopTarget && state.activeRouteStopTarget.index === idx);
+      const isCaseMatch = (typeof matchCaseNumbers === 'function') ?
+                          (matchCaseNumbers(sCase, cleanCase) || (origCase && matchCaseNumbers(sCase, origCase))) :
+                          (sCase === cleanCase || sCase.replace(/\s+/g, '') === cleanCase.replace(/\s+/g, ''));
+
+      if (isIndexMatch || isCaseMatch) {
         stop.deliveryStatus = status;
         if (extra.capturedAt) stop.capturedAt = extra.capturedAt;
         if (extra.uploadedAt) stop.uploadedAt = extra.uploadedAt;
         if (extra.capturedPhotoUrl) stop.capturedPhotoUrl = extra.capturedPhotoUrl;
+        if (extra.fileName) stop.fileName = extra.fileName;
+        if (extra.driveFileId) stop.driveFileId = extra.driveFileId;
         changed = true;
       }
     });
@@ -20813,7 +20918,7 @@ window.setRouteStopDeliveryStatus = function(caseNumber, status, extra = {}) {
       try {
         localStorage.setItem('slts_shared_route_stops', JSON.stringify(state.currentRouteStops));
         localStorage.setItem('slts_user_route_' + uId, JSON.stringify({
-          stops: state.currentRouteStops,
+          stops: cleanStopsForStorage(state.currentRouteStops),
           startLocation: state.routeStartLocation,
           endLocation: state.routeEndLocation,
           isRoundTrip: state.isRoundTrip,
@@ -20857,11 +20962,12 @@ window.saveRouteToServer = function() {
     if (!userId || !Array.isArray(state.currentRouteStops) || state.currentRouteStops.length === 0) return;
 
     try {
+      const cleaned = cleanStopsForStorage(state.currentRouteStops);
       const payload = {
         action: 'save_user_route',
         user_id: userId,
         userName: state.currentUser.name || userId,
-        stops: state.currentRouteStops,
+        stops: cleaned,
         startLocation: state.routeStartLocation,
         endLocation: state.routeEndLocation,
         isRoundTrip: state.isRoundTrip,
@@ -20876,7 +20982,7 @@ window.saveRouteToServer = function() {
           bc.postMessage({
             type: 'route_status_update',
             user_id: userId,
-            stops: state.currentRouteStops,
+            stops: cleaned,
             timestamp: payload.timestamp
           });
         } catch (bce) {}
@@ -21005,12 +21111,16 @@ function extractDriveIdFromUrl(urlOrId) {
 window.getNewlyUploadedPhotoForStop = function(stop) {
   if (!stop) return null;
   const sCase = String(stop.caseNumber || '').trim();
-  const normCase = sCase.replace(/\s+/g, '');
-  if (!normCase) return null;
+  const normCase = (typeof normalizeCaseForMatching === 'function') ? normalizeCaseForMatching(sCase) : sCase.replace(/\s+/g, '');
+  if (!sCase && !normCase) return null;
 
   const uId = getRouteDeliveryUserKey();
   const statusMap = getRouteStopStatusMap(uId);
-  const mapped = statusMap[sCase] || statusMap[normCase];
+  let mapped = statusMap[sCase] || (normCase ? statusMap[normCase] : null);
+  if (!mapped && sCase) {
+    const entries = Object.values(statusMap);
+    mapped = entries.find(m => (typeof matchCaseNumbers === 'function') ? (matchCaseNumbers(m.caseNumber, sCase) || matchCaseNumbers(m.originalCaseNumber, sCase)) : false);
+  }
 
   // รูปภาพอ้างอิงจากการวางแผนในแผนที่และหมุด (ห้ามนำมาใช้เป็นภาพส่งหมายเด็ดขาด!)
   const refImgs = [stop.planImageUrl, stop.customRoutePlanImg].filter(Boolean);
@@ -21040,12 +21150,13 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
   }
 
   // 3. ตรวจสอบจากฐานข้อมูล Google Sheet (allSheetRows) ที่ Mobile อัปโหลดขึ้น Server ไปแล้ว
-  if (Array.isArray(state.allSheetRows) && state.allSheetRows.length > 0) {
+  if (Array.isArray(state.allSheetRows) && state.allSheetRows.length > 0 && sCase) {
     const routeStartTime = typeof getRouteStartTime === 'function' ? getRouteStartTime() : 0;
     for (let i = state.allSheetRows.length - 1; i >= 0; i--) {
       const row = state.allSheetRows[i];
-      const rCase = String(row['เลขคดี'] || '').trim().replace(/\s+/g, '');
-      if (rCase && rCase === normCase) {
+      const rCase = String(row['เลขคดี'] || row['caseNumber'] || '').trim();
+      const isCaseMatch = (typeof matchCaseNumbers === 'function') ? matchCaseNumbers(rCase, sCase) : (rCase.replace(/\s+/g, '') === sCase.replace(/\s+/g, ''));
+      if (rCase && isCaseMatch) {
         const driveFileId = String(row['Drive File ID'] || '').trim() || (row['ลิงก์รูปภาพใน Google Drive'] ? extractDriveIdFromUrl(row['ลิงก์รูปภาพใน Google Drive']) : '');
         const driveUrl = row['ลิงก์รูปภาพใน Google Drive'] || (driveFileId ? `https://lh3.googleusercontent.com/d/${driveFileId}=w1600` : '');
         if (driveUrl && !refImgs.includes(driveUrl)) {
@@ -21178,12 +21289,18 @@ window.syncStopsWithDeliveryStatus = function(stops) {
 
   let statusMapModified = false;
 
-  stops.forEach((stop) => {
+  stops.forEach((stop, sIdx) => {
     const sCase = String(stop.caseNumber || '').trim();
-    const normCase = sCase.replace(/\s+/g, '');
-    if (!normCase) return;
+    if (!sCase && !stop.locationText) return;
 
-    const mapped = statusMap[sCase] || statusMap[normCase];
+    const normCase = (typeof normalizeCaseForMatching === 'function') ? normalizeCaseForMatching(sCase) : sCase.replace(/\s+/g, '');
+
+    let mapped = statusMap[sCase] || (normCase ? statusMap[normCase] : null);
+    if (!mapped && sCase) {
+      const entries = Object.values(statusMap);
+      mapped = entries.find(m => (typeof matchCaseNumbers === 'function') ? (matchCaseNumbers(m.caseNumber, sCase) || matchCaseNumbers(m.originalCaseNumber, sCase)) : false);
+    }
+
     const refImgs = [stop.planImageUrl, stop.customRoutePlanImg].filter(Boolean);
 
     // หากมี capturedPhotoUrl แต่ดันไปตรงกับรูปภาพอ้างอิง ให้ล้างออก
@@ -21193,14 +21310,15 @@ window.syncStopsWithDeliveryStatus = function(stops) {
 
     // 1. ตรวจสอบจากฐานข้อมูล Google Sheet (allSheetRows) ที่ Mobile อัปโหลดขึ้น Server
     let sheetMatchedRow = null;
-    if (allRows.length > 0) {
+    if (allRows.length > 0 && sCase) {
       for (let rIdx = allRows.length - 1; rIdx >= 0; rIdx--) {
         const row = allRows[rIdx];
-        const rowCase = String(row['เลขคดี'] || '').trim().replace(/\s+/g, '');
-        if (rowCase && rowCase === normCase) {
-          const hasImg = Boolean(row['ลิงก์รูปภาพใน Google Drive'] || row['Drive File ID'] || row['ชื่อไฟล์รูปภาพ']);
+        const rowCase = String(row['เลขคดี'] || row['caseNumber'] || '').trim();
+        const isCaseMatch = (typeof matchCaseNumbers === 'function') ? matchCaseNumbers(rowCase, sCase) : (rowCase.replace(/\s+/g, '') === sCase.replace(/\s+/g, ''));
+        if (rowCase && isCaseMatch) {
+          const hasImg = Boolean(row['ลิงก์รูปภาพใน Google Drive'] || row['Drive File ID'] || row['ชื่อไฟล์รูปภาพ'] || row['fileName']);
           if (hasImg) {
-            const rowTime = parseDateToTime(row['วัน-เวลาบันทึก']);
+            const rowTime = parseDateToTime(row['วัน-เวลาบันทึก'] || row['timestamp']);
             if (routeStartTime > 0) {
               if (rowTime === 0 || rowTime >= (routeStartTime - 900000)) {
                 sheetMatchedRow = row;
@@ -21225,25 +21343,27 @@ window.syncStopsWithDeliveryStatus = function(stops) {
 
       stop.deliveryStatus = 'uploaded';
       stop.uploadedAt = uploadedTime;
-      stop.capturedPhotoUrl = driveUrl;
-      stop.driveFileId = driveFileId;
+      stop.capturedPhotoUrl = driveUrl || stop.capturedPhotoUrl;
+      stop.driveFileId = driveFileId || stop.driveFileId;
 
-      statusMap[sCase] = {
+      const statusEntry = {
         caseNumber: sCase,
         deliveryStatus: 'uploaded',
         uploadedAt: uploadedTime,
-        capturedPhotoUrl: driveUrl,
-        driveFileId: driveFileId,
+        capturedPhotoUrl: driveUrl || stop.capturedPhotoUrl,
+        driveFileId: driveFileId || stop.driveFileId,
         updatedAt: new Date().toISOString()
       };
+      statusMap[sCase] = { ...(statusMap[sCase] || {}), ...statusEntry };
+      if (normCase) statusMap[normCase] = { ...(statusMap[normCase] || {}), ...statusEntry };
       statusMapModified = true;
     } else if (mapped && mapped.deliveryStatus && mapped.deliveryStatus !== 'pending') {
       const mappedPhoto = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl;
       const isRealCameraPhoto = mappedPhoto && !refImgs.includes(mappedPhoto);
       const hasDriveFile = Boolean(mapped.driveFileId || stop.driveFileId);
 
-      // หาก mapped ระบุว่าเป็น 'uploaded' แต่ไม่มีรูปถ่ายจริงจากกล้องหรือ Drive
-      if (mapped.deliveryStatus === 'uploaded' && !isRealCameraPhoto && !stop.capturedPhotoUrl && !hasDriveFile) {
+      // หาก mapped ระบุว่าเป็น 'uploaded' แต่ไม่มีรูปถ่ายจริงจากกล้องหรือ Drive และไม่มีเวลาอัปโหลด
+      if (mapped.deliveryStatus === 'uploaded' && !isRealCameraPhoto && !stop.capturedPhotoUrl && !hasDriveFile && !mapped.uploadedAt) {
         stop.deliveryStatus = 'pending';
         stop.uploadedAt = null;
         stop.capturedAt = null;
@@ -21261,7 +21381,14 @@ window.syncStopsWithDeliveryStatus = function(stops) {
 
     // ตรวจสอบว่าค้างอยู่ในคิว Background Queue หรือไม่
     if (stop.deliveryStatus !== 'uploaded') {
-      const inQueue = bgQueue.some(q => String(q.caseNumber || '').trim().replace(/\s+/g, '') === normCase);
+      const inQueue = bgQueue.some(q => {
+        if (typeof matchCaseNumbers === 'function') {
+          return matchCaseNumbers(q.caseNumber, sCase) ||
+                 (q.originalCaseNumber && matchCaseNumbers(q.originalCaseNumber, sCase)) ||
+                 (q.routeStopIndex !== undefined && q.routeStopIndex === sIdx);
+        }
+        return String(q.caseNumber || '').trim().replace(/\s+/g, '') === sCase.replace(/\s+/g, '');
+      });
       if (inQueue) {
         stop.deliveryStatus = 'captured_offline';
       }
@@ -21269,7 +21396,10 @@ window.syncStopsWithDeliveryStatus = function(stops) {
 
     // Self-healing: หาก stop.deliveryStatus === 'uploaded' แต่ไม่มี capturedPhotoUrl จากกล้อง/Drive และไม่พบในชีต
     if (stop.deliveryStatus === 'uploaded') {
-      const hasRealPhoto = (stop.capturedPhotoUrl && !refImgs.includes(stop.capturedPhotoUrl)) || Boolean(stop.driveFileId) || Boolean(sheetMatchedRow);
+      const hasRealPhoto = (stop.capturedPhotoUrl && !refImgs.includes(stop.capturedPhotoUrl)) ||
+                           Boolean(stop.driveFileId) || Boolean(sheetMatchedRow) ||
+                           Boolean(stop.uploadedAt) ||
+                           Boolean(mapped && mapped.deliveryStatus === 'uploaded');
       if (!hasRealPhoto) {
         stop.deliveryStatus = 'pending';
         stop.uploadedAt = null;
@@ -22013,6 +22143,10 @@ window.initMobileModalMapInstance = function() {
   const container = document.getElementById('mobileModalLeafletMap');
   if (!container || typeof L === 'undefined') return;
 
+  if (typeof syncStopsWithDeliveryStatus === 'function') {
+    syncStopsWithDeliveryStatus(state.currentRouteStops);
+  }
+
   if (window.mobileModalMap) {
     try {
       window.mobileModalMap.remove();
@@ -22067,7 +22201,7 @@ window.initMobileModalMapInstance = function() {
     if (!isNaN(sLat) && !isNaN(sLng) && sLat > 0 && sLng > 0) {
       const delStatus = stop.deliveryStatus || 'pending';
       const photoData = getStopDisplayPhotoData(stop);
-      const hasCameraDelivery = (delStatus === 'uploaded' || delStatus === 'captured_offline') && !photoData.isReference;
+      const hasCameraDelivery = delStatus === 'uploaded' || (delStatus === 'captured_offline' && !photoData.isReference);
 
       let pinBgClass = 'bg-rose-600 ring-rose-300';
       let pinIconInner = `${pinNum}`;
@@ -22242,6 +22376,11 @@ window.centerMobileModalMap = function() {
 window.renderMobileRouteList = function() {
   const container = document.getElementById('mobileMapRouteStopsList');
   if (!container) return;
+
+  if (typeof syncStopsWithDeliveryStatus === 'function') {
+    syncStopsWithDeliveryStatus(state.currentRouteStops);
+  }
+
   const stops = state.currentRouteStops || [];
   const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872 };
   const end = state.routeEndLocation;
@@ -22286,7 +22425,7 @@ window.renderMobileRouteList = function() {
     const distText = hasPin ? `+ ${(stop.legDistanceKm || 0).toFixed(1)} กม.` : 'ไม่มีหมุด';
     const delStatus = stop.deliveryStatus || 'pending';
     const photoData = getStopDisplayPhotoData(stop);
-    const hasCameraDelivery = (delStatus === 'uploaded' || delStatus === 'captured_offline') && !photoData.isReference;
+    const hasCameraDelivery = delStatus === 'uploaded' || (delStatus === 'captured_offline' && !photoData.isReference);
 
     let itemClass = isExact ? 'border-emerald-200 bg-emerald-50/50' : (isNear ? 'border-amber-200 bg-amber-50/50' : 'border-gray-200 bg-white');
     let badgeBg = isExact ? 'bg-emerald-600 text-white' : (isNear ? 'bg-amber-500 text-white' : 'bg-gray-300 text-gray-700');
