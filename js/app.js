@@ -3146,6 +3146,11 @@ window.switchTab = function(tabName) {
     if (activeIcon) activeIcon.innerHTML = tabMeta[tabName].icon;
   }
 
+  // หยุด Realtime Poller ของแท็บรายการส่งหมายรอบนี้ เมื่อสลับไปแท็บอื่น
+  if (tabName !== 'route_batch' && typeof stopRouteBatchRealtimePoller === 'function') {
+    stopRouteBatchRealtimePoller();
+  }
+
   if (tabName === 'form') {
     closeCameraModal();
     if (elements.tabBtnForm) elements.tabBtnForm.classList.add('active');
@@ -3276,6 +3281,11 @@ window.switchTab = function(tabName) {
     }
 
     renderRouteBatchTab();
+
+    // เริ่มต้นระบบตรวจสอบและอัปเดตแบบ Realtime สำหรับหน้าจอ PC
+    if (typeof startRouteBatchRealtimePoller === 'function') {
+      startRouteBatchRealtimePoller();
+    }
   } else if (tabName === 'users') {
     const isAllowed = state.currentUser && (state.currentUser.role === 'admin' || state.currentUser.role === 'local_advisor');
     if (!isAllowed) {
@@ -19960,6 +19970,50 @@ window.fetchActiveRouteFromServer = async function() {
           localStorage.setItem('slts_user_route_' + userId, JSON.stringify(r));
 
           updateMobileRouteMapButtonBadge(r.stops.length);
+        } else {
+          // หากบนเครื่องมีข้อมูล stops อยู่แล้ว ให้ซิงค์สถานะการส่งหมายล่าสุดที่อัปเดตมาจาก Mobile
+          let changed = false;
+          r.stops.forEach((serverStop) => {
+            const sCase = String(serverStop.caseNumber || '').trim().replace(/\s+/g, '');
+            if (!sCase) return;
+            const localStop = state.currentRouteStops.find(ls => String(ls.caseNumber || '').trim().replace(/\s+/g, '') === sCase);
+            if (localStop) {
+              if (serverStop.deliveryStatus && serverStop.deliveryStatus !== 'pending') {
+                if (localStop.deliveryStatus !== serverStop.deliveryStatus) {
+                  localStop.deliveryStatus = serverStop.deliveryStatus;
+                  changed = true;
+                }
+                if (serverStop.capturedPhotoUrl && localStop.capturedPhotoUrl !== serverStop.capturedPhotoUrl) {
+                  localStop.capturedPhotoUrl = serverStop.capturedPhotoUrl;
+                  changed = true;
+                }
+                if (serverStop.uploadedAt && localStop.uploadedAt !== serverStop.uploadedAt) {
+                  localStop.uploadedAt = serverStop.uploadedAt;
+                  changed = true;
+                }
+                if (serverStop.capturedAt && localStop.capturedAt !== serverStop.capturedAt) {
+                  localStop.capturedAt = serverStop.capturedAt;
+                  changed = true;
+                }
+                if (serverStop.driveFileId && localStop.driveFileId !== serverStop.driveFileId) {
+                  localStop.driveFileId = serverStop.driveFileId;
+                  changed = true;
+                }
+              }
+            }
+          });
+          if (changed) {
+            try {
+              localStorage.setItem('slts_shared_route_stops', JSON.stringify(state.currentRouteStops));
+              localStorage.setItem('slts_user_route_' + userId, JSON.stringify({
+                stops: state.currentRouteStops,
+                startLocation: state.routeStartLocation,
+                endLocation: state.routeEndLocation,
+                isRoundTrip: state.isRoundTrip,
+                timestamp: new Date().toISOString()
+              }));
+            } catch (e) {}
+          }
         }
       }
     }
@@ -20002,6 +20056,16 @@ window.initMobileHandoffReceiver = function() {
               if (document.getElementById('mobileMapRouteStopsList')) renderMobileRouteList();
               if (window.mobileModalMap && document.getElementById('mobileModalLeafletMap')) initMobileModalMapInstance();
               if (typeof renderRouteBatchTab === 'function') renderRouteBatchTab();
+              return;
+            }
+          }
+
+          // ตรวจสอบกรณีเป็นการอัปเดตสถานะการส่งหมายรายจุด (Route Status Update)
+          if (event.data.type === 'route_status_update') {
+            if (uId && targetUserId === uId && Array.isArray(event.data.stops)) {
+              state.currentRouteStops = event.data.stops;
+              if (typeof renderRouteBatchTab === 'function') renderRouteBatchTab();
+              if (document.getElementById('mobileMapRouteStopsList')) renderMobileRouteList();
               return;
             }
           }
@@ -20783,6 +20847,52 @@ window.setRouteStopDeliveryStatus = function(caseNumber, status, extra = {}) {
   }
 };
 
+let _saveRouteServerTimer = null;
+window.saveRouteToServer = function() {
+  if (_saveRouteServerTimer) clearTimeout(_saveRouteServerTimer);
+  _saveRouteServerTimer = setTimeout(async () => {
+    const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+    if (!isUserLoggedIn || !state.appsScriptUrl || !navigator.onLine) return;
+    const userId = (state.currentUser.username || '').trim().toLowerCase();
+    if (!userId || !Array.isArray(state.currentRouteStops) || state.currentRouteStops.length === 0) return;
+
+    try {
+      const payload = {
+        action: 'save_user_route',
+        user_id: userId,
+        userName: state.currentUser.name || userId,
+        stops: state.currentRouteStops,
+        startLocation: state.routeStartLocation,
+        endLocation: state.routeEndLocation,
+        isRoundTrip: state.isRoundTrip,
+        routeRoadPolyline: state.routeRoadPolylineCoords || state.mapRoutePolylineCoords,
+        totalDistanceKm: state.calculatedRoadDistanceKm,
+        timestamp: new Date().toISOString()
+      };
+
+      if (window.BroadcastChannel) {
+        try {
+          const bc = new BroadcastChannel('slts_device_handoff');
+          bc.postMessage({
+            type: 'route_status_update',
+            user_id: userId,
+            stops: state.currentRouteStops,
+            timestamp: payload.timestamp
+          });
+        } catch (bce) {}
+      }
+
+      await fetch(state.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+    } catch (e) {
+      console.warn('saveRouteToServer error:', e);
+    }
+  }, 400);
+};
+
 /**
  * แปลงสตริง วันที่-เวลา เป็น Epoch Timestamp (มิลลิวินาที)
  * รองรับ: ISO, ว/ด/ปีกึ่งพุทธ, และ วันที่ภาษาไทย เช่น "5 ก.ย. 2569 13:45:00"
@@ -20878,6 +20988,17 @@ function getRouteStartTime() {
   return 0;
 }
 
+function extractDriveIdFromUrl(urlOrId) {
+  if (!urlOrId || typeof urlOrId !== 'string') return '';
+  const trimmed = urlOrId.trim();
+  const match = trimmed.match(/\/d\/([a-zA-Z0-9_-]{20,50})/) ||
+                trimmed.match(/[?&]id=([a-zA-Z0-9_-]{20,50})/) ||
+                trimmed.match(/id%3D([a-zA-Z0-9_-]{20,50})/);
+  if (match && match[1]) return match[1];
+  if (/^[a-zA-Z0-9_-]{20,50}$/.test(trimmed)) return trimmed;
+  return '';
+}
+
 /**
  * ตรวจสอบและดึงข้อมูลภาพถ่ายที่ถูกถ่ายและนำเข้าสู่ระบบใหม่ในรอบนี้เท่านั้น (ไม่ใช่ประวัติเดิม)
  */
@@ -20894,7 +21015,7 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
   // รูปภาพอ้างอิงจากการวางแผนในแผนที่และหมุด (ห้ามนำมาใช้เป็นภาพส่งหมายเด็ดขาด!)
   const refImgs = [stop.planImageUrl, stop.customRoutePlanImg].filter(Boolean);
 
-  // 1. ตรวจสอบถ้าสถานะใน Stop เป็น 'uploaded' ในรอบนี้ และมีรูปภาพจากกล้อง
+  // 1. ตรวจสอบถ้าสถานะใน Stop เป็น 'uploaded' ในรอบนี้ และมีรูปภาพจากกล้องหรือ Google Drive
   if (stop.deliveryStatus === 'uploaded') {
     const photoUrl = stop.capturedPhotoUrl || (mapped && (mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl));
     if (photoUrl && !refImgs.includes(photoUrl)) {
@@ -20915,6 +21036,29 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
         deliveryStatus: 'uploaded',
         uploadedAt: mapped.uploadedAt || mapped.updatedAt || ''
       };
+    }
+  }
+
+  // 3. ตรวจสอบจากฐานข้อมูล Google Sheet (allSheetRows) ที่ Mobile อัปโหลดขึ้น Server ไปแล้ว
+  if (Array.isArray(state.allSheetRows) && state.allSheetRows.length > 0) {
+    const routeStartTime = typeof getRouteStartTime === 'function' ? getRouteStartTime() : 0;
+    for (let i = state.allSheetRows.length - 1; i >= 0; i--) {
+      const row = state.allSheetRows[i];
+      const rCase = String(row['เลขคดี'] || '').trim().replace(/\s+/g, '');
+      if (rCase && rCase === normCase) {
+        const driveFileId = String(row['Drive File ID'] || '').trim() || (row['ลิงก์รูปภาพใน Google Drive'] ? extractDriveIdFromUrl(row['ลิงก์รูปภาพใน Google Drive']) : '');
+        const driveUrl = row['ลิงก์รูปภาพใน Google Drive'] || (driveFileId ? `https://lh3.googleusercontent.com/d/${driveFileId}=w1600` : '');
+        if (driveUrl && !refImgs.includes(driveUrl)) {
+          const rowTime = parseDateToTime(row['วัน-เวลาบันทึก']);
+          if (routeStartTime === 0 || rowTime === 0 || rowTime >= (routeStartTime - 900000)) {
+            return {
+              url: driveUrl,
+              deliveryStatus: 'uploaded',
+              uploadedAt: row['วัน-เวลาบันทึก'] || ''
+            };
+          }
+        }
+      }
     }
   }
 
@@ -21029,14 +21173,17 @@ window.syncStopsWithDeliveryStatus = function(stops) {
   const uId = getRouteDeliveryUserKey();
   const statusMap = getRouteStopStatusMap(uId);
   const bgQueue = typeof getBackgroundQueue === 'function' ? getBackgroundQueue() : [];
+  const allRows = Array.isArray(state.allSheetRows) ? state.allSheetRows : [];
+  const routeStartTime = typeof getRouteStartTime === 'function' ? getRouteStartTime() : 0;
 
   let statusMapModified = false;
 
   stops.forEach((stop) => {
     const sCase = String(stop.caseNumber || '').trim();
     const normCase = sCase.replace(/\s+/g, '');
-    const mapped = statusMap[sCase] || statusMap[normCase];
+    if (!normCase) return;
 
+    const mapped = statusMap[sCase] || statusMap[normCase];
     const refImgs = [stop.planImageUrl, stop.customRoutePlanImg].filter(Boolean);
 
     // หากมี capturedPhotoUrl แต่ดันไปตรงกับรูปภาพอ้างอิง ให้ล้างออก
@@ -21044,12 +21191,59 @@ window.syncStopsWithDeliveryStatus = function(stops) {
       stop.capturedPhotoUrl = null;
     }
 
-    if (mapped && mapped.deliveryStatus && mapped.deliveryStatus !== 'pending') {
+    // 1. ตรวจสอบจากฐานข้อมูล Google Sheet (allSheetRows) ที่ Mobile อัปโหลดขึ้น Server
+    let sheetMatchedRow = null;
+    if (allRows.length > 0) {
+      for (let rIdx = allRows.length - 1; rIdx >= 0; rIdx--) {
+        const row = allRows[rIdx];
+        const rowCase = String(row['เลขคดี'] || '').trim().replace(/\s+/g, '');
+        if (rowCase && rowCase === normCase) {
+          const hasImg = Boolean(row['ลิงก์รูปภาพใน Google Drive'] || row['Drive File ID'] || row['ชื่อไฟล์รูปภาพ']);
+          if (hasImg) {
+            const rowTime = parseDateToTime(row['วัน-เวลาบันทึก']);
+            if (routeStartTime > 0) {
+              if (rowTime === 0 || rowTime >= (routeStartTime - 900000)) {
+                sheetMatchedRow = row;
+                break;
+              }
+            } else {
+              // หากไม่มี routeStartTime: ตรวจสอบว่าเป็นข้อมูลไม่เกิน 24 ชม.
+              if (rowTime === 0 || (Date.now() - rowTime) < 86400000) {
+                sheetMatchedRow = row;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (sheetMatchedRow) {
+      const driveFileId = String(sheetMatchedRow['Drive File ID'] || '').trim() || (sheetMatchedRow['ลิงก์รูปภาพใน Google Drive'] ? extractDriveIdFromUrl(sheetMatchedRow['ลิงก์รูปภาพใน Google Drive']) : '');
+      const driveUrl = sheetMatchedRow['ลิงก์รูปภาพใน Google Drive'] || (driveFileId ? `https://lh3.googleusercontent.com/d/${driveFileId}=w1600` : '');
+      const uploadedTime = sheetMatchedRow['วัน-เวลาบันทึก'] || new Date().toISOString();
+
+      stop.deliveryStatus = 'uploaded';
+      stop.uploadedAt = uploadedTime;
+      stop.capturedPhotoUrl = driveUrl;
+      stop.driveFileId = driveFileId;
+
+      statusMap[sCase] = {
+        caseNumber: sCase,
+        deliveryStatus: 'uploaded',
+        uploadedAt: uploadedTime,
+        capturedPhotoUrl: driveUrl,
+        driveFileId: driveFileId,
+        updatedAt: new Date().toISOString()
+      };
+      statusMapModified = true;
+    } else if (mapped && mapped.deliveryStatus && mapped.deliveryStatus !== 'pending') {
       const mappedPhoto = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl;
       const isRealCameraPhoto = mappedPhoto && !refImgs.includes(mappedPhoto);
+      const hasDriveFile = Boolean(mapped.driveFileId || stop.driveFileId);
 
-      // หาก mapped ระบุว่าเป็น 'uploaded' แต่ไม่มีรูปถ่ายจริงจากกล้อง (เช่น ติดมาจากประวัติเดิม)
-      if (mapped.deliveryStatus === 'uploaded' && !isRealCameraPhoto && !stop.capturedPhotoUrl) {
+      // หาก mapped ระบุว่าเป็น 'uploaded' แต่ไม่มีรูปถ่ายจริงจากกล้องหรือ Drive
+      if (mapped.deliveryStatus === 'uploaded' && !isRealCameraPhoto && !stop.capturedPhotoUrl && !hasDriveFile) {
         stop.deliveryStatus = 'pending';
         stop.uploadedAt = null;
         stop.capturedAt = null;
@@ -21061,6 +21255,7 @@ window.syncStopsWithDeliveryStatus = function(stops) {
         if (mapped.capturedAt) stop.capturedAt = mapped.capturedAt;
         if (mapped.uploadedAt) stop.uploadedAt = mapped.uploadedAt;
         if (isRealCameraPhoto) stop.capturedPhotoUrl = mappedPhoto;
+        if (mapped.driveFileId) stop.driveFileId = mapped.driveFileId;
       }
     }
 
@@ -21072,10 +21267,9 @@ window.syncStopsWithDeliveryStatus = function(stops) {
       }
     }
 
-    // Self-healing: หาก stop.deliveryStatus === 'uploaded' แต่ไม่มี capturedPhotoUrl จากกล้อง
-    // ให้รีเซ็ตกลับเป็น 'pending' ทันที
+    // Self-healing: หาก stop.deliveryStatus === 'uploaded' แต่ไม่มี capturedPhotoUrl จากกล้อง/Drive และไม่พบในชีต
     if (stop.deliveryStatus === 'uploaded') {
-      const hasRealPhoto = stop.capturedPhotoUrl && !refImgs.includes(stop.capturedPhotoUrl);
+      const hasRealPhoto = (stop.capturedPhotoUrl && !refImgs.includes(stop.capturedPhotoUrl)) || Boolean(stop.driveFileId) || Boolean(sheetMatchedRow);
       if (!hasRealPhoto) {
         stop.deliveryStatus = 'pending';
         stop.uploadedAt = null;
@@ -21619,7 +21813,7 @@ window.confirmClearBatchHistory = function() {
   });
 };
 
-window.refreshRouteBatchData = async function() {
+window.refreshRouteBatchData = async function(silent = false) {
   if (typeof loadGoogleSheetData === 'function') {
     await loadGoogleSheetData(true, true);
   }
@@ -21627,6 +21821,40 @@ window.refreshRouteBatchData = async function() {
     await fetchActiveRouteFromServer();
   }
   renderRouteBatchTab();
+};
+
+let routeBatchPollerTimer = null;
+let isRouteBatchPolling = false;
+
+window.startRouteBatchRealtimePoller = function() {
+  if (routeBatchPollerTimer) clearInterval(routeBatchPollerTimer);
+
+  // รันทันที 1 ครั้งแบบ Force Refresh ในเบื้องหลัง
+  refreshRouteBatchData(true);
+
+  // ตรวจสอบข้อมูลอัพเดตแบบ Realtime ทุก 4 วินาที สำหรับหน้าจอ PC
+  routeBatchPollerTimer = setInterval(async () => {
+    const pane = document.getElementById('tabContentRouteBatch');
+    if (!pane || pane.classList.contains('hidden') || isRouteBatchPolling) return;
+    if (!navigator.onLine) return;
+
+    isRouteBatchPolling = true;
+    try {
+      await refreshRouteBatchData(true);
+    } catch (e) {
+      console.warn('Route batch realtime poll error:', e);
+    } finally {
+      isRouteBatchPolling = false;
+    }
+  }, 4000);
+};
+
+window.stopRouteBatchRealtimePoller = function() {
+  if (routeBatchPollerTimer) {
+    clearInterval(routeBatchPollerTimer);
+    routeBatchPollerTimer = null;
+  }
+  isRouteBatchPolling = false;
 };
 
 function urlToBase64ViaImage(url) {
