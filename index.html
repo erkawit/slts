@@ -913,127 +913,14 @@
     <!-- TAB 4: จัดการผู้ใช้งาน (User Management View - Full Width Desktop) -->
     <!-- ========================================================= -->
     <div id="tabContentUsers" class="tab-pane hidden">
-      <div class="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div class="w-full">
         
-        <!-- Add User Card (lg:col-span-4) -->
-        <div class="lg:col-span-4 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-5">
-          <div>
-            <h3 class="text-base font-bold text-gray-900 mb-1 flex items-center gap-2">
-              <i class="fa-solid fa-user-plus text-blue-600"></i>
-              <span>เพิ่มผู้ใช้งานใหม่</span>
-            </h3>
-            <p class="text-xs text-gray-500">สร้างบัญชีสำหรับเจ้าพนักงานหรือผู้ดูแลระบบ</p>
-          </div>
+        <!-- Datalist for provinces (preserved for compatibility) -->
+        <datalist id="assignedProvinceDatalist"></datalist>
 
-          <!-- Local Advisor notice box (shown dynamically when logged in as Local Advisor) -->
-          <div id="localAdvisorNoticeContainer" class="hidden mb-3.5 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 space-y-2 shadow-xs">
-            <div class="flex items-center gap-2 font-bold text-amber-800 border-b border-amber-200/70 pb-1.5">
-              <i class="fa-solid fa-shield-halved text-amber-600 text-sm"></i>
-              <span>สิทธิ์ผู้ดูแลระดับ Local Advisor</span>
-            </div>
-            <div class="space-y-1 text-[11px] leading-relaxed">
-              <div class="flex items-center gap-1.5">
-                <i class="fa-solid fa-building-columns text-blue-600"></i>
-                <span>สังกัดศาล: <b id="localAdvisorCourtText" class="text-blue-900 font-bold underline">ศาลจังหวัดอุดรธานี</b></span>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <i class="fa-solid fa-location-dot text-rose-500"></i>
-                <span>จังหวัดที่รับผิดชอบ: <b id="localAdvisorProvinceText" class="text-gray-800 font-bold">จ.อุดรธานี</b></span>
-              </div>
-              <p class="text-amber-700 pt-1">
-                <i class="fa-solid fa-circle-info mr-1"></i>คุณสามารถสร้างและจัดการผู้ใช้งานได้เฉพาะ <b>Role => User</b> ในสังกัดศาลตนเองเท่านั้น
-              </p>
-            </div>
-          </div>
-
-          <form id="addUserForm" onsubmit="handleCreateUser(event)" class="space-y-3.5">
-            <div>
-              <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อผู้ใช้ (Username) *</label>
-              <input type="text" id="newUsername" required placeholder="เช่น officer1" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อ-นามสกุล / ชื่อแสดง *</label>
-              <input type="text" id="newFullName" required placeholder="เช่น นายสมชาย ส่งหมาย" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-gray-700 mb-1">รหัสผ่าน (Password) *</label>
-              <input type="password" id="newPassword" required placeholder="กำหนดรหัสผ่าน" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-            </div>
-            <div>
-              <label class="block text-xs font-bold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) *</label>
-              <select id="newRole" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                <option value="user">User (เจ้าหน้าที่ทั่วไป)</option>
-                <option value="local_advisor">Local Advisor (ผู้ดูแลประจำจังหวัด)</option>
-                <option value="admin">Admin (ผู้ดูแลระบบ)</option>
-              </select>
-            </div>
-
-            <!-- หมวดหมู่การระบุชื่อศาลและสังกัด (ซ่อนเมื่อเป็น Local Advisor) -->
-            <div id="newCourtAndProvinceSection" class="space-y-3 border-t border-gray-100 pt-3">
-              <div>
-                <label class="block text-xs font-bold text-gray-700 mb-1">ประเภทศาลที่สังกัด *</label>
-                <select id="newCourtCategory" onchange="handleNewCourtCategoryChange()" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                  <option value="ศาลจังหวัด">ศาลจังหวัด</option>
-                  <option value="ศาลแขวง">ศาลแขวง</option>
-                  <option value="ศาลเยาวชนและครอบครัว">ศาลเยาวชนและครอบครัว</option>
-                  <option value="ศาลไม่สังกัดภาค">ศาลไม่สังกัดภาค</option>
-                </select>
-              </div>
-
-              <!-- 1. กรณี ศาลไม่สังกัดภาค: เปิดกล่องข้อความให้พิมพ์ได้ โดยเติมคำว่า "ศาล" เอาไว้เลย -->
-              <div id="newCustomCourtContainer" class="hidden">
-                <label class="block text-xs font-bold text-gray-700 mb-1">ระบุชื่อศาล (พิมพ์ต่อจากคำว่า "ศาล") *</label>
-                <div class="relative">
-                  <input type="text" id="newCustomCourtName" value="ศาล" placeholder="เช่น ศาลแพ่ง, ศาลอาญา, ศาลล้มละลายกลาง" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-gray-800 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                </div>
-                <p class="text-[11px] text-gray-400 mt-1">สามารถพิมพ์ชื่อศาลที่ต้องการได้ตามจริง</p>
-              </div>
-
-              <!-- 2. กรณี ศาลจังหวัด, ศาลแขวง, ศาลเยาวชนและครอบครัว: เลือกจังหวัด + แสดงกล่องข้อความ disabled -->
-              <div id="newStandardCourtContainer" class="space-y-2.5">
-                <div>
-                  <label class="block text-xs font-bold text-gray-700 mb-1">จังหวัดที่ส่งหมาย (พื้นที่รับผิดชอบ) *</label>
-                  <div class="relative">
-                    <input type="text" id="newAssignedProvince" list="assignedProvinceDatalist" oninput="updateGeneratedCourtNamePreview()" required placeholder="เลือกหรือพิมพ์ค้นหาจังหวัด..." value="อุดรธานี" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                    <datalist id="assignedProvinceDatalist">
-                      <!-- Populated dynamically with 77 provinces -->
-                    </datalist>
-                  </div>
-                  <p class="text-[11px] text-gray-400 mt-1">พิมพ์ค้นหาหรือคลิกเลือกรายชื่อจังหวัด</p>
-                </div>
-
-                <div>
-                  <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อศาลที่สังกัด (ระบบสร้างให้อัตโนมัติ) *</label>
-                  <input type="text" id="newGeneratedCourtNamePreview" disabled readonly value="ศาลจังหวัดอุดรธานี" class="w-full bg-gray-100 border border-gray-300 rounded-xl px-3.5 py-2.5 text-sm font-bold text-blue-800 cursor-not-allowed select-none">
-                </div>
-              </div>
-            </div>
-
-            <div class="pt-2">
-              <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl transition shadow-md shadow-blue-200 text-sm">
-                <i class="fa-solid fa-plus mr-1"></i> เพิ่มผู้ใช้งาน
-              </button>
-            </div>
-          </form>
-
-          <!-- Default Reset Password Configuration Card -->
-          <div id="defaultResetPassConfigCard" class="pt-4 border-t border-gray-100">
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-xs font-bold text-gray-800">รหัสผ่านตั้งต้นเมื่อรีเซ็ต</p>
-                <p class="text-[11px] text-gray-500">ค่าปัจจุบัน: <span id="currentDefaultResetPassText" class="font-mono font-bold text-blue-600">caogikojt02</span></p>
-              </div>
-              <button type="button" onclick="openDefaultPasswordConfigModal()" class="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg border border-gray-300 transition flex items-center gap-1">
-                <i class="fa-solid fa-pen-to-square text-xs"></i>
-                <span>เปลี่ยน</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Users List Card (lg:col-span-8) -->
-        <div class="lg:col-span-8 bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-          <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <!-- Users List Card (Full Width Desktop & Tablet) -->
+        <div class="w-full bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+          <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
             <div>
               <h3 class="text-base font-bold text-gray-900 flex items-center gap-2">
                 <i class="fa-solid fa-users text-blue-600"></i>
@@ -1041,14 +928,27 @@
               </h3>
               <p id="usersListSubtitle" class="text-xs text-gray-500 mt-0.5">จัดเก็บและซิงค์ข้อมูลผ่าน Google Sheet (Tab: users)</p>
             </div>
-            <div class="flex items-center gap-2">
-              <button type="button" id="btnSyncAllUsersStructure" onclick="syncAllUsersStructureToGoogleSheet()" class="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold rounded-xl text-xs transition flex items-center gap-1.5 border border-purple-200 shadow-sm" title="สร้างคอลัมน์ศาล/จังหวัด และซิงค์ข้อมูลผู้ใช้ทั้งหมดไปยัง Google Sheet">
+            <div class="flex items-center gap-2 flex-wrap">
+              <!-- Default Reset Password Configuration Mini-Card -->
+              <div id="defaultResetPassConfigCard" class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-xl border border-gray-200 text-xs text-gray-600">
+                <span>รหัสผ่านตั้งต้น: <strong id="currentDefaultResetPassText" class="font-mono text-blue-600 font-bold">caogikojt02</strong></span>
+                <button type="button" onclick="openDefaultPasswordConfigModal()" class="text-gray-500 hover:text-blue-600 font-semibold transition cursor-pointer" title="เปลี่ยนรหัสผ่านตั้งต้น">
+                  <i class="fa-solid fa-pen-to-square"></i>
+                </button>
+              </div>
+
+              <button type="button" id="btnSyncAllUsersStructure" onclick="syncAllUsersStructureToGoogleSheet()" class="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold rounded-xl text-xs transition flex items-center gap-1.5 border border-purple-200 shadow-2xs cursor-pointer" title="สร้างคอลัมน์ศาล/จังหวัด และซิงค์ข้อมูลผู้ใช้ทั้งหมดไปยัง Google Sheet">
                 <i class="fa-solid fa-cloud-arrow-up text-purple-600"></i>
                 <span>ซิงค์โครงสร้างชีต users</span>
               </button>
-              <button type="button" onclick="loadUsersData(true)" class="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-xl text-xs transition flex items-center gap-1.5 border border-blue-200 shadow-sm" title="โหลดข้อมูลผู้ใช้ล่าสุดจาก Google Sheet">
+              <button type="button" onclick="loadUsersData(true)" class="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-xl text-xs transition flex items-center gap-1.5 border border-blue-200 shadow-2xs cursor-pointer" title="โหลดข้อมูลผู้ใช้ล่าสุดจาก Google Sheet">
                 <i class="fa-solid fa-rotate"></i>
                 <span>รีเฟรชรายชื่อ</span>
+              </button>
+              <!-- ปุ่มเพิ่มผู้ใช้งานใหม่ ที่ด้านขวามือสุด ถัดจากปุ่ม "รีเฟรชรายชื่อ" -->
+              <button type="button" id="btnOpenAddUserModal" onclick="openAddUserModal()" class="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-semibold rounded-xl text-xs transition flex items-center gap-1.5 shadow-sm shadow-blue-200 cursor-pointer" title="เพิ่มผู้ใช้งานใหม่">
+                <i class="fa-solid fa-user-plus text-xs"></i>
+                <span>เพิ่มผู้ใช้งานใหม่</span>
               </button>
             </div>
           </div>
@@ -1383,11 +1283,11 @@
         </div>
 
         <!-- มุมขวาล่าง: กล่องข้อมูลสด Live Badge (ตามข้อ 4) -->
-        <div id="liveBadgeWrapper" class="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 max-w-[75%] sm:max-w-[65%] gyro-rotate cursor-pointer pointer-events-auto" onclick="handleLiveBadgeClick(event)" title="แตะเพื่อเปิดฟอร์มแก้ไขข้อมูลส่งหมาย">
+        <div id="liveBadgeWrapper" class="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 max-w-[calc(100%-120px)] sm:max-w-[calc(100%-130px)] gyro-rotate cursor-pointer pointer-events-auto" onclick="handleLiveBadgeClick(event)" title="แตะเพื่อเปิดฟอร์มแก้ไขข้อมูลส่งหมาย">
           <div class="bg-black border-2 border-white/70 rounded-xl p-2 sm:p-2.5 shadow-2xl text-white space-y-0.5 pointer-events-none">
             <div id="liveBadgeDate" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📅 --</div>
             <div id="liveBadgeCoords" class="text-[9px] sm:text-[10px] font-bold text-white leading-tight">📍 --</div>
-            <div id="liveBadgeLocation" class="text-[9px] sm:text-[10px] font-semibold text-white leading-tight truncate">🏠 --</div>
+            <div id="liveBadgeLocation" class="text-[9px] sm:text-[10px] font-semibold text-white leading-tight line-clamp-2 break-words">🏠 --</div>
             <div id="liveBadgeCase" class="text-[9px] sm:text-[11px] font-bold text-white leading-tight truncate">⚖️ --</div>
           </div>
         </div>
@@ -1473,17 +1373,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260904_07"></script>
-  <script src="js/compass.js?v=20260904_08"></script>
-  <script src="js/map.js?v=20260904_08"></script>
-  <script src="js/watermark.js?v=20260904_15"></script>
-  <script src="js/app.js?v=20260904_22"></script>
+  <script src="js/data.js?v=20260906_05"></script>
+  <script src="js/compass.js?v=20260906_05"></script>
+  <script src="js/map.js?v=20260906_05"></script>
+  <script src="js/watermark.js?v=20260906_05"></script>
+  <script src="js/app.js?v=20260906_05"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260904_22')
+        navigator.serviceWorker.register('./sw.js?v=20260906_05')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

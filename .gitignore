@@ -10,3 +10,4 @@ android/build/
 public/
 .vercel
 .env*
+.agents/

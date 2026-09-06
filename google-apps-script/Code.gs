@@ -834,11 +834,11 @@ function doPost(e) {
         fileUrl = createdFile.getUrl();
       }
 
-      // 1. ถ้าเป็นการแทนที่แถวเดิม (Overwrite) -> ค้นหาและอัปเดตเฉพาะแถวเป้าหมาย
-      if (data.overwrite) {
-        const sheetData = sheet.getDataRange().getValues();
-        let targetRowIndex = -1;
+      // 1. ถ้าเป็นการแทนที่แถวเดิม (Overwrite หรือ Manual Upload ที่มีอยู่แล้ว) -> ค้นหาและอัปเดตแถวเป้าหมาย
+      const sheetData = sheet.getDataRange().getValues();
+      let targetRowIndex = -1;
 
+      if (data.overwrite || data.isManualUpload || data.forceUpdate) {
         if (data.rowIndex && Number(data.rowIndex) > 1 && Number(data.rowIndex) <= sheetData.length) {
           targetRowIndex = Number(data.rowIndex);
         } else if (data.oldFileId) {
@@ -849,25 +849,47 @@ function doPost(e) {
             }
           }
         }
-
-        if (targetRowIndex !== -1) {
-          // อัปเดตแถวเดิมใน Google Sheet (แทนที่รูปภาพ)
-          sheet.getRange(targetRowIndex, 11).setValue(data.fileName || "");
-          sheet.getRange(targetRowIndex, 12).setValue(fileUrl);
-          sheet.getRange(targetRowIndex, 14).setValue(fileId);
+        
+        // หากยังไม่เจอแถว ให้ค้นหาจากเลขคดี (Case Number) ในชีต
+        if (targetRowIndex === -1 && data.caseNumber) {
+          const targetCase = String(data.caseNumber).trim().toLowerCase();
+          for (let i = sheetData.length - 1; i >= 1; i--) {
+            const rowCase = String(sheetData[i][1] || '').trim().toLowerCase();
+            if (rowCase && (rowCase === targetCase || rowCase.replace(/\s+/g, '') === targetCase.replace(/\s+/g, ''))) {
+              targetRowIndex = i + 1;
+              break;
+            }
+          }
         }
-      } else {
-        // 2. การเพิ่มข้อมูลใหม่ (New Row) -> appendRow โดยตรงทันที
-        const timestamp = new Date();
-        const thaiDateStr = data.dateTime || Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
-        const uploaderUser = data.uploader || data.username || data.uploadedBy || data.user_id || "";
+      }
 
-        // ตรวจสอบเพื่อป้องกันการบันทึกแถวซ้ำซ้อน (Server-side Deduplication Check)
-        // ตรวจแถวล่าสุดไม่เกิน 20 แถว หากพบเลขคดีเดียวกัน และเวลาหรือชื่อไฟล์เดียวกัน ถือเป็นรายการซ้ำจาก Retry / Reload
+      const timestamp = new Date();
+      const thaiDateStr = data.dateTime || Utilities.formatDate(timestamp, "Asia/Bangkok", "dd/MM/yyyy HH:mm:ss");
+      const uploaderUser = data.uploader || data.username || data.uploadedBy || data.user_id || "";
+
+      if (targetRowIndex > 1) {
+        // อัปเดตแถวเดิมใน Google Sheet ครบทุกฟิลด์สำคัญ
+        if (thaiDateStr) sheet.getRange(targetRowIndex, 1).setValue(thaiDateStr);
+        if (data.courtType) sheet.getRange(targetRowIndex, 3).setValue(data.courtType);
+        if (data.district) sheet.getRange(targetRowIndex, 4).setValue(data.district);
+        if (data.subdistrict) sheet.getRange(targetRowIndex, 5).setValue(data.subdistrict);
+        if (data.locationType) sheet.getRange(targetRowIndex, 6).setValue(data.locationType);
+        if (data.locationText) sheet.getRange(targetRowIndex, 7).setValue(data.locationText);
+        if (data.lat) sheet.getRange(targetRowIndex, 8).setValue(Number(data.lat));
+        if (data.lng) sheet.getRange(targetRowIndex, 9).setValue(Number(data.lng));
+        if (data.heading !== undefined) sheet.getRange(targetRowIndex, 10).setValue(data.heading);
+        sheet.getRange(targetRowIndex, 11).setValue(data.fileName || "");
+        sheet.getRange(targetRowIndex, 12).setValue(fileUrl);
+        sheet.getRange(targetRowIndex, 14).setValue(fileId);
+        if (uploaderUser) sheet.getRange(targetRowIndex, 15).setValue(uploaderUser);
+        if (data.province) sheet.getRange(targetRowIndex, 16).setValue(data.province);
+      } else {
+        // 2. การเพิ่มข้อมูลใหม่ (New Row) -> appendRow
+        // ตรวจสอบเพื่อป้องกันการส่งซ้ำระดับวินาทีเดียวกันจากการกดรัวซ้ำ (Double Submit Check)
         const lastRow = sheet.getLastRow();
         let isDuplicateRow = false;
-        if (lastRow > 1) {
-          const startCheckRow = Math.max(2, lastRow - 19);
+        if (!data.forceUpdate && !data.isManualUpload && lastRow > 1) {
+          const startCheckRow = Math.max(2, lastRow - 9);
           const numCheckRows = lastRow - startCheckRow + 1;
           const recentData = sheet.getRange(startCheckRow, 1, numCheckRows, 11).getValues();
           for (let r = recentData.length - 1; r >= 0; r--) {
@@ -877,8 +899,8 @@ function doPost(e) {
 
             if (rCase === String(data.caseNumber || '').trim()) {
               if (
-                (data.fileName && rFile === String(data.fileName).trim()) ||
-                (rTime === String(thaiDateStr).trim())
+                data.fileName && rFile === String(data.fileName).trim() &&
+                rTime === String(thaiDateStr).trim()
               ) {
                 isDuplicateRow = true;
                 break;
@@ -888,7 +910,6 @@ function doPost(e) {
         }
 
         if (isDuplicateRow) {
-          // หากสร้างไฟล์รูปซ้ำใน Google Drive ให้ลบไฟล์รูปซ้ำลงถังขยะทันทีเพื่อไม่ให้เปลืองพื้นที่
           if (fileId) {
             try {
               DriveApp.getFileById(fileId).setTrashed(true);

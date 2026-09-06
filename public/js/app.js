@@ -69,6 +69,17 @@ function escapeHtml(str) {
 }
 window.escapeHtml = escapeHtml;
 
+/**
+ * ฟังก์ชันกลางสำหรับแปลงพิกัดเป็นสตริงที่คงทศนิยมครบ 6 ตำแหน่งเสมอ (ป้องกันการตัดเลขศูนย์ท้าย เช่น 17.410000)
+ */
+function formatFullCoordinateString(coord, decimals = 6) {
+  if (coord === null || coord === undefined || coord === '') return '';
+  const num = typeof coord === 'number' ? coord : parseFloat(String(coord).trim());
+  if (isNaN(num)) return String(coord).trim();
+  return num.toFixed(decimals);
+}
+window.formatFullCoordinateString = formatFullCoordinateString;
+
 // Cache Constants
 const CACHE_KEY_SHEET_DATA = 'slts_sheet_data_cache';
 const CACHE_KEY_SHEET_TIME = 'slts_sheet_data_last_fetch';
@@ -648,30 +659,34 @@ if (typeof window !== 'undefined') {
 function enqueueBackgroundUpload(taskData) {
   const queue = getBackgroundQueue();
 
-  // 1. ป้องกันการอัปโหลดซ้ำซ้อนของเลขคดีเดียวกันจากการกดรัวหรือบั๊กซ้ำ (Queue Deduplication Check)
-  const isDuplicate = queue.some(item => 
-    item.caseNumber && 
-    taskData.caseNumber && 
-    String(item.caseNumber).trim() === String(taskData.caseNumber).trim() &&
-    (Date.now() - new Date(item.createdAt || 0).getTime()) < 60000
-  );
+  // 1. ป้องกันการอัปโหลดซ้ำซ้อนของไฟล์เดียวกันหรือ ID เดียวกันจากการกดรัวซ้ำ (Queue Deduplication Check)
+  const isDuplicate = queue.some(item => {
+    if (taskData.id && item.id === taskData.id) return true;
+    if (taskData.fileName && item.fileName && item.fileName === taskData.fileName) return true;
+    if (taskData.stopId && item.stopId && item.stopId === taskData.stopId && taskData.fileName && item.fileName && item.fileName === taskData.fileName) return true;
+    // หากมี fileName ตรงกันเป๊ะและอยู่ในช่วง 60 วินาที
+    if (taskData.caseNumber && item.caseNumber && 
+        String(item.caseNumber).trim() === String(taskData.caseNumber).trim() &&
+        taskData.fileName && item.fileName && item.fileName === taskData.fileName &&
+        (Date.now() - new Date(item.createdAt || 0).getTime()) < 60000) {
+      return true;
+    }
+    return false;
+  });
   if (isDuplicate) {
-    console.warn('[BgQueue] Suppressed duplicate enqueue for case:', taskData.caseNumber);
+    console.warn('[BgQueue] Suppressed duplicate enqueue for file/case:', taskData.fileName || taskData.caseNumber);
     return null;
   }
 
-  // 2. ป้องกันการอัปโหลดซ้ำจากประวัติการส่งสำเร็จล่าสุด (Recent Completed Check ภายใน 60 วินาที)
+  // 2. ป้องกันการอัปโหลดซ้ำจากประวัติการส่งสำเร็จล่าสุด (Recent Completed Check ภายใน 60 วินาที เฉพาะชื่อไฟล์เดียวกัน)
   try {
     const recentSubmissions = JSON.parse(localStorage.getItem('slts_recent_submissions') || '[]');
     const isRecentDuplicate = recentSubmissions.some(sub => 
-      sub.caseNumber && 
-      taskData.caseNumber && 
-      String(sub.caseNumber).trim() === String(taskData.caseNumber).trim() &&
-      (!taskData.fileName || sub.fileName === taskData.fileName) &&
+      taskData.fileName && sub.fileName && sub.fileName === taskData.fileName &&
       (Date.now() - sub.timestamp) < 60000
     );
-    if (isRecentDuplicate) {
-      console.warn('[BgQueue] Suppressed enqueue: case already completed within last 60s:', taskData.caseNumber);
+    if (!taskData.forceUpdate && !taskData.isManualUpload && isRecentDuplicate) {
+      console.warn('[BgQueue] Suppressed enqueue: file already completed within last 60s:', taskData.fileName);
       return null;
     }
   } catch (e) {}
@@ -937,6 +952,162 @@ window.openBackgroundQueueModal = function() {
   });
 };
 
+/**
+ * บังคับให้รายการในคิวอัปโหลดทันทีเป็นลำดับแรก (Force Upload)
+ */
+window.forceUploadQueueItem = async function(itemId) {
+  let queue = getBackgroundQueue();
+  const itemIndex = queue.findIndex(q => q.id === itemId);
+  if (itemIndex === -1) return;
+
+  const [item] = queue.splice(itemIndex, 1);
+  item.status = 'pending';
+  item.retryCount = 0;
+  delete item.uploadStartedAt;
+  queue.unshift(item);
+  saveBackgroundQueue(queue);
+
+  isBgQueueWorkerRunning = false;
+  bgQueueWorkerStartTime = 0;
+
+  renderBackgroundQueueModalContent();
+  updateBackgroundQueueUI();
+
+  if (navigator.onLine) {
+    processBackgroundQueue();
+  }
+};
+
+/**
+ * แนบรูปภาพใหม่สำหรับรายการในคิวแล้วสั่งส่งทันที (Manual Attachment & Upload)
+ */
+window.attachAndUploadQueueItem = function(itemId) {
+  const queue = getBackgroundQueue();
+  const item = queue.find(q => q.id === itemId);
+  if (!item) return;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.onchange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    try {
+      showCustomLoading('กำลังเตรียมรูปภาพใหม่...', 'กำลังแปลงและบีบอัดรูปภาพ');
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        try {
+          const rawBase64 = ev.target.result;
+          const compressed = await compressImageToMax1MB(rawBase64);
+
+          const baseCase = (item.caseNumber || 'summons').replace(/\//g, '-');
+          const newFileName = `${baseCase}_reattach_${Date.now()}.jpg`;
+          item.fileName = newFileName;
+          item.capturedPhotoUrl = compressed;
+          if (item.payload) {
+            item.payload.imageBase64 = compressed;
+            item.payload.action = 'upload_image';
+            item.payload.fileName = newFileName;
+            item.payload.forceUpdate = true;
+            item.payload.isManualUpload = true;
+            if (!item.payload.uploader) {
+              item.payload.uploader = state.currentUser?.username || '';
+              item.payload.uploadedBy = state.currentUser?.username || '';
+              item.payload.user_id = state.currentUser?.username || '';
+            }
+          }
+          item.status = 'pending';
+          item.retryCount = 0;
+          delete item.uploadStartedAt;
+
+          saveBackgroundQueue(queue);
+          hideCustomLoading();
+
+          isBgQueueWorkerRunning = false;
+          bgQueueWorkerStartTime = 0;
+
+          renderBackgroundQueueModalContent();
+          updateBackgroundQueueUI();
+
+          if (navigator.onLine) {
+            processBackgroundQueue();
+          }
+
+          if (typeof showSystemToast === 'function') {
+            showSystemToast('แนบรูปใหม่และเริ่มส่งทันที', 'success');
+          }
+        } catch (procErr) {
+          hideCustomLoading();
+          Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถประมวลผลรูปภาพได้: ' + procErr.message, 'error');
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      hideCustomLoading();
+      Swal.fire('เกิดข้อผิดพลาด', err.message, 'error');
+    }
+  };
+  fileInput.click();
+};
+
+/**
+ * ผู้ใช้แจ้งเปลี่ยนสถานะเป็น "ส่งหมายแล้ว" ด้วยตนเอง (Manual Mark as Delivered) สำหรับรายการในคิว
+ */
+window.markQueueItemDelivered = async function(itemId) {
+  const queue = getBackgroundQueue();
+  const item = queue.find(q => q.id === itemId);
+  if (!item) return;
+
+  const res = await Swal.fire({
+    title: 'ยืนยันการแจ้งส่งหมายแล้ว?',
+    html: `
+      <div class="text-left text-xs space-y-2 text-gray-700 leading-relaxed">
+        <p>คุณต้องการเปลี่ยนสถานะหมายเลขคดี <b>${escapeHtml(item.caseNumber || 'ไม่ระบุ')}</b> เป็น <span class="text-emerald-700 font-bold">"ส่งหมายแล้ว (สีเทา)"</span> หรือไม่?</p>
+        <p class="text-[11px] text-gray-500">ระบบจะนำรายการนี้ออกจากคิวรอส่ง และปรับสถานะในระบบเส้นทางทันที</p>
+      </div>
+    `,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-check mr-1"></i> ยืนยันส่งแล้ว',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#059669',
+    cancelButtonColor: '#6b7280'
+  });
+
+  if (!res.isConfirmed) return;
+
+  if (typeof setRouteStopDeliveryStatus === 'function') {
+    setRouteStopDeliveryStatus(item.caseNumber, 'uploaded', {
+      originalCaseNumber: item.originalCaseNumber,
+      routeStopIndex: item.routeStopIndex,
+      locationText: item.locationText,
+      capturedPhotoUrl: item.capturedPhotoUrl || item.payload?.imageBase64,
+      id: item.stopId || item.payload?.stopId,
+      uploadedAt: new Date().toISOString(),
+      manuallyMarked: true
+    });
+  }
+
+  removeBackgroundQueueItem(itemId);
+  saveRouteToServer();
+  localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+
+  renderBackgroundQueueModalContent();
+  updateBackgroundQueueUI();
+
+  if (typeof renderMobileRouteList === 'function' && document.getElementById('mobileMapRouteStopsList')) {
+    renderMobileRouteList();
+  }
+  if (typeof renderRouteBatchTab === 'function') {
+    renderRouteBatchTab();
+  }
+
+  if (typeof showSystemToast === 'function') {
+    showSystemToast(`บันทึกสถานะส่งหมายคดี ${item.caseNumber || ''} เรียบร้อย`, 'success');
+  }
+};
+
 function renderBackgroundQueueModalContent() {
   const container = document.getElementById('bgQueueModalListContainer');
   const summaryBadge = document.getElementById('modalQueueSummaryBadge');
@@ -985,6 +1156,20 @@ function renderBackgroundQueueModalContent() {
       : '';
   };
 
+  const renderQueueActionButtons = (it) => `
+    <div class="flex items-center gap-1.5 pt-1 pl-8 flex-wrap">
+      <button type="button" onclick="forceUploadQueueItem('${it.id}')" class="px-2 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition shadow-2xs" title="บังคับส่งรายการนี้ทันที">
+        <i class="fa-solid fa-bolt text-[9px]"></i> ส่งทันที
+      </button>
+      <button type="button" onclick="attachAndUploadQueueItem('${it.id}')" class="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition shadow-2xs" title="เลือกรูปใหม่เพื่อส่ง">
+        <i class="fa-solid fa-file-arrow-up text-[9px]"></i> แนบภาพใหม่
+      </button>
+      <button type="button" onclick="markQueueItemDelivered('${it.id}')" class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer transition shadow-2xs" title="เปลี่ยนสถานะเป็นส่งแล้ว">
+        <i class="fa-solid fa-check-double text-[9px]"></i> แจ้งส่งแล้ว
+      </button>
+    </div>
+  `;
+
   // 1. กรณีเครื่องออฟไลน์: แสดงรายการทั้งหมดในคิวในสถานะรอเชื่อมต่อเน็ต
   if (!isOnline && total > 0) {
     html += `
@@ -1014,6 +1199,7 @@ function renderBackgroundQueueModalContent() {
             <span><i class="fa-solid fa-floppy-disk text-gray-400 mr-1"></i>บันทึกในเครื่องปลอดภัย</span>
             <span class="font-mono">${item.createdAt ? new Date(item.createdAt).toLocaleTimeString('th-TH') : ''}</span>
           </div>
+          ${renderQueueActionButtons(item)}
         </div>
       `;
     });
@@ -1022,19 +1208,28 @@ function renderBackgroundQueueModalContent() {
   else if (total > 0) {
     const activeItem = queue[0];
     const activePercent = window.currentActiveItemProgress || 20;
+    const isFailed = activeItem.status === 'failed';
+
     html += `
-      <div class="p-3.5 rounded-2xl border-2 border-blue-400 bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-blue-50/90 shadow-sm space-y-2 text-left transition-all">
+      <div class="p-3.5 rounded-2xl border-2 ${isFailed ? 'border-red-400 bg-red-50/70' : 'border-blue-400 bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-blue-50/90'} shadow-sm space-y-2 text-left transition-all">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2 flex-wrap">
-            <span class="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">1</span>
-            <span class="font-bold text-sm text-blue-900 font-mono"><i class="fa-solid fa-gavel mr-1 text-blue-600"></i>${activeItem.caseNumber}</span>
+            <span class="w-6 h-6 rounded-full ${isFailed ? 'bg-red-600' : 'bg-blue-600'} text-white font-bold text-xs flex items-center justify-center shadow-xs">1</span>
+            <span class="font-bold text-sm ${isFailed ? 'text-red-900' : 'text-blue-900'} font-mono"><i class="fa-solid fa-gavel mr-1 ${isFailed ? 'text-red-600' : 'text-blue-600'}"></i>${activeItem.caseNumber}</span>
             <span class="text-[10px] text-gray-500">${activeItem.courtType || ''}</span>
             ${getManualUploadBadge(activeItem)}
           </div>
-          <span class="text-[11px] font-bold text-blue-700 bg-white px-2.5 py-0.5 rounded-full border border-blue-200 shadow-2xs flex items-center gap-1.5 animate-pulse">
-            <i class="fa-solid fa-spinner fa-spin text-blue-600 text-[10px]"></i>
-            <span>กำลังส่ง (<b id="modalActivePercent">${activePercent}%</b>)</span>
-          </span>
+          ${isFailed ? `
+            <span class="text-[11px] font-bold text-red-700 bg-white px-2.5 py-0.5 rounded-full border border-red-200 shadow-2xs flex items-center gap-1.5">
+              <i class="fa-solid fa-triangle-exclamation text-red-600 text-[10px]"></i>
+              <span>ส่งไม่ผ่าน (${activeItem.retryCount || 0} ครั้ง)</span>
+            </span>
+          ` : `
+            <span class="text-[11px] font-bold text-blue-700 bg-white px-2.5 py-0.5 rounded-full border border-blue-200 shadow-2xs flex items-center gap-1.5 animate-pulse">
+              <i class="fa-solid fa-spinner fa-spin text-blue-600 text-[10px]"></i>
+              <span>กำลังส่ง (<b id="modalActivePercent">${activePercent}%</b>)</span>
+            </span>
+          `}
         </div>
 
         <p class="text-xs text-gray-700 pl-8 truncate"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${activeItem.locationText || '-'}</p>
@@ -1049,25 +1244,34 @@ function renderBackgroundQueueModalContent() {
             <span class="text-[10px] font-mono text-gray-400">${activeItem.createdAt ? new Date(activeItem.createdAt).toLocaleTimeString('th-TH') : ''}</span>
           </div>
         </div>
+        ${renderQueueActionButtons(activeItem)}
       </div>
     `;
 
     // รายการที่รอในคิวถัดไป
     for (let i = 1; i < total; i++) {
       const item = queue[i];
+      const isItemFailed = item.status === 'failed';
       html += `
-        <div class="p-3 rounded-2xl border border-gray-200 bg-gray-50/80 hover:bg-gray-50 transition space-y-1.5 text-left">
+        <div class="p-3 rounded-2xl border ${isItemFailed ? 'border-red-200 bg-red-50/50' : 'border-gray-200 bg-gray-50/80 hover:bg-gray-50'} transition space-y-1.5 text-left">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="w-6 h-6 rounded-full bg-gray-200 text-gray-700 font-bold text-xs flex items-center justify-center">${i + 1}</span>
+              <span class="w-6 h-6 rounded-full ${isItemFailed ? 'bg-red-400 text-white' : 'bg-gray-200 text-gray-700'} font-bold text-xs flex items-center justify-center">${i + 1}</span>
               <span class="font-bold text-sm text-gray-800 font-mono">${item.caseNumber}</span>
               <span class="text-[10px] text-gray-500">${item.courtType || ''}</span>
               ${getManualUploadBadge(item)}
             </div>
-            <span class="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
-              <i class="fa-solid fa-clock text-amber-600"></i>
-              <span>รอในคิวลำดับที่ ${i + 1}</span>
-            </span>
+            ${isItemFailed ? `
+              <span class="text-[10px] font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-full border border-red-200 flex items-center gap-1">
+                <i class="fa-solid fa-circle-exclamation text-red-600"></i>
+                <span>ส่งไม่ผ่าน</span>
+              </span>
+            ` : `
+              <span class="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                <i class="fa-solid fa-clock text-amber-600"></i>
+                <span>รอในคิวลำดับที่ ${i + 1}</span>
+              </span>
+            `}
           </div>
           <p class="text-xs text-gray-600 pl-8 truncate"><i class="fa-solid fa-location-dot text-gray-400 mr-1"></i>${item.locationText || '-'}</p>
           <div class="pl-8 pt-0.5">
@@ -1075,6 +1279,7 @@ function renderBackgroundQueueModalContent() {
               <div class="bg-gray-300 h-full rounded-full" style="width: 0%"></div>
             </div>
           </div>
+          ${renderQueueActionButtons(item)}
         </div>
       `;
     }
@@ -1112,10 +1317,10 @@ function renderBackgroundQueueModalContent() {
 }
 
 async function processBackgroundQueue() {
-  // Watchdog: หาก worker ติดค้างนานเกิน 75 วินาที ให้รีเซ็ต lock เพื่อให้คิวทำงานต่อได้
+  // Watchdog: หาก worker ติดค้างนานเกิน 45 วินาที ให้รีเซ็ต lock เพื่อให้คิวทำงานต่อได้
   if (isBgQueueWorkerRunning) {
-    if (bgQueueWorkerStartTime && (Date.now() - bgQueueWorkerStartTime > 75000)) {
-      console.warn('[BgQueue] Worker timed out (>75s), auto-resetting lock...');
+    if (bgQueueWorkerStartTime && (Date.now() - bgQueueWorkerStartTime > 45000)) {
+      console.warn('[BgQueue] Worker timed out (>45s), auto-resetting lock...');
       isBgQueueWorkerRunning = false;
     } else {
       return;
@@ -1141,41 +1346,6 @@ async function processBackgroundQueue() {
 
   const currentItem = queue[0];
 
-  // ตรวจสอบกรณีหน้ารีเฟรช (เช่น ผู้ใช้กด Ctrl + Shift + R หรือ F5) ขณะที่รายการนี้กำลังส่งอยู่ก่อนหน้า
-  if (currentItem.uploadStartedAt && (Date.now() - currentItem.uploadStartedAt < 50000)) {
-    console.log('[BgQueue] Item was in-flight when page reloaded. Verifying Google Sheet before retrying...', currentItem.caseNumber);
-    try {
-      const apiUrl = `${getSanitizedAppsScriptUrl()}?action=get_data&_t=${Date.now()}`;
-      const checkRes = await fetch(apiUrl, { cache: 'no-store' });
-      const checkJson = await checkRes.json();
-      if (checkJson && checkJson.status === 'success' && Array.isArray(checkJson.data)) {
-        const recentRows = checkJson.data.slice(-20);
-        const alreadyExists = recentRows.some(row => {
-          const rCase = String(row['เลขคดี'] || row['caseNumber'] || '').trim();
-          const rFile = String(row['ชื่อไฟล์'] || row['fileName'] || '').trim();
-          return rCase === String(currentItem.caseNumber).trim() && (!currentItem.fileName || rFile === String(currentItem.fileName).trim());
-        });
-        if (alreadyExists) {
-          console.log('[BgQueue] Verified: Item already recorded in Google Sheet! Skipping duplicate upload.', currentItem.caseNumber);
-          recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName, {
-            originalCaseNumber: currentItem.originalCaseNumber,
-            routeStopIndex: currentItem.routeStopIndex,
-            locationText: currentItem.locationText,
-            capturedPhotoUrl: currentItem.capturedPhotoUrl || currentItem.payload?.imageBase64,
-            driveFileId: currentItem.driveFileId,
-            id: currentItem.stopId || currentItem.payload?.stopId
-          });
-          removeBackgroundQueueItem(currentItem.id);
-          isBgQueueWorkerRunning = false;
-          setTimeout(processBackgroundQueue, 500);
-          return;
-        }
-      }
-    } catch (checkErr) {
-      console.warn('[BgQueue] Could not verify existing row via Sheet API:', checkErr);
-    }
-  }
-
   // หาก payload imageBase64 ถูกตัดไปเก็บใน IndexedDB ให้ดึงภาพกลับมาก่อนส่ง
   if (currentItem.payload && currentItem.payload.imageBase64 === '[STORED_IN_INDEXEDDB]') {
     try {
@@ -1191,6 +1361,17 @@ async function processBackgroundQueue() {
       }
     } catch (idbErr) {
       console.warn('[BgQueue] IDB payload retrieval error:', idbErr);
+    }
+  }
+
+  // มั่นใจว่า payload มี action: upload_image และข้อมูล uploader เสมอ
+  if (currentItem.payload) {
+    currentItem.payload.action = 'upload_image';
+    if (!currentItem.payload.uploader) {
+      currentItem.payload.uploader = state.currentUser?.username || '';
+      currentItem.payload.uploadedBy = state.currentUser?.username || '';
+      currentItem.payload.user_id = state.currentUser?.username || '';
+      currentItem.payload.uploaderRole = state.currentUser?.role || 'user';
     }
   }
 
@@ -1261,11 +1442,59 @@ async function processBackgroundQueue() {
     });
     removeBackgroundQueueItem(currentItem.id);
 
-    // ทำงานเงียบ 100% เบื้องหลังโดยไม่มี Pop Up หรือ Toast รบกวน
+    // อัปเดตข้อมูลแถวสดเข้าสู่ state.allSheetRows และ LocalStorage ทันที (Instant Local DB Update)
+    const newSheetRow = {
+      "วัน-เวลาบันทึก": currentItem.payload?.dateTime || (typeof WatermarkEngine !== 'undefined' ? WatermarkEngine.formatThaiDateTime(new Date()) : new Date().toLocaleString('th-TH')),
+      "เลขคดี": currentItem.caseNumber || "",
+      "ประเภทศาล": currentItem.payload?.courtType || "",
+      "อำเภอ": currentItem.payload?.district || "",
+      "ตำบล": currentItem.payload?.subdistrict || "",
+      "ประเภทสถานที่": currentItem.payload?.locationType || "",
+      "ที่ตั้งส่งหมาย (เต็ม)": currentItem.locationText || currentItem.payload?.locationText || "",
+      "ละติจูด (Lat)": currentItem.payload?.lat || "",
+      "ลองจิจูด (Lng)": currentItem.payload?.lng || "",
+      "ทิศองศา": currentItem.payload?.heading !== undefined ? currentItem.payload.heading : "",
+      "ชื่อไฟล์รูปภาพ": currentItem.fileName || "",
+      "ลิงก์รูปภาพใน Google Drive": drivePhotoUrl || "",
+      "Drive File ID": driveFileId || "",
+      "ผู้บันทึก": currentItem.payload?.uploader || state.currentUser?.username || "",
+      "จังหวัด": currentItem.payload?.province || state.selectedProvince || "อุดรธานี"
+    };
 
-    // Invalidate sheet cache
-    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
-    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+    if (Array.isArray(state.allSheetRows)) {
+      let rowUpdated = false;
+      for (let i = 0; i < state.allSheetRows.length; i++) {
+        const r = state.allSheetRows[i];
+        const rCase = String(r['เลขคดี'] || r['หมายเลขคดี'] || r['caseNumber'] || '').trim();
+        if (rCase && rCase === currentItem.caseNumber.trim()) {
+          state.allSheetRows[i] = { ...r, ...newSheetRow };
+          rowUpdated = true;
+          break;
+        }
+      }
+      if (!rowUpdated) {
+        state.allSheetRows.unshift(newSheetRow);
+      }
+      try {
+        localStorage.setItem(CACHE_KEY_SHEET_DATA, JSON.stringify(state.allSheetRows));
+        localStorage.setItem(CACHE_KEY_SHEET_TIME, String(Date.now()));
+      } catch (e) {}
+    } else {
+      state.allSheetRows = [newSheetRow];
+      try {
+        localStorage.setItem(CACHE_KEY_SHEET_DATA, JSON.stringify(state.allSheetRows));
+        localStorage.setItem(CACHE_KEY_SHEET_TIME, String(Date.now()));
+      } catch (e) {}
+    }
+
+    if (typeof syncStopsWithDeliveryStatus === 'function') {
+      syncStopsWithDeliveryStatus(state.currentRouteStops);
+    }
+    if (typeof saveRouteToServer === 'function' && navigator.onLine) {
+      saveRouteToServer();
+    }
+
+    // ทำงานเงียบ 100% เบื้องหลังโดยไม่มี Pop Up หรือ Toast รบกวน
 
   } catch (err) {
     clearTimeout(timeoutId);
@@ -1295,11 +1524,20 @@ async function processBackgroundQueue() {
     bgQueueWorkerStartTime = 0;
     window.currentActiveItemProgress = 0;
     const remainingQueue = getBackgroundQueue();
-    if (remainingQueue.length > 0) {
+    // ดำเนินการต่อเฉพาะเมื่อมีรายการที่ยังไม่ failed และเชื่อมต่ออินเทอร์เน็ต
+    const hasWorkableItems = remainingQueue.some(item => item.status !== 'failed');
+    if (remainingQueue.length > 0 && hasWorkableItems && navigator.onLine) {
       processBackgroundQueue();
     } else {
       updateBackgroundQueueUI();
-      loadGoogleSheetData(true, true);
+      if (typeof loadGoogleSheetData === 'function') {
+        loadGoogleSheetData(true, true);
+        setTimeout(() => {
+          if (typeof loadGoogleSheetData === 'function') {
+            loadGoogleSheetData(true, true);
+          }
+        }, 2500);
+      }
     }
   }
 }
@@ -1355,6 +1593,28 @@ document.addEventListener('DOMContentLoaded', () => {
   renderDesktopFormHistoryCard();
   updateBackgroundQueueUI();
   processBackgroundQueue();
+
+  // กู้คืนเป้าหมายการส่งหมายที่เลือกไว้ (ถ่ายภาพหมายนี้) ข้ามการรีเฟรชหรือสลับเคลียร์แอพ
+  try {
+    const savedActiveTarget = localStorage.getItem('slts_active_route_target');
+    const savedFormData = localStorage.getItem('slts_active_route_form_data');
+    if (savedActiveTarget) {
+      state.activeRouteStopTarget = JSON.parse(savedActiveTarget);
+      if (savedFormData) {
+        state.tempModalValues = JSON.parse(savedFormData);
+        applyModalFormValues(state.tempModalValues);
+      }
+      if (elements.liveBadgeCase && state.activeRouteStopTarget.caseNumber) {
+        elements.liveBadgeCase.textContent = `⚖️  เลขคดี: ${state.activeRouteStopTarget.caseNumber}`;
+      }
+      if (elements.liveBadgeLocation && state.activeRouteStopTarget.locationText) {
+        elements.liveBadgeLocation.textContent = `🏠  ${state.activeRouteStopTarget.locationText}`;
+      }
+      updateCaptureButtonState();
+    }
+  } catch (e) {
+    console.warn('[Restore] Failed to restore active route target:', e);
+  }
 
   // ตรวจสอบการเปิดผ่าน LINE: หากเป็น LINE In-App Browser ให้สลับไปเปิดในเบราว์เซอร์ภายนอก (Chrome/Safari) ทันที
   if (/Line/i.test(navigator.userAgent) && !window.location.search.includes('openExternalBrowser=1')) {
@@ -2016,6 +2276,12 @@ function updateAuthUI() {
     elements.btnSettings.classList.add('hidden');
   }
 
+  // ปุ่มเพิ่มผู้ใช้งานใหม่ (แสดงเฉพาะ Admin หรือ Local Advisor)
+  const btnOpenAddUser = document.getElementById('btnOpenAddUserModal');
+  if (btnOpenAddUser) {
+    btnOpenAddUser.style.display = (isAdmin || isLocalAdvisor) ? 'inline-flex' : 'none';
+  }
+
   if (elements.currentDefaultResetPassText) {
     elements.currentDefaultResetPassText.textContent = localStorage.getItem('slts_default_reset_pass') || '123456';
   }
@@ -2416,8 +2682,273 @@ window.updateGeneratedCourtNamePreview = function() {
   previewEl.value = buildCourtNameFromCategoryAndProvince(category, province);
 };
 
-function handleCreateUser(e) {
-  e.preventDefault();
+/**
+ * สลับการแสดงผล/ซ่อนรหัสผ่านในหน้าต่างเพิ่มผู้ใช้งาน
+ */
+window.toggleModalPasswordVisibility = function() {
+  const passInput = document.getElementById('modalNewPassword');
+  const icon = document.getElementById('modalPasswordToggleIcon');
+  if (!passInput || !icon) return;
+  if (passInput.type === 'password') {
+    passInput.type = 'text';
+    icon.classList.remove('fa-eye');
+    icon.classList.add('fa-eye-slash');
+  } else {
+    passInput.type = 'password';
+    icon.classList.remove('fa-eye-slash');
+    icon.classList.add('fa-eye');
+  }
+};
+
+/**
+ * สลับประเภทศาลในหน้าต่าง SweetAlert เพิ่มผู้ใช้งาน
+ */
+window.handleModalCourtCategoryChange = function() {
+  const categoryEl = document.getElementById('modalNewCourtCategory');
+  const customContainer = document.getElementById('modalCustomCourtContainer');
+  const standardContainer = document.getElementById('modalStandardCourtContainer');
+  const customInput = document.getElementById('modalNewCustomCourtName');
+
+  if (!categoryEl) return;
+  const category = categoryEl.value;
+
+  if (category === 'ศาลไม่สังกัดภาค') {
+    if (customContainer) customContainer.classList.remove('hidden');
+    if (standardContainer) standardContainer.classList.add('hidden');
+    if (customInput) {
+      if (!customInput.value || !customInput.value.startsWith('ศาล')) {
+        customInput.value = 'ศาล';
+      }
+      if (!customInput.dataset.listenerAttached) {
+        customInput.dataset.listenerAttached = 'true';
+        customInput.addEventListener('blur', () => {
+          let val = customInput.value.trim();
+          if (!val) val = 'ศาล';
+          if (!val.startsWith('ศาล')) val = 'ศาล' + val;
+          customInput.value = val;
+        });
+      }
+    }
+  } else {
+    if (customContainer) customContainer.classList.add('hidden');
+    if (standardContainer) standardContainer.classList.remove('hidden');
+    updateModalGeneratedCourtPreview();
+  }
+};
+
+/**
+ * อัปเดตกล่องข้อความชื่อศาลที่สร้างอัตโนมัติในหน้าต่าง SweetAlert
+ */
+window.updateModalGeneratedCourtPreview = function() {
+  const categoryEl = document.getElementById('modalNewCourtCategory');
+  const provEl = document.getElementById('modalNewAssignedProvince');
+  const previewEl = document.getElementById('modalNewGeneratedCourtNamePreview');
+  if (!previewEl) return;
+
+  const category = categoryEl ? categoryEl.value : 'ศาลจังหวัด';
+  const province = provEl ? provEl.value.trim() : 'อุดรธานี';
+  previewEl.value = buildCourtNameFromCategoryAndProvince(category, province);
+};
+
+/**
+ * เปิดหน้าต่าง SweetAlert สำหรับเพิ่มผู้ใช้งานใหม่ (PC & Tablet)
+ * เงื่อนไข:
+ * 1. ปิดได้เฉพาะปุ่ม "ปิด" และปุ่มกากบาท 'X' เท่านั้น (allowOutsideClick: false, allowEscapeKey: false)
+ * 2. รองรับสิทธิ์ Admin (เลือก Role, ศาล, จังหวัดได้อิสระ) และ Local Advisor (ล็อค Role=User, ล็อคศาลตนเอง)
+ * 3. บันทึกและอัปเดตตาราง "รายชื่อผู้ใช้งานทั้งหมด" ทันทีโดยไม่ต้องรีเฟรชหน้าเว็บ
+ */
+window.openAddUserModal = function() {
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
+
+  if (!isAdmin && !isLocalAdvisor) {
+    Swal.fire({
+      icon: 'error',
+      title: 'ไม่มีสิทธิ์เข้าถึง',
+      text: 'เฉพาะ Admin หรือ Local Advisor เท่านั้นที่สามารถเพิ่มผู้ใช้งานได้'
+    });
+    return;
+  }
+
+  const allUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
+  let advisorProvince = 'อุดรธานี';
+  let advisorCourtCategory = 'ศาลจังหวัด';
+  let advisorCourt = 'ศาลจังหวัดอุดรธานี';
+
+  if (isLocalAdvisor) {
+    const advisorProfile = allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser;
+    advisorProvince = (advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+    advisorCourtCategory = (advisorProfile?.courtCategory || state.currentUser?.courtCategory || 'ศาลจังหวัด').trim();
+    advisorCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || '').trim();
+
+    if (!advisorCourt) {
+      if (advisorCourtCategory === 'ศาลไม่สังกัดภาค') advisorCourt = 'ศาลแพ่ง';
+      else if (advisorCourtCategory === 'ศาลแขวง') advisorCourt = `ศาลแขวง${advisorProvince}`;
+      else if (advisorCourtCategory === 'ศาลเยาวชนและครอบครัว') advisorCourt = `ศาลเยาวชนและครอบครัวจังหวัด${advisorProvince}`;
+      else advisorCourt = `ศาลจังหวัด${advisorProvince}`;
+    }
+  }
+
+  const roleSectionHtml = isLocalAdvisor ? `
+    <div>
+      <label class="block text-xs font-semibold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role)</label>
+      <div class="px-3.5 py-2.5 bg-gray-100 border border-gray-300 rounded-xl text-xs sm:text-sm text-gray-700 font-medium flex items-center justify-between">
+        <span>User (เจ้าหน้าที่ทั่วไป)</span>
+        <span class="text-[11px] px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-semibold">ล็อคตามสิทธิ์ศาลของคุณ</span>
+      </div>
+      <input type="hidden" id="modalNewRole" value="user" />
+    </div>
+  ` : `
+    <div>
+      <label class="block text-xs font-semibold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) <span class="text-rose-500">*</span></label>
+      <select id="modalNewRole" class="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition" required>
+        <option value="user" selected>User (เจ้าหน้าที่ทั่วไป)</option>
+        <option value="local_advisor">Local Advisor (ผู้ดูแลประจำจังหวัด)</option>
+        <option value="admin">Admin (ผู้ดูแลระบบ)</option>
+      </select>
+    </div>
+  `;
+
+  const courtSectionHtml = isLocalAdvisor ? `
+    <div class="p-3.5 bg-blue-50 border border-blue-200 rounded-xl">
+      <div class="flex items-start gap-2.5">
+        <i class="fa-solid fa-building-columns text-blue-600 text-sm mt-0.5"></i>
+        <div class="text-xs text-blue-900 space-y-1">
+          <p class="font-bold">สังกัดหน่วยงานตามสิทธิ์ผู้ดูแล:</p>
+          <div class="flex flex-wrap gap-2 pt-0.5">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-semibold">ศาล: ${advisorCourt}</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-semibold">จ.${advisorProvince}</span>
+          </div>
+          <p class="text-[11px] text-blue-700/80 pt-0.5">ผู้ใช้ใหม่จะถูกเพิ่มในสังกัดศาลของคุณโดยอัตโนมัติ</p>
+        </div>
+      </div>
+    </div>
+  ` : `
+    <div class="p-3.5 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
+      <div class="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+        <i class="fa-solid fa-building-columns text-blue-600"></i>
+        <span>การกำหนดศาลและพื้นที่ปฏิบัติงาน</span>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-700 mb-1">ประเภทศาล</label>
+          <select id="modalNewCourtCategory" onchange="handleModalCourtCategoryChange()" class="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
+            <option value="ศาลจังหวัด" selected>ศาลจังหวัด</option>
+            <option value="ศาลแขวง">ศาลแขวง</option>
+            <option value="ศาลเยาวชนและครอบครัว">ศาลเยาวชนและครอบครัว</option>
+            <option value="ศาลไม่สังกัดภาค">ศาลไม่สังกัดภาค (ศาลแพ่ง/อาญา/ศาลชำนัญพิเศษ)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-700 mb-1">จังหวัดที่ส่งหมาย</label>
+          <input type="text" id="modalNewAssignedProvince" list="assignedProvinceDatalist" oninput="updateModalGeneratedCourtPreview()" value="อุดรธานี" class="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition" placeholder="พิมพ์ชื่อจังหวัด..." required />
+        </div>
+      </div>
+
+      <div id="modalStandardCourtContainer">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">ชื่อศาลที่จะบันทึก (สร้างอัตโนมัติ)</label>
+        <input type="text" id="modalNewGeneratedCourtNamePreview" class="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-xl text-xs text-gray-600 font-semibold cursor-not-allowed" value="ศาลจังหวัดอุดรธานี" readonly />
+      </div>
+      <div id="modalCustomCourtContainer" class="hidden">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">ระบุชื่อศาล <span class="text-rose-500">*</span></label>
+        <input type="text" id="modalNewCustomCourtName" class="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition" placeholder="เช่น ศาลแพ่ง, ศาลอาญา..." />
+      </div>
+    </div>
+  `;
+
+  const modalHtml = `
+    <div class="text-left font-sans">
+      <div class="flex items-center gap-3 pb-3 border-b border-gray-100 mb-4">
+        <div class="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg font-bold border border-blue-100">
+          <i class="fa-solid fa-user-plus"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-gray-900 leading-tight">เพิ่มผู้ใช้งานใหม่</h3>
+          <p class="text-xs text-gray-500 mt-0.5">ระบบจัดการและกำหนดสิทธิ์ผู้ใช้งานในศาล</p>
+        </div>
+      </div>
+
+      <form id="modalAddUserForm" onsubmit="handleModalCreateUser(event)" class="space-y-3.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-700 mb-1">ชื่อผู้ใช้ (Username) <span class="text-rose-500">*</span></label>
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <i class="fa-solid fa-user text-xs"></i>
+              </div>
+              <input type="text" id="modalNewUsername" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น officer01" required autocomplete="off" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-700 mb-1">ชื่อ-สกุล / ชื่อแสดง</label>
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <i class="fa-solid fa-id-card text-xs"></i>
+              </div>
+              <input type="text" id="modalNewFullName" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น นายสมชาย ส่งหมาย" />
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-700 mb-1">รหัสผ่าน (Password) <span class="text-rose-500">*</span></label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+              <i class="fa-solid fa-lock text-xs"></i>
+            </div>
+            <input type="password" id="modalNewPassword" class="w-full pl-8 pr-10 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="กำหนดรหัสผ่านอย่างน้อย 4 ตัวอักษร" required autocomplete="new-password" />
+            <button type="button" onclick="toggleModalPasswordVisibility()" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none cursor-pointer" title="แสดง/ซ่อนรหัสผ่าน">
+              <i id="modalPasswordToggleIcon" class="fa-solid fa-eye text-xs"></i>
+            </button>
+          </div>
+        </div>
+
+        ${roleSectionHtml}
+
+        ${courtSectionHtml}
+
+        <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100 mt-4">
+          <button type="button" onclick="Swal.close()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 font-semibold rounded-xl text-xs sm:text-sm transition border border-gray-300 cursor-pointer flex items-center gap-1.5">
+            <i class="fa-solid fa-xmark"></i>
+            <span>ปิด</span>
+          </button>
+          <button type="submit" id="btnSubmitAddUserModal" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-semibold rounded-xl text-xs sm:text-sm transition shadow-sm shadow-blue-200 cursor-pointer flex items-center gap-1.5">
+            <i class="fa-solid fa-user-plus"></i>
+            <span>เพิ่มผู้ใช้งาน</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  Swal.fire({
+    html: modalHtml,
+    width: window.innerWidth < 640 ? '95%' : '580px',
+    padding: '1.25rem',
+    showConfirmButton: false,
+    showCancelButton: false,
+    showCloseButton: true,
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    customClass: {
+      popup: 'rounded-2xl shadow-2xl border border-gray-200 text-left',
+      closeButton: 'text-gray-400 hover:text-gray-700 focus:outline-none'
+    },
+    didOpen: () => {
+      const usernameInput = document.getElementById('modalNewUsername');
+      if (usernameInput) usernameInput.focus();
+      if (isAdmin && typeof updateModalGeneratedCourtPreview === 'function') {
+        updateModalGeneratedCourtPreview();
+      }
+    }
+  });
+};
+
+/**
+ * ประมวลผลการเพิ่มผู้ใช้งานใหม่จากหน้าต่าง SweetAlert
+ */
+window.handleModalCreateUser = function(e) {
+  if (e) e.preventDefault();
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
 
@@ -2426,25 +2957,33 @@ function handleCreateUser(e) {
     return;
   }
 
-  const username = document.getElementById('newUsername').value.trim();
-  const fullName = document.getElementById('newFullName').value.trim();
-  const password = document.getElementById('newPassword').value.trim();
-  
-  let role = document.getElementById('newRole').value;
+  const username = (document.getElementById('modalNewUsername')?.value || '').trim();
+  const fullName = (document.getElementById('modalNewFullName')?.value || '').trim();
+  const password = (document.getElementById('modalNewPassword')?.value || '').trim();
+
+  if (!username || !password) {
+    Swal.fire('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน', 'warning');
+    return;
+  }
+
+  const allUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
+
+  if (allUsers.some(u => (u.username || '').toLowerCase() === username.toLowerCase())) {
+    Swal.fire('ชื่อผู้ใช้ซ้ำ', `ชื่อผู้ใช้ "${username}" มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น`, 'warning');
+    return;
+  }
+
+  let role = 'user';
   let courtCategory = 'ศาลจังหวัด';
   let assignedProvince = 'อุดรธานี';
   let assignedCourt = 'ศาลจังหวัดอุดรธานี';
 
-  const allUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
-
-  // หากเป็น Local Advisor: เพิ่มผู้ใช้งานได้เฉพาะศาลตนเองเท่านั้น และสร้างได้เฉพาะ Role => User
   if (isLocalAdvisor) {
     role = 'user';
-    const advisorProfile = allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser.username || '').toLowerCase()) || state.currentUser;
-
-    assignedProvince = (advisorProfile.assignedProvince || state.currentUser.assignedProvince || 'อุดรธานี').trim();
-    courtCategory = advisorProfile.courtCategory || state.currentUser.courtCategory || 'ศาลจังหวัด';
-    assignedCourt = (advisorProfile.assignedCourt || state.currentUser.assignedCourt || '').trim();
+    const advisorProfile = allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser;
+    assignedProvince = (advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+    courtCategory = (advisorProfile?.courtCategory || state.currentUser?.courtCategory || 'ศาลจังหวัด').trim();
+    assignedCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || '').trim();
 
     if (!assignedCourt) {
       if (courtCategory === 'ศาลไม่สังกัดภาค') assignedCourt = 'ศาลแพ่ง';
@@ -2453,27 +2992,29 @@ function handleCreateUser(e) {
       else assignedCourt = `ศาลจังหวัด${assignedProvince}`;
     }
   } else {
-    // หากเป็น Admin: สามารถเพิ่มได้ทุก Role และได้ทุกศาล ทุกจังหวัด
-    courtCategory = document.getElementById('newCourtCategory')?.value || 'ศาลจังหวัด';
+    role = document.getElementById('modalNewRole')?.value || 'user';
+    courtCategory = document.getElementById('modalNewCourtCategory')?.value || 'ศาลจังหวัด';
     if (courtCategory === 'ศาลไม่สังกัดภาค') {
-      assignedCourt = (document.getElementById('newCustomCourtName')?.value || 'ศาลแพ่ง').trim();
+      assignedCourt = (document.getElementById('modalNewCustomCourtName')?.value || 'ศาลแพ่ง').trim();
       if (!assignedCourt.startsWith('ศาล')) assignedCourt = 'ศาล' + assignedCourt;
-      assignedProvince = document.getElementById('newAssignedProvince')?.value.trim() || 'กรุงเทพมหานคร';
+      assignedProvince = (document.getElementById('modalNewAssignedProvince')?.value || 'กรุงเทพมหานคร').trim();
     } else {
-      assignedProvince = document.getElementById('newAssignedProvince')?.value.trim() || 'อุดรธานี';
+      assignedProvince = (document.getElementById('modalNewAssignedProvince')?.value || 'อุดรธานี').trim();
       assignedCourt = buildCourtNameFromCategoryAndProvince(courtCategory, assignedProvince);
     }
   }
 
-  if (!username || !password) return;
-
-  if (allUsers.some(u => u.username.toLowerCase() === username.toLowerCase())) {
-    Swal.fire('ข้อผิดพลาด', 'ชื่อผู้ใช้นี้มีในระบบแล้ว กรุณาใช้ชื่ออื่น', 'warning');
-    return;
+  let dateNow = '';
+  try {
+    if (typeof WatermarkEngine !== 'undefined' && WatermarkEngine.formatThaiDateTime) {
+      const parts = WatermarkEngine.formatThaiDateTime(new Date()).split(' ');
+      dateNow = `${parts[0] || ''} ${parts[1] || ''} ${parts[2] || ''}`.trim();
+    }
+  } catch (err) {
+    dateNow = new Date().toLocaleDateString('th-TH');
   }
+  if (!dateNow) dateNow = new Date().toLocaleDateString('th-TH');
 
-  const dateNow = WatermarkEngine.formatThaiDateTime(new Date()).split(' ')[0] + ' ' + WatermarkEngine.formatThaiDateTime(new Date()).split(' ')[1] + ' ' + WatermarkEngine.formatThaiDateTime(new Date()).split(' ')[2];
-  
   const newUser = {
     username: username,
     password: password,
@@ -2490,23 +3031,27 @@ function handleCreateUser(e) {
 
   allUsers.push(newUser);
   localStorage.setItem('slts_users', JSON.stringify(allUsers));
-  document.getElementById('addUserForm').reset();
-  if (document.getElementById('newAssignedProvince')) {
-    document.getElementById('newAssignedProvince').value = isLocalAdvisor ? assignedProvince : 'อุดรธานี';
-  }
-  updateGeneratedCourtNamePreview();
+
+  // อัปเดตตารางรายชื่อผู้ใช้งานทันทีโดยไม่ต้องรีเฟรชหน้าเว็บ
   renderUserList();
 
-  // ซิงค์ผู้ใช้ใหม่ไปยัง Google Sheet (Tab: users)
-  syncUserToGoogleSheet('save_user', newUser);
+  // ซิงค์ผู้ใช้ใหม่ไปยัง Google Sheet (Tab: users) ในเบื้องหลัง
+  if (typeof syncUserToGoogleSheet === 'function') {
+    syncUserToGoogleSheet('save_user', newUser);
+  }
 
   Swal.fire({
     icon: 'success',
     title: 'เพิ่มผู้ใช้งานสำเร็จ',
-    html: `สร้างผู้ใช้ <b>"${username}"</b><br><span class="text-xs text-gray-600 mt-1 inline-block">สังกัด: <b>${assignedCourt}</b> (Role: ${role.toUpperCase()}, จ.${assignedProvince})</span>`,
-    timer: 2000,
+    html: `สร้างผู้ใช้ <b>"${username}"</b> เรียบร้อยแล้ว<br><span class="text-xs text-gray-600 mt-1 inline-block">สังกัด: <b>${assignedCourt}</b> (Role: ${role.toUpperCase()}, จ.${assignedProvince})</span>`,
+    timer: 2200,
     showConfirmButton: false
   });
+};
+
+function handleCreateUser(e) {
+  if (e) e.preventDefault();
+  handleModalCreateUser(e);
 }
 
 function renderUserList() {
@@ -6867,13 +7412,32 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     directImgUrl = `https://lh3.googleusercontent.com/d/${match[1]}=w1200`;
   }
 
+  // หากอยู่บนมือถือ (< 768px) และมีข้อมูลเส้นทางส่งหมาย ให้ตรวจว่ามี stack ย้อนกลับหรือไม่
+  // หาก stack ว่างเปล่า ให้สร้างการย้อนกลับสู่หน้าแผนที่เส้นทางส่งหมายอัตโนมัติ (Fallback Safety Net)
+  if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+    if (!window.mobileModalStack || window.mobileModalStack.length === 0) {
+      if (typeof window.pushMobileModalState === 'function') {
+        window.pushMobileModalState(() => window.showMobileRouteMapModal && window.showMobileRouteMapModal());
+      }
+    }
+  }
+
   const hasBackStack = Boolean(window.mobileModalStack && window.mobileModalStack.length > 0);
+  const showBackButton = hasBackStack || (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0);
   let isNavigatingToFullScreen = false;
+  let hasHandledBack = false;
 
   const executeSafeBack = () => {
-    if (isNavigatingToFullScreen) return;
+    if (hasHandledBack || isNavigatingToFullScreen) return;
+    hasHandledBack = true;
     if (hasBackStack) {
       window.handleMobileModalBackOrClose();
+    } else if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+      if (typeof window.showMobileRouteMapModal === 'function') {
+        window.showMobileRouteMapModal();
+      } else {
+        Swal.close();
+      }
     } else {
       Swal.close();
     }
@@ -6883,13 +7447,19 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
   // ฟังก์ชันคลิกเปิดดูภาพขนาดเต็ม (ป้องกันไม่ให้ .then ของ modal เดิมไปสั่ง Swal.close ทับ)
   window._openFullScreenFromPhotoModal = function() {
     isNavigatingToFullScreen = true;
+    // ดูแลให้มี stack สำหรับย้อนกลับสู่หน้าแผนที่เสมอ
+    if (window.innerWidth < 768 && (!window.mobileModalStack || window.mobileModalStack.length === 0)) {
+      if (typeof window.pushMobileModalState === 'function') {
+        window.pushMobileModalState(() => window.showMobileRouteMapModal && window.showMobileRouteMapModal());
+      }
+    }
     window.openFullScreenImage(directImgUrl, imgUrl, caseNumber, locationFull, timestamp, lat, lng);
   };
 
   Swal.fire({
     title: `
       <div class="flex items-center justify-between w-full pr-1 text-gray-900 font-bold text-base">
-        ${hasBackStack ? `
+        ${showBackButton ? `
           <button type="button" onclick="window._currentPhotoModalBack && window._currentPhotoModalBack()" class="w-8 h-8 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 flex items-center justify-center text-xs transition cursor-pointer" title="ย้อนกลับ">
             <i class="fa-solid fa-arrow-left"></i>
           </button>
@@ -6922,7 +7492,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     showCancelButton: true,
     allowOutsideClick: false,
     confirmButtonText: '<i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> เปิดภาพใน Google Drive',
-    cancelButtonText: hasBackStack ? '<i class="fa-solid fa-arrow-left mr-1"></i> ย้อนกลับ' : 'ปิด',
+    cancelButtonText: showBackButton ? '<i class="fa-solid fa-arrow-left mr-1"></i> ย้อนกลับ' : 'ปิด',
     confirmButtonColor: '#2563eb',
     cancelButtonColor: '#6b7280'
   }).then((res) => {
@@ -6930,6 +7500,11 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     if (isNavigatingToFullScreen) {
       return;
     }
+    // ป้องกันการย้อนกลับซ้ำซ้อน (Anti-Double-Trigger)
+    if (hasHandledBack) {
+      return;
+    }
+    hasHandledBack = true;
 
     if (res.isConfirmed) {
       window.open(imgUrl, '_blank');
@@ -6937,10 +7512,20 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
         setTimeout(() => {
           window.handleMobileModalBackOrClose();
         }, 300);
+      } else if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+        setTimeout(() => {
+          if (typeof window.showMobileRouteMapModal === 'function') {
+            window.showMobileRouteMapModal();
+          }
+        }, 300);
       }
     } else {
       if (hasBackStack) {
         window.handleMobileModalBackOrClose();
+      } else if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+        if (typeof window.showMobileRouteMapModal === 'function') {
+          window.showMobileRouteMapModal();
+        }
       }
     }
   });
@@ -6953,9 +7538,18 @@ window.openFullScreenImage = function(imgSrc, originalUrl = '', caseNo = '', loc
     isClosed = true;
     // เมื่อปิดภาพขนาดเต็ม หากมีข้อมูลเดิม ให้เปิด viewPhotoModal คืนกลับมา ทั้งบน Desktop และ Mobile
     if (originalUrl && caseNo) {
+      if (window.innerWidth < 768 && (!window.mobileModalStack || window.mobileModalStack.length === 0)) {
+        if (typeof window.pushMobileModalState === 'function') {
+          window.pushMobileModalState(() => window.showMobileRouteMapModal && window.showMobileRouteMapModal());
+        }
+      }
       window.viewPhotoModal(originalUrl, caseNo, loc, time, lat, lng);
     } else if (window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0) {
       window.handleMobileModalBackOrClose();
+    } else if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+      if (typeof window.showMobileRouteMapModal === 'function') {
+        window.showMobileRouteMapModal();
+      }
     }
   };
 
@@ -8907,7 +9501,26 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
 
         <div id="mobileUploadGpsInfo" class="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-[11px] flex items-center gap-2">
           <i class="fa-solid fa-location-crosshairs text-blue-600 shrink-0"></i>
-          <span id="mobileUploadGpsText">${(extractedLat && extractedLng) ? `พบพิกัดในรูปถ่าย: ${Number(extractedLat).toFixed(6)}, ${Number(extractedLng).toFixed(6)}` : 'ระบบจะสกัดพิกัด GPS จากรูปภาพ หรือสามารถพิมพ์ระบุด้านล่างได้'}</span>
+          <span id="mobileUploadGpsText">${(extractedLat && extractedLng) ? `พบพิกัดในรูปถ่าย: ${formatFullCoordinateString(extractedLat, 6)}, ${formatFullCoordinateString(extractedLng, 6)}` : 'ระบบจะสกัดพิกัด GPS จากรูปภาพ หรือสามารถพิมพ์ระบุด้านล่างได้'}</span>
+        </div>
+
+        <!-- ตัวเลือก: ภาพถ่ายมีพิกัดบนภาพแล้ว -->
+        <div class="bg-amber-50/70 border border-amber-200/90 rounded-xl p-2.5 flex items-start gap-2.5 transition text-left">
+          <input 
+            type="checkbox" 
+            id="chkMobileHasWatermark" 
+            class="mt-0.5 w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer shrink-0"
+            ${(localStorage.getItem('slts_has_watermark') === 'true' || localStorage.getItem('slts_desktop_has_watermark') === 'true') ? 'checked' : ''}
+          >
+          <label for="chkMobileHasWatermark" class="text-xs text-gray-700 font-semibold cursor-pointer select-none leading-relaxed">
+            <span class="text-amber-900 font-bold flex items-center gap-1.5">
+              <i class="fa-solid fa-location-crosshairs text-amber-600"></i>
+              <span>ภาพถ่ายมีพิกัดบนภาพ</span>
+            </span>
+            <span class="block text-[10px] font-normal text-gray-600 mt-0.5">
+              (หากติ๊กเลือก ระบบจะไม่ทำลายน้ำซ้ำบนภาพ และจะจำการตั้งค่านี้ไว้)
+            </span>
+          </label>
         </div>
 
         <!-- กล่องพิมพ์แก้ไขพิกัด Latitude และ Longitude (ตามข้อกำหนด 1) -->
@@ -8921,11 +9534,11 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-[10px] text-gray-500 mb-0.5 font-semibold">ละติจูด (Latitude)</label>
-              <input type="number" step="any" id="mobileUploadLatInput" value="${extractedLat ? Number(extractedLat).toFixed(6) : ''}" placeholder="เช่น 17.412345" class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none">
+              <input type="number" step="any" id="mobileUploadLatInput" value="${extractedLat ? formatFullCoordinateString(extractedLat, 6) : ''}" placeholder="เช่น 17.412345" class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none">
             </div>
             <div>
               <label class="block text-[10px] text-gray-500 mb-0.5 font-semibold">ลองจิจูด (Longitude)</label>
-              <input type="number" step="any" id="mobileUploadLngInput" value="${extractedLng ? Number(extractedLng).toFixed(6) : ''}" placeholder="เช่น 102.789012" class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none">
+              <input type="number" step="any" id="mobileUploadLngInput" value="${extractedLng ? formatFullCoordinateString(extractedLng, 6) : ''}" placeholder="เช่น 102.789012" class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white font-mono focus:ring-1 focus:ring-blue-500 focus:outline-none">
             </div>
           </div>
         </div>
@@ -8951,6 +9564,15 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
       const latInput = document.getElementById('mobileUploadLatInput');
       const lngInput = document.getElementById('mobileUploadLngInput');
       const gpsBox = document.getElementById('mobileUploadGpsInputBox');
+      const chkWatermark = document.getElementById('chkMobileHasWatermark');
+
+      if (chkWatermark) {
+        chkWatermark.addEventListener('change', (e) => {
+          const val = e.target.checked ? 'true' : 'false';
+          localStorage.setItem('slts_has_watermark', val);
+          localStorage.setItem('slts_desktop_has_watermark', val);
+        });
+      }
 
       fileInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
@@ -8978,11 +9600,11 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
               if (gps && gps.latitude && gps.longitude) {
                 extractedLat = gps.latitude;
                 extractedLng = gps.longitude;
-                if (latInput) latInput.value = extractedLat.toFixed(6);
-                if (lngInput) lngInput.value = extractedLng.toFixed(6);
+                if (latInput) latInput.value = formatFullCoordinateString(extractedLat, 6);
+                if (lngInput) lngInput.value = formatFullCoordinateString(extractedLng, 6);
                 if (gpsBox) gpsBox.classList.remove('hidden');
                 if (gpsText) {
-                  gpsText.innerHTML = `<b class="text-emerald-700"><i class="fa-solid fa-satellite mr-1"></i>พบพิกัดในรูปถ่าย:</b> ${extractedLat.toFixed(6)}, ${extractedLng.toFixed(6)}`;
+                  gpsText.innerHTML = `<b class="text-emerald-700"><i class="fa-solid fa-satellite mr-1"></i>พบพิกัดในรูปถ่าย:</b> ${formatFullCoordinateString(extractedLat, 6)}, ${formatFullCoordinateString(extractedLng, 6)}`;
                 }
               } else {
                 if (gpsBox) gpsBox.classList.remove('hidden');
@@ -9008,6 +9630,11 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
       }
       const latInput = document.getElementById('mobileUploadLatInput');
       const lngInput = document.getElementById('mobileUploadLngInput');
+      const chkWatermark = document.getElementById('chkMobileHasWatermark');
+      const hasWatermarkAlready = chkWatermark ? chkWatermark.checked : (localStorage.getItem('slts_has_watermark') === 'true');
+      localStorage.setItem('slts_has_watermark', hasWatermarkAlready ? 'true' : 'false');
+      localStorage.setItem('slts_desktop_has_watermark', hasWatermarkAlready ? 'true' : 'false');
+
       let finalLat = extractedLat;
       let finalLng = extractedLng;
       if (latInput && latInput.value.trim()) {
@@ -9021,7 +9648,8 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
       return {
         dataUrl: selectedDataUrl,
         lat: finalLat,
-        lng: finalLng
+        lng: finalLng,
+        hasWatermarkAlready: hasWatermarkAlready
       };
     }
   }).then((res) => {
@@ -9030,7 +9658,8 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
       showMobileSummonsFormModal(false, false, {
         attachedImage: res.value.dataUrl,
         lat: res.value.lat,
-        lng: res.value.lng
+        lng: res.value.lng,
+        hasWatermarkAlready: res.value.hasWatermarkAlready
       });
     }
   });
@@ -9094,8 +9723,8 @@ window.submitMobileManualUploadForm = async function() {
       subdistrict: finalSubdistrict,
       locationType: v.locType || (elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน'),
       locationText: locationText,
-      lat: coordsLat,
-      lng: coordsLng,
+      lat: formatFullCoordinateString(coordsLat, 6),
+      lng: formatFullCoordinateString(coordsLng, 6),
       heading: currentHeading,
       dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
       uploader: state.currentUser?.username || '',
@@ -9105,22 +9734,44 @@ window.submitMobileManualUploadForm = async function() {
       isManualUpload: true
     };
 
-    const watermarkedResult = await WatermarkEngine.renderWatermark(img, payloadData);
-    const baseFilename = caseNumber.replace(/\//g, '-');
-    const imageFilename = baseFilename + '.jpg';
-
-    const compressedImageBase64 = await compressImageToMax1MB(watermarkedResult.dataUrl);
-
-    const uploadPayload = {
-      action: 'upload_image',
-      ...payloadData,
-      fileName: imageFilename,
-      imageBase64: compressedImageBase64
-    };
-
     const activeTarget = state.activeRouteStopTarget;
     const origCaseNumber = activeTarget?.caseNumber || caseNumber;
     const targetStopIndex = (activeTarget && typeof activeTarget.index === 'number') ? activeTarget.index : undefined;
+
+    if ((!coordsLat || isNaN(coordsLat) || Number(coordsLat) === 0) && activeTarget?.lat && activeTarget?.lng) {
+      coordsLat = activeTarget.lat;
+      coordsLng = activeTarget.lng;
+      payloadData.lat = formatFullCoordinateString(coordsLat, 6);
+      payloadData.lng = formatFullCoordinateString(coordsLng, 6);
+    }
+
+    const hasWatermarkAlready = manualData.hasWatermarkAlready || (localStorage.getItem('slts_has_watermark') === 'true') || (localStorage.getItem('slts_desktop_has_watermark') === 'true');
+    let compressedImageBase64;
+    if (hasWatermarkAlready) {
+      // ผู้ใช้เลือก "ภาพถ่ายมีพิกัดบนภาพแล้ว" ข้ามการวาดลายน้ำซ้ำ
+      compressedImageBase64 = await compressImageToMax1MB(manualData.attachedImage);
+    } else {
+      const watermarkedResult = await WatermarkEngine.renderWatermark(img, payloadData);
+      compressedImageBase64 = await compressImageToMax1MB(watermarkedResult.dataUrl);
+    }
+
+    const baseFilename = caseNumber.replace(/\//g, '-');
+    const imageFilename = `${baseFilename}_manual_${Date.now()}.jpg`;
+
+    const uploadPayload = {
+      action: 'upload_image',
+      uploader: payloadData.uploader,
+      uploadedBy: payloadData.uploadedBy,
+      user_id: payloadData.user_id,
+      uploaderRole: payloadData.uploaderRole,
+      ...payloadData,
+      fileName: imageFilename,
+      imageBase64: compressedImageBase64,
+      isManualUpload: true,
+      forceUpdate: true,
+      overwrite: true,
+      oldFileId: activeTarget?.driveFileId || ''
+    };
 
     // ส่งเข้า Unified Multi-Tier Background Queue (100% เบื้องหลัง)
     const enqueued = enqueueBackgroundUpload({
@@ -9133,7 +9784,8 @@ window.submitMobileManualUploadForm = async function() {
       locationText: locationText,
       fileName: imageFilename,
       payload: uploadPayload,
-      isManualUpload: true
+      isManualUpload: true,
+      forceUpdate: true
     });
 
     if (typeof setRouteStopDeliveryStatus === 'function') {
@@ -9239,10 +9891,10 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
   const isManualUploadActive = !!(state.attachedManualUpload && state.attachedManualUpload.attachedImage);
 
   const curCoords = (manualUploadData && manualUploadData.lat && manualUploadData.lng)
-    ? `${Number(manualUploadData.lat).toFixed(6)}, ${Number(manualUploadData.lng).toFixed(6)}`
+    ? `${formatFullCoordinateString(manualUploadData.lat, 6)}, ${formatFullCoordinateString(manualUploadData.lng, 6)}`
     : ((state.attachedManualUpload && state.attachedManualUpload.lat && state.attachedManualUpload.lng)
-      ? `${Number(state.attachedManualUpload.lat).toFixed(6)}, ${Number(state.attachedManualUpload.lng).toFixed(6)}`
-      : ((state.tempModalValues?.coords !== undefined) ? state.tempModalValues.coords : (elements.coordinatesInput?.value || (state.lat ? `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}` : ''))));
+      ? `${formatFullCoordinateString(state.attachedManualUpload.lat, 6)}, ${formatFullCoordinateString(state.attachedManualUpload.lng, 6)}`
+      : ((state.tempModalValues?.coords !== undefined) ? state.tempModalValues.coords : (elements.coordinatesInput?.value || (state.lat ? `${formatFullCoordinateString(state.lat, 6)}, ${formatFullCoordinateString(state.lng, 6)}` : ''))));
 
   const currentThaiYear = new Date().getFullYear() + 543;
   let yearOpts = '';
@@ -9480,9 +10132,10 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
               <div class="flex items-center gap-2.5 min-w-0">
                 <img src="${state.attachedManualUpload.attachedImage}" class="w-12 h-12 rounded-xl object-cover border border-emerald-400 shrink-0 shadow-2xs">
                 <div class="min-w-0 text-left">
-                  <div class="flex items-center gap-1">
+                  <div class="flex items-center gap-1 flex-wrap">
                     <span class="text-[10px] bg-emerald-600 text-white font-bold px-1.5 py-0.2 rounded-full">มีรูปภาพแนบอยู่</span>
                     <span class="text-[10px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.2 rounded-full border border-purple-200">อัปโหลดรูปเอง</span>
+                    ${state.attachedManualUpload?.hasWatermarkAlready ? '<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.2 rounded-full border border-amber-200">ภาพมีพิกัดแล้ว</span>' : ''}
                   </div>
                   <p class="text-[10px] text-gray-500 truncate mt-0.5">พร้อมส่งเข้าคิวอัปโหลดเบื้องหลัง</p>
                 </div>
@@ -10898,6 +11551,15 @@ window.applySimilarRecordToDesktopForm = function(idx) {
   }
 };
 
+function stripAdministrativeSuffixes(text) {
+  if (!text) return '';
+  return text
+    .replace(/(?:\s*[,/]?\s*(?:ต\.|ตำบล)\s*([^\s,]+))/g, '')
+    .replace(/(?:\s*[,/]?\s*(?:อ\.|อำเภอ)\s*([^\s,]+))/g, '')
+    .replace(/(?:\s*[,/]?\s*(?:จ\.|จังหวัด)\s*([^\s,]+))/g, '')
+    .trim();
+}
+
 function getFullLocationText() {
   const province = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || localStorage.getItem('slts_selected_province') || '';
   const district = state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : '') || localStorage.getItem('slts_selected_district') || '';
@@ -10907,7 +11569,8 @@ function getFullLocationText() {
   const isBkk = province === 'กรุงเทพมหานคร';
   const subPrefix = isBkk ? '' : 'ต.';
   const distPrefix = isBkk ? '' : 'อ.';
-  const provSuffix = province ? ` จ.${province}` : '';
+  const provClean = province ? province.replace(/^(?:จ\.|จังหวัด)\s*/, '').trim() : '';
+  const provSuffix = provClean ? ` จ.${provClean}` : '';
 
   let addressPart = '';
   if (locationType === 'ที่ทำการปกครองส่วนท้องถิ่น') {
@@ -10921,14 +11584,26 @@ function getFullLocationText() {
     addressPart = `${houseNo}${mooText}`.trim();
   }
 
-  // Fallback if addressPart is empty and we have active stop locationText
-  if (!addressPart && state.activeRouteStopTarget?.locationText) {
-    return state.activeRouteStopTarget.locationText;
+  // ป้องกันตำบล/อำเภอ/จังหวัดซ้ำซ้อน: ตัดข้อความตำบล/อำเภอ/จังหวัด ออกจาก addressPart ก่อน
+  const cleanAddress = stripAdministrativeSuffixes(addressPart);
+
+  // ดึงตำบลและอำเภอจาก Dropdown/Select Option เท่านั้น
+  const cleanSub = subdistrict ? subdistrict.replace(/^(?:ต\.|ตำบล)\s*/, '').trim() : '';
+  const cleanDist = district ? district.replace(/^(?:อ\.|อำเภอ)\s*/, '').trim() : '';
+
+  const subText = cleanSub ? ` ${subPrefix}${cleanSub}` : '';
+  const distText = cleanDist ? ` ${distPrefix}${cleanDist}` : '';
+
+  // กรณี addressPart ว่าง และมี activeRouteStopTarget
+  if (!cleanAddress && state.activeRouteStopTarget?.locationText) {
+    const stopLoc = state.activeRouteStopTarget.locationText.trim();
+    if (stopLoc.includes('ต.') || stopLoc.includes('ตำบล') || stopLoc.includes('อ.') || stopLoc.includes('อำเภอ')) {
+      return stopLoc;
+    }
+    return `${stopLoc}${subText}${distText}${provSuffix}`.trim();
   }
 
-  const subText = subdistrict ? ` ${subPrefix}${subdistrict}` : '';
-  const distText = district ? ` ${distPrefix}${district}` : '';
-  const full = `${addressPart}${subText}${distText}${provSuffix}`.trim();
+  const full = `${cleanAddress}${subText}${distText}${provSuffix}`.trim();
   return full || (state.activeRouteStopTarget?.locationText || '');
 }
 
@@ -12907,8 +13582,9 @@ async function openCameraModal() {
   const initialGyroAngle = (window.compassManager && typeof window.compassManager.getDeviceAngle === 'function')
     ? window.compassManager.getDeviceAngle()
     : (state.deviceAngle || 0);
+  const isHardwareLandscape = (window.innerWidth > window.innerHeight) && (window.innerWidth < 1024);
   const isGyroLandscape = Math.abs(initialGyroAngle) === 90 || initialGyroAngle === 270;
-  setCaptureOrientation(isGyroLandscape ? 'landscape' : 'portrait');
+  setCaptureOrientation((isHardwareLandscape || isGyroLandscape) ? 'landscape' : 'portrait');
 
   if (elements.cameraModal) {
     elements.cameraModal.classList.remove('hidden');
@@ -12950,6 +13626,53 @@ function closeCameraModal() {
   elements.cameraModal.classList.add('hidden');
   elements.cameraModal.classList.remove('flex');
 }
+
+/**
+ * พักการทำงานของกล้องชั่วคราวเพื่อประหยัดพลังงาน CPU / GPU / Battery และป้องกันกล้องค้างบนมือถือ
+ * โดยใช้ track.enabled = false และ pause() วิดีโอแทนการทำลาย stream ทำให้กลับมาทำงานได้ทันที 0ms ไม่เกิดอาการค้าง
+ */
+window.pauseCameraStream = function() {
+  stopLiveCameraHUD();
+  if (state.cameraStream) {
+    state.cameraStream.getVideoTracks().forEach(track => {
+      try { track.enabled = false; } catch (e) {}
+    });
+  }
+  if (elements.videoPreview) {
+    try {
+      elements.videoPreview.pause();
+    } catch (e) {}
+  }
+  state.isCameraStreamPaused = true;
+};
+
+/**
+ * สตรีมกล้องต่อทันทีเมื่อปิดหน้าต่างแผนที่หรือโมดอล
+ */
+window.resumeCameraStream = async function() {
+  if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
+    state.isCameraStreamPaused = false;
+    if (state.cameraStream && state.cameraStream.active && state.cameraStream.getVideoTracks().some(t => t.readyState === 'live')) {
+      state.cameraStream.getVideoTracks().forEach(track => {
+        try { track.enabled = true; } catch (e) {}
+      });
+      if (elements.videoPreview) {
+        try {
+          if (!elements.videoPreview.srcObject) {
+            elements.videoPreview.srcObject = state.cameraStream;
+          }
+          await elements.videoPreview.play().catch(() => {});
+        } catch (e) {}
+      }
+    } else {
+      await startCameraStream();
+    }
+    startLiveCameraHUD();
+    if (typeof fetchCurrentLocation === 'function') {
+      fetchCurrentLocation(true);
+    }
+  }
+};
 
 /**
  * ปรับปรุงการวาด Live Camera HUD และเข็มทิศเพื่อลดการกินทรัพยากรเครื่อง (CPU / GPU / Battery):
@@ -13066,12 +13789,6 @@ window.freezeCameraStream = function() {
   // ยกเลิกการ freeze โหมดกล้องทุกกรณี
 };
 
-window.resumeCameraStream = function() {
-  // ยกเลิกการ freeze โหมดกล้องทุกกรณี
-  if (typeof fetchCurrentLocation === 'function') {
-    fetchCurrentLocation(true);
-  }
-};
 
 /**
  * ตรวจสอบว่าเปิดผ่าน In-App Browser (WebView เช่น LINE, Facebook, IG, ฯลฯ) หรือไม่
@@ -13367,10 +14084,14 @@ async function captureAndProcessPhoto() {
       subdistrict: finalSubdistrict,
       locationType: elements.locationTypeSelect.value,
       locationText: locationText,
-      lat: state.lat,
-      lng: state.lng,
+      lat: formatFullCoordinateString(state.lat, 6),
+      lng: formatFullCoordinateString(state.lng, 6),
       heading: currentHeading,
-      dateTime: WatermarkEngine.formatThaiDateTime(new Date())
+      dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+      uploader: state.currentUser?.username || '',
+      uploadedBy: state.currentUser?.username || '',
+      user_id: state.currentUser?.username || '',
+      uploaderRole: state.currentUser?.role || 'user'
     };
 
     let rotationDeg = 0;
@@ -13411,6 +14132,11 @@ async function captureAndProcessPhoto() {
     const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
 
     const uploadPayload = {
+      action: 'upload_image',
+      uploader: payloadData.uploader,
+      uploadedBy: payloadData.uploadedBy,
+      user_id: payloadData.user_id,
+      uploaderRole: payloadData.uploaderRole,
       ...payloadData,
       fileName: imageFilename,
       imageBase64: compressedImageBase64
@@ -13736,6 +14462,13 @@ function resetFormForNextCase() {
   if (elements.customOtherLocationName) elements.customOtherLocationName.value = '';
   const similarCard = document.getElementById('desktopSimilarRecordsCard');
   if (similarCard) similarCard.classList.add('hidden');
+
+  // รีเซ็ต activeRouteStopTarget และเคลียร์ออกจาก localStorage
+  state.activeRouteStopTarget = null;
+  try {
+    localStorage.removeItem('slts_active_route_target');
+    localStorage.removeItem('slts_active_route_form_data');
+  } catch (e) {}
 
   // ข้อ 2: ยกเลิกการแสดง Pop Up "ฟอร์มบันทึกการส่งหมาย" เมื่อมีการถ่ายภาพแล้ว (พร้อมถ่ายภาพหมายถัดไปทันที)
 }
@@ -18829,7 +19562,7 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
 
           ${directThumbUrl ? `
             <div class="pt-0.5">
-              <div class="relative w-full h-32 bg-gray-100 rounded-xl overflow-hidden border border-gray-200 group cursor-pointer shadow-xs" onclick="viewPhotoModal('${rawImgUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')" title="คลิกเพื่อดูภาพขนาดเต็ม">
+              <div class="relative w-full h-32 bg-gray-100 rounded-xl overflow-hidden border border-gray-200 group cursor-pointer shadow-xs" onclick="if(window.pushMobileModalState) window.pushMobileModalState(() => window.showMobileRouteMapModal && window.showMobileRouteMapModal()); if(window.viewPhotoModal) window.viewPhotoModal('${rawImgUrl}', '${safeCase}', '${safeLoc}', '${safeDate}', '${stop.lat}', '${stop.lng}')" title="คลิกเพื่อดูภาพขนาดเต็ม">
                 <img src="${directThumbUrl}" 
                      alt="ภาพถ่ายหมาย: ${safeCase}" 
                      class="w-full h-full object-cover transition duration-200 group-hover:scale-105" 
@@ -18848,7 +19581,7 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
           ` : ''}
 
           <div class="pt-1 flex gap-1.5">
-            <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white !text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5" style="color: #ffffff !important; text-decoration: none;">
+            <a href="https://www.google.com/maps?q=${stop.lat},${stop.lng}" target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white !text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5" style="color: #ffffff !important; text-decoration: none;">
               <i class="fa-solid fa-diamond-turn-right text-xs text-white" style="color: #ffffff !important;"></i>
               <span class="text-white font-bold" style="color: #ffffff !important;">นำทาง Google Maps</span>
             </a>
@@ -19412,7 +20145,10 @@ window.openFullRouteInGoogleMaps = function() {
     return;
   }
 
-  const origin = `${start.lat},${start.lng}`;
+  let origin = `${start.lat},${start.lng}`;
+  if (isMobileView() && state.lat && state.lng && !isNaN(state.lat) && !isNaN(state.lng) && Number(state.lat) > 0 && Number(state.lng) > 0) {
+    origin = `${state.lat},${state.lng}`;
+  }
   let destination = '';
   let waypoints = [];
 
@@ -20134,6 +20870,14 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
   state.tempModalValues = formData;
   applyModalFormValues(formData);
 
+  // บันทึกลง localStorage ข้ามการ Clear App หรือ Refresh
+  try {
+    localStorage.setItem('slts_active_route_target', JSON.stringify(state.activeRouteStopTarget));
+    localStorage.setItem('slts_active_route_form_data', JSON.stringify(formData));
+  } catch (e) {
+    console.warn('Failed to save activeRouteStopTarget to localStorage:', e);
+  }
+
   if (coordsStr && elements.coordinatesInput) {
     elements.coordinatesInput.value = coordsStr;
   }
@@ -20164,6 +20908,270 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
   }
 
   // 7. นำเข้าข้อมูลเรียบร้อย ไม่ต้องแสดง Little Notification ตามความต้องการของผู้ใช้งาน
+};
+
+/**
+ * ผู้ใช้แจ้งเปลี่ยนสถานะจุดส่งหมายเป็น "ส่งหมายแล้ว" ด้วยตนเอง (Manual Mark as Delivered)
+ */
+window.markStopDeliveredManually = async function(stopIndex) {
+  const stops = state.currentRouteStops || [];
+  const stop = typeof stopIndex === 'number' ? stops[stopIndex] : (stopIndex || stops[0]);
+  if (!stop) return;
+
+  const caseNum = stop.caseNumber || 'ไม่ระบุ';
+  const locText = stop.locationText || '-';
+
+  const res = await Swal.fire({
+    title: 'ยืนยันแจ้งส่งหมายแล้ว?',
+    html: `
+      <div class="text-left text-xs space-y-2 text-gray-700 leading-relaxed">
+        <p>คุณต้องการเปลี่ยนสถานะจุดส่งหมายลำดับที่ ${typeof stopIndex === 'number' ? stopIndex + 1 : '-'} เป็น <span class="text-emerald-700 font-bold">"ส่งหมายแล้ว (สีเทา)"</span> หรือไม่?</p>
+        <div class="p-2.5 bg-gray-50 rounded-xl border border-gray-200 text-xs">
+          <p><strong>⚖️ เลขคดี:</strong> ${escapeHtml(caseNum)}</p>
+          <p class="truncate"><strong>🏠 สถานที่:</strong> ${escapeHtml(locText)}</p>
+        </div>
+      </div>
+    `,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-check mr-1"></i> ยืนยันส่งแล้ว',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#059669',
+    cancelButtonColor: '#6b7280'
+  });
+
+  if (!res.isConfirmed) return;
+
+  if (typeof setRouteStopDeliveryStatus === 'function') {
+    setRouteStopDeliveryStatus(stop.caseNumber, 'uploaded', {
+      originalCaseNumber: stop.originalCaseNumber || stop.caseNumber,
+      routeStopIndex: typeof stopIndex === 'number' ? stopIndex : undefined,
+      locationText: stop.locationText,
+      id: stop.id,
+      uploadedAt: new Date().toISOString(),
+      manuallyMarked: true
+    });
+  }
+
+  // ลบรายการใน Background Queue สำหรับจุดนี้ออก (ถ้ามีค้างอยู่)
+  let queue = getBackgroundQueue();
+  const filteredQueue = queue.filter(item => {
+    if (stop.id && item.stopId && item.stopId === stop.id) return false;
+    if (stop.caseNumber && item.caseNumber && String(item.caseNumber).trim() === String(stop.caseNumber).trim()) return false;
+    return true;
+  });
+  if (filteredQueue.length !== queue.length) {
+    saveBackgroundQueue(filteredQueue);
+    updateBackgroundQueueUI();
+  }
+
+  saveRouteToServer();
+  localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+
+  // อัปเดต UI ทันที
+  if (typeof renderMobileRouteList === 'function' && document.getElementById('mobileMapRouteStopsList')) {
+    renderMobileRouteList();
+  }
+  if (typeof renderRouteBatchTab === 'function') {
+    renderRouteBatchTab();
+  }
+
+  if (typeof showSystemToast === 'function') {
+    showSystemToast(`แจ้งส่งหมายคดี ${caseNum} แล้วเรียบร้อย`, 'success');
+  }
+};
+
+/**
+ * ปุ่มแนบรูปภาพส่งหมายด้วยตนเอง (Manual Photo Upload สำหรับจุดส่งหมาย)
+ */
+window.triggerManualStopUpload = async function(stopIndex) {
+  const stops = state.currentRouteStops || [];
+  const stop = typeof stopIndex === 'number' ? stops[stopIndex] : (stopIndex || stops[0]);
+  if (!stop) return;
+
+  // นำจุดนี้เข้าสู่ activeRouteStopTarget พร้อมพิกัดจุดหมาย
+  state.activeRouteStopTarget = {
+    index: typeof stopIndex === 'number' ? stopIndex : 0,
+    caseNumber: stop.caseNumber,
+    id: stop.id,
+    locationText: stop.locationText,
+    lat: stop.lat,
+    lng: stop.lng
+  };
+  try {
+    localStorage.setItem('slts_active_route_target', JSON.stringify(state.activeRouteStopTarget));
+  } catch (e) {}
+
+  // เปิดหน้าต่างแนบภาพถ่ายส่งหมายได้ทันทีทุกอุปกรณ์ (Mobile, Tablet, Desktop)
+  if (typeof showMobileUploadPhotoModal === 'function') {
+    showMobileUploadPhotoModal();
+  } else {
+    if (typeof switchTab === 'function') {
+      switchTab('form');
+    }
+    const fileInput = elements.desktopImageFileInput || document.getElementById('desktopImageFileInput');
+    if (fileInput) {
+      fileInput.click();
+    }
+  }
+};
+
+/**
+ * ปุ่มอัพโหลดอีกครั้งสำหรับแต่ละรายการส่งหมาย (Retry Upload Single Stop)
+ * รองรับทั้งรายการที่ค้างในคิว, รายการที่มีภาพถ่ายออฟไลน์แต่ยังไม่ได้ขึ้นฐานข้อมูล,
+ * และรายการที่ต้องการถ่ายหรือเลือกรูปภาพใหม่เพื่อบังคับอัพเดทขึ้น Server
+ */
+window.retryStopUpload = async function(stopIndex) {
+  const stops = state.currentRouteStops || [];
+  const stop = typeof stopIndex === 'number' ? stops[stopIndex] : (stopIndex || stops[0]);
+  if (!stop) {
+    if (typeof showSystemToast === 'function') {
+      showSystemToast('ไม่พบข้อมูลจุดส่งหมาย', 'warning');
+    }
+    return;
+  }
+
+  const sCase = String(stop.caseNumber || '').trim();
+  const safeCase = (typeof escapeHtml === 'function' ? escapeHtml(sCase) : sCase) || 'ไม่ระบุเลขคดี';
+
+  // 1. ตรวจสอบในคิวส่งข้อมูลเบื้องหลัง (Background Queue) ก่อน
+  let queue = getBackgroundQueue();
+  const matchingIndices = [];
+  queue.forEach((item, idx) => {
+    const itemCase = String(item.caseNumber || item.caseNo || '').trim();
+    if (
+      (sCase && itemCase && (itemCase === sCase || (typeof matchCaseNumbers === 'function' && matchCaseNumbers(itemCase, sCase)))) ||
+      (stop.id && item.stopId && String(item.stopId) === String(stop.id))
+    ) {
+      matchingIndices.push(idx);
+    }
+  });
+
+  if (matchingIndices.length > 0) {
+    // พบรายการในคิว ให้รีเซ็ตสถานะเป็น pending, ล้าง retryCount, บังคับ forceUpdate / overwrite
+    matchingIndices.forEach(idx => {
+      queue[idx].status = 'pending';
+      queue[idx].retryCount = 0;
+      queue[idx].forceUpdate = true;
+      queue[idx].isManualUpload = true;
+      queue[idx].overwrite = true;
+      delete queue[idx].lastError;
+      delete queue[idx].failedAt;
+    });
+    // เลื่อนรายการที่เลือกมาไว้หน้าสุด
+    const selectedItems = matchingIndices.map(idx => queue[idx]);
+    const otherItems = queue.filter((_, idx) => !matchingIndices.includes(idx));
+    queue = [...selectedItems, ...otherItems];
+    saveBackgroundQueue(queue);
+
+    if (typeof showSystemToast === 'function') {
+      showSystemToast(`กำลังอัพโหลดหมายคดี ${sCase} ใหม่อีกครั้ง...`, 'info');
+    }
+
+    // ปลดล็อคและประมวลผลคิวทันที
+    _isProcessingQueue = false;
+    processBackgroundQueue();
+    return;
+  }
+
+  // 2. ถ้าไม่อยู่ในคิว แต่มีภาพถ่ายที่บันทึกไว้ในจุดนี้ (offline photo / captured photo / new photo)
+  const newPhotoData = typeof getNewlyUploadedPhotoForStop === 'function' ? getNewlyUploadedPhotoForStop(stop) : null;
+  const photoCandidate = stop.capturedPhotoUrl || (stop.photoData && stop.photoData.rawUrl) || (newPhotoData && newPhotoData.url);
+
+  // ตรวจสอบว่ารูปนี้เป็นภาพอ้างอิงจากการจัดเส้นทางหรือไม่ (ห้ามนำภาพอ้างอิงมาอัพโหลด)
+  const refImgs = [stop.planImageUrl, stop.customRoutePlanImg].filter(Boolean);
+  const isReferenceOnly = !photoCandidate || refImgs.includes(photoCandidate);
+
+  if (photoCandidate && !isReferenceOnly && (photoCandidate.startsWith('data:image') || photoCandidate.startsWith('blob:'))) {
+    const safeBaseName = (sCase || 'stop_' + (typeof stopIndex === 'number' ? stopIndex + 1 : 1)).replace(/[^a-zA-Z0-9ก-๙_-]/g, '_');
+    const timestamp = Date.now();
+    const fileName = `${safeBaseName}_retry_${timestamp}.jpg`;
+    
+    let lat = stop.lat || (state.userLocation && state.userLocation.lat) || 0;
+    let lng = stop.lng || (state.userLocation && state.userLocation.lng) || 0;
+    let heading = (typeof getCompassHeading === 'function' ? getCompassHeading() : (state.compassHeading || 0));
+
+    enqueueBackgroundUpload({
+      caseNumber: sCase,
+      stopId: stop.id || ('stop_' + stopIndex),
+      locationText: stop.locationText || '',
+      base64Image: photoCandidate,
+      fileName: fileName,
+      lat: lat,
+      lng: lng,
+      heading: heading,
+      timestamp: timestamp,
+      forceUpdate: true,
+      isManualUpload: true,
+      overwrite: true,
+      uploader: (state.currentUser && state.currentUser.name) || ''
+    });
+
+    if (typeof showSystemToast === 'function') {
+      showSystemToast(`ส่งข้อมูลหมายคดี ${sCase} เข้าระบบคิวอัพโหลดใหม่แล้ว`, 'success');
+    }
+
+    _isProcessingQueue = false;
+    processBackgroundQueue();
+    return;
+  }
+
+  // 3. ถ้าไม่มีภาพในหน่วยความจำชั่วคราว (หรือภาพเดิมอยู่บน Google Drive Server แล้ว)
+  // ให้บันทึก activeRouteStopTarget และเปิดกล่องเลือกให้ผู้ใช้เลือกว่าจะแนบไฟล์หรือเปิดกล้องถ่ายใหม่
+  state.activeRouteStopTarget = {
+    index: typeof stopIndex === 'number' ? stopIndex : 0,
+    caseNumber: stop.caseNumber,
+    id: stop.id,
+    locationText: stop.locationText
+  };
+  try {
+    localStorage.setItem('slts_active_route_target', JSON.stringify(state.activeRouteStopTarget));
+  } catch (e) {}
+
+  if (typeof Swal !== 'undefined') {
+    const safeCaseDisplay = typeof escapeHtml === 'function' ? escapeHtml(sCase) : sCase;
+    const result = await Swal.fire({
+      icon: 'question',
+      title: 'อัพโหลดหมายอีกครั้ง',
+      html: `
+        <div class="text-left text-xs text-gray-600 space-y-2">
+          <p class="font-bold text-gray-800 text-sm">หมายเลขคดี: <span class="text-blue-600 font-mono font-bold">${safeCaseDisplay || '-'}</span></p>
+          <p class="text-gray-500">${stop.locationText || 'ไม่มีรายละเอียดที่อยู่'}</p>
+          <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 leading-relaxed">
+            <i class="fa-solid fa-circle-info mr-1 text-amber-600"></i> เลือกวิธีอัพโหลดใหม่อีกครั้งสำหรับหมายนี้ เพื่อบันทึกภาพและอัพเดทข้อมูลลงฐานข้อมูล Server
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: '<i class="fa-solid fa-file-arrow-up mr-1"></i> แนบรูปภาพส่งใหม่',
+      cancelButtonText: 'ยกเลิก',
+      showDenyButton: true,
+      denyButtonText: '<i class="fa-solid fa-camera mr-1"></i> เปิดกล้องถ่ายใหม่',
+      confirmButtonColor: '#9333ea',
+      denyButtonColor: '#059669',
+      cancelButtonColor: '#64748b',
+      customClass: {
+        popup: 'rounded-2xl shadow-xl',
+        confirmButton: 'rounded-xl font-bold px-4 py-2 text-xs',
+        denyButton: 'rounded-xl font-bold px-4 py-2 text-xs',
+        cancelButton: 'rounded-xl font-bold px-4 py-2 text-xs'
+      }
+    });
+
+    if (result.isConfirmed) {
+      if (typeof triggerManualStopUpload === 'function') {
+        triggerManualStopUpload(stopIndex);
+      }
+    } else if (result.isDenied) {
+      if (typeof loadRouteStopIntoSummonsFormAndCamera === 'function') {
+        loadRouteStopIntoSummonsFormAndCamera(stopIndex);
+      }
+    }
+  } else {
+    if (typeof triggerManualStopUpload === 'function') {
+      triggerManualStopUpload(stopIndex);
+    }
+  }
 };
 
 /**
@@ -21998,13 +23006,30 @@ window.renderRouteBatchTab = function() {
       `;
     }
 
-    // คอลัมน์นำทาง
+    // คอลัมน์นำทางและการจัดการ
     const hasCoords = stop.lat && stop.lng && !isNaN(stop.lat) && !isNaN(stop.lng) && Number(stop.lat) > 0;
     const navHtml = hasCoords ? `
-      <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-[11px] transition inline-flex items-center gap-1 border border-blue-200 cursor-pointer shadow-2xs">
+      <a href="https://www.google.com/maps?q=${stop.lat},${stop.lng}" target="_blank" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-[11px] transition inline-flex items-center gap-1 border border-blue-200 cursor-pointer shadow-2xs" title="ปักหมุดพิกัดใน Google Maps">
         <i class="fa-solid fa-location-arrow"></i> นำทาง
       </a>
     ` : `<span class="text-gray-300 text-[10px]">ไม่มีพิกัด</span>`;
+
+    const actionsColHtml = `
+      <div class="flex items-center justify-center gap-1.5 flex-wrap">
+        ${navHtml}
+        <button type="button" onclick="triggerManualStopUpload(${index})" class="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-lg text-[11px] transition inline-flex items-center gap-1 border border-purple-200 cursor-pointer shadow-2xs" title="แนบไฟล์ภาพถ่ายส่งหมาย">
+          <i class="fa-solid fa-file-arrow-up text-[10px]"></i> แนบภาพ
+        </button>
+        <button type="button" onclick="retryStopUpload(${index})" class="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-lg text-[11px] transition inline-flex items-center gap-1 border border-amber-300 cursor-pointer shadow-2xs" title="อัพโหลดหมายนี้อีกครั้ง">
+          <i class="fa-solid fa-cloud-arrow-up text-[10px] text-amber-600"></i> อัพโหลดอีกครั้ง
+        </button>
+        ${stop.deliveryStatus !== 'uploaded' ? `
+          <button type="button" onclick="markStopDeliveredManually(${index})" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-[11px] transition inline-flex items-center gap-1 border border-slate-300 cursor-pointer shadow-2xs" title="แจ้งส่งหมายแล้ว">
+            <i class="fa-solid fa-check-double text-[10px] text-emerald-600"></i> ส่งแล้ว
+          </button>
+        ` : ''}
+      </div>
+    `;
 
     rowsHtml += `
       <tr class="${rowBg} transition border-b border-gray-100">
@@ -22034,7 +23059,7 @@ window.renderRouteBatchTab = function() {
           ${downloadColHtml}
         </td>
         <td class="py-3 px-3 text-center">
-          ${navHtml}
+          ${actionsColHtml}
         </td>
       </tr>
     `;
@@ -22334,7 +23359,164 @@ function urlToBase64ViaImage(url) {
   });
 }
 
+/**
+ * ตรวจสอบและบังคับอัปโหลดใหม่อีกครั้งสำหรับหน้ารายการแผนที่เส้นทางส่งหมายบนมือถือ
+ */
+window.triggerCheckAndRetryUploads = async function(silent = false) {
+  const isOnline = navigator.onLine;
+  let queue = (typeof getBackgroundQueue === 'function') ? getBackgroundQueue() : [];
+  
+  if (!silent) {
+    showCustomLoading('กำลังตรวจสอบสถานะการอัปโหลด...', 'ระบบกำลังตรวจสอบรายการและเชื่อมต่อ Server');
+  }
+
+  // 1. ตรวจสอบและรีเซ็ตรายการในคิวที่ค้างหรือล้มเหลว
+  let resetCount = 0;
+  queue.forEach(item => {
+    if (item.status === 'failed' || item.status === 'offline' || (item.status === 'uploading' && !isBgQueueWorkerRunning)) {
+      item.status = 'pending';
+      item.retryCount = 0;
+      delete item.uploadStartedAt;
+      resetCount++;
+    }
+  });
+
+  // 2. ตรวจสอบจุดส่งหมายใน state.currentRouteStops ที่ถ่ายรูปแล้ว (captured_offline) แต่ยังไม่ถูกส่ง
+  const stops = state.currentRouteStops || [];
+  let enqueuedFromStops = 0;
+  stops.forEach((stop, idx) => {
+    if (stop.deliveryStatus === 'captured_offline' && stop.capturedPhotoUrl) {
+      const alreadyInQueue = queue.some(q => 
+        (q.stopId && stop.id && q.stopId === stop.id) ||
+        (q.caseNumber && stop.caseNumber && q.caseNumber.trim() === stop.caseNumber.trim())
+      );
+      if (!alreadyInQueue) {
+        const caseNum = stop.caseNumber || `หมายที่_${idx + 1}`;
+        const baseFilename = caseNum.replace(/\//g, '-');
+        const imgName = `${baseFilename}_retry_${Date.now()}.jpg`;
+        const payloadData = {
+          action: 'upload_image',
+          caseNumber: caseNum,
+          courtType: stop.courtType || '',
+          province: stop.province || state.selectedProvince || 'อุดรธานี',
+          district: stop.district || '',
+          subdistrict: stop.subdistrict || '',
+          locationType: stop.locationType || 'หมายบ้าน',
+          locationText: stop.locationText || '',
+          lat: formatFullCoordinateString(stop.lat, 6),
+          lng: formatFullCoordinateString(stop.lng, 6),
+          heading: 0,
+          dateTime: (typeof WatermarkEngine !== 'undefined') ? WatermarkEngine.formatThaiDateTime(new Date()) : new Date().toLocaleString('th-TH'),
+          uploader: state.currentUser?.username || '',
+          uploadedBy: state.currentUser?.username || '',
+          user_id: state.currentUser?.username || '',
+          uploaderRole: state.currentUser?.role || 'user',
+          isManualUpload: true,
+          forceUpdate: true,
+          fileName: imgName,
+          imageBase64: stop.capturedPhotoUrl
+        };
+        const task = {
+          id: 'bg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+          caseNumber: caseNum,
+          originalCaseNumber: stop.caseNumber,
+          routeStopIndex: idx,
+          stopId: stop.id,
+          capturedPhotoUrl: stop.capturedPhotoUrl,
+          locationText: stop.locationText,
+          fileName: imgName,
+          payload: payloadData,
+          status: 'pending',
+          retryCount: 0,
+          createdAt: new Date().toISOString()
+        };
+        queue.push(task);
+        enqueuedFromStops++;
+      }
+    }
+  });
+
+  saveBackgroundQueue(queue);
+
+  // 3. ปลดล็อค Worker Lock และเริ่มกระบวนการอัปโหลด
+  isBgQueueWorkerRunning = false;
+  bgQueueWorkerStartTime = 0;
+
+  if (isOnline) {
+    if (typeof processBackgroundQueue === 'function') {
+      processBackgroundQueue();
+    }
+    // ซิงค์ข้อมูลล่าสุดจาก Google Sheet
+    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+    if (typeof loadGoogleSheetData === 'function') {
+      await loadGoogleSheetData(true, true);
+    }
+    // ซิงค์สถานะเส้นทางจาก Server
+    if (typeof fetchActiveRouteFromServer === 'function') {
+      await fetchActiveRouteFromServer();
+    }
+  }
+
+  // 4. ซิงค์สถานะและรีเรนเดอร์ UI
+  if (typeof syncStopsWithDeliveryStatus === 'function') {
+    syncStopsWithDeliveryStatus(state.currentRouteStops);
+  }
+  if (document.getElementById('mobileMapRouteStopsList')) {
+    renderMobileRouteList();
+  }
+  if (window.mobileModalMap && document.getElementById('mobileModalLeafletMap')) {
+    initMobileModalMapInstance();
+  }
+  if (typeof updateBackgroundQueueUI === 'function') {
+    updateBackgroundQueueUI();
+  }
+  if (typeof updateCameraTopBarUI === 'function') {
+    updateCameraTopBarUI();
+  }
+
+  hideCustomLoading();
+
+  // 5. แจ้งผลลัพธ์ให้ผู้ใช้ทราบอย่างชัดเจน
+  const remainingQueue = getBackgroundQueue();
+  const pendingCount = remainingQueue.filter(q => q.status !== 'failed').length;
+  const failedCount = remainingQueue.filter(q => q.status === 'failed').length;
+
+  if (!silent) {
+    if (!isOnline) {
+      Swal.fire({
+        icon: 'info',
+        title: 'อุปกรณ์กำลังออฟไลน์',
+        text: `บันทึกรายการในคิวแล้ว (${remainingQueue.length} รายการ) ระบบจะนำส่งข้อมูลขึ้น Server อัตโนมัติเมื่อเชื่อมต่ออินเทอร์เน็ต`,
+        confirmButtonText: 'รับทราบ',
+        confirmButtonColor: '#2563eb'
+      });
+    } else if (pendingCount > 0) {
+      Swal.fire({
+        icon: 'success',
+        title: 'เริ่มส่งข้อมูลแล้ว',
+        html: `กำลังนำส่งข้อมูลขึ้น Server จำนวน <b>${pendingCount}</b> รายการในเบื้องหลัง${failedCount > 0 ? `<br><span class="text-xs text-red-600">(พบรายการไม่สำเร็จ ${failedCount} รายการ)</span>` : ''}`,
+        timer: 2500,
+        timerProgressBar: true,
+        showConfirmButton: false
+      });
+    } else {
+      Swal.fire({
+        icon: 'success',
+        title: 'ตรวจสอบเรียบร้อย',
+        text: 'ทุกรายการส่งหมายนำส่งขึ้น Server และบันทึกลงฐานข้อมูลเรียบร้อยแล้ว',
+        timer: 2000,
+        timerProgressBar: true,
+        showConfirmButton: false
+      });
+    }
+  }
+};
+
 window.showMobileRouteMapModal = function() {
+  if (typeof window.pauseCameraStream === 'function') {
+    window.pauseCameraStream();
+  }
   if (typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('ดูแผนที่และเส้นทางส่งหมาย')) {
     return;
   }
@@ -22385,10 +23567,17 @@ window.showMobileRouteMapModal = function() {
       <div class="slts-province-modal flex flex-col h-[88dvh] overflow-hidden bg-gray-50">
         <!-- Header -->
         <div class="slts-modal-header flex-shrink-0 px-3.5 py-2.5 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white flex items-center justify-between shadow-sm">
-          <!-- ปุ่มรีเฟรชข้อมูลเส้นทาง -->
-          <button type="button" onclick="showMobileRouteMapModal()" class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs font-bold transition cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
-            <i class="fa-solid fa-rotate-right"></i>
-          </button>
+          <div class="flex items-center gap-1 flex-shrink-0">
+            <!-- ปุ่มรีเฟรชข้อมูลเส้นทาง -->
+            <button type="button" onclick="showMobileRouteMapModal()" class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs font-bold transition cursor-pointer" title="รีเฟรชข้อมูลเส้นทาง">
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+            <!-- ปุ่มตรวจสอบเพื่ออัพโหลดใหม่อีกครั้ง -->
+            <button type="button" onclick="triggerCheckAndRetryUploads()" class="px-2 py-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer" title="ตรวจสอบเพื่ออัพโหลดใหม่อีกครั้ง">
+              <i class="fa-solid fa-cloud-arrow-up text-[11px]"></i>
+              <span class="text-[10px] hidden xs:inline">ตรวจสอบส่งใหม่</span>
+            </button>
+          </div>
           <div class="flex-1 text-center px-2">
             <h2 class="text-xs font-bold text-white truncate">🗺️ แผนที่เส้นทางส่งหมาย</h2>
             <p class="text-[10px] text-blue-100 truncate">📍 จ.${prov} (${stops.length} จุดหมาย)</p>
@@ -22460,6 +23649,19 @@ window.showMobileRouteMapModal = function() {
       setTimeout(() => {
         initMobileModalMapInstance();
       }, 200);
+    },
+    willClose: () => {
+      if (window.mobileModalMap) {
+        try {
+          window.mobileModalMap.stop();
+          window.mobileModalMap.remove();
+        } catch (e) {}
+        window.mobileModalMap = null;
+        window.mobileModalMarkersLayer = null;
+      }
+      if (typeof window.resumeCameraStream === 'function') {
+        window.resumeCameraStream();
+      }
     }
   });
 };
@@ -22599,7 +23801,20 @@ window.initMobileModalMapInstance = function() {
           <p class="text-[11px] text-gray-600 leading-snug">${stop.locationText}</p>
           <div class="flex flex-col gap-1.5 pt-1">
             ${captureBtnHtml}
-            <a href="https://www.google.com/maps/dir/?api=1&destination=${sLat},${sLng}" target="_blank" class="w-full py-0.5 text-center inline-flex items-center justify-center gap-1 text-[10px] text-blue-600 font-bold hover:underline">
+            <div class="flex items-center gap-1 flex-wrap">
+              <button type="button" onclick="triggerManualStopUpload(${stopIndex})" class="flex-1 py-1 px-1.5 bg-purple-50 hover:bg-purple-100 active:scale-95 text-purple-700 border border-purple-200 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition shadow-2xs" title="แนบภาพถ่ายส่งหมาย">
+                <i class="fa-solid fa-file-arrow-up text-[10px]"></i> แนบภาพ
+              </button>
+              <button type="button" onclick="retryStopUpload(${stopIndex})" class="flex-1 py-1 px-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white border border-amber-600 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition shadow-xs" title="อัพโหลดหมายนี้อีกครั้ง">
+                <i class="fa-solid fa-cloud-arrow-up text-[10px]"></i> อัพโหลดอีกครั้ง
+              </button>
+              ${delStatus !== 'uploaded' ? `
+                <button type="button" onclick="markStopDeliveredManually(${stopIndex})" class="flex-1 py-1 px-1.5 bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 border border-slate-300 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition shadow-2xs" title="แจ้งส่งหมายแล้ว">
+                  <i class="fa-solid fa-check-double text-[10px] text-emerald-600"></i> ส่งแล้ว
+                </button>
+              ` : ''}
+            </div>
+            <a href="https://www.google.com/maps?q=${sLat},${sLng}" target="_blank" class="w-full py-0.5 text-center inline-flex items-center justify-center gap-1 text-[10px] text-blue-600 font-bold hover:underline">
               <i class="fa-solid fa-location-arrow"></i> นำทางจุดนี้ด้วย Google Maps
             </a>
           </div>
@@ -22723,8 +23938,38 @@ window.renderMobileRouteList = function() {
 
   let pinCounter = 1;
 
-  // 1. หมุดจุดเริ่มต้นด้านบนสุด
+  const queue = (typeof getBackgroundQueue === 'function') ? getBackgroundQueue() : [];
+  const pendingQueueCount = queue.filter(q => q.status !== 'failed').length;
+  const offlineStopsCount = stops.filter(s => s.deliveryStatus === 'captured_offline').length;
+  const pendingTotal = Math.max(pendingQueueCount, offlineStopsCount);
+
+  // 0. แถบปุ่มตรวจสอบเพื่ออัพโหลดใหม่อีกครั้ง
   let html = `
+    <div class="p-2.5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 shadow-2xs space-y-2 mb-2">
+      <div class="flex items-center justify-between text-xs">
+        <span class="font-bold text-amber-950 flex items-center gap-1.5">
+          <i class="fa-solid fa-satellite-dish text-amber-600"></i>
+          <span>สถานะการนำส่งหมาย</span>
+        </span>
+        ${pendingTotal > 0 ? `
+          <span class="text-[10px] font-bold text-amber-800 bg-amber-200/90 px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1">
+            <i class="fa-solid fa-clock"></i> รอส่ง ${pendingTotal} รายการ
+          </span>
+        ` : `
+          <span class="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <i class="fa-solid fa-circle-check text-emerald-600"></i> ข้อมูลบน Server ล่าสุดแล้ว
+          </span>
+        `}
+      </div>
+      <button type="button" onclick="triggerCheckAndRetryUploads()" class="w-full py-2 px-3 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 active:scale-98 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs cursor-pointer transition">
+        <i class="fa-solid fa-cloud-arrow-up text-amber-100"></i>
+        <span>ทำการตรวจสอบเพื่ออัพโหลดใหม่อีกครั้ง</span>
+      </button>
+    </div>
+  `;
+
+  // 1. หมุดจุดเริ่มต้นด้านบนสุด
+  html += `
     <div class="p-2.5 rounded-2xl border border-blue-200 bg-blue-50/80 flex items-start gap-2 text-xs shadow-2xs">
       <span class="w-6 h-6 rounded-full bg-blue-700 text-white text-[12px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5 shadow-xs">
         🏛️
@@ -22811,13 +24056,24 @@ window.renderMobileRouteList = function() {
           <div class="flex items-center justify-between mt-1 text-[10px]">
             ${isExact ? `<span class="text-emerald-700 font-bold flex items-center gap-1"><i class="fa-solid fa-circle-check text-[9px]"></i> มีพิกัดตรง</span>` : (isNear ? `<span class="text-amber-800 font-bold flex items-center gap-1"><i class="fa-solid fa-location-dot text-[9px]"></i> ${stop.matchNote || 'ใกล้เคียง'}</span>` : `<span class="text-gray-400">○ ไม่มีหมุดในระบบ</span>`)}
             ${hasPin ? `
-              <a href="https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}" target="_blank" class="text-blue-600 hover:text-blue-800 font-bold underline flex items-center gap-1">
+              <a href="https://www.google.com/maps?q=${stop.lat},${stop.lng}" target="_blank" class="text-blue-600 hover:text-blue-800 font-bold underline flex items-center gap-1">
                 <i class="fa-solid fa-location-arrow"></i> นำทาง
               </a>
             ` : ''}
           </div>
-          <div class="mt-2 pt-1.5 border-t border-gray-100 flex items-center gap-1.5">
+          <div class="mt-2 pt-1.5 border-t border-gray-100 flex items-center gap-1.5 flex-wrap">
             ${captureBtnHtml}
+            <button type="button" onclick="triggerManualStopUpload(${index})" class="py-1.5 px-2.5 bg-purple-50 hover:bg-purple-100 active:scale-95 text-purple-700 border border-purple-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer shadow-2xs" title="แนบภาพถ่ายส่งหมาย">
+              <i class="fa-solid fa-file-arrow-up text-[10px]"></i> แนบภาพ
+            </button>
+            <button type="button" onclick="retryStopUpload(${index})" class="py-1.5 px-2.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white border border-amber-600 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer shadow-xs" title="อัพโหลดหมายนี้อีกครั้ง">
+              <i class="fa-solid fa-cloud-arrow-up text-[10px]"></i> อัพโหลดอีกครั้ง
+            </button>
+            ${delStatus !== 'uploaded' ? `
+              <button type="button" onclick="markStopDeliveredManually(${index})" class="py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 border border-slate-300 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer shadow-2xs" title="แจ้งส่งหมายแล้ว">
+                <i class="fa-solid fa-check-double text-[10px] text-emerald-600"></i> ส่งแล้ว
+              </button>
+            ` : ''}
           </div>
         </div>
         ${photoData.hasPhoto ? `

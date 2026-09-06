@@ -177,13 +177,13 @@ class WatermarkEngine {
   }
 
   /**
-   * วาดกล่องข้อความมุมขวาล่าง (สีดำสนิท + ขอบขาวมน + ไอคอนและข้อความชิดซ้ายในกล่อง ตามแบบในภาพที่ 1 และข้อ 4)
+   * วาดกล่องข้อความมุมขวาล่าง (สีดำสนิท + ขอบขาวมน + ไอคอนและข้อความชิดซ้ายในกล่อง พร้อมระบบตัดคำอัตโนมัติป้องกันทับแผนที่)
    */
   static async drawInfoBadge(ctx, canvasWidth, canvasHeight, scale, data) {
     const padding = 18 * scale;
-    const fontSize = Math.round(23 * scale);
-    const fontTitleSize = Math.round(25 * scale);
-    const lineHeight = fontSize * 1.5;
+    let fontSize = Math.round(23 * scale);
+    let fontTitleSize = Math.round(25 * scale);
+    let lineHeight = fontSize * 1.5;
 
     ctx.save();
 
@@ -207,10 +207,90 @@ class WatermarkEngine {
       caseStr = `เลขคดี: ${caseStr}`;
     }
 
+    // คำนวณระยะขอบเพื่อป้องกันไม่ให้กล่องข้อมูลขวาล่างซ้อนทับแผนที่ซ้ายล่างเด็ดขาด
+    // Map overlay อยู่ที่ mapX = 28 * scale กว้าง 220 * scale -> ขอบขวาแผนที่ = 248 * scale
+    const mapRightEdge = (28 * scale) + (220 * scale) + (24 * scale);
+    const maxAllowedBoxWidth = canvasWidth - mapRightEdge - (28 * scale);
+    const maxContentWidth = maxAllowedBoxWidth - (padding * 2.2);
+
+    // ฟังก์ชันตัดแบ่งข้อความที่ตั้งยาวเป็น 2 บรรทัดอัตโนมัติ
+    const formatLocationLines = (locText, currentFont, maxW) => {
+      ctx.font = currentFont;
+      const fullText = `🏠  ${locText}`;
+      if (ctx.measureText(fullText).width <= maxW) {
+        return [fullText];
+      }
+
+      // พยายามตัดคำ ณ ตำแหน่งคำบ่งชี้ที่อยู่ภาษาไทย เช่น ตำบล, อำเภอ, จังหวัด, ซอย, ถนน
+      const delimiters = [' ตำบล', ' ต.', ' แขวง', ' อำเภอ', ' อ.', ' เขต', ' จังหวัด', ' จ.', ' ถนน', ' ถ.', ' ซอย', ' ซ.', ' หมู่', ' ม.', ' '];
+      let bestSplitIdx = -1;
+      let bestDiff = Infinity;
+      const mid = locText.length / 2;
+
+      for (const delim of delimiters) {
+        let pos = 0;
+        while (true) {
+          const idx = locText.indexOf(delim, pos);
+          if (idx === -1) break;
+          const splitPoint = delim.startsWith(' ') ? idx + 1 : idx;
+          if (splitPoint > 6 && splitPoint < locText.length - 6) {
+            const diff = Math.abs(splitPoint - mid);
+            if (diff < bestDiff) {
+              bestDiff = diff;
+              bestSplitIdx = splitPoint;
+            }
+          }
+          pos = idx + 1;
+        }
+      }
+
+      if (bestSplitIdx !== -1) {
+        const p1 = locText.substring(0, bestSplitIdx).trim();
+        const p2 = locText.substring(bestSplitIdx).trim();
+        const line1 = `🏠  ${p1}`;
+        const line2 = `     ${p2}`;
+        if (ctx.measureText(line1).width <= maxW && ctx.measureText(line2).width <= maxW) {
+          return [line1, line2];
+        }
+      }
+
+      // หากยังยาวเกิน ให้ตัดตามความกว้างตัวอักษร
+      let p1 = '';
+      let p2 = '';
+      for (let i = 0; i < locText.length; i++) {
+        const testP1 = `🏠  ${locText.substring(0, i + 1)}`;
+        if (ctx.measureText(testP1).width <= maxW) {
+          p1 = locText.substring(0, i + 1);
+        } else {
+          p2 = locText.substring(i);
+          break;
+        }
+      }
+      return [ `🏠  ${p1.trim()}`, `     ${p2.trim()}` ];
+    };
+
+    let locFont = `600 ${fontSize}px 'Sarabun', 'Prompt', sans-serif`;
+    let locLines = formatLocationLines(locationStr, locFont, maxContentWidth);
+
+    // ตรวจสอบว่าหลังจากแบ่งบรรทัดแล้ว ขนาดตัวอักษรยังกว้างเกินหรือไม่ หากเกินให้ลดขนาดลงเล็กน้อย
+    let maxTestW = 0;
+    locLines.forEach(l => {
+      const w = ctx.measureText(l).width;
+      if (w > maxTestW) maxTestW = w;
+    });
+
+    if (maxTestW > maxContentWidth) {
+      fontSize = Math.round(fontSize * 0.88);
+      fontTitleSize = Math.round(fontTitleSize * 0.88);
+      lineHeight = fontSize * 1.45;
+      locFont = `600 ${fontSize}px 'Sarabun', 'Prompt', sans-serif`;
+      locLines = formatLocationLines(locationStr, locFont, maxContentWidth);
+    }
+
     const lines = [
       { text: `📅  ${dateStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
       { text: `📍  ${coordWithHeadingStr}`, font: `bold ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
-      { text: `🏠  ${locationStr}`, font: `600 ${fontSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' },
+      ...locLines.map(l => ({ text: l, font: locFont, color: '#ffffff' })),
       { text: `⚖️  ${caseStr}`, font: `bold ${fontTitleSize}px 'Sarabun', 'Prompt', sans-serif`, color: '#ffffff' }
     ];
 
@@ -222,10 +302,11 @@ class WatermarkEngine {
       if (w > maxTextWidth) maxTextWidth = w;
     });
 
-    const boxWidth = maxTextWidth + (padding * 2.2);
+    // กำหนด boxWidth ไม่ให้เกิน maxAllowedBoxWidth โดยเด็ดขาด
+    const boxWidth = Math.min(maxTextWidth + (padding * 2.2), maxAllowedBoxWidth);
     const boxHeight = (lines.length * lineHeight) + (padding * 1.4);
-    // วางที่มุมขวาล่าง (Bottom-Right) ตามสเปกภาพที่ 1 และข้อ 4
-    const boxX = canvasWidth - boxWidth - (28 * scale);
+    // วางที่มุมขวาล่าง (Bottom-Right)
+    const boxX = Math.max(canvasWidth - boxWidth - (28 * scale), mapRightEdge);
     const boxY = canvasHeight - boxHeight - (28 * scale);
 
     // วาดพื้นหลังกล่องดำสนิท (Solid Black) ขอบมนสวยงาม
