@@ -19520,7 +19520,7 @@ window.openShareRouteModal = async function() {
     confirmButtonColor: '#4f46e5',
     cancelButtonColor: '#6b7280',
     customClass: {
-      popup: 'rounded-3xl',
+      popup: 'slts-share-route-popup rounded-3xl',
       confirmButton: 'text-xs py-2.5 px-4 font-bold shadow-md',
       cancelButton: 'text-xs py-2.5 px-4'
     },

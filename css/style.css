@@ -702,6 +702,47 @@ body.swal2-toast-shown .swal2-popup,
 }
 
 /* ================================================================
+   Share Route Modal — จัดให้ Scroll ได้ทั้งบน PC และมือถือ
+   ================================================================ */
+.slts-share-route-popup {
+  max-height: 88vh !important;
+  max-height: 88dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.slts-share-route-popup > .swal2-html-container {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+.slts-share-route-popup > .swal2-html-container::-webkit-scrollbar { width: 5px; }
+.slts-share-route-popup > .swal2-html-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+.slts-share-route-popup > .swal2-html-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+
+.slts-share-route-popup > .swal2-actions {
+  flex-shrink: 0 !important;
+}
+
+/* ================================================================
+   PC Responsive — ขยาย Modal ให้กว้างขึ้นบนหน้าจอ PC (>= 769px)
+   ================================================================ */
+@media (min-width: 769px) {
+  .slts-swal-fullscreen-80 {
+    max-width: min(90vw, 720px) !important;
+  }
+  .slts-share-route-popup {
+    max-width: min(90vw, 560px) !important;
+  }
+}
+
+/* ================================================================
    Shared Modal Header
    ================================================================ */
 .slts-modal-header {
