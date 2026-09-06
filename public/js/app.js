@@ -2768,11 +2768,35 @@ window.updateModalGeneratedCourtPreview = function() {
   const categoryEl = document.getElementById('modalNewCourtCategory');
   const provEl = document.getElementById('modalNewAssignedProvince');
   const previewEl = document.getElementById('modalNewGeneratedCourtNamePreview');
+  const displayEl = document.getElementById('modalAssignedProvinceDisplay');
   if (!previewEl) return;
 
   const category = categoryEl ? categoryEl.value : 'ศาลจังหวัด';
   const province = provEl ? provEl.value.trim() : 'อุดรธานี';
+  if (displayEl && provEl) {
+    displayEl.textContent = province;
+  }
   previewEl.value = buildCourtNameFromCategoryAndProvince(category, province);
+};
+
+window._addUserFormDataBuffer = null;
+let _isOpeningAddUserProvincePicker = false;
+let _addUserPickerActionTaken = false;
+
+function escapeHtmlAttr(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+window.closeAddUserModal = function() {
+  window._addUserFormDataBuffer = null;
+  _isOpeningAddUserProvincePicker = false;
+  Swal.close();
 };
 
 /**
@@ -2781,8 +2805,9 @@ window.updateModalGeneratedCourtPreview = function() {
  * 1. ปิดได้เฉพาะปุ่ม "ปิด" และปุ่มกากบาท 'X' เท่านั้น (allowOutsideClick: false, allowEscapeKey: false)
  * 2. รองรับสิทธิ์ Admin (เลือก Role, ศาล, จังหวัดได้อิสระ) และ Local Advisor (ล็อค Role=User, ล็อคศาลตนเอง)
  * 3. บันทึกและอัปเดตตาราง "รายชื่อผู้ใช้งานทั้งหมด" ทันทีโดยไม่ต้องรีเฟรชหน้าเว็บ
+ * 4. รองรับการรับค่า initialData เพื่อคงข้อมูลเดิมเมื่อกลับมาจากการเลือกจังหวัด
  */
-window.openAddUserModal = function() {
+window.openAddUserModal = function(initialData = {}) {
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
 
@@ -2811,6 +2836,15 @@ window.openAddUserModal = function() {
     }
   }
 
+  // Restore fields from initialData (e.g. returning from province selector) or use defaults
+  const currentUsername = initialData.username || '';
+  const currentFullName = initialData.fullName || '';
+  const currentPassword = initialData.password || '';
+  const currentRole = initialData.role || 'user';
+  const currentCourtCategory = initialData.courtCategory || 'ศาลจังหวัด';
+  const currentProvince = normalizeProvinceName(initialData.province || state.selectedProvince || 'อุดรธานี');
+  const currentCustomCourtName = initialData.customCourtName || '';
+
   const roleSectionHtml = isLocalAdvisor ? `
     <div>
       <label class="block text-xs font-semibold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role)</label>
@@ -2824,9 +2858,9 @@ window.openAddUserModal = function() {
     <div>
       <label class="block text-xs font-semibold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role) <span class="text-rose-500">*</span></label>
       <select id="modalNewRole" class="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition" required>
-        <option value="user" selected>User (เจ้าหน้าที่ทั่วไป)</option>
-        <option value="local_advisor">Local Advisor (ผู้ดูแลประจำจังหวัด)</option>
-        <option value="admin">Admin (ผู้ดูแลระบบ)</option>
+        <option value="user" ${currentRole === 'user' ? 'selected' : ''}>User (เจ้าหน้าที่ทั่วไป)</option>
+        <option value="local_advisor" ${currentRole === 'local_advisor' ? 'selected' : ''}>Local Advisor (ผู้ดูแลประจำจังหวัด)</option>
+        <option value="admin" ${currentRole === 'admin' ? 'selected' : ''}>Admin (ผู้ดูแลระบบ)</option>
       </select>
       <p class="text-[11px] text-gray-500 mt-1">Admin สามารถสร้างได้ทุก Role: User, Local Advisor และ Admin</p>
     </div>
@@ -2862,25 +2896,32 @@ window.openAddUserModal = function() {
         <div>
           <label class="block text-xs font-semibold text-gray-700 mb-1">ประเภทศาล</label>
           <select id="modalNewCourtCategory" onchange="handleModalCourtCategoryChange()" class="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
-            <option value="ศาลจังหวัด" selected>ศาลจังหวัด</option>
-            <option value="ศาลแขวง">ศาลแขวง</option>
-            <option value="ศาลเยาวชนและครอบครัว">ศาลเยาวชนและครอบครัว</option>
-            <option value="ศาลไม่สังกัดภาค">ศาลไม่สังกัดภาค (ศาลแพ่ง/อาญา/ศาลชำนัญพิเศษ)</option>
+            <option value="ศาลจังหวัด" ${currentCourtCategory === 'ศาลจังหวัด' ? 'selected' : ''}>ศาลจังหวัด</option>
+            <option value="ศาลแขวง" ${currentCourtCategory === 'ศาลแขวง' ? 'selected' : ''}>ศาลแขวง</option>
+            <option value="ศาลเยาวชนและครอบครัว" ${currentCourtCategory === 'ศาลเยาวชนและครอบครัว' ? 'selected' : ''}>ศาลเยาวชนและครอบครัว</option>
+            <option value="ศาลไม่สังกัดภาค" ${currentCourtCategory === 'ศาลไม่สังกัดภาค' ? 'selected' : ''}>ศาลไม่สังกัดภาค (ศาลแพ่ง/อาญา/ศาลชำนัญพิเศษ)</option>
           </select>
         </div>
         <div>
-          <label class="block text-xs font-semibold text-gray-700 mb-1">จังหวัดที่ส่งหมาย</label>
-          <input type="text" id="modalNewAssignedProvince" list="assignedProvinceDatalist" oninput="updateModalGeneratedCourtPreview()" value="อุดรธานี" class="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition" placeholder="พิมพ์ชื่อจังหวัด..." required />
+          <label class="block text-xs font-semibold text-gray-700 mb-1 cursor-pointer" onclick="openProvincePickerForAddUser()">จังหวัดที่ส่งหมาย <span class="text-rose-500">*</span></label>
+          <div id="btnSelectAssignedProvince" onclick="openProvincePickerForAddUser()" class="w-full px-3 py-2 bg-white hover:bg-blue-50/50 border border-gray-300 hover:border-blue-400 rounded-xl text-xs flex items-center justify-between cursor-pointer transition focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs group select-none" title="คลิกเพื่อเลือกจังหวัด">
+            <div class="flex items-center gap-1.5 truncate">
+              <i class="fa-solid fa-location-dot text-blue-600 text-xs shrink-0"></i>
+              <span id="modalAssignedProvinceDisplay" class="font-semibold text-gray-800">${escapeHtmlAttr(currentProvince)}</span>
+            </div>
+            <i class="fa-solid fa-caret-down text-gray-500 group-hover:text-blue-600 transition text-xs shrink-0"></i>
+          </div>
+          <input type="hidden" id="modalNewAssignedProvince" value="${escapeHtmlAttr(currentProvince)}" />
         </div>
       </div>
 
-      <div id="modalStandardCourtContainer">
+      <div id="modalStandardCourtContainer" class="${currentCourtCategory === 'ศาลไม่สังกัดภาค' ? 'hidden' : ''}">
         <label class="block text-xs font-semibold text-gray-700 mb-1">ชื่อศาลที่จะบันทึก (สร้างอัตโนมัติ)</label>
-        <input type="text" id="modalNewGeneratedCourtNamePreview" class="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-xl text-xs text-gray-600 font-semibold cursor-not-allowed" value="ศาลจังหวัดอุดรธานี" readonly />
+        <input type="text" id="modalNewGeneratedCourtNamePreview" class="w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-xl text-xs text-gray-600 font-semibold cursor-not-allowed" value="${escapeHtmlAttr(buildCourtNameFromCategoryAndProvince(currentCourtCategory, currentProvince))}" readonly />
       </div>
-      <div id="modalCustomCourtContainer" class="hidden">
+      <div id="modalCustomCourtContainer" class="${currentCourtCategory === 'ศาลไม่สังกัดภาค' ? '' : 'hidden'}">
         <label class="block text-xs font-semibold text-gray-700 mb-1">ระบุชื่อศาล <span class="text-rose-500">*</span></label>
-        <input type="text" id="modalNewCustomCourtName" class="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition" placeholder="เช่น ศาลแพ่ง, ศาลอาญา..." />
+        <input type="text" id="modalNewCustomCourtName" value="${escapeHtmlAttr(currentCustomCourtName)}" class="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 transition" placeholder="เช่น ศาลแพ่ง, ศาลอาญา..." />
       </div>
     </div>
   `;
@@ -2909,7 +2950,7 @@ window.openAddUserModal = function() {
               <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
                 <i class="fa-solid fa-user text-xs"></i>
               </div>
-              <input type="text" id="modalNewUsername" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น officer01" required autocomplete="off" />
+              <input type="text" id="modalNewUsername" value="${escapeHtmlAttr(currentUsername)}" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น officer01" required autocomplete="off" />
             </div>
           </div>
           <div>
@@ -2918,7 +2959,7 @@ window.openAddUserModal = function() {
               <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
                 <i class="fa-solid fa-id-card text-xs"></i>
               </div>
-              <input type="text" id="modalNewFullName" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น นายสมชาย ส่งหมาย" />
+              <input type="text" id="modalNewFullName" value="${escapeHtmlAttr(currentFullName)}" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น นายสมชาย ส่งหมาย" />
             </div>
           </div>
         </div>
@@ -2929,7 +2970,7 @@ window.openAddUserModal = function() {
             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
               <i class="fa-solid fa-lock text-xs"></i>
             </div>
-            <input type="password" id="modalNewPassword" class="w-full pl-8 pr-10 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="กำหนดรหัสผ่านอย่างน้อย 4 ตัวอักษร" required autocomplete="new-password" />
+            <input type="password" id="modalNewPassword" value="${escapeHtmlAttr(currentPassword)}" class="w-full pl-8 pr-10 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="กำหนดรหัสผ่านอย่างน้อย 4 ตัวอักษร" required autocomplete="new-password" />
             <button type="button" onclick="toggleModalPasswordVisibility()" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none cursor-pointer" title="แสดง/ซ่อนรหัสผ่าน">
               <i id="modalPasswordToggleIcon" class="fa-solid fa-eye text-xs"></i>
             </button>
@@ -2941,7 +2982,7 @@ window.openAddUserModal = function() {
         ${courtSectionHtml}
 
         <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100 mt-4">
-          <button type="button" onclick="Swal.close()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 font-semibold rounded-xl text-xs sm:text-sm transition border border-gray-300 cursor-pointer flex items-center gap-1.5">
+          <button type="button" onclick="closeAddUserModal()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 font-semibold rounded-xl text-xs sm:text-sm transition border border-gray-300 cursor-pointer flex items-center gap-1.5">
             <i class="fa-solid fa-xmark"></i>
             <span>ปิด</span>
           </button>
@@ -2969,11 +3010,169 @@ window.openAddUserModal = function() {
     },
     didOpen: () => {
       const usernameInput = document.getElementById('modalNewUsername');
-      if (usernameInput) usernameInput.focus();
+      if (usernameInput && !currentUsername) usernameInput.focus();
       if (isAdmin && typeof updateModalGeneratedCourtPreview === 'function') {
         updateModalGeneratedCourtPreview();
       }
+    },
+    didClose: () => {
+      if (!_isOpeningAddUserProvincePicker) {
+        window._addUserFormDataBuffer = null;
+      }
     }
+  });
+};
+
+/**
+ * เปิด Modal เลือกจังหวัดสำหรับการสร้างผู้ใช้งานใหม่ (role => admin)
+ * - แสดงผลในรูปแบบเดียวกับ Image 2 (หัวเรื่อง "เลือกจังหวัดที่ต้องการสร้างชื่อผู้ใช้งานใหม่")
+ * - มีผลเฉพาะการกำหนดจังหวัดในหน้าเพิ่มผู้ใช้งานใหม่เท่านั้น โดยไม่เปลี่ยนหรือรีเซตจังหวัดปฏิบัติงานของระบบ
+ * - เมื่อเลือกจังหวัดแล้ว ให้ปิด Modal นี้ และกลับไปแสดงผลหน้าเพิ่มผู้ใช้งานใหม่ (Image 1) พร้อมจังหวัดที่เลือก
+ */
+window.openProvincePickerForAddUser = function() {
+  const isAdmin = state.currentUser && state.currentUser.role === 'admin';
+  if (!isAdmin) return;
+
+  // บันทึกข้อมูลที่ผู้ใช้กรอกค้างไว้ในฟอร์มเพื่อไม่ให้สูญหาย
+  window._addUserFormDataBuffer = {
+    username: (document.getElementById('modalNewUsername')?.value || '').trim(),
+    fullName: (document.getElementById('modalNewFullName')?.value || '').trim(),
+    password: (document.getElementById('modalNewPassword')?.value || '').trim(),
+    role: document.getElementById('modalNewRole')?.value || 'user',
+    courtCategory: document.getElementById('modalNewCourtCategory')?.value || 'ศาลจังหวัด',
+    province: normalizeProvinceName(document.getElementById('modalNewAssignedProvince')?.value || state.selectedProvince || 'อุดรธานี'),
+    customCourtName: (document.getElementById('modalNewCustomCourtName')?.value || '').trim()
+  };
+
+  _isOpeningAddUserProvincePicker = true;
+  _addUserPickerActionTaken = false;
+
+  const currentProv = window._addUserFormDataBuffer.province;
+  const provinceList = (typeof THAILAND_PROVINCES !== 'undefined' && Array.isArray(THAILAND_PROVINCES)) ? THAILAND_PROVINCES : [];
+  let provincesHtml = '';
+  provinceList.forEach(p => {
+    const isSelected = normalizeProvinceName(p.name) === currentProv;
+    provincesHtml += `
+      <button type="button" class="province-btn-item ${isSelected ? 'province-btn-selected' : ''}" onclick="selectProvinceForAddUser('${p.name}')">
+        ${isSelected ? '<i class="fa-solid fa-circle-check text-blue-600 text-xs shrink-0"></i>' : '<span class="province-btn-dot"></span>'}
+        <span class="flex-1 text-left">${p.name}</span>
+      </button>
+    `;
+  });
+
+  Swal.fire({
+    html: `
+      <div class="slts-province-modal">
+        <!-- Header -->
+        <div class="slts-modal-header">
+          <div class="slts-modal-header-icon cursor-pointer hover:bg-white/30 transition" onclick="cancelProvincePickerForAddUser()" title="คลิกเพื่อกลับไปฟอร์มเพิ่มผู้ใช้งาน">
+            <i class="fa-solid fa-map-location-dot"></i>
+          </div>
+          <div class="flex-1 text-center pr-4">
+            <h2 class="slts-modal-title">เลือกจังหวัดที่ต้องการสร้างชื่อผู้ใช้งานใหม่</h2>
+            <p class="slts-modal-subtitle">เลือกจังหวัดสำหรับผู้ใช้งานใหม่ที่ต้องการสร้าง (ไม่มีผลต่อจังหวัดที่เปิดใช้งานอยู่)</p>
+          </div>
+        </div>
+        <!-- Search -->
+        <div class="slts-search-wrap">
+          <i class="fa-solid fa-magnifying-glass slts-search-icon"></i>
+          <input type="text" id="swalAddUserProvinceSearchInput" placeholder="ค้นหาจังหวัด เช่น อุดรธานี, กรุงเทพ..." class="slts-search-input" oninput="filterAddUserProvinceList(this.value)" autocomplete="off">
+        </div>
+        <!-- Province grid -->
+        <div id="swalAddUserProvinceGrid" class="slts-province-grid slts-swal-body-scroll">
+          ${provincesHtml}
+        </div>
+        <p class="slts-province-note"><i class="fa-solid fa-circle-info mr-1"></i>มีผลเฉพาะในหน้าเพิ่มชื่อผู้ใช้งานใหม่เท่านั้น โดยไม่เปลี่ยนหรือรีเซตจังหวัดที่ใช้งานอยู่ปัจจุบัน</p>
+      </div>
+    `,
+    position: 'top',
+    showConfirmButton: false,
+    showCloseButton: true,
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    customClass: {
+      container: 'slts-swal-top-container',
+      popup: 'slts-swal-fullscreen-80 slts-swal-no-padding',
+      closeButton: 'slts-close-btn'
+    },
+    didOpen: () => {
+      const popup = document.querySelector('.swal2-popup');
+      const grid = document.getElementById('swalAddUserProvinceGrid');
+      const searchInput = document.getElementById('swalAddUserProvinceSearchInput');
+      if (!popup) return;
+
+      const adjustProvinceModal = () => {
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        const maxH = Math.max(160, Math.floor(vh - 16));
+        popup.style.maxHeight = `${maxH}px`;
+        if (grid) {
+          grid.style.maxHeight = `${Math.max(80, maxH - 115)}px`;
+        }
+      };
+
+      adjustProvinceModal();
+
+      const vv = window.visualViewport;
+      if (vv) {
+        vv.addEventListener('resize', adjustProvinceModal);
+        vv.addEventListener('scroll', adjustProvinceModal);
+        popup._vvResizeHandler = adjustProvinceModal;
+      }
+
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.addEventListener('focus', () => {
+          setTimeout(adjustProvinceModal, 150);
+        });
+      }
+    },
+    didClose: () => {
+      const vv = window.visualViewport;
+      const popup = document.querySelector('.swal2-popup');
+      if (vv && popup?._vvResizeHandler) {
+        vv.removeEventListener('resize', popup._vvResizeHandler);
+        vv.removeEventListener('scroll', popup._vvResizeHandler);
+      }
+      _isOpeningAddUserProvincePicker = false;
+      if (!_addUserPickerActionTaken) {
+        // หากผู้ใช้กดปุ่ม 'X' ปิด ให้ย้อนกลับสู่หน้าต่างเพิ่มผู้ใช้งานพร้อมข้อมูลเดิม
+        openAddUserModal(window._addUserFormDataBuffer || {});
+      }
+    }
+  });
+};
+
+/**
+ * เลือกจังหวัดสำหรับการสร้างผู้ใช้งานใหม่ (ไม่กระทบต่อ selectedProvince ของระบบ)
+ */
+window.selectProvinceForAddUser = function(provinceName) {
+  _addUserPickerActionTaken = true;
+  _isOpeningAddUserProvincePicker = false;
+  const data = window._addUserFormDataBuffer || {};
+  data.province = normalizeProvinceName(provinceName);
+  openAddUserModal(data);
+};
+
+/**
+ * ยกเลิกการเลือกจังหวัดและกลับสู่หน้าต่างเพิ่มผู้ใช้งาน
+ */
+window.cancelProvincePickerForAddUser = function() {
+  _addUserPickerActionTaken = true;
+  _isOpeningAddUserProvincePicker = false;
+  openAddUserModal(window._addUserFormDataBuffer || {});
+};
+
+/**
+ * ค้นหากรองรายชื่อจังหวัดในหน้าต่างเลือกจังหวัดสำหรับสร้างผู้ใช้งาน
+ */
+window.filterAddUserProvinceList = function(query) {
+  const grid = document.getElementById('swalAddUserProvinceGrid');
+  if (!grid) return;
+  const q = (query || '').trim().toLowerCase();
+  const buttons = grid.querySelectorAll('.province-btn-item');
+  buttons.forEach(btn => {
+    const text = btn.textContent.toLowerCase();
+    btn.style.display = text.includes(q) ? '' : 'none';
   });
 };
 
@@ -3073,6 +3272,8 @@ window.handleModalCreateUser = function(e) {
   if (typeof syncUserToGoogleSheet === 'function') {
     syncUserToGoogleSheet('save_user', newUser);
   }
+
+  window._addUserFormDataBuffer = null;
 
   Swal.fire({
     icon: 'success',
