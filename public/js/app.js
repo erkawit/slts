@@ -2202,14 +2202,11 @@ function updateAuthUI() {
     // ดึงข้อมูลโปรไฟล์ล่าสุดของ Local Advisor จากฐานข้อมูลเพื่อความถูกต้องแม่นยำ
     const allUsers = JSON.parse(localStorage.getItem('slts_users') || '[]');
     const advisorProfile = allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser;
-    const prov = (advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+    const prov = normalizeProvinceName(advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี');
     const courtCat = (advisorProfile?.courtCategory || state.currentUser?.courtCategory || 'ศาลจังหวัด').trim();
     let court = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || '').trim();
     if (!court) {
-      if (courtCat === 'ศาลไม่สังกัดภาค') court = 'ศาลแพ่ง';
-      else if (courtCat === 'ศาลแขวง') court = `ศาลแขวง${prov}`;
-      else if (courtCat === 'ศาลเยาวชนและครอบครัว') court = `ศาลเยาวชนและครอบครัวจังหวัด${prov}`;
-      else court = `ศาลจังหวัด${prov}`;
+      court = buildCourtNameFromCategoryAndProvince(courtCat, prov);
     }
 
     // อัปเดตเซสชันให้ตรงกัน
@@ -2274,6 +2271,12 @@ function updateAuthUI() {
     elements.btnSettings.classList.remove('hidden');
   } else {
     elements.btnSettings.classList.add('hidden');
+  }
+
+  // ปุ่มซิงค์โครงสร้างชีต users (เฉพาะ Admin เท่านั้น)
+  const btnSyncStructure = document.getElementById('btnSyncAllUsersStructure');
+  if (btnSyncStructure) {
+    btnSyncStructure.style.display = isAdmin ? 'inline-flex' : 'none';
   }
 
   // ปุ่มเพิ่มผู้ใช้งานใหม่ (แสดงเฉพาะ Admin หรือ Local Advisor)
@@ -2610,6 +2613,28 @@ window.handleSaveNewPassword = function(e) {
 // =========================================================================
 
 /**
+ * จัดรูปแบบชื่อจังหวัดให้เป็นมาตรฐาน (ตัดคำนำหน้า 'จังหวัด' หรือ 'จ.' ออก)
+ */
+function normalizeProvinceName(province) {
+  if (!province) return '';
+  return String(province).trim().replace(/^(จังหวัด|จ\.)/, '').trim();
+}
+window.normalizeProvinceName = normalizeProvinceName;
+
+/**
+ * จัดรูปแบบชื่อศาลให้เป็นมาตรฐาน สำหรับการเปรียบเทียบความถูกต้องของสังกัด
+ */
+function normalizeCourtName(courtName, province = '') {
+  let clean = String(courtName || '').trim().replace(/\s+/g, '');
+  if (!clean && province) {
+    const provClean = normalizeProvinceName(province);
+    return `ศาลจังหวัด${provClean}`;
+  }
+  return clean;
+}
+window.normalizeCourtName = normalizeCourtName;
+
+/**
  * สร้างชื่อศาลมาตรฐานจากประเภทศาลและชื่อจังหวัด
  */
 function buildCourtNameFromCategoryAndProvince(category, province, customName = '') {
@@ -2619,7 +2644,7 @@ function buildCourtNameFromCategoryAndProvince(category, province, customName = 
     if (!clean.startsWith('ศาล')) clean = 'ศาล' + clean;
     return clean;
   }
-  const prov = (province || 'อุดรธานี').trim().replace(/^จ\./, '');
+  const prov = normalizeProvinceName(province) || 'อุดรธานี';
   if (category === 'ศาลจังหวัด') {
     return `ศาลจังหวัด${prov}`;
   } else if (category === 'ศาลแขวง') {
@@ -2777,15 +2802,12 @@ window.openAddUserModal = function() {
 
   if (isLocalAdvisor) {
     const advisorProfile = allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser;
-    advisorProvince = (advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+    advisorProvince = normalizeProvinceName(advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี');
     advisorCourtCategory = (advisorProfile?.courtCategory || state.currentUser?.courtCategory || 'ศาลจังหวัด').trim();
     advisorCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || '').trim();
 
     if (!advisorCourt) {
-      if (advisorCourtCategory === 'ศาลไม่สังกัดภาค') advisorCourt = 'ศาลแพ่ง';
-      else if (advisorCourtCategory === 'ศาลแขวง') advisorCourt = `ศาลแขวง${advisorProvince}`;
-      else if (advisorCourtCategory === 'ศาลเยาวชนและครอบครัว') advisorCourt = `ศาลเยาวชนและครอบครัวจังหวัด${advisorProvince}`;
-      else advisorCourt = `ศาลจังหวัด${advisorProvince}`;
+      advisorCourt = buildCourtNameFromCategoryAndProvince(advisorCourtCategory, advisorProvince);
     }
   }
 
@@ -2793,8 +2815,8 @@ window.openAddUserModal = function() {
     <div>
       <label class="block text-xs font-semibold text-gray-700 mb-1">สิทธิ์การใช้งาน (Role)</label>
       <div class="px-3.5 py-2.5 bg-gray-100 border border-gray-300 rounded-xl text-xs sm:text-sm text-gray-700 font-medium flex items-center justify-between">
-        <span>User (เจ้าหน้าที่ทั่วไป)</span>
-        <span class="text-[11px] px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-semibold">ล็อคตามสิทธิ์ศาลของคุณ</span>
+        <span class="flex items-center gap-1.5"><i class="fa-solid fa-user text-blue-600"></i> User (เจ้าหน้าที่ทั่วไป)</span>
+        <span class="text-[11px] px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-semibold">สร้างได้เฉพาะ Role User</span>
       </div>
       <input type="hidden" id="modalNewRole" value="user" />
     </div>
@@ -2806,6 +2828,7 @@ window.openAddUserModal = function() {
         <option value="local_advisor">Local Advisor (ผู้ดูแลประจำจังหวัด)</option>
         <option value="admin">Admin (ผู้ดูแลระบบ)</option>
       </select>
+      <p class="text-[11px] text-gray-500 mt-1">Admin สามารถสร้างได้ทุก Role: User, Local Advisor และ Admin</p>
     </div>
   `;
 
@@ -2813,21 +2836,27 @@ window.openAddUserModal = function() {
     <div class="p-3.5 bg-blue-50 border border-blue-200 rounded-xl">
       <div class="flex items-start gap-2.5">
         <i class="fa-solid fa-building-columns text-blue-600 text-sm mt-0.5"></i>
-        <div class="text-xs text-blue-900 space-y-1">
-          <p class="font-bold">สังกัดหน่วยงานตามสิทธิ์ผู้ดูแล:</p>
+        <div class="text-xs text-blue-900 space-y-1.5">
+          <p class="font-bold text-sm">สังกัดศาลที่ได้รับสิทธิ์สร้างผู้ใช้งาน:</p>
           <div class="flex flex-wrap gap-2 pt-0.5">
-            <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-semibold">ศาล: ${advisorCourt}</span>
-            <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-semibold">จ.${advisorProvince}</span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-100 text-blue-800 font-bold text-xs border border-blue-200">
+              <i class="fa-solid fa-landmark"></i> ${advisorCourt}
+            </span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800 font-bold text-xs border border-indigo-200">
+              <i class="fa-solid fa-location-dot text-rose-500"></i> จ.${advisorProvince}
+            </span>
           </div>
-          <p class="text-[11px] text-blue-700/80 pt-0.5">ผู้ใช้ใหม่จะถูกเพิ่มในสังกัดศาลของคุณโดยอัตโนมัติ</p>
+          <p class="text-[11px] text-blue-700 leading-relaxed pt-0.5">
+            <i class="fa-solid fa-circle-info mr-0.5"></i> สิทธิ์ Local Advisor สามารถสร้างชื่อผู้ใช้งานได้เฉพาะในสังกัด <b>${advisorCourt}</b> (จ.${advisorProvince}) เท่านั้น ไม่สามารถสร้างข้ามไปยังศาลอื่นได้
+          </p>
         </div>
       </div>
     </div>
   ` : `
     <div class="p-3.5 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
-      <div class="text-xs font-bold text-gray-700 flex items-center gap-1.5">
-        <i class="fa-solid fa-building-columns text-blue-600"></i>
-        <span>การกำหนดศาลและพื้นที่ปฏิบัติงาน</span>
+      <div class="text-xs font-bold text-gray-700 flex items-center justify-between">
+        <span class="flex items-center gap-1.5"><i class="fa-solid fa-building-columns text-blue-600"></i> กำหนดศาลและจังหวัด</span>
+        <span class="text-[11px] text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded border border-purple-200">Admin กำหนดได้ทุกศาล ทุกจังหวัด</span>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
@@ -2856,6 +2885,10 @@ window.openAddUserModal = function() {
     </div>
   `;
 
+  const modalSubText = isAdmin ?
+    'ผู้ดูแลระบบ (Admin) สามารถกำหนด Role, ศาล และจังหวัดได้ทุกพื้นที่' :
+    `สร้างผู้ใช้งานสำหรับ ${advisorCourt} (จ.${advisorProvince}) เฉพาะ Role User`;
+
   const modalHtml = `
     <div class="text-left font-sans">
       <div class="flex items-center gap-3 pb-3 border-b border-gray-100 mb-4">
@@ -2864,7 +2897,7 @@ window.openAddUserModal = function() {
         </div>
         <div>
           <h3 class="text-base font-bold text-gray-900 leading-tight">เพิ่มผู้ใช้งานใหม่</h3>
-          <p class="text-xs text-gray-500 mt-0.5">ระบบจัดการและกำหนดสิทธิ์ผู้ใช้งานในศาล</p>
+          <p class="text-xs text-gray-500 mt-0.5">${modalSubText}</p>
         </div>
       </div>
 
@@ -2946,6 +2979,8 @@ window.openAddUserModal = function() {
 
 /**
  * ประมวลผลการเพิ่มผู้ใช้งานใหม่จากหน้าต่าง SweetAlert
+ * - Admin: สร้างได้ทุกจังหวัด ทุกประเภทศาล และทุก Role
+ * - Local Advisor: สร้างได้เฉพาะศาลและจังหวัดที่ตนเองสังกัดอยู่เท่านั้น และสร้างได้เฉพาะ Role User
  */
 window.handleModalCreateUser = function(e) {
   if (e) e.preventDefault();
@@ -2979,27 +3014,26 @@ window.handleModalCreateUser = function(e) {
   let assignedCourt = 'ศาลจังหวัดอุดรธานี';
 
   if (isLocalAdvisor) {
+    // Local Advisor: สามารถสร้างได้เฉพาะศาลที่ตนเองสังกัดอยู่เท่านั้น และสร้างได้เฉพาะ Role User
     role = 'user';
     const advisorProfile = allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser;
-    assignedProvince = (advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+    assignedProvince = normalizeProvinceName(advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี');
     courtCategory = (advisorProfile?.courtCategory || state.currentUser?.courtCategory || 'ศาลจังหวัด').trim();
     assignedCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || '').trim();
 
     if (!assignedCourt) {
-      if (courtCategory === 'ศาลไม่สังกัดภาค') assignedCourt = 'ศาลแพ่ง';
-      else if (courtCategory === 'ศาลแขวง') assignedCourt = `ศาลแขวง${assignedProvince}`;
-      else if (courtCategory === 'ศาลเยาวชนและครอบครัว') assignedCourt = `ศาลเยาวชนและครอบครัวจังหวัด${assignedProvince}`;
-      else assignedCourt = `ศาลจังหวัด${assignedProvince}`;
+      assignedCourt = buildCourtNameFromCategoryAndProvince(courtCategory, assignedProvince);
     }
   } else {
+    // Admin: สามารถสร้าง user ได้ทุกจังหวัด ทุกประเภทศาล และสร้างได้ทุก role
     role = document.getElementById('modalNewRole')?.value || 'user';
     courtCategory = document.getElementById('modalNewCourtCategory')?.value || 'ศาลจังหวัด';
     if (courtCategory === 'ศาลไม่สังกัดภาค') {
       assignedCourt = (document.getElementById('modalNewCustomCourtName')?.value || 'ศาลแพ่ง').trim();
       if (!assignedCourt.startsWith('ศาล')) assignedCourt = 'ศาล' + assignedCourt;
-      assignedProvince = (document.getElementById('modalNewAssignedProvince')?.value || 'กรุงเทพมหานคร').trim();
+      assignedProvince = normalizeProvinceName(document.getElementById('modalNewAssignedProvince')?.value || 'กรุงเทพมหานคร');
     } else {
-      assignedProvince = (document.getElementById('modalNewAssignedProvince')?.value || 'อุดรธานี').trim();
+      assignedProvince = normalizeProvinceName(document.getElementById('modalNewAssignedProvince')?.value || 'อุดรธานี');
       assignedCourt = buildCourtNameFromCategoryAndProvince(courtCategory, assignedProvince);
     }
   }
@@ -3060,16 +3094,22 @@ function renderUserList() {
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
   const advisorProfile = isLocalAdvisor ? (allUsers.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser) : state.currentUser;
-  const advisorCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || `ศาลจังหวัด${advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี'}`).trim();
-  const advisorProv = (advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี').trim();
+  const advisorProv = normalizeProvinceName(advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี');
+  const advisorCourtCat = (advisorProfile?.courtCategory || state.currentUser?.courtCategory || 'ศาลจังหวัด').trim();
+  let advisorCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || '').trim();
+  if (!advisorCourt) {
+    advisorCourt = buildCourtNameFromCategoryAndProvince(advisorCourtCat, advisorProv);
+  }
+  const normAdvisorCourt = normalizeCourtName(advisorCourt, advisorProv);
 
-  // หากเป็น Local Advisor: กรองแสดงเฉพาะผู้ใช้งานที่สังกัดศาลตนเองเท่านั้น
+  // สิทธิ์การมองเห็นข้อมูล:
+  // Admin: สามารถมองเห็นและจัดการได้ทั้งหมดทุกศาล ทุกจังหวัด
+  // Local Advisor: สามารถมองเห็นเฉพาะผู้ใช้งานที่สังกัดศาลตนเองเท่านั้น ไม่สามารถมองเห็นข้อมูลของศาลอื่นได้
   let users = allUsers;
   if (isLocalAdvisor) {
     users = allUsers.filter(u => {
-      const uCourt = (u.assignedCourt || `ศาลจังหวัด${u.assignedProvince || 'อุดรธานี'}`).trim();
-      const uProv = (u.assignedProvince || 'อุดรธานี').trim();
-      return uCourt === advisorCourt || (advisorProv && uProv === advisorProv && u.role === 'user');
+      const uCourt = normalizeCourtName(u.assignedCourt || u['ศาลที่สังกัด'], u.assignedProvince || u['จังหวัดที่ส่งหมาย']);
+      return uCourt === normAdvisorCourt;
     });
   }
 
@@ -3110,14 +3150,15 @@ function renderUserList() {
     }
 
     const isPrimaryAdmin = u.username === 'admin';
-    const userProvince = u.assignedProvince || 'อุดรธานี';
-    const userCourt = u.assignedCourt || (u.assignedProvince ? `ศาลจังหวัด${u.assignedProvince}` : 'ศาลจังหวัดอุดรธานี');
+    const userProvince = normalizeProvinceName(u.assignedProvince || u['จังหวัดที่ส่งหมาย'] || 'อุดรธานี');
+    const userCourt = (u.assignedCourt || u['ศาลที่สังกัด'] || buildCourtNameFromCategoryAndProvince(u.courtCategory || u['ประเภทศาล'] || 'ศาลจังหวัด', userProvince)).trim();
+    const normUserCourt = normalizeCourtName(userCourt, userProvince);
     
     // สิทธิ์การจัดการปุ่ม Action:
-    // Admin: จัดการได้ทุกบัญชี (ยกเว้นลบ primary admin)
+    // Admin: สามารถมองเห็นและจัดการได้ทั้งหมด (ยกเว้นลบ primary admin)
     // Local Advisor: จัดการได้เฉพาะบัญชีที่เป็น Role => User ในสังกัดศาลตนเองเท่านั้น
     let actionButtons = '';
-    const canManageThisUser = isAdmin || (isLocalAdvisor && u.role === 'user' && userCourt === advisorCourt);
+    const canManageThisUser = isAdmin || (isLocalAdvisor && u.role === 'user' && normUserCourt === normAdvisorCourt);
 
     if (canManageThisUser) {
       actionButtons = `
@@ -3182,8 +3223,14 @@ window.editUserModal = function(username) {
   if (!user) return;
 
   const isPrimary = username === 'admin';
-  const advisorCourt = (state.currentUser?.assignedCourt || `ศาลจังหวัด${state.currentUser?.assignedProvince || 'อุดรธานี'}`).trim();
-  const userCourt = (user.assignedCourt || `ศาลจังหวัด${user.assignedProvince || 'อุดรธานี'}`).trim();
+  const advisorProfile = isLocalAdvisor ? (users.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser) : state.currentUser;
+  const advisorProv = normalizeProvinceName(advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี');
+  const advisorCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || buildCourtNameFromCategoryAndProvince(advisorProfile?.courtCategory || 'ศาลจังหวัด', advisorProv)).trim();
+  const normAdvisorCourt = normalizeCourtName(advisorCourt, advisorProv);
+
+  const userProv = normalizeProvinceName(user.assignedProvince || 'อุดรธานี');
+  const userCourt = (user.assignedCourt || buildCourtNameFromCategoryAndProvince(user.courtCategory || 'ศาลจังหวัด', userProv)).trim();
+  const normUserCourt = normalizeCourtName(userCourt, userProv);
 
   // Local Advisor: แก้ไขได้เฉพาะผู้ใช้งานที่เป็น Role => User ในสังกัดศาลตนเองเท่านั้น
   if (isLocalAdvisor) {
@@ -3191,7 +3238,7 @@ window.editUserModal = function(username) {
       Swal.fire('ไม่มีสิทธิ์', 'Local Advisor สามารถแก้ไขได้เฉพาะผู้ใช้งานที่เป็น Role => User เท่านั้น', 'error');
       return;
     }
-    if (userCourt !== advisorCourt) {
+    if (normUserCourt !== normAdvisorCourt) {
       Swal.fire('ไม่มีสิทธิ์', 'ไม่สามารถแก้ไขข้อมูลผู้ใช้งานนอกสังกัดศาลของตนเองได้', 'error');
       return;
     }
@@ -3432,15 +3479,21 @@ window.resetUserPasswordModal = function(username) {
   const user = users.find(u => u.username === username);
   if (!user) return;
 
-  const advisorCourt = (state.currentUser?.assignedCourt || `ศาลจังหวัด${state.currentUser?.assignedProvince || 'อุดรธานี'}`).trim();
-  const userCourt = (user.assignedCourt || `ศาลจังหวัด${user.assignedProvince || 'อุดรธานี'}`).trim();
+  const advisorProfile = isLocalAdvisor ? (users.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser) : state.currentUser;
+  const advisorProv = normalizeProvinceName(advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี');
+  const advisorCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || buildCourtNameFromCategoryAndProvince(advisorProfile?.courtCategory || 'ศาลจังหวัด', advisorProv)).trim();
+  const normAdvisorCourt = normalizeCourtName(advisorCourt, advisorProv);
+
+  const userProv = normalizeProvinceName(user.assignedProvince || 'อุดรธานี');
+  const userCourt = (user.assignedCourt || buildCourtNameFromCategoryAndProvince(user.courtCategory || 'ศาลจังหวัด', userProv)).trim();
+  const normUserCourt = normalizeCourtName(userCourt, userProv);
 
   if (isLocalAdvisor) {
     if (user.role !== 'user') {
       Swal.fire('ไม่มีสิทธิ์', 'Local Advisor สามารถรีเซ็ตรหัสผ่านได้เฉพาะผู้ใช้งานทั่วไป (User) เท่านั้น', 'error');
       return;
     }
-    if (userCourt !== advisorCourt) {
+    if (normUserCourt !== normAdvisorCourt) {
       Swal.fire('ไม่มีสิทธิ์', 'ไม่สามารถรีเซ็ตรหัสผ่านผู้ใช้งานนอกสังกัดศาลของตนเองได้', 'error');
       return;
     }
@@ -3564,15 +3617,21 @@ window.deleteUser = function(username) {
   const targetUser = users.find(u => u.username === username);
   if (!targetUser) return;
 
-  const advisorCourt = (state.currentUser?.assignedCourt || `ศาลจังหวัด${state.currentUser?.assignedProvince || 'อุดรธานี'}`).trim();
-  const targetCourt = (targetUser.assignedCourt || `ศาลจังหวัด${targetUser.assignedProvince || 'อุดรธานี'}`).trim();
+  const advisorProfile = isLocalAdvisor ? (users.find(u => (u.username || '').toLowerCase() === (state.currentUser?.username || '').toLowerCase()) || state.currentUser) : state.currentUser;
+  const advisorProv = normalizeProvinceName(advisorProfile?.assignedProvince || state.currentUser?.assignedProvince || 'อุดรธานี');
+  const advisorCourt = (advisorProfile?.assignedCourt || state.currentUser?.assignedCourt || buildCourtNameFromCategoryAndProvince(advisorProfile?.courtCategory || 'ศาลจังหวัด', advisorProv)).trim();
+  const normAdvisorCourt = normalizeCourtName(advisorCourt, advisorProv);
+
+  const targetProv = normalizeProvinceName(targetUser.assignedProvince || 'อุดรธานี');
+  const targetCourt = (targetUser.assignedCourt || buildCourtNameFromCategoryAndProvince(targetUser.courtCategory || 'ศาลจังหวัด', targetProv)).trim();
+  const normTargetCourt = normalizeCourtName(targetCourt, targetProv);
 
   if (isLocalAdvisor) {
     if (targetUser.role !== 'user') {
       Swal.fire('ไม่มีสิทธิ์', 'Local Advisor สามารถลบได้เฉพาะผู้ใช้งานทั่วไป (User) เท่านั้น', 'error');
       return;
     }
-    if (targetCourt !== advisorCourt) {
+    if (normTargetCourt !== normAdvisorCourt) {
       Swal.fire('ไม่มีสิทธิ์', 'ไม่สามารถลบผู้ใช้งานนอกสังกัดศาลของตนเองได้', 'error');
       return;
     }
