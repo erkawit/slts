@@ -59,13 +59,21 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  height: 100%;
-  max-height: 100%;
-  width: auto;
   aspect-ratio: 4 / 3;
+  width: auto;
+  height: 100%;
   max-width: 100%;
-  border: 1.5px dashed rgba(255, 255, 255, 0.45);
+  max-height: 100%;
+  border: 1.5px dashed rgba(255, 255, 255, 0.55);
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.52); /* Side shading mask outside 4:3 area */
+  box-sizing: border-box;
+}
+
+@media (max-aspect-ratio: 4/3) {
+  .camera-live-frame.ratio-4-3 {
+    width: 100%;
+    height: auto;
+  }
 }
 
 /* 4:3 Aspect Ratio Badge Indicator in center-top of active frame */
@@ -93,13 +101,21 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 100%;
-  max-width: 100%;
-  height: auto;
   aspect-ratio: 3 / 4;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
   max-height: 100%;
-  border: 1.5px dashed rgba(255, 255, 255, 0.35);
+  border: 1.5px dashed rgba(255, 255, 255, 0.45);
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  box-sizing: border-box;
+}
+
+@media (min-aspect-ratio: 3/4) {
+  .camera-live-frame.ratio-3-4 {
+    height: 100%;
+    width: auto;
+  }
 }
 
 .camera-live-frame.ratio-3-4::before {
@@ -120,52 +136,35 @@ body {
   z-index: 20;
 }
 
-/* Anchored Viewfinder HUD Overlays inside Active 4:3 & 3:4 Frames */
+/* Anchored Viewfinder HUD Overlays inside Active 4:3 & 3:4 Frames
+   คงตำแหน่งตายตัวในกรอบภาพทั้งแนวตั้งและแนวนอน:
+   - เข็มทิศ: มุมซ้ายบน ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
+   - แผนที่ขนาดเล็ก: มุมซ้ายล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
+   - ลายน้ำข้อความ: มุมขวาล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3 และไม่ทับซ้อนแผนที่
+*/
+.camera-live-frame #liveCompassWrapper,
 .camera-live-frame.ratio-4-3 #liveCompassWrapper,
 .camera-live-frame.ratio-3-4 #liveCompassWrapper {
   top: 0.75rem !important;
   left: 0.75rem !important;
   right: auto !important;
   bottom: auto !important;
+  transform: none !important;
 }
 
+.camera-live-frame #liveMapWrapper,
 .camera-live-frame.ratio-4-3 #liveMapWrapper,
 .camera-live-frame.ratio-3-4 #liveMapWrapper {
   bottom: 0.75rem !important;
   left: 0.75rem !important;
   top: auto !important;
   right: auto !important;
+  transform: none !important;
 }
 
+.camera-live-frame #liveBadgeWrapper,
 .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
 .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
-  bottom: 0.75rem !important;
-  right: 0.75rem !important;
-  top: auto !important;
-  left: auto !important;
-  max-width: calc(100% - 125px) !important;
-}
-
-body.hardware-landscape .camera-live-frame.ratio-4-3 #liveCompassWrapper,
-body.hardware-landscape .camera-live-frame.ratio-3-4 #liveCompassWrapper {
-  top: 0.75rem !important;
-  left: 0.75rem !important;
-  right: auto !important;
-  bottom: auto !important;
-  transform: none !important;
-}
-
-body.hardware-landscape .camera-live-frame.ratio-4-3 #liveMapWrapper,
-body.hardware-landscape .camera-live-frame.ratio-3-4 #liveMapWrapper {
-  bottom: 0.75rem !important;
-  left: 0.75rem !important;
-  top: auto !important;
-  right: auto !important;
-  transform: none !important;
-}
-
-body.hardware-landscape .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
-body.hardware-landscape .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
   bottom: 0.75rem !important;
   right: 0.75rem !important;
   top: auto !important;
@@ -280,37 +279,38 @@ body.gyro-portrait #liveBadgeWrapper {
   left: auto !important;
   top: auto !important;
   transform: none !important;
-  max-width: min(75%, 340px) !important;
+  max-width: calc(100% - 125px) !important;
 }
 
-/* 1. เมื่อหมุนกล้องเป็นแนวนอน 90 องศา (Landscape Left: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์) */
+/* 1. เมื่อหมุนกล้องเป็นแนวนอน 90 องศา (Landscape Left: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์)
+   ตำแหน่งของ HUD ในกรอบภาพ 4:3 และ 3:4 จะต้องคงเดิมเหมือนแนวตั้ง 100%:
+   - เข็มทิศ: มุมซ้ายบน ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
+   - แผนที่ขนาดเล็ก: มุมซ้ายล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
+   - ลายน้ำข้อความ: มุมขวาล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3 และไม่ทับซ้อนแผนที่
+*/
 body.gyro-landscape-90 #liveCompassWrapper {
-  top: 1.25rem !important;
-  right: 1.5rem !important;
-  left: auto !important;
+  top: 0.75rem !important;
+  left: 0.75rem !important;
+  right: auto !important;
   bottom: auto !important;
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
+  transform: none !important;
 }
 
 body.gyro-landscape-90 #liveMapWrapper {
-  top: 1.25rem !important;
-  left: 1.25rem !important;
-  bottom: auto !important;
+  bottom: 0.75rem !important;
+  left: 0.75rem !important;
+  top: auto !important;
   right: auto !important;
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
+  transform: none !important;
 }
 
-/* ย้ายกล่องข้อมูลสดไปยังตำแหน่งปลายลูกศรชี้ (ขยับลงมาที่มุมขวาล่างให้พอดีสวยงาม) */
 body.gyro-landscape-90 #liveBadgeWrapper {
-  bottom: 4.5rem !important;
-  left: -0.5rem !important;
-  right: auto !important;
+  bottom: 0.75rem !important;
+  right: 0.75rem !important;
   top: auto !important;
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
-  max-width: min(70vh, 320px) !important;
+  left: auto !important;
+  transform: none !important;
+  max-width: calc(100% - 125px) !important;
 }
 
 /* หมุนปุ่มชัตเตอร์และปุ่มบนแถบด้านบน */
@@ -336,34 +336,35 @@ body.gyro-landscape-90 #btnCameraAuth {
   opacity: 0.55 !important;
 }
 
-/* 2. เมื่อหมุนกล้องเป็นแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา) */
+/* 2. เมื่อหมุนกล้องเป็นแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา)
+   ตำแหน่งของ HUD ในกรอบภาพ 4:3 และ 3:4 จะต้องคงเดิมเหมือนแนวตั้ง 100%:
+   - เข็มทิศ: มุมซ้ายบน ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
+   - แผนที่ขนาดเล็ก: มุมซ้ายล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
+   - ลายน้ำข้อความ: มุมขวาล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3 และไม่ทับซ้อนแผนที่
+*/
 body.gyro-landscape-270 #liveCompassWrapper {
-  bottom: 1.5rem !important;
-  left: 1.25rem !important;
-  top: auto !important;
+  top: 0.75rem !important;
+  left: 0.75rem !important;
   right: auto !important;
-  transform: rotate(-90deg) !important;
-  transform-origin: center center !important;
+  bottom: auto !important;
+  transform: none !important;
 }
 
 body.gyro-landscape-270 #liveMapWrapper {
-  bottom: 1.5rem !important;
-  right: 1.5rem !important;
+  bottom: 0.75rem !important;
+  left: 0.75rem !important;
   top: auto !important;
-  left: auto !important;
-  transform: rotate(-90deg) !important;
-  transform-origin: center center !important;
+  right: auto !important;
+  transform: none !important;
 }
 
-/* ย้ายกล่องข้อมูลสดให้อยู่ต่ำลงมาและชิดขอบให้สมมาตร */
 body.gyro-landscape-270 #liveBadgeWrapper {
-  top: 4.5rem !important;
-  right: -0.5rem !important;
-  bottom: auto !important;
+  bottom: 0.75rem !important;
+  right: 0.75rem !important;
+  top: auto !important;
   left: auto !important;
-  transform: rotate(-90deg) !important;
-  transform-origin: center center !important;
-  max-width: min(70vh, 320px) !important;
+  transform: none !important;
+  max-width: calc(100% - 125px) !important;
 }
 
 body.gyro-landscape-270 #btnCameraBgQueue,
@@ -2063,28 +2064,28 @@ body.hardware-landscape #cameraControlsContainer {
 }
 
 body.hardware-landscape #liveCompassWrapper {
-  top: 1rem !important;
-  left: max(5rem, calc(env(safe-area-inset-left, 0px) + 4.5rem)) !important;
+  top: 0.75rem !important;
+  left: 0.75rem !important;
   right: auto !important;
   bottom: auto !important;
   transform: none !important;
 }
 
 body.hardware-landscape #liveMapWrapper {
-  bottom: 1rem !important;
-  left: max(5rem, calc(env(safe-area-inset-left, 0px) + 4.5rem)) !important;
+  bottom: 0.75rem !important;
+  left: 0.75rem !important;
   top: auto !important;
   right: auto !important;
   transform: none !important;
 }
 
 body.hardware-landscape #liveBadgeWrapper {
-  bottom: 1rem !important;
-  right: max(6.25rem, calc(env(safe-area-inset-right, 0px) + 5.75rem)) !important;
+  bottom: 0.75rem !important;
+  right: 0.75rem !important;
   top: auto !important;
   left: auto !important;
   transform: none !important;
-  max-width: min(55vw, 420px) !important;
+  max-width: calc(100% - 125px) !important;
 }
 
 body.hardware-landscape #cameraTopBar #btnCameraBgQueue,
@@ -2158,31 +2159,7 @@ body.hardware-landscape #btnFlipOrientationQuick {
     z-index: 30 !important;
   }
 
-  #liveCompassWrapper {
-    top: 1rem !important;
-    left: max(5rem, calc(env(safe-area-inset-left, 0px) + 4.5rem)) !important;
-    right: auto !important;
-    bottom: auto !important;
-    transform: none !important;
-  }
-
-  #liveMapWrapper {
-    bottom: 1rem !important;
-    left: max(5rem, calc(env(safe-area-inset-left, 0px) + 4.5rem)) !important;
-    top: auto !important;
-    right: auto !important;
-    transform: none !important;
-  }
-
-  #liveBadgeWrapper {
-    bottom: 1rem !important;
-    right: max(6.25rem, calc(env(safe-area-inset-right, 0px) + 5.75rem)) !important;
-    top: auto !important;
-    left: auto !important;
-    transform: none !important;
-    max-width: min(55vw, 420px) !important;
-  }
-
+  .camera-live-frame #liveCompassWrapper,
   .camera-live-frame.ratio-4-3 #liveCompassWrapper,
   .camera-live-frame.ratio-3-4 #liveCompassWrapper {
     top: 0.75rem !important;
@@ -2192,6 +2169,7 @@ body.hardware-landscape #btnFlipOrientationQuick {
     transform: none !important;
   }
 
+  .camera-live-frame #liveMapWrapper,
   .camera-live-frame.ratio-4-3 #liveMapWrapper,
   .camera-live-frame.ratio-3-4 #liveMapWrapper {
     bottom: 0.75rem !important;
@@ -2201,6 +2179,7 @@ body.hardware-landscape #btnFlipOrientationQuick {
     transform: none !important;
   }
 
+  .camera-live-frame #liveBadgeWrapper,
   .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
   .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
     bottom: 0.75rem !important;
