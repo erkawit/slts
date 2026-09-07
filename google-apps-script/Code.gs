@@ -174,11 +174,13 @@ function doPost(e) {
         const uId = String(hData[i][0] || '').trim().toLowerCase();
         const status = String(hData[i][7] || '').trim().toLowerCase();
         
-        if (!targetUserId || uId === targetUserId) {
-          if (data.action === "get_pending_handoff" && status !== "pending") {
-            continue;
-          }
+        const isUserMatch = Boolean(targetUserId && uId === targetUserId);
+        if (isUserMatch) {
           if (status === "cleared") {
+            // หยุดการค้นหาทันที! เนื่องจากเส้นทางล่าสุดของผู้ใช้นี้ถูกสั่งล้างแล้ว ห้ามวนลูปย้อนกลับไปหยิบเอาเส้นทางเก่าในอดีตมาแสดงเด็ดขาด
+            break;
+          }
+          if (data.action === "get_pending_handoff" && status !== "pending") {
             continue;
           }
 
@@ -1295,13 +1297,15 @@ function doGet(e) {
           const uId = String(hData[i][0] || '').trim().toLowerCase();
           const status = String(hData[i][7] || '').trim().toLowerCase();
           
-          // Match only when targetUserId is specified and matches, or no filter
-          const isUserMatch = !targetUserId || uId === targetUserId;
+          // Match strictly when targetUserId is specified and matches
+          const isUserMatch = Boolean(targetUserId && uId === targetUserId);
           if (isUserMatch) {
-            if (e.parameter.action === "get_pending_handoff" && status !== "pending") {
-              continue;
-            }
             if (status === "cleared") {
+              // หยุดการค้นหาทันที! เนื่องจากเส้นทางล่าสุดของผู้ใช้นี้ถูกสั่งล้างแล้ว
+              // ห้ามวนลูปย้อนกลับไปหยิบเอาเส้นทางเก่าในอดีตมาแสดงเด็ดขาด
+              break;
+            }
+            if (e.parameter.action === "get_pending_handoff" && status !== "pending") {
               continue;
             }
 

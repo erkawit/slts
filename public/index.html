@@ -57,19 +57,47 @@
   <!-- JSZip for Batch Photo Download -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
+  <!-- Pre-boot Device Mode Reader (อ่านและใช้งานโหมดอุปกรณ์จากความจำเครื่องทันที ป้องกันการกะพริบ) -->
+  <script>
+    (function() {
+      try {
+        var mode = localStorage.getItem('slts_device_mode');
+        var type = localStorage.getItem('slts_device_type');
+        if (!mode || !type) {
+          var ua = navigator.userAgent || '';
+          var isIPad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          var isAndroidTablet = /Android/i.test(ua) && !/Mobile/i.test(ua);
+          var isTablet = isIPad || isAndroidTablet;
+          var isMobileUA = /Android.*Mobile|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+          var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+          var isSmallTouch = isTouch && window.innerWidth < 640;
+          var isMobile = (isMobileUA || isSmallTouch) && !isTablet;
+
+          if (isTablet) {
+            type = 'tablet';
+            mode = localStorage.getItem('slts_tablet_mode') || 'pc';
+          } else if (isMobile) {
+            type = 'mobile';
+            mode = 'mobile';
+          } else {
+            type = 'pc';
+            mode = 'pc';
+          }
+          localStorage.setItem('slts_device_type', type);
+          localStorage.setItem('slts_device_mode', mode);
+        }
+        document.documentElement.setAttribute('data-device-mode', mode);
+        document.documentElement.setAttribute('data-device-type', type);
+      } catch (e) {
+        console.warn('[Device Boot] Pre-boot check error:', e);
+      }
+    })();
+  </script>
+
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/style.css?v=20260904_19">
+  <link rel="stylesheet" href="css/style.css?v=20260907_01">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
-
-  <!-- Tablet Mode Switch Transition Full-screen Black Overlay (ซ่อนเด็ดขาดเริ่มต้น ป้องกันการกะพริบตอนโหลด) -->
-  <div id="tabletModeTransitionOverlay" style="display: none;">
-    <div class="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center text-3xl text-white mb-4 shadow-lg animate-pulse">
-      <i id="tabletTransitionIcon" class="fa-solid fa-arrows-rotate fa-spin"></i>
-    </div>
-    <h3 id="tabletTransitionText" class="text-lg sm:text-xl font-bold text-white tracking-wide">สลับไปยังโหมด Mobile</h3>
-    <p class="text-xs text-gray-400 mt-1">กำลังปรับเปลี่ยนรูปแบบการทำงาน...</p>
-  </div>
 
   <!-- Main Header & Desktop Navigation Bar (Full Width on Desktop) -->
   <header class="bg-white border-b border-gray-200/90 sticky top-0 z-30 shadow-sm backdrop-blur-md bg-white/95">
@@ -1375,17 +1403,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260906_07"></script>
-  <script src="js/compass.js?v=20260906_07"></script>
-  <script src="js/map.js?v=20260906_07"></script>
-  <script src="js/watermark.js?v=20260906_07"></script>
-  <script src="js/app.js?v=20260906_07"></script>
+  <script src="js/data.js?v=20260907_01"></script>
+  <script src="js/compass.js?v=20260907_01"></script>
+  <script src="js/map.js?v=20260907_01"></script>
+  <script src="js/watermark.js?v=20260907_01"></script>
+  <script src="js/app.js?v=20260907_01"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260906_07')
+        navigator.serviceWorker.register('./sw.js?v=20260907_01')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();
