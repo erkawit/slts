@@ -10,6 +10,29 @@
  * 5. ลบข้อมูลใน Google Sheet และ Google Drive (Admin เท่านั้น)
  */
 
+// =========================================================================
+// ปิด Animation & Transition ของ SweetAlert2 ทั่วทั้งระบบ เพื่อลดการกินทรัพยากร
+// =========================================================================
+(function disableSwalAnimations() {
+  if (typeof window !== 'undefined') {
+    const applyNoAnimation = () => {
+      if (typeof window.Swal !== 'undefined' && !window.Swal._sltsNoAnimPatched) {
+        window.Swal._sltsNoAnimPatched = true;
+        const _origFire = window.Swal.fire;
+        window.Swal.fire = function(...args) {
+          if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+            args[0].showClass = { popup: '', backdrop: '', icon: '' };
+            args[0].hideClass = { popup: '', backdrop: '', icon: '' };
+          }
+          return _origFire.apply(this, args);
+        };
+      }
+    };
+    applyNoAnimation();
+    document.addEventListener('DOMContentLoaded', applyNoAnimation);
+  }
+})();
+
 // Global Application State
 const state = {
   lat: null,
@@ -2351,6 +2374,13 @@ window.handleMobileCameraAuthAction = function() {
 window.performDirectLogout = function(sourceMode = (window.innerWidth < 768 ? 'mobile' : 'desktop')) {
   // บันทึกประวัติการออกจากระบบและขนาดหน้าจอเพื่อแยกการแสดงผล
   state.currentUser = null;
+  state.currentRouteStops = [];
+  state.routeRoadPolylineCoords = [];
+  state.mapRoutePolylineCoords = [];
+  state.calculatedRoadDistanceKm = 0;
+  if (typeof updateMobileRouteMapButtonBadge === 'function') {
+    updateMobileRouteMapButtonBadge(0);
+  }
   localStorage.removeItem('slts_current_user');
   localStorage.setItem('slts_last_auth_action', 'logout');
   localStorage.setItem('slts_last_auth_device_mode', sourceMode);
@@ -7149,6 +7179,9 @@ window.handleMobileModalBackOrClose = function() {
  *    - แสดงปุ่ม "เปลี่ยนจังหวัด" เพื่อให้เปลี่ยนกลับไปยังจังหวัดที่รับผิดชอบได้ตลอดเวลา
  */
 window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock = false) {
+  if (typeof window.pauseCameraStream === 'function') {
+    window.pauseCameraStream();
+  }
   if (!forceLock && typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('ค้นหาข้อมูลหมาย')) {
     return;
   }
@@ -7483,6 +7516,13 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
           performSilentBackgroundUpdate();
         });
       }
+    },
+    willClose: () => {
+      setTimeout(() => {
+        if (typeof Swal !== 'undefined' && !Swal.isVisible() && typeof window.resumeCameraStream === 'function') {
+          window.resumeCameraStream();
+        }
+      }, 60);
     }
   });
 };
@@ -10083,6 +10123,9 @@ window.submitMobileManualUploadForm = async function() {
 // SweetAlert Form บันทึกข้อมูลส่งหมาย 80% สำหรับ Mobile
 // -------------------------------------------------------------------------
 window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape = false, manualUploadData = null) {
+  if (typeof window.pauseCameraStream === 'function') {
+    window.pauseCameraStream();
+  }
   if (!allowLandscape && typeof checkGyroLandscapeAndWarn === 'function' && checkGyroLandscapeAndWarn('กรอกหรือแก้ไขข้อมูลหมาย')) {
     return;
   }
@@ -10490,6 +10533,11 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
       if (popup?._formEl && popup?._focusInHandler) {
         popup._formEl.removeEventListener('focusin', popup._focusInHandler);
       }
+      setTimeout(() => {
+        if (typeof Swal !== 'undefined' && !Swal.isVisible() && typeof window.resumeCameraStream === 'function') {
+          window.resumeCameraStream();
+        }
+      }, 60);
     }
   });
 };
@@ -12381,6 +12429,15 @@ function initCameraResumeLifecycle() {
       if (isCameraOpen) {
         _cameraWasActiveWhenHidden = true;
         _cameraPausedTimestamp = Date.now();
+        // พักกล้องและ HUD เพื่อประหยัด GPU/CPU/Battery ขณะพับหน้าจอหรือสลับแอป
+        if (typeof pauseCameraStream === 'function') {
+          pauseCameraStream();
+        }
+        // หยุด GPS Polling ชั่วคราว เพื่อไม่ให้ชิป GPS ทำงานเบื้องหลังกินแบตเตอรี่
+        if (state.locationIntervalId) {
+          clearInterval(state.locationIntervalId);
+          state.locationIntervalId = null;
+        }
       } else {
         _cameraWasActiveWhenHidden = false;
         _cameraPausedTimestamp = 0;
@@ -12440,6 +12497,11 @@ function initCameraResumeLifecycle() {
           updateCameraTopBarUI();
           if (typeof updateLiveMapHUD === 'function') {
             updateLiveMapHUD();
+          }
+
+          // ฟื้นฟู GPS Polling Interval ที่หยุดไว้ขณะพับหน้าจอ
+          if (!state.locationIntervalId && window.innerWidth <= 768 && typeof startLocationInterval === 'function') {
+            startLocationInterval();
           }
         }
       }
@@ -13883,6 +13945,11 @@ function closeCameraModal() {
     state.cameraStream.getTracks().forEach(track => track.stop());
     state.cameraStream = null;
   }
+  // หยุด GPS Polling เมื่อปิดหน้าจอกล้อง เพื่อประหยัดแบตเตอรี่ (ชิป GPS จะหยุดทำงานเบื้องหลัง)
+  if (state.locationIntervalId) {
+    clearInterval(state.locationIntervalId);
+    state.locationIntervalId = null;
+  }
   elements.cameraModal.classList.add('hidden');
   elements.cameraModal.classList.remove('flex');
 }
@@ -13893,14 +13960,19 @@ function closeCameraModal() {
  */
 window.pauseCameraStream = function() {
   stopLiveCameraHUD();
+  // หยุดการทำงานของฮาร์ดแวร์กล้อง Native Camera ทันที (ชัตเตอร์ฮาร์ดแวร์ปิด ไม่สะสมความร้อน ไม่กินแบต)
   if (state.cameraStream) {
-    state.cameraStream.getVideoTracks().forEach(track => {
-      try { track.enabled = false; } catch (e) {}
+    state.cameraStream.getTracks().forEach(track => {
+      try { track.stop(); } catch (e) {}
     });
+    state.cameraStream = null;
   }
+  // ซ่อนองค์ประกอบวิดีโอและตัด Stream ออกทันที ไม่ให้มีภาพกล้องเคลื่อนไหวเบื้องหลังเด็ดขาด
   if (elements.videoPreview) {
     try {
       elements.videoPreview.pause();
+      elements.videoPreview.srcObject = null;
+      elements.videoPreview.style.display = 'none';
     } catch (e) {}
   }
   state.isCameraStreamPaused = true;
@@ -13910,23 +13982,16 @@ window.pauseCameraStream = function() {
  * สตรีมกล้องต่อทันทีเมื่อปิดหน้าต่างแผนที่หรือโมดอล
  */
 window.resumeCameraStream = async function() {
+  if (typeof Swal !== 'undefined' && Swal.isVisible()) {
+    return;
+  }
   if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
     state.isCameraStreamPaused = false;
-    if (state.cameraStream && state.cameraStream.active && state.cameraStream.getVideoTracks().some(t => t.readyState === 'live')) {
-      state.cameraStream.getVideoTracks().forEach(track => {
-        try { track.enabled = true; } catch (e) {}
-      });
-      if (elements.videoPreview) {
-        try {
-          if (!elements.videoPreview.srcObject) {
-            elements.videoPreview.srcObject = state.cameraStream;
-          }
-          await elements.videoPreview.play().catch(() => {});
-        } catch (e) {}
-      }
-    } else {
-      await startCameraStream();
+    if (elements.videoPreview) {
+      elements.videoPreview.style.display = '';
     }
+    // สตาร์ตกล้องใหม่แบบสด 0ms เมื่อกลับสู่หน้ากล้อง
+    await startCameraStream();
     startLiveCameraHUD();
     if (typeof fetchCurrentLocation === 'function') {
       fetchCurrentLocation(true);
@@ -14251,6 +14316,7 @@ async function startCameraStream() {
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     state.cameraStream = stream;
     if (elements.videoPreview) {
+      elements.videoPreview.style.display = '';
       elements.videoPreview.srcObject = stream;
       try {
         await elements.videoPreview.play();
@@ -14326,7 +14392,16 @@ async function captureAndProcessPhoto() {
       return;
     }
 
-    showCustomLoading('กำลังสร้างภาพถ่ายพร้อมลายน้ำ...', 'กำลังประมวลผลแผนที่ เข็มทิศ และข้อมูลส่งหมาย');
+    // เอฟเฟกต์แสงชัตเตอร์สีขาว (Camera Shutter Flash Effect) ไม่บังหน้าจอ ให้ความรู้สึกเหมือนกล้องจริง
+    const flashEl = document.getElementById('cameraShutterFlash');
+    if (flashEl) {
+      flashEl.classList.remove('opacity-0');
+      flashEl.classList.add('opacity-80');
+      setTimeout(() => {
+        flashEl.classList.remove('opacity-80');
+        flashEl.classList.add('opacity-0');
+      }, 120);
+    }
 
     const caseNumber = getFormattedCaseNumber();
     const locationText = getFullLocationText();
@@ -14385,8 +14460,6 @@ async function captureAndProcessPhoto() {
     const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation, rotationDeg);
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
-    
-    hideCustomLoading();
 
     // ปรับลดขนาดรูปภาพให้ <= 1MB
     const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
@@ -14443,12 +14516,29 @@ async function captureAndProcessPhoto() {
 
     // สั่นตอบสนองเบาๆ (Haptic Feedback) ให้ทราบว่าถ่ายภาพสำเร็จ
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate(40);
+      navigator.vibrate([40, 30, 40]);
+    }
+
+    // แสดงแจ้งเตือน Toast สั้นๆ ด้านบนจอ โดยไม่บังหน้าจอและไม่ขัดจังหวะการทำงาน
+    if (typeof Swal !== 'undefined') {
+      const Toast = Swal.mixin({
+        toast: true,
+        position: 'top',
+        showConfirmButton: false,
+        timer: 2200,
+        timerProgressBar: false
+      });
+      Toast.fire({
+        icon: 'success',
+        title: 'ถ่ายภาพสำเร็จ บันทึกข้อมูลเบื้องหลังเรียบร้อย'
+      });
     }
 
   } catch (error) {
     console.error('Capture/Upload error:', error);
-    hideCustomLoading();
+    if (typeof hideCustomLoading === 'function') {
+      hideCustomLoading();
+    }
 
     const caseNumber = getFormattedCaseNumber();
     const baseFilename = caseNumber.replace(/\//g, '-');
@@ -14475,8 +14565,6 @@ async function handleFallbackFile(e) {
     e.target.value = '';
     return;
   }
-
-  showCustomLoading('กำลังประมวลผลภาพถ่าย...', 'กำลังสร้างภาพถ่ายพร้อมข้อมูลส่งหมาย');
 
   try {
     const img = new Image();
@@ -14508,8 +14596,6 @@ async function handleFallbackFile(e) {
     const result = await WatermarkEngine.renderWatermark(img, payloadData);
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
-    
-    hideCustomLoading();
 
     // 1. นำคำสั่ง triggerDownload ออก เพื่อป้องกันไม่ให้ Google Chrome แสดงแจ้งเตือนดาวน์โหลดไฟล์รบกวนหน้ากล้อง
     // ข้อมูลและภาพถูกจัดเก็บอย่างปลอดภัยใน Background Queue / Offline Queue / Google Drive & Sheet แล้ว
@@ -14564,11 +14650,27 @@ async function handleFallbackFile(e) {
     updateCameraTopBarUI();
 
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate(40);
+      navigator.vibrate([40, 30, 40]);
+    }
+
+    if (typeof Swal !== 'undefined') {
+      const Toast = Swal.mixin({
+        toast: true,
+        position: 'top',
+        showConfirmButton: false,
+        timer: 2200,
+        timerProgressBar: false
+      });
+      Toast.fire({
+        icon: 'success',
+        title: 'บันทึกภาพถ่ายและข้อมูลเบื้องหลังเรียบร้อย'
+      });
     }
   } catch (err) {
     console.error(err);
-    hideCustomLoading();
+    if (typeof hideCustomLoading === 'function') {
+      hideCustomLoading();
+    }
     Swal.fire({
       icon: 'error',
       title: 'ไม่สามารถประมวลผลภาพได้',
@@ -20500,12 +20602,15 @@ window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
     await Promise.all(base64Stops.map(s => uploadRouteReferenceImageToServer(s)));
   }
 
-  const cleanStops = cleanStopsForStorage(targetStop ? [targetStop] : stops);
+  const cleanStops = deduplicateRouteStops(cleanStopsForStorage(targetStop ? [targetStop] : stops));
   const primaryStop = cleanStops[0] || {};
   const prov = primaryStop.province || state.selectedProvince || 'อุดรธานี';
   const queryString = buildVillageCenterSearchQuery(primaryStop.moo, primaryStop.subdistrict, primaryStop.district, prov);
   const userId = (state.currentUser.username || 'user').trim();
   const userName = state.currentUser.name || userId;
+
+  // ล้างสถานะที่เคยสั่งล้างเส้นทาง เพื่อให้เส้นทางใหม่แสดงผลได้ทันที
+  localStorage.removeItem('slts_route_cleared_' + userId.toLowerCase());
 
   // อ่านจุดเริ่มต้น และจุดสิ้นสุดที่มีการวางไว้จากหน้าจอ Desktop ให้ตรงกันทั้งหมด
   const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)', lat: 17.4138, lng: 102.7872, isCustom: false };
@@ -20566,9 +20671,10 @@ window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
     timestamp: new Date().toISOString()
   };
 
-  // 1. บันทึก Local Storage & Shared State
+  // 1. บันทึก Local Storage & Shared State สำหรับ User นี้โดยตรง
   try {
     localStorage.setItem('slts_device_handoff_' + userId.toLowerCase(), JSON.stringify(payload));
+    localStorage.setItem('slts_user_route_' + userId.toLowerCase(), JSON.stringify(payload));
     localStorage.setItem('slts_latest_handoff', JSON.stringify(payload));
     localStorage.setItem('slts_shared_route_stops', JSON.stringify(cleanStops));
     localStorage.setItem('slts_shared_route_start', JSON.stringify(start));
@@ -20607,8 +20713,14 @@ window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
   logServerActivity('MAP_CROSS_DEVICE_HANDOFF_SENT', `ส่งพิกัดไปยังมือถือ: ${queryString} (คดี: ${primaryStop.caseNumber || '-'}, ผู้รับ: @${userId})`, {
     user_id: userId,
     queryString: queryString,
-    stopsCount: stops.length
+    stopsCount: cleanStops.length
   });
+
+  // อัปเดตสถานะตัวเลขบน Badge ปุ่มแผนที่บนหน้าจอมือถือ และตารางรายการส่งหมายรอบนี้
+  updateMobileRouteMapButtonBadge(cleanStops.length);
+  if (typeof renderRouteBatchTab === 'function') {
+    renderRouteBatchTab();
+  }
 
   // แจ้งเตือนเมื่อส่งต่อเส้นทาง: PC แสดงมุมขวาบน / มือถือแสดงแถบเขียว 2 วิ
   showHandoffSentFeedback('ส่งไปแสดงผลบนมือถือเรียบร้อย!', `ผู้รับ: @${userId} (${cleanStops.length} จุดหมาย)`);
@@ -20864,7 +20976,7 @@ window.openShareRouteModal = async function() {
     if (!result.isConfirmed || !result.value) return;
 
     const { targetUserIds, note } = result.value;
-    const cleanStops = cleanStopsForStorage(stops);
+    const cleanStops = deduplicateRouteStops(cleanStopsForStorage(stops));
     const primaryStop = cleanStops[0] || {};
     const fromUserId = (state.currentUser.username || '').trim();
     const fromUserName = state.currentUser.name || fromUserId;
@@ -20899,9 +21011,11 @@ window.openShareRouteModal = async function() {
     // ส่ง LocalStorage และ BroadcastChannel สำหรับผู้รับแต่ละคน
     targetUserIds.forEach(tid => {
       try {
+        const uIdLower = tid.trim().toLowerCase();
+        localStorage.removeItem('slts_route_cleared_' + uIdLower);
         const userPayload = { ...payload, user_id: tid, target_user_id: tid };
-        localStorage.setItem('slts_device_handoff_' + tid.toLowerCase(), JSON.stringify(userPayload));
-        localStorage.setItem('slts_user_route_' + tid.toLowerCase(), JSON.stringify(userPayload));
+        localStorage.setItem('slts_device_handoff_' + uIdLower, JSON.stringify(userPayload));
+        localStorage.setItem('slts_user_route_' + uIdLower, JSON.stringify(userPayload));
       } catch (e) {}
     });
     localStorage.setItem('slts_handoff_event', Date.now().toString());
@@ -21509,7 +21623,18 @@ window.fetchActiveRouteFromServer = async function() {
     const data = await res.json();
     if (data && data.status === 'success' && data.hasRoute && data.route) {
       const r = data.route;
+
+      // ตรวจสอบว่าเคยมีการสั่งล้างข้อมูลเส้นทางของผู้ใช้นี้หรือไม่
+      const clearedTime = Number(localStorage.getItem('slts_route_cleared_' + userId) || 0);
+      if (clearedTime > 0) {
+        const rTime = new Date(r.timestamp || r.savedAt || 0).getTime();
+        if (rTime > 0 && rTime <= clearedTime) {
+          return; // ข้อมูลนี้ถูกผู้ใช้สั่งล้างไปแล้ว ห้ามดึงกลับมาแสดงอีก
+        }
+      }
+
       if (r.timestamp !== window.dismissedHandoffTime && Array.isArray(r.stops) && r.stops.length > 0) {
+        r.stops = deduplicateRouteStops(r.stops);
         if (!state.currentRouteStops || state.currentRouteStops.length === 0) {
           state.currentRouteStops = r.stops;
           if (r.startLocation) state.routeStartLocation = r.startLocation;
@@ -21775,42 +21900,22 @@ window.initMobileHandoffReceiver = function() {
     }
   });
 
-  // 3. ตรวจสอบและซิงค์แคชเดิมทันทีเมื่อเริ่มต้นระบบ (รองรับโหมด Offline 100%)
-  let cachedStops = localStorage.getItem('slts_shared_route_stops');
-  if (!cachedStops && currentUserId) {
-    const userCached = localStorage.getItem('slts_user_route_' + currentUserId);
-    if (userCached) {
-      try {
-        const uParsed = JSON.parse(userCached);
-        if (uParsed && Array.isArray(uParsed.stops) && uParsed.stops.length > 0) {
-          cachedStops = JSON.stringify(uParsed.stops);
-          if (uParsed.startLocation) state.routeStartLocation = uParsed.startLocation;
-          if (uParsed.endLocation) state.routeEndLocation = uParsed.endLocation;
-        }
-      } catch (e) {}
+  // 3. ตรวจสอบและซิงค์แคชของ User นั้นโดยเฉพาะเมื่อเริ่มต้นระบบ (Strict User Isolation)
+  const activeRoute = currentUserId ? getUserActiveRoute(currentUserId) : null;
+  if (activeRoute && Array.isArray(activeRoute.stops) && activeRoute.stops.length > 0) {
+    state.currentRouteStops = deduplicateRouteStops(activeRoute.stops);
+    if (activeRoute.startLocation) state.routeStartLocation = activeRoute.startLocation;
+    if (activeRoute.endLocation) state.routeEndLocation = activeRoute.endLocation;
+    if (activeRoute.routeRoadPolyline && Array.isArray(activeRoute.routeRoadPolyline)) {
+      state.routeRoadPolylineCoords = activeRoute.routeRoadPolyline;
     }
-  }
-
-  if (cachedStops) {
-    try {
-      const parsed = JSON.parse(cachedStops);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        state.currentRouteStops = parsed;
-        updateMobileRouteMapButtonBadge(parsed.length);
-      }
-    } catch (e) {}
-  }
-  const cachedStart = localStorage.getItem('slts_shared_route_start');
-  if (cachedStart) {
-    try { state.routeStartLocation = JSON.parse(cachedStart); } catch (e) {}
-  }
-  const cachedEnd = localStorage.getItem('slts_shared_route_end');
-  if (cachedEnd) {
-    try { state.routeEndLocation = JSON.parse(cachedEnd); } catch (e) {}
-  }
-  const cachedPolyline = localStorage.getItem('slts_shared_route_polyline');
-  if (cachedPolyline) {
-    try { state.routeRoadPolylineCoords = JSON.parse(cachedPolyline); } catch (e) {}
+    if (activeRoute.totalDistanceKm) {
+      state.calculatedRoadDistanceKm = activeRoute.totalDistanceKm;
+    }
+    updateMobileRouteMapButtonBadge(state.currentRouteStops.length);
+  } else {
+    state.currentRouteStops = [];
+    updateMobileRouteMapButtonBadge(0);
   }
 
   // 4. ตรวจสอบข้อมูลจาก Server (Handoff และ Route เดิมที่เซฟไว้)
@@ -21832,13 +21937,12 @@ function checkLocalHandoffData() {
   const userId = (state.currentUser?.username || '').trim().toLowerCase();
   if (!userId) return;
 
+  const clearedTime = Number(localStorage.getItem('slts_route_cleared_' + userId) || 0);
+
   try {
     let raw = localStorage.getItem('slts_device_handoff_' + userId);
     if (!raw) {
       raw = localStorage.getItem('slts_user_route_' + userId);
-    }
-    if (!raw) {
-      raw = localStorage.getItem('slts_latest_handoff');
     }
     if (!raw) return;
 
@@ -21846,10 +21950,20 @@ function checkLocalHandoffData() {
     const targetUserId = (handoff.user_id || handoff.target_user_id || '').trim().toLowerCase();
     const targetUserIds = Array.isArray(handoff.target_user_ids) ? handoff.target_user_ids.map(u => String(u).toLowerCase()) : [];
     const isTarget = targetUserId === userId || targetUserIds.includes(userId);
+    if (!isTarget) return;
 
-    if (isTarget && handoff.status === 'pending' && handoff.timestamp !== lastReceivedHandoffTime && handoff.timestamp !== window.dismissedHandoffTime) {
+    if (clearedTime > 0) {
+      const hTime = new Date(handoff.timestamp || handoff.savedAt || 0).getTime();
+      if (hTime > 0 && hTime <= clearedTime) return;
+    }
+
+    if (Array.isArray(handoff.stops)) {
+      handoff.stops = deduplicateRouteStops(handoff.stops);
+    }
+
+    if (handoff.status === 'pending' && handoff.timestamp !== lastReceivedHandoffTime && handoff.timestamp !== window.dismissedHandoffTime) {
       applyReceivedHandoff(handoff);
-    } else if (isTarget && (handoff.status === 'shared_active' || handoff.status === 'active_route')) {
+    } else if (handoff.status === 'shared_active' || handoff.status === 'active_route') {
       if ((!state.currentRouteStops || state.currentRouteStops.length === 0) && Array.isArray(handoff.stops) && handoff.stops.length > 0) {
         state.currentRouteStops = handoff.stops;
         updateMobileRouteMapButtonBadge(handoff.stops.length);
@@ -21913,6 +22027,10 @@ function applyReceivedHandoff(handoff) {
   const distText = handoff.totalDistanceKm ? ` • ระยะทาง ${handoff.totalDistanceKm.toFixed(1)} กม.` : '';
 
   const applyHandoffDataToState = () => {
+    localStorage.removeItem('slts_route_cleared_' + currentUserId);
+    if (Array.isArray(handoff.stops)) {
+      handoff.stops = deduplicateRouteStops(handoff.stops);
+    }
     handoff.status = isShareRoute ? 'shared_active' : 'active';
     try {
       localStorage.setItem('slts_device_handoff_' + currentUserId, JSON.stringify(handoff));
@@ -22066,6 +22184,10 @@ function applyReceivedHandoff(handoff) {
         }
 
         // นำเข้าข้อมูลเส้นทางและหมุด (ตั้งสถานะเป็น shared_active เพื่อคงอยู่จนกว่าจะกดล้าง)
+        localStorage.removeItem('slts_route_cleared_' + currentUserId);
+        if (Array.isArray(handoff.stops)) {
+          handoff.stops = deduplicateRouteStops(handoff.stops);
+        }
         handoff.status = 'shared_active';
         try {
           localStorage.setItem('slts_device_handoff_' + currentUserId, JSON.stringify(handoff));
@@ -22150,6 +22272,10 @@ function applyReceivedHandoff(handoff) {
   }
 
   // 2. อัปเดต Local Storage และ State ให้ตรงตามที่ส่งมาทั้งหมด (คงอยู่จนกว่าจะกดล้าง)
+  localStorage.removeItem('slts_route_cleared_' + currentUserId);
+  if (Array.isArray(handoff.stops)) {
+    handoff.stops = deduplicateRouteStops(handoff.stops);
+  }
   handoff.status = 'active_route';
   try {
     localStorage.setItem('slts_device_handoff_' + currentUserId, JSON.stringify(handoff));
@@ -22283,7 +22409,11 @@ function applyReceivedHandoff(handoff) {
  * อัปเดตสถานะและจำนวนจุดส่งหมายบนปุ่มแผนที่หน้าจอมือถือ
  */
 window.updateMobileRouteMapButtonBadge = function(count) {
-  const stopsCount = count !== undefined ? count : (state.currentRouteStops ? state.currentRouteStops.length : 0);
+  let stopsCount = count;
+  if (stopsCount === undefined) {
+    const active = typeof getUserActiveRoute === 'function' ? getUserActiveRoute() : null;
+    stopsCount = (active && Array.isArray(active.stops)) ? active.stops.length : 0;
+  }
   const btn = document.getElementById('btnCameraRouteMap');
   const txt = document.getElementById('txtCameraRouteMapCount');
   const pill = document.getElementById('mobileHandoffPillBanner');
@@ -22371,6 +22501,8 @@ window.clearMobileRouteHandoff = function(event) {
 
   const userId = (state.currentUser?.username || '').trim().toLowerCase();
   if (userId) {
+    // บันทึก timestamp ที่สั่งล้างข้อมูลอย่างถาวรใน LocalStorage ป้องกันการกู้คืนกลับมา
+    localStorage.setItem('slts_route_cleared_' + userId, Date.now().toString());
     localStorage.removeItem('slts_device_handoff_' + userId);
     localStorage.removeItem('slts_user_route_' + userId);
     localStorage.removeItem('slts_route_stop_status_' + userId);
@@ -22387,7 +22519,7 @@ window.clearMobileRouteHandoff = function(event) {
   }
 
   // บันทึก timestamp ที่ถูกล้าง เพื่อไม่ให้ Polling ดึงซ้ำมาอีก
-  window.dismissedHandoffTime = lastReceivedHandoffTime || Date.now().toString();
+  window.dismissedHandoffTime = Date.now().toString();
 
   // 2. แจ้ง Server ผ่าน API เพื่อปลด pending handoff และล้าง active route
   if (state.appsScriptUrl && navigator.onLine && userId) {
@@ -22423,29 +22555,104 @@ window.clearMobileRouteHandoff = function(event) {
 };
 
 /**
+ * คัดกรองและตัดรายการส่งหมายที่ซ้ำซ้อนออก (Deduplication)
+ * ตรวจสอบจาก: id, เลขคดี (caseNumber) + ที่ตั้งส่งหมาย (locationText), หรือ พิกัด (lat, lng)
+ */
+window.deduplicateRouteStops = function(stops) {
+  if (!Array.isArray(stops) || stops.length <= 1) return stops || [];
+  const seenKeys = new Set();
+  const deduped = [];
+
+  for (let i = 0; i < stops.length; i++) {
+    const s = stops[i];
+    if (!s) continue;
+
+    let key = '';
+    const cleanId = String(s.id || '').trim();
+    const cleanCase = String(s.caseNumber || '').trim();
+    const cleanLoc = String(s.locationText || `${s.houseNo || ''} ${s.moo || ''} ${s.subdistrict || ''} ${s.district || ''}`.trim()).trim();
+
+    if (cleanId) {
+      key = 'id_' + cleanId;
+    } else if (cleanCase && cleanCase !== '-' && cleanCase !== 'ไม่ระบุ') {
+      const normCase = cleanCase.replace(/[\s\.\/]/g, '').toLowerCase();
+      const normLoc = cleanLoc ? cleanLoc.replace(/\s+/g, '').toLowerCase() : '';
+      key = 'case_' + normCase + (normLoc ? '_' + normLoc : '');
+    } else if (cleanLoc) {
+      key = 'loc_' + cleanLoc.replace(/\s+/g, '').toLowerCase();
+    } else if (s.lat && s.lng) {
+      key = 'coords_' + Number(s.lat).toFixed(5) + '_' + Number(s.lng).toFixed(5);
+    } else {
+      key = 'idx_' + i;
+    }
+
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      deduped.push(s);
+    } else {
+      console.warn('[Deduplicate] Duplicate stop removed:', key, s.caseNumber || s.locationText);
+    }
+  }
+
+  return deduped;
+};
+
+/**
+ * ดึงข้อมูลเส้นทางส่งหมายรอบนี้สำหรับ User คนนั้นโดยเฉพาะ (Strict User Isolation)
+ * - แยกออกจากชุดข้อมูลหมุดในแผนที่โดยเด็ดขาด
+ * - แสดงเฉพาะเมื่อมีการกด "ส่งไปแสดงผลบนมือถือ" หรือแชร์เส้นทางมาแล้วเท่านั้น
+ * - หากมีการสั่งล้างข้อมูล (slts_route_cleared_) จะไม่ส่งข้อมูลเก่ากลับมาแสดงอีก
+ */
+window.getUserActiveRoute = function(userId = null) {
+  const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
+  if (!isUserLoggedIn) return null;
+
+  const currentUserId = (userId || state.currentUser?.username || '').trim().toLowerCase();
+  if (!currentUserId) return null;
+
+  // ตรวจสอบว่าเคยมีการสั่งล้างข้อมูลเส้นทางของ User คนนี้ไปแล้วหรือไม่
+  const clearedTime = Number(localStorage.getItem('slts_route_cleared_' + currentUserId) || 0);
+
+  try {
+    const raw = localStorage.getItem('slts_user_route_' + currentUserId) ||
+                localStorage.getItem('slts_device_handoff_' + currentUserId);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed) return null;
+
+    // หากเวลาของเส้นทางเก่ากว่าเวลาที่เคยสั่งล้างข้อมูล ถือว่าข้อมูลถูกล้างแล้ว ไม่ดึงกลับมาแสดง
+    if (clearedTime > 0) {
+      const routeTime = new Date(parsed.timestamp || parsed.savedAt || 0).getTime();
+      if (routeTime > 0 && routeTime <= clearedTime) {
+        return null;
+      }
+    }
+
+    // ตรวจสอบความถูกต้องว่าเป็นเส้นทางที่ส่งมาให้ User คนนี้โดยตรงเท่านั้น (User Isolation 100%)
+    const targetUser = (parsed.user_id || parsed.userId || parsed.targetUserId || parsed.target_user_id || '').trim().toLowerCase();
+    const targetUsers = Array.isArray(parsed.target_user_ids) ? parsed.target_user_ids.map(u => String(u).toLowerCase()) : [];
+    const isTarget = targetUser === currentUserId || targetUsers.includes(currentUserId);
+    if (!isTarget) {
+      return null;
+    }
+
+    if (Array.isArray(parsed.stops)) {
+      parsed.stops = deduplicateRouteStops(parsed.stops);
+    }
+
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+};
+
+/**
  * ตรวจสอบว่ามีรายการส่งหมายส่งมาจากหน้าจอ Desktop หรือผู้ใช้อื่น หรือมีเส้นทางค้างอยู่หรือไม่
  */
 function hasDesktopHandoffForCurrentUser() {
-  const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
-  if (!isUserLoggedIn) return false;
-
-  const currentUserId = (state.currentUser?.username || '').trim().toLowerCase();
-  if (!currentUserId) return false;
-
-  try {
-    const raw = localStorage.getItem('slts_device_handoff_' + currentUserId) || localStorage.getItem('slts_user_route_' + currentUserId);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const isTargetUser = (parsed.user_id || parsed.userId || parsed.targetUserId || parsed.target_user_id || '').toLowerCase() === currentUserId ||
-        (Array.isArray(parsed.target_user_ids) && parsed.target_user_ids.map(u => String(u).toLowerCase()).includes(currentUserId));
-      const hasStops = Array.isArray(parsed.stops) && parsed.stops.length > 0;
-      if (isTargetUser && hasStops) {
-        return true;
-      }
-    }
-  } catch (e) {}
-
-  return Boolean(state.currentRouteStops && state.currentRouteStops.length > 0);
+  const activeRoute = getUserActiveRoute();
+  return Boolean(activeRoute && Array.isArray(activeRoute.stops) && activeRoute.stops.length > 0);
 }
 
 // =========================================================================
@@ -23064,25 +23271,58 @@ window.renderRouteBatchTab = function() {
   const emptyState = document.getElementById('routeBatchEmptyState');
   if (!container) return;
 
+  const isUserLoggedIn = state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
   const userId = getRouteDeliveryUserKey();
-  let stops = state.currentRouteStops || [];
-  if (stops.length === 0) {
-    try {
-      const saved = localStorage.getItem('slts_shared_route_stops') || localStorage.getItem('slts_user_route_' + userId);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        stops = Array.isArray(parsed) ? parsed : (parsed.stops || []);
-        state.currentRouteStops = stops;
-      }
-    } catch (e) {}
-  }
 
-  syncStopsWithDeliveryStatus(stops);
+  // ดึงเฉพาะข้อมูลเส้นทางที่ส่งมาให้ผู้ใช้นี้อย่างถูกต้อง (Strict User Isolation & Handoff Only)
+  // แยกออกจากชุดข้อมูลใน แผนที่และหมุด อย่างเด็ดขาด และจะแสดงต่อเมื่อมีการกดส่งไปยังมือถือแล้วเท่านั้น
+  const activeRoute = isUserLoggedIn ? getUserActiveRoute(userId) : null;
+  const stops = (activeRoute && Array.isArray(activeRoute.stops)) ? deduplicateRouteStops(activeRoute.stops) : [];
+  state.currentRouteStops = stops;
+
+  if (activeRoute && activeRoute.startLocation) {
+    state.routeStartLocation = activeRoute.startLocation;
+  }
+  if (activeRoute && activeRoute.endLocation) {
+    state.routeEndLocation = activeRoute.endLocation;
+  }
+  if (activeRoute && activeRoute.totalDistanceKm) {
+    state.calculatedRoadDistanceKm = activeRoute.totalDistanceKm;
+  }
 
   const start = state.routeStartLocation || { name: 'ศาลจังหวัดอุดรธานี (ค่าเริ่มต้น)' };
   const prov = state.selectedProvince || 'อุดรธานี';
-
   const total = stops.length;
+
+  if (total === 0) {
+    container.innerHTML = '';
+    if (emptyState) emptyState.classList.remove('hidden');
+    const badgeTotal = document.getElementById('routeBatchTotalBadge');
+    if (badgeTotal) badgeTotal.textContent = '0 รายการ';
+    const sub = document.getElementById('routeBatchSubtitle');
+    if (sub) sub.textContent = `ยังไม่มีรายการส่งหมายรอบนี้ (จะแสดงเมื่อกด "ส่งไปแสดงผลบนมือถือ" หรือมีเส้นทางที่ส่งมายังคุณ)`;
+    const navBadge = document.getElementById('routeBatchBadgeCount');
+    if (navBadge) navBadge.classList.add('hidden');
+    const startText = document.getElementById('routeBatchStartText');
+    if (startText) startText.textContent = start.name || 'ศาลจังหวัดอุดรธานี';
+    const totalCountEl = document.getElementById('routeBatchTotalCountText');
+    if (totalCountEl) totalCountEl.textContent = '0 จุด';
+    const capturedCountEl = document.getElementById('routeBatchCapturedCountText');
+    if (capturedCountEl) capturedCountEl.textContent = '0 จุด';
+    const uploadedCountEl = document.getElementById('routeBatchUploadedCountText');
+    if (uploadedCountEl) uploadedCountEl.textContent = '0 จุด';
+    const btnZip = document.getElementById('btnDownloadBatchZip');
+    const zipBtnText = document.getElementById('btnDownloadBatchZipText');
+    if (btnZip && zipBtnText) {
+      btnZip.disabled = true;
+      zipBtnText.textContent = 'ดาวน์โหลดรูปภาพทั้งหมด (0 รูป)';
+    }
+    return;
+  }
+
+  if (emptyState) emptyState.classList.add('hidden');
+  syncStopsWithDeliveryStatus(stops);
+
   let capturedCount = 0;
   let uploadedCount = 0;
   let photosCount = 0;
@@ -23109,12 +23349,8 @@ window.renderRouteBatchTab = function() {
 
   const navBadge = document.getElementById('routeBatchBadgeCount');
   if (navBadge) {
-    if (total > 0) {
-      navBadge.textContent = `${total}`;
-      navBadge.classList.remove('hidden');
-    } else {
-      navBadge.classList.add('hidden');
-    }
+    navBadge.textContent = `${total}`;
+    navBadge.classList.remove('hidden');
   }
 
   const startText = document.getElementById('routeBatchStartText');
@@ -23139,10 +23375,6 @@ window.renderRouteBatchTab = function() {
       zipBtnText.textContent = `ดาวน์โหลดรูปภาพทั้งหมด (0 รูป)`;
       btnZip.title = 'ยังไม่มีรูปภาพที่ถ่ายและนำเข้าสู่ระบบใหม่ในรอบนี้';
       if (icon) icon.className = 'fa-solid fa-file-zipper text-base';
-    } else if (photosCount === 1) {
-      zipBtnText.textContent = `ดาวน์โหลดรูปภาพ (1 รูป) ไฟล์รูปภาพ`;
-      btnZip.title = 'คลิกดาวน์โหลดไฟล์รูปภาพ (ไม่ต้องบีบอัด ZIP)';
-      if (icon) icon.className = 'fa-solid fa-image text-base';
     } else {
       zipBtnText.textContent = `ดาวน์โหลดรูปภาพทั้งหมด (${photosCount} รูป) .ZIP`;
       btnZip.title = 'คลิกดาวน์โหลดรูปภาพทั้งหมดเป็นไฟล์ .ZIP';
@@ -23166,13 +23398,6 @@ window.renderRouteBatchTab = function() {
   } else if (noticeBanner) {
     noticeBanner.classList.add('hidden');
   }
-
-  if (total === 0) {
-    container.innerHTML = '';
-    if (emptyState) emptyState.classList.remove('hidden');
-    return;
-  }
-  if (emptyState) emptyState.classList.add('hidden');
 
   let rowsHtml = '';
   stops.forEach((stop, index) => {
@@ -23328,6 +23553,140 @@ window.renderRouteBatchTab = function() {
   container.innerHTML = rowsHtml;
 };
 
+/**
+ * แยกส่วนประกอบของเลขคดีเพื่อใช้จัดเรียงลำดับ:
+ * 1. ตัวอักษรไทย (Thai letters prefix เช่น "ผบ", "พ", "อ", "มโน", ฯลฯ)
+ * 2. ลำดับเลขคดี (Case running sequence number จากน้อยไปมาก)
+ * 3. เลขปี (Year พ.ศ. จากน้อยไปมาก)
+ */
+function parseCaseNumberForSort(caseNumber) {
+  if (!caseNumber) return { prefix: '', num: 0, year: 0, raw: '' };
+  const raw = String(caseNumber).trim();
+
+  // Pattern เช่น: "ผบ.123/2567", "ผบ. 123/2567", "ผบ123/67", "ผบ.123-2567", "พ.45/68", "อ.102/2566", "12/2569"
+  const matchWithYear = raw.match(/^([^\d\/\\-]+)?[\s\.\/\\-]*(\d+)[\s\.\/\\-]+(\d+)/);
+  if (matchWithYear) {
+    const prefix = (matchWithYear[1] || '').replace(/[\s\.]/g, '').trim();
+    const num = parseInt(matchWithYear[2], 10) || 0;
+    let year = parseInt(matchWithYear[3], 10) || 0;
+    if (year > 0 && year < 100) {
+      year += 2500;
+    } else if (year > 2000 && year < 2400) {
+      year += 543;
+    }
+    return { prefix, num, year, raw };
+  }
+
+  // กรณีมีเฉพาะตัวอักษรนำหน้าและเลขคดี ไม่มีปี
+  const matchNoYear = raw.match(/^([^\d]+)?[\s\.\/\\-]*(\d+)/);
+  if (matchNoYear) {
+    const prefix = (matchNoYear[1] || '').replace(/[\s\.]/g, '').trim();
+    const num = parseInt(matchNoYear[2], 10) || 0;
+    return { prefix, num, year: 0, raw };
+  }
+
+  return { prefix: raw, num: 0, year: 0, raw };
+}
+
+/**
+ * เรียงลำดับเลขคดีตามข้อกำหนด:
+ * 1. ตามตัวอักษรไทย (Thai Prefix)
+ * 2. ตามลำดับเลขคดี (Case Number จากน้อยไปมาก)
+ * 3. ตามปี โดยเรียงลำดับเลขปีจากน้อยไปมาก (Year จากน้อยไปมาก)
+ */
+function compareCaseNumbersForBatch(aCase, bCase) {
+  const a = parseCaseNumberForSort(aCase);
+  const b = parseCaseNumberForSort(bCase);
+
+  // 1. เรียงตามตัวอักษรไทย
+  const prefixCmp = a.prefix.localeCompare(b.prefix, 'th');
+  if (prefixCmp !== 0) return prefixCmp;
+
+  // 2. ตามลำดับเลขคดี
+  if (a.num !== b.num) return a.num - b.num;
+
+  // 3. ตามปี โดยเรียงลำดับเลขปีจากน้อยไปมาก
+  if (a.year !== b.year) return a.year - b.year;
+
+  return a.raw.localeCompare(b.raw, 'th');
+}
+
+/**
+ * สร้างชื่อโฟลเดอร์สำหรับ ZIP ตามข้อกำหนด:
+ * [วันที่-เดือน-ปี(พ.ศ.) ทีมีการบันทึกวันที่ถ่ายภาพ หากมีมากกว่า 1 วันให้เลือกวันสุดท้าย] - โซนการส่งหมาย-ชื่ออำเภอ-ชื่อตำบล(กรณีเป็นอำเภอเมืองอุดรธานีเท่านั้น)
+ */
+function buildBatchFolderName(photoItems, stops) {
+  // 1. วันที่: หากมีมากกว่า 1 วันให้เลือกวันสุดท้าย (วันล่าสุด)
+  const validTimestamps = photoItems.map(p => p.capturedTimestamp).filter(t => t > 0);
+  let d = new Date();
+  if (validTimestamps.length > 0) {
+    const latestTimestamp = Math.max(...validTimestamps);
+    d = new Date(latestTimestamp);
+  }
+
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  let year = d.getFullYear();
+  if (year < 2400) year += 543;
+  const dateStr = `${day}-${month}-${year}`;
+
+  // 2. ค้นหาชื่ออำเภอและตำบลจากรายการส่งหมาย
+  let rawDistrict = '';
+  let rawSubdistrict = '';
+
+  for (const p of photoItems) {
+    if (!rawDistrict && p.district) rawDistrict = p.district;
+    if (!rawSubdistrict && p.subdistrict) rawSubdistrict = p.subdistrict;
+    if (rawDistrict && rawSubdistrict) break;
+  }
+
+  if (!rawDistrict && Array.isArray(stops)) {
+    for (const s of stops) {
+      if (s.district) { rawDistrict = s.district; break; }
+      if (s.raw && s.raw['อำเภอ']) { rawDistrict = s.raw['อำเภอ']; break; }
+    }
+  }
+
+  if (!rawSubdistrict && Array.isArray(stops)) {
+    for (const s of stops) {
+      if (s.subdistrict) { rawSubdistrict = s.subdistrict; break; }
+      if (s.raw && s.raw['ตำบล']) { rawSubdistrict = s.raw['ตำบล']; break; }
+    }
+  }
+
+  if (!rawDistrict && state.selectedDistrict) {
+    rawDistrict = state.selectedDistrict;
+  }
+  if (!rawSubdistrict && state.selectedSubdistrict) {
+    rawSubdistrict = state.selectedSubdistrict;
+  }
+
+  // ทำความสะอาดชื่ออำเภอและตำบล
+  const cleanDistrict = (rawDistrict || 'เมืองอุดรธานี').replace(/^อ\./, '').replace(/^อำเภอ/, '').trim();
+  const cleanSubdistrict = (rawSubdistrict || '').replace(/^ต\./, '').replace(/^ตำบล/, '').trim();
+
+  // ตรวจสอบกรณีเป็นอำเภอเมืองอุดรธานี
+  const isMueangUdon = cleanDistrict === 'เมืองอุดรธานี' || 
+                       cleanDistrict === 'เมือง' || 
+                       cleanDistrict.includes('เมืองอุดร');
+
+  let areaPart = '';
+  if (isMueangUdon) {
+    const zoneName = 'ในเขต';
+    const distName = 'เมืองอุดรธานี';
+    const subName = cleanSubdistrict || 'หมากแข้ง';
+    areaPart = `${zoneName}-${distName}-${subName}`;
+  } else {
+    const zoneName = 'นอกเขต';
+    const distName = cleanDistrict;
+    // กรณีไม่ใช่เมืองอุดรธานี ไม่ต้องมีชื่อตำบล
+    areaPart = `${zoneName}-${distName}`;
+  }
+
+  const folderName = `${dateStr} - ${areaPart}`.replace(/[\/\\?%*:|"<>]/g, '-').trim();
+  return folderName;
+}
+
 window.downloadRouteBatchZip = async function() {
   const stops = state.currentRouteStops || [];
   if (stops.length === 0) {
@@ -23340,10 +23699,16 @@ window.downloadRouteBatchZip = async function() {
   stops.forEach((stop, index) => {
     const newPhoto = getNewlyUploadedPhotoForStop(stop);
     if (newPhoto && newPhoto.url && newPhoto.deliveryStatus === 'uploaded') {
+      const rawDate = stop.capturedAt || newPhoto.uploadedAt || stop.uploadedAt || stop.dateTime || (stop.raw && stop.raw['วัน-เวลาบันทึก']) || '';
       photoItems.push({
-        index: index + 1,
-        caseNumber: (stop.caseNumber || `Stop_${index + 1}`).replace(/[\/\\?%*:|"<>]/g, '-'),
-        url: newPhoto.url
+        originalIndex: index + 1,
+        stop: stop,
+        caseNumber: (stop.caseNumber || `Stop_${index + 1}`).trim(),
+        url: newPhoto.url,
+        capturedDateRaw: rawDate,
+        capturedTimestamp: parseDateToTime(rawDate),
+        district: (stop.district || (stop.raw && stop.raw['อำเภอ']) || '').trim(),
+        subdistrict: (stop.subdistrict || (stop.raw && stop.raw['ตำบล']) || '').trim()
       });
     }
   });
@@ -23360,22 +23725,16 @@ window.downloadRouteBatchZip = async function() {
     return;
   }
 
-  // หากมีเพียง 1 รายการ -> ดาวน์โหลดเป็นไฟล์รูปภาพธรรมดา ไม่ต้องทำเป็น Zip file (ตาม Requirement)
-  if (photoItems.length === 1) {
-    const item = photoItems[0];
-    const seq = String(item.index).padStart(2, '0');
-    const fileName = `ลำดับที่_${seq}_คดี_${item.caseNumber}.jpg`;
-    
-    const success = await downloadSingleImageFile(item.url, fileName);
-    if (success) {
-      setTimeout(() => {
-        promptPostDownloadCleanupModal();
-      }, 700);
-    }
-    return;
-  }
+  // จัดเรียงลำดับรายการตามข้อกำหนด:
+  // 1. ตามตัวอักษรไทย
+  // 2. ตามลำดับเลขคดี (จากน้อยไปมาก)
+  // 3. ตามปี โดยเรียงลำดับเลขปีจากน้อยไปมาก
+  photoItems.sort((a, b) => compareCaseNumbersForBatch(a.caseNumber, b.caseNumber));
 
-  // หากมีตั้งแต่ 2 รายการขึ้นไป -> บีบอัดเป็น .ZIP ด้วย JSZip
+  // สร้างชื่อโฟลเดอร์ตามข้อกำหนด:
+  // [วันที่-เดือน-ปี(พ.ศ.) ทีมีการบันทึกวันที่ถ่ายภาพ หากมีมากกว่า 1 วันให้เลือกวันสุดท้าย] - โซนการส่งหมาย-ชื่ออำเภอ-ชื่อตำบล(กรณีเป็นอำเภอเมืองอุดรธานีเท่านั้น)
+  const folderName = buildBatchFolderName(photoItems, stops);
+
   if (typeof JSZip === 'undefined') {
     Swal.fire('เกิดข้อผิดพลาด', 'ไลบรารี JSZip ยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง', 'error');
     return;
@@ -23385,7 +23744,7 @@ window.downloadRouteBatchZip = async function() {
     title: 'กำลังบีบอัดไฟล์ ZIP...',
     html: `
       <div class="space-y-3 p-2">
-        <p class="text-xs text-gray-600">กำลังรวบรวมและบีบอัดรูปภาพจำนวน ${photoItems.length} รูป (นำเข้าใหม่ในรอบนี้)</p>
+        <p class="text-xs text-gray-600">กำลังรวบรวมและบีบอัดรูปภาพจำนวน ${photoItems.length} รูป ในโฟลเดอร์ <b>"${folderName}"</b></p>
         <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
           <div id="zipProgressBar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 10%"></div>
         </div>
@@ -23399,16 +23758,19 @@ window.downloadRouteBatchZip = async function() {
 
   try {
     const zip = new JSZip();
-    const folder = zip.folder("summons_photos");
+    const folder = zip.folder(folderName);
     const pBar = document.getElementById('zipProgressBar');
     const pText = document.getElementById('zipProgressText');
 
     for (let i = 0; i < photoItems.length; i++) {
       const item = photoItems[i];
-      const fileName = `ลำดับที่_${String(item.index).padStart(2, '0')}_คดี_${item.caseNumber}.jpg`;
+      const seq = i + 1;
+      const cleanCase = String(item.caseNumber || 'ไม่ระบุเลขคดี').trim().replace(/[\/\\?%*:|"<>]/g, '-');
+      // ตั้งชื่อไฟล์เป็นตัวเลขนำหน้า เช่น 1, 2, 3 แล้วตามด้วย จุด(.) และตามด้วยเลขคดี
+      const fileName = `${seq}.${cleanCase}.jpg`;
       
       if (pBar) pBar.style.width = `${Math.round(((i + 1) / photoItems.length) * 80)}%`;
-      if (pText) pText.textContent = `กำลังโหลดรูปที่ ${i + 1}/${photoItems.length}: ${item.caseNumber}`;
+      if (pText) pText.textContent = `กำลังโหลดรูปที่ ${seq}/${photoItems.length}: ${fileName}`;
 
       if (item.url.startsWith('data:image')) {
         const commaIdx = item.url.indexOf(',');
@@ -23432,7 +23794,7 @@ window.downloadRouteBatchZip = async function() {
             folder.file(fileName, commaIdx > -1 ? b64.slice(commaIdx + 1) : b64, { base64: true });
           } catch (imgErr) {
             console.warn('Image load failed for:', fileName);
-            folder.file(`คดี_${item.caseNumber}_ลิงก์รูปภาพ.txt`, `ลิงก์ภาพถ่ายใน Google Drive:\n${item.url}\n`);
+            folder.file(`${seq}.${cleanCase}_ลิงก์รูปภาพ.txt`, `ลิงก์ภาพถ่ายใน Google Drive:\n${item.url}\n`);
           }
         }
       }
@@ -23445,9 +23807,7 @@ window.downloadRouteBatchZip = async function() {
       if (pBar) pBar.style.width = `${90 + Math.round(metadata.percent * 0.1)}%`;
     });
 
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const downloadFileName = `รายการส่งหมาย_ศาลจังหวัดอุดรธานี_${dateStr}.zip`;
+    const downloadFileName = `${folderName}.zip`;
     
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
@@ -23461,6 +23821,17 @@ window.downloadRouteBatchZip = async function() {
     }, 1000);
 
     Swal.close();
+
+    // บันทึกประวัติการดาวน์โหลด
+    const now = new Date();
+    const thaiDate = now.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const thaiTime = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    const downloadInfo = {
+      timestamp: now.toISOString(),
+      formatted: `ดาวน์โหลดล่าสุดเมื่อ ${thaiDate} เวลา ${thaiTime} น.`
+    };
+    const userId = getRouteDeliveryUserKey();
+    localStorage.setItem('slts_batch_downloaded_at_' + userId, JSON.stringify(downloadInfo));
 
     // ป๊อปอัปแจ้งเตือนยืนยันหลังดาวน์โหลดเสร็จสิ้น
     setTimeout(() => {
@@ -23798,13 +24169,19 @@ window.showMobileRouteMapModal = function() {
     return;
   }
 
-  if (!state.currentRouteStops || state.currentRouteStops.length === 0) {
-    try {
-      const savedStops = localStorage.getItem('slts_shared_route_stops');
-      if (savedStops) {
-        state.currentRouteStops = JSON.parse(savedStops);
-      }
-    } catch (e) {}
+  const activeRoute = getUserActiveRoute();
+  if (activeRoute && Array.isArray(activeRoute.stops) && activeRoute.stops.length > 0) {
+    state.currentRouteStops = deduplicateRouteStops(activeRoute.stops);
+    if (activeRoute.startLocation) state.routeStartLocation = activeRoute.startLocation;
+    if (activeRoute.endLocation) state.routeEndLocation = activeRoute.endLocation;
+    if (activeRoute.routeRoadPolyline && Array.isArray(activeRoute.routeRoadPolyline)) {
+      state.routeRoadPolylineCoords = activeRoute.routeRoadPolyline;
+    }
+    if (activeRoute.totalDistanceKm) {
+      state.calculatedRoadDistanceKm = activeRoute.totalDistanceKm;
+    }
+  } else {
+    state.currentRouteStops = [];
   }
 
   if (typeof syncStopsWithDeliveryStatus === 'function') {
@@ -24176,6 +24553,15 @@ window.centerMobileModalMap = function() {
 window.renderMobileRouteList = function() {
   const container = document.getElementById('mobileMapRouteStopsList');
   if (!container) return;
+
+  const activeRoute = getUserActiveRoute();
+  if (activeRoute && Array.isArray(activeRoute.stops) && activeRoute.stops.length > 0) {
+    state.currentRouteStops = deduplicateRouteStops(activeRoute.stops);
+    if (activeRoute.startLocation) state.routeStartLocation = activeRoute.startLocation;
+    if (activeRoute.endLocation) state.routeEndLocation = activeRoute.endLocation;
+  } else {
+    state.currentRouteStops = [];
+  }
 
   if (typeof syncStopsWithDeliveryStatus === 'function') {
     syncStopsWithDeliveryStatus(state.currentRouteStops);

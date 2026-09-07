@@ -14,6 +14,8 @@ class CompassManager {
 
   initSensor() {
     const handleOrientationEvent = (e) => {
+      // ข้ามการคำนวณทิศเมื่อหน้าจอถูกซ่อน (พับจอ/สลับแอป) เพื่อประหยัด CPU
+      if (document.visibilityState === 'hidden') return;
       let heading = null;
       if (e.webkitCompassHeading !== undefined) {
         // iOS Safari
@@ -35,6 +37,8 @@ class CompassManager {
     };
 
     const handleMotionEvent = (e) => {
+      // ข้ามการคำนวณ Motion เมื่อหน้าจอถูกซ่อน (พับจอ/สลับแอป) เพื่อประหยัด CPU
+      if (document.visibilityState === 'hidden') return;
       const acc = e.accelerationIncludingGravity || e.acceleration;
       if (!acc) return;
       const x = acc.x || 0;

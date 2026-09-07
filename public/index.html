@@ -62,8 +62,8 @@
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
-  <!-- Tablet Mode Switch Transition Full-screen Black Overlay -->
-  <div id="tabletModeTransitionOverlay">
+  <!-- Tablet Mode Switch Transition Full-screen Black Overlay (ซ่อนเด็ดขาดเริ่มต้น ป้องกันการกะพริบตอนโหลด) -->
+  <div id="tabletModeTransitionOverlay" style="display: none;">
     <div class="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center text-3xl text-white mb-4 shadow-lg animate-pulse">
       <i id="tabletTransitionIcon" class="fa-solid fa-arrows-rotate fa-spin"></i>
     </div>
@@ -1268,6 +1268,8 @@
     <!-- Video Viewport & Live Overlays (HUD) - Default Landscape 4:3 -->
     <div id="cameraViewportContainer" class="relative flex-1 flex items-center justify-center overflow-hidden bg-black">
       <video id="videoPreview" autoplay playsinline muted class="w-full h-full object-cover"></video>
+      <!-- Camera Shutter Flash Effect Overlay (แสงชัตเตอร์สีขาวตอนกดถ่ายภาพ) -->
+      <div id="cameraShutterFlash" class="absolute inset-0 bg-white opacity-0 pointer-events-none transition-opacity duration-150 z-20"></div>
 
       <!-- Live Overlays Reticle Frame (สลับ 4:3 / 3:4 ตามปุ่มกด) -->
       <div id="liveOverlayFrame" class="camera-live-frame pointer-events-none">

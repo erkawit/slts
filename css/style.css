@@ -617,9 +617,9 @@ table.dataTable tbody td {
 }
 
 .swal2-backdrop-show {
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  background: rgba(0, 0, 0, 0.65) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(0, 0, 0, 0.85) !important;
 }
 
 /* ป้องกันแถบสีเข้มพื้นหลังพาดผ่านจากบนลงล่างสำหรับ Toast Notification บน PC */
@@ -723,6 +723,20 @@ body.swal2-toast-shown .swal2-popup,
   padding-top: max(8px, env(safe-area-inset-top, 8px)) !important;
   padding-bottom: 0 !important;
   overflow-y: hidden !important;
+}
+
+/* พื้นหลังทึบ 100% สำหรับ Pop Up บน Mobile (ฟอร์มบันทึกส่งหมาย, ค้นหาข้อมูล, แผนที่) เพื่อลดการโหลดกล้องเบื้องหลัง */
+.swal2-container.slts-swal-top-container,
+.swal2-container.slts-mobile-search-container,
+.swal2-container.slts-swal-top-container.swal2-backdrop-show,
+.swal2-container.slts-mobile-search-container.swal2-backdrop-show,
+.swal2-container.slts-swal-top-container > .swal2-backdrop,
+.swal2-container.slts-mobile-search-container > .swal2-backdrop {
+  background: #000000 !important;
+  background-color: #000000 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
 }
 
 .slts-swal-fullscreen-80 {
@@ -2328,7 +2342,7 @@ body.hardware-landscape #btnFlipOrientationQuick {
   inset: 0;
   background-color: #000000;
   z-index: 999999;
-  display: flex;
+  display: none; /* ซ่อนเด็ดขาด ป้องกันการกะพริบตอนโหลดหน้าเว็บ */
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -2338,23 +2352,45 @@ body.hardware-landscape #btnFlipOrientationQuick {
 }
 
 #tabletModeTransitionOverlay.active {
+  display: flex !important; /* แสดงผลเฉพาะเมื่อสลับโหมด */
   opacity: 1;
   pointer-events: auto;
 }
 
 /* ================================================================
-   Performance Optimizations: ลด Animation & Transition ในฟอร์ม
+   Performance Optimizations: ตัด Animation & Transition ทั้งหมดของ Pop Up
    ================================================================ */
-.slts-form-modal,
 .swal2-popup,
+.swal2-container,
+.swal2-modal,
+.swal2-backdrop-show,
+.swal2-backdrop-hide,
+.swal2-show,
+.swal2-hide,
+.swal2-icon,
+.swal2-icon-show,
+.swal2-icon-hide,
+.slts-form-modal,
 .slts-route-modal-popup,
-.slts-mobile-search-popup {
+.slts-mobile-search-popup,
+.slts-province-modal,
+.swal2-html-container,
+.swal2-title,
+.swal2-actions {
   animation: none !important;
+  -webkit-animation: none !important;
   transition: none !important;
+  -webkit-transition: none !important;
+  transform: none !important;
+  -webkit-transform: none !important;
 }
 
-.swal2-backdrop-show {
+.swal2-backdrop-show,
+.swal2-backdrop-hide {
   backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: none !important;
+  -webkit-transition: none !important;
 }
 
 
