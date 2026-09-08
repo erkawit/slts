@@ -15723,7 +15723,21 @@ function getStopDisplayPhotoData(stop) {
 window.getStopDisplayPhotoData = getStopDisplayPhotoData;
 
 /**
- * ดึงและจัดรูปแบบข้อความที่ตั้งส่งหมายสำหรับแสดงผลบนแผนที่และแถบข้าง โดยแสดงบ้านเลขที่เสมอ
+ * ตัดชื่อจังหวัดออกจากข้อความที่อยู่สำหรับการแสดงผลบนแผนที่และแถบข้าง (จังหวัดไม่ต้องแสดงผล)
+ */
+function stripProvinceFromAddress(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/(?:[\s,]+)?(?:จ\.|จังหวัด)\s*[ก-๙a-zA-Z]+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+window.stripProvinceFromAddress = stripProvinceFromAddress;
+
+/**
+ * ดึงและจัดรูปแบบข้อความที่ตั้งส่งหมายสำหรับแสดงผลบนแผนที่และแถบข้าง
+ * - แสดง "บ้านเลขที่" เด่นชัดและอยู่หน้าสุดเสมอ
+ * - ตัด "จังหวัด" ออก ไม่ต้องแสดงผล เพื่อความกระชับและชัดเจนของพื้นที่ส่งหมาย
  */
 function getStopDisplayLocationText(stop) {
   if (!stop) return '-';
@@ -15750,51 +15764,74 @@ function getStopDisplayLocationText(stop) {
     }
   }
 
+  // 2. ดึงบ้านเลขที่จากทุกแหล่งที่เป็นไปได้
+  let houseNo = String(
+    stop.houseNo || 
+    (stop.raw ? (stop.raw['บ้านเลขที่'] || stop.raw['เลขที่'] || stop.raw['houseNo'] || stop.raw['house_no']) : '') ||
+    (matched ? (matched['บ้านเลขที่'] || matched['เลขที่'] || matched['houseNo'] || matched['house_no']) : '') || 
+    ''
+  ).trim();
+
   let loc = String(stop.locationText || '').trim();
-  let houseNo = String(stop.houseNo || (matched ? (matched['บ้านเลขที่'] || '') : '') || '').trim();
-  const matchedFull = matched ? String(matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || '').trim() : '';
-  const matchedHouse = matched ? String(matched['บ้านเลขที่'] || '').trim() : '';
+  const matchedFull = matched ? String(matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || matched['ที่อยู่'] || '').trim() : '';
 
-  // ตรวจสอบว่า loc มีบ้านเลขที่แล้วหรือไม่
-  const hasHouseNumberInLoc = /^(?:บ้านเลขที่\s*)?\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(loc) ||
-                              /(?:บ้านเลขที่)\s*\d+/.test(loc);
-
-  if (hasHouseNumberInLoc) {
-    // หากขึ้นต้นด้วยเลขโดดๆ เช่น "72 ม.3..." หรือ "199/21 ม.5..." ให้เติม "บ้านเลขที่ " ด้านหน้าเพื่อความชัดเจน
-    if (/^\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่)/.test(loc)) {
-      return `บ้านเลขที่ ${loc}`;
+  // สกัดบ้านเลขที่จาก loc หรือ matchedFull หรือ caseExtra หากยังไม่พบบ้านเลขที่
+  if (!houseNo || houseNo === '-') {
+    const candidateTexts = [loc, matchedFull, stop.caseExtra, stop.rawText].filter(Boolean);
+    for (const txt of candidateTexts) {
+      const hm = txt.match(/(?:บ้านเลขที่|เลขที่)\s*([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)/) ||
+                 txt.match(/^([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่|ต\.|ตำบล|\s)/) ||
+                 txt.match(/(?:^|\s)([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่)/);
+      if (hm && hm[1]) {
+        houseNo = hm[1].trim();
+        if (!stop.houseNo) stop.houseNo = houseNo;
+        break;
+      }
     }
-    return loc;
   }
 
-  // หาก loc ยังไม่มีบ้านเลขที่ (เช่น "ม.3 ต.สามพร้าว...")
-  // กรณี 1: ตรวจสอบจาก matchedFull ที่มีบ้านเลขที่
-  if (matchedFull && (/^(?:บ้านเลขที่\s*)?\d+/.test(matchedFull) || /(?:บ้านเลขที่)\s*\d+/.test(matchedFull))) {
-    if (!stop.houseNo && matchedHouse) stop.houseNo = matchedHouse;
-    if (/^\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่)/.test(matchedFull)) {
-      return `บ้านเลขที่ ${matchedFull}`;
-    }
-    return matchedFull;
+  // เลือกข้อความที่อยู่หลัก: หาก loc ยังไม่มีบ้านเลขที่แต่ matchedFull มีบ้านเลขที่ ให้ใช้ matchedFull
+  let baseLoc = loc || matchedFull || '';
+  const baseHasHouse = /^(?:บ้านเลขที่\s*)?\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(baseLoc) || /(?:บ้านเลขที่)\s*\d+/.test(baseLoc);
+  const matchedHasHouse = /^(?:บ้านเลขที่\s*)?\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(matchedFull) || /(?:บ้านเลขที่)\s*\d+/.test(matchedFull);
+
+  if (!baseHasHouse && matchedHasHouse) {
+    baseLoc = matchedFull;
   }
 
-  // กรณี 2: มี houseNo แยกอยู่ แต่ไม่ได้อยู่ใน loc (เช่น houseNo = '72')
-  const effectiveHouse = houseNo || matchedHouse;
-  if (effectiveHouse && effectiveHouse !== '-') {
-    const formattedHouse = `บ้านเลขที่ ${effectiveHouse}`;
-    if (loc.startsWith('ม.') || loc.startsWith('หมู่') || loc.startsWith('ต.') || loc.startsWith('อ.')) {
-      return `${formattedHouse} ${loc}`;
-    } else if (loc) {
-      return `${formattedHouse} ${loc}`;
+  // 3. ตัดชื่อจังหวัดออกจากข้อความแสดงผลเสมอ (จังหวัดไม่ต้องแสดงผล)
+  baseLoc = stripProvinceFromAddress(baseLoc);
+
+  // 4. จัดรูปแบบการแสดงผลบ้านเลขที่
+  // กรณี 4.1: มีคำว่า "บ้านเลขที่" อยู่หน้าตัวเลขแล้ว
+  if (/^บ้านเลขที่\s*\d+/.test(baseLoc)) {
+    return baseLoc;
+  }
+
+  // กรณี 4.2: ขึ้นต้นด้วยตัวเลขโดดๆ (เช่น "72 ม.3...", "199/21 ม.5...") ให้เติม "บ้านเลขที่ " ไว้ข้างหน้า
+  if (/^\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(baseLoc)) {
+    return `บ้านเลขที่ ${baseLoc}`;
+  }
+
+  // กรณี 4.3: มี houseNo แยกไว้ แต่ใน baseLoc ยังไม่มีบ้านเลขที่นำหน้า (เช่น "ม.3 ต.สามพร้าว...")
+  if (houseNo && houseNo !== '-') {
+    const formattedHouse = `บ้านเลขที่ ${houseNo}`;
+    if (baseLoc.startsWith('ม.') || baseLoc.startsWith('หมู่') || baseLoc.startsWith('ต.') || baseLoc.startsWith('อ.')) {
+      return `${formattedHouse} ${baseLoc}`;
+    } else if (baseLoc) {
+      return `${formattedHouse} ${baseLoc}`;
     } else {
-      const sub = stop.subdistrict ? `ต.${stop.subdistrict}` : '';
-      const dist = stop.district ? `อ.${stop.district}` : '';
-      const prov = stop.province ? `จ.${stop.province}` : '';
-      const moo = stop.moo ? `ม.${stop.moo}` : '';
-      return [formattedHouse, moo, sub, dist, prov].filter(Boolean).join(' ');
+      const mooVal = stop.moo || (matched ? (matched['หมู่ที่'] || matched['หมู่']) : '') || '';
+      const subVal = stop.subdistrict || (matched ? matched['ตำบล'] : '') || '';
+      const distVal = stop.district || (matched ? matched['อำเภอ'] : '') || '';
+      const mooPart = mooVal ? ((mooVal.startsWith('ม.') || mooVal.startsWith('หมู่')) ? mooVal : `ม.${mooVal}`) : '';
+      const subPart = subVal ? ((subVal.startsWith('ต.') || subVal.startsWith('ตำบล')) ? subVal : `ต.${subVal}`) : '';
+      const distPart = distVal ? ((distVal.startsWith('อ.') || distVal.startsWith('อำเภอ')) ? distVal : `อ.${distVal}`) : '';
+      return [formattedHouse, mooPart, subPart, distPart].filter(Boolean).join(' ');
     }
   }
 
-  return loc || '-';
+  return baseLoc || '-';
 }
 window.getStopDisplayLocationText = getStopDisplayLocationText;
 
@@ -15913,11 +15950,17 @@ function matchSingleCaseWithHistory(caseNumber, houseNo, subdistrict, district, 
     const lng = parseFloat(matched['ลองจิจูด (Lng)'] || matched['ลองจิจูด'] || 0);
     if (!isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0) {
       const matchedImg = typeof extractRowImageUrl === 'function' ? extractRowImageUrl(matched) : '';
-      const matchedFull = matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || '';
-      const matchedHouse = (matched['บ้านเลขที่'] || '').trim();
+      const matchedFull = matched['ที่ตั้งส่งหมาย (เต็ม)'] || matched['ที่ตั้งส่งหมาย'] || matched['ที่อยู่'] || '';
+      const matchedHouse = (matched['บ้านเลขที่'] || matched['เลขที่'] || matched['houseNo'] || '').trim();
       const hasHouseInLoc = /^(?:บ้านเลขที่\s*)?\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(locationText || '');
       const finalLoc = (hasHouseInLoc ? locationText : (matchedFull || locationText)) || '-';
-      const finalHouse = (houseNo || matchedHouse || '').trim();
+      let finalHouse = (houseNo || matchedHouse || '').trim();
+      if (!finalHouse || finalHouse === '-') {
+        const hm = String(finalLoc || matchedFull).match(/(?:บ้านเลขที่|เลขที่)\s*([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)/) ||
+                   String(finalLoc || matchedFull).match(/^([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่|ต\.|ตำบล|\s)/) ||
+                   String(finalLoc || matchedFull).match(/(?:^|\s)([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่)/);
+        if (hm && hm[1]) finalHouse = hm[1].trim();
+      }
 
       return {
         matchedRow: matched,
@@ -18236,7 +18279,14 @@ function convertParsedRecordsToStops(records, province = 'อุดรธาน�
       province
     );
 
-    const resolvedHouseNo = (houseNoDisplay || matchRes.houseNo || (matchRes.matchedRow ? (matchRes.matchedRow['บ้านเลขที่'] || '') : '') || '').trim();
+    let resolvedHouseNo = (houseNoDisplay || matchRes.houseNo || (matchRes.matchedRow ? (matchRes.matchedRow['บ้านเลขที่'] || matchRes.matchedRow['เลขที่'] || matchRes.matchedRow['houseNo']) : '') || '').trim();
+    if (!resolvedHouseNo && matchRes.matchedRow) {
+      const mFull = matchRes.matchedRow['ที่ตั้งส่งหมาย (เต็ม)'] || matchRes.matchedRow['ที่ตั้งส่งหมาย'] || matchRes.matchedRow['ที่อยู่'] || '';
+      const hm = mFull.match(/(?:บ้านเลขที่|เลขที่)\s*([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)/) ||
+                 mFull.match(/^([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่|ต\.|ตำบล|\s)/) ||
+                 mFull.match(/(?:^|\s)([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่)/);
+      if (hm && hm[1]) resolvedHouseNo = hm[1].trim();
+    }
 
     let locationText = '';
     if (!houseNoDisplay && matchRes.locationText && matchRes.locationText !== '-' && /^(?:บ้านเลขที่\s*)?\d+/.test(matchRes.locationText)) {
@@ -18572,10 +18622,18 @@ window.openMapAreaSelectorModal = function() {
         const subdistrict = (r['ตำบล'] || '').trim();
         const district = (r['อำเภอ'] || '').trim();
         const province = getRowProvince(r) || currentProvince;
-        const rawHouseNo = (r['บ้านเลขที่'] || '').trim();
-        let locationText = r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || (district ? `อ.${district} ต.${subdistrict}` : '-');
+        let rawHouseNo = (r['บ้านเลขที่'] || r['เลขที่'] || r['houseNo'] || '').trim();
+        let locationText = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || r['ที่อยู่'] || (district ? `อ.${district} ต.${subdistrict}` : '-')).trim();
+        if (!rawHouseNo || rawHouseNo === '-') {
+          const hm = locationText.match(/(?:บ้านเลขที่|เลขที่)\s*([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)/) ||
+                     locationText.match(/^([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่|ต\.|ตำบล|\s)/) ||
+                     locationText.match(/(?:^|\s)([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่)/);
+          if (hm && hm[1]) rawHouseNo = hm[1].trim();
+        }
         if (rawHouseNo && !/^(?:บ้านเลขที่\s*)?\d+/.test(locationText)) {
           locationText = `บ้านเลขที่ ${rawHouseNo} ${locationText}`.trim();
+        } else if (/^\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(locationText) && !locationText.startsWith('บ้านเลขที่')) {
+          locationText = `บ้านเลขที่ ${locationText}`.trim();
         }
 
         return {
@@ -20098,11 +20156,19 @@ window.renderMapAndPins = function(province, district, subdistrict) {
     const lng = parseFloat(rawLng);
 
     if (!isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0) {
-      const rawHouseNo = (r['บ้านเลขที่'] || '').trim();
+      let rawHouseNo = (r['บ้านเลขที่'] || r['เลขที่'] || r['houseNo'] || '').trim();
       const rawMoo = (r['หมู่'] || r['หมู่ที่'] || '').trim();
-      let rawLocText = r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || (r['อำเภอ'] ? `อ.${r['อำเภอ']} ต.${r['ตำบล'] || ''}` : '-');
+      let rawLocText = (r['ที่ตั้งส่งหมาย (เต็ม)'] || r['ที่ตั้งส่งหมาย'] || r['ที่อยู่'] || (r['อำเภอ'] ? `อ.${r['อำเภอ']} ต.${r['ตำบล'] || ''}` : '-')).trim();
+      if (!rawHouseNo || rawHouseNo === '-') {
+        const hm = rawLocText.match(/(?:บ้านเลขที่|เลขที่)\s*([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)/) ||
+                   rawLocText.match(/^([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่|ต\.|ตำบล|\s)/) ||
+                   rawLocText.match(/(?:^|\s)([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|หมู่ที่)/);
+        if (hm && hm[1]) rawHouseNo = hm[1].trim();
+      }
       if (rawHouseNo && !/^(?:บ้านเลขที่\s*)?\d+/.test(rawLocText)) {
         rawLocText = `บ้านเลขที่ ${rawHouseNo} ${rawLocText}`.trim();
+      } else if (/^\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(rawLocText) && !rawLocText.startsWith('บ้านเลขที่')) {
+        rawLocText = `บ้านเลขที่ ${rawLocText}`.trim();
       }
 
       validStops.push({
@@ -20384,7 +20450,7 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
           <div class="pt-1 flex gap-1.5">
             <a href="https://www.google.com/maps?q=${stop.lat},${stop.lng}" target="_blank" rel="noopener noreferrer" class="flex-1 text-center py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white !text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5" style="color: #ffffff !important; text-decoration: none;">
               <i class="fa-solid fa-diamond-turn-right text-xs text-white" style="color: #ffffff !important;"></i>
-              <span class="text-white font-bold" style="color: #ffffff !important;">นำทาง Google Maps</span>
+              <span class="text-white font-bold" style="color: #ffffff !important;">เปิด Google Map</span>
             </a>
             <button type="button" onclick="loadRouteStopIntoSummonsFormAndCamera(${index})" class="flex-1 text-center py-2 bg-blue-600 hover:bg-blue-700 active:scale-98 text-white !text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer" style="color: #ffffff !important;">
               <i class="fa-solid fa-camera text-xs text-white"></i>
@@ -25012,7 +25078,8 @@ window.initMobileModalMapInstance = function() {
       });
       const safeCase = (stop.caseNumber || '').replace(/'/g, "\\'");
       const safePhoto = photoData.rawUrl.replace(/'/g, "\\'");
-      const safeLoc = (stop.locationText || '').replace(/'/g, "\\'");
+      const displayLoc = typeof getStopDisplayLocationText === 'function' ? getStopDisplayLocationText(stop) : (stop.locationText || '');
+      const safeLoc = displayLoc.replace(/'/g, "\\'");
       const safeDate = photoData.isReference ? 'ภาพอ้างอิงประกอบการจัดเส้นทาง' : ((stop.dateTime || stop.uploadedAt || '').replace(/'/g, "\\'"));
 
       let captureBtnHtml = `
@@ -25051,7 +25118,7 @@ window.initMobileModalMapInstance = function() {
               </div>
             </div>
           ` : ''}
-          <p class="text-[11px] text-gray-600 leading-snug">${stop.locationText}</p>
+          <p class="text-[11px] text-gray-600 leading-snug">${displayLoc}</p>
           <div class="flex flex-col gap-1.5 pt-1">
             ${captureBtnHtml}
             <div class="flex items-center gap-1 flex-wrap">
@@ -25068,7 +25135,7 @@ window.initMobileModalMapInstance = function() {
               ` : ''}
             </div>
             <a href="https://www.google.com/maps?q=${sLat},${sLng}" target="_blank" class="w-full py-0.5 text-center inline-flex items-center justify-center gap-1 text-[10px] text-blue-600 font-bold hover:underline">
-              <i class="fa-solid fa-location-arrow"></i> นำทางจุดนี้ด้วย Google Maps
+              <i class="fa-solid fa-location-arrow"></i> เปิด Google Map
             </a>
           </div>
         </div>
@@ -25294,7 +25361,8 @@ window.renderMobileRouteList = function() {
 
     const safePhoto = photoData.rawUrl.replace(/'/g, "\\'");
     const safeCaseNo = (stop.caseNumber || 'รูปภาพประกอบ').replace(/'/g, "\\'");
-    const safeLocText = (stop.locationText || '').replace(/'/g, "\\'");
+    const displayLoc = typeof getStopDisplayLocationText === 'function' ? getStopDisplayLocationText(stop) : (stop.locationText || '');
+    const safeLocText = displayLoc.replace(/'/g, "\\'");
     const safeDateTime = photoData.isReference ? 'ภาพอ้างอิงประกอบการจัดเส้นทาง' : ((stop.dateTime || stop.uploadedAt || '').replace(/'/g, "\\'"));
     const sLat = (stop.lat !== null && stop.lat !== undefined) ? stop.lat : '';
     const sLng = (stop.lng !== null && stop.lng !== undefined) ? stop.lng : '';
@@ -25314,7 +25382,7 @@ window.renderMobileRouteList = function() {
               </span>
             </div>
           </div>
-          <p class="text-[11px] text-gray-700 leading-snug truncate">${stop.locationText}</p>
+          <p class="text-[11px] text-gray-700 leading-snug truncate" title="${displayLoc}">${displayLoc}</p>
           <div class="flex items-center justify-between mt-1 text-[10px]">
             ${isExact ? `<span class="text-emerald-700 font-bold flex items-center gap-1"><i class="fa-solid fa-circle-check text-[9px]"></i> มีพิกัดตรง</span>` : (isNear ? `<span class="text-amber-800 font-bold flex items-center gap-1"><i class="fa-solid fa-location-dot text-[9px]"></i> ${stop.matchNote || 'ใกล้เคียง'}</span>` : `<span class="text-gray-400">○ ไม่มีหมุดในระบบ</span>`)}
             ${hasPin ? `
