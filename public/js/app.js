@@ -17525,6 +17525,30 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
       icon = 'fa-location-dot';
     }
 
+    // สกัดบ้านเลขที่จาก row
+    let itemHouseNo = (rHouse || r['เลขที่'] || r['houseNo'] || '').trim();
+    if (!itemHouseNo && rLoc) {
+      const hMatch = rLoc.match(/(?:บ้านเลขที่\s*)?([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/) ||
+                     rLoc.match(/^(?:บ้านเลขที่\s*)?([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)/);
+      if (hMatch) itemHouseNo = hMatch[1].trim();
+    }
+
+    // สกัดหมู่จาก row
+    let itemMoo = (rMoo || r['หมู่ที่'] || r['moo'] || '').trim();
+    if (!itemMoo && rLoc) {
+      const mMatch = rLoc.match(/(?:ม\.|หมู่|หมู่ที่)\s*(\d+)/);
+      if (mMatch) itemMoo = mMatch[1].trim();
+    }
+
+    // สกัด caseExtra จาก row หรือเลขคดี
+    let itemCaseExtra = (r['ข้อมูลเพิ่มเติม'] || r['ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)'] || r['caseExtra'] || '').trim();
+    if (!itemCaseExtra && rCase) {
+      const extraMatch = rCase.match(/^(?:[^\/\s]+(?:\s+[^\/\s]+)*\/\d+)\s+(.+)$/);
+      if (extraMatch && extraMatch[1]) {
+        itemCaseExtra = extraMatch[1].trim();
+      }
+    }
+
     evaluated.push({
       row: r,
       lat,
@@ -17537,7 +17561,10 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
       badgeText,
       badgeClass,
       icon,
-      isLocalAdmin
+      isLocalAdmin,
+      houseNo: itemHouseNo,
+      moo: itemMoo,
+      caseExtra: itemCaseExtra
     });
   });
 
@@ -17556,19 +17583,19 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
   // เรียงลำดับจากคะแนนมากไปหาน้อย
   evaluated.sort((a, b) => b.score - a.score);
 
+  // เก็บ items ลงใน global cache เพื่อให้อ้างอิงผ่าน index ได้แม่นยำ
+  window[`_refPinItems_${prefix}`] = evaluated;
+
   const currentSelLat = parseFloat(selLatEl?.value || '0');
   const currentSelLng = parseFloat(document.getElementById(`${prefix}selectedLng`)?.value || '0');
 
   // Render cards
-  listContainer.innerHTML = evaluated.map((item) => {
+  listContainer.innerHTML = evaluated.map((item, idx) => {
     const isSelected = (currentSelLat && currentSelLng && Math.abs(currentSelLat - item.lat) < 0.0001 && Math.abs(currentSelLng - item.lng) < 0.0001);
-    const safeLoc = item.locationText.replace(/'/g, "\\'");
-    const safeImg = item.imageUrl.replace(/'/g, "\\'");
-    const safeNote = item.badgeText.replace(/'/g, "\\'");
 
     return `
       <div 
-        onclick="selectRefPinChoice('${prefix}', ${item.lat}, ${item.lng}, '${safeLoc}', '${safeImg}', '${safeNote}')"
+        onclick="selectRefPinChoice('${prefix}', ${idx})"
         class="p-2.5 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2.5 ${isSelected ? 'bg-emerald-50/90 border-emerald-500 ring-2 ring-emerald-400/30 shadow-xs' : 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50/40'}"
       >
         <div class="flex items-start gap-2.5 min-w-0 flex-1">
@@ -17606,7 +17633,46 @@ window.updateRefPinsSuggestions = function(prefix = 'quick_') {
   }).join('');
 };
 
-window.selectRefPinChoice = function(prefix, lat, lng, refText, refImg, refNote) {
+window.selectRefPinChoice = function(prefix, arg1, lng, refText, refImg, refNote) {
+  let lat, lngVal, textVal, imgVal, noteVal;
+  let itemHouseNo = '';
+  let itemMoo = '';
+  let itemCaseExtra = '';
+  let matchedRow = null;
+
+  if (typeof arg1 === 'number' && lng === undefined) {
+    const list = window[`_refPinItems_${prefix}`] || [];
+    const item = list[arg1];
+    if (!item) return;
+    lat = item.lat;
+    lngVal = item.lng;
+    textVal = item.locationText;
+    imgVal = item.imageUrl;
+    noteVal = item.badgeText;
+    itemHouseNo = item.houseNo || '';
+    itemMoo = item.moo || '';
+    itemCaseExtra = item.caseExtra || '';
+    matchedRow = item.row || null;
+  } else {
+    lat = arg1;
+    lngVal = lng;
+    textVal = refText || '';
+    imgVal = refImg || '';
+    noteVal = refNote || '';
+  }
+
+  // บันทึก row อ้างอิงและข้อมูลที่เกี่ยวข้องไว้ใช้ตอนกดบันทึก
+  window[`_selectedRefRow_${prefix}`] = matchedRow;
+  window[`_selectedRefData_${prefix}`] = {
+    houseNo: itemHouseNo,
+    moo: itemMoo,
+    caseExtra: itemCaseExtra,
+    lat: lat,
+    lng: lngVal,
+    refText: textVal,
+    matchedRow: matchedRow
+  };
+
   const latEl = document.getElementById(`${prefix}selectedLat`);
   const lngEl = document.getElementById(`${prefix}selectedLng`);
   const textEl = document.getElementById(`${prefix}selectedRefText`);
@@ -17619,40 +17685,53 @@ window.selectRefPinChoice = function(prefix, lat, lng, refText, refImg, refNote)
   const noticeText = document.getElementById(`${prefix}gpsNoticeText`);
 
   if (latEl) latEl.value = lat;
-  if (lngEl) lngEl.value = lng;
-  if (textEl) textEl.value = refText || '';
-  if (imgEl) imgEl.value = refImg || '';
-  if (noteEl) noteEl.value = refNote || '';
+  if (lngEl) lngEl.value = lngVal;
+  if (textEl) textEl.value = textVal || '';
+  if (imgEl) imgEl.value = imgVal || '';
+  if (noteEl) noteEl.value = noteVal || '';
 
   if (coordsInput) {
-    coordsInput.value = `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
+    coordsInput.value = `${Number(lat).toFixed(6)}, ${Number(lngVal).toFixed(6)}`;
   }
   if (statusHint) {
     statusHint.innerHTML = `<span class="text-emerald-600 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>เลือกจากหมุดอ้างอิง</span>`;
   }
   if (noticeText) {
-    noticeText.innerHTML = `<span class="text-emerald-600 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i>ใช้หมุดอ้างอิง: ${refText} (${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)})</span>`;
+    noticeText.innerHTML = `<span class="text-emerald-600 font-semibold"><i class="fa-solid fa-circle-check mr-1"></i>ใช้หมุดอ้างอิง: ${textVal} (${Number(lat).toFixed(6)}, ${Number(lngVal).toFixed(6)})</span>`;
   }
 
   if (previewBox && previewLabel) {
-    previewLabel.textContent = `ใช้หมุดอ้างอิง: ${refText} (${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)})`;
+    previewLabel.textContent = `ใช้หมุดอ้างอิง: ${textVal} (${Number(lat).toFixed(4)}, ${Number(lngVal).toFixed(4)})`;
     previewBox.classList.remove('hidden');
     previewBox.classList.add('flex');
   }
 
-  // ถอดบ้านเลขที่และหมู่จาก refText หากช่องในฟอร์มยังว่างอยู่
-  if (refText) {
-    const houseInput = document.getElementById(`${prefix}houseNo`);
-    const mooInput = document.getElementById(`${prefix}moo`);
-    const hMatch = refText.match(/(?:บ้านเลขที่\s*)?([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่)/) ||
-                   refText.match(/^(?:บ้านเลขที่\s*)?([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s/);
-    const mMatch = refText.match(/(?:ม\.|หมู่|หมู่ที่)\s*(\d+)/);
-    if (hMatch && houseInput && !houseInput.value.trim()) {
-      houseInput.value = hMatch[1].trim();
+  // ถอดบ้านเลขที่, หมู่ และข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี) มาเติมลงฟอร์ม
+  const houseInput = document.getElementById(`${prefix}houseNo`);
+  const mooInput = document.getElementById(`${prefix}moo`);
+  const caseExtraInput = document.getElementById(`${prefix}caseExtraInput`);
+
+  if (houseInput) {
+    if (itemHouseNo) {
+      houseInput.value = itemHouseNo;
+    } else if (textVal) {
+      const hMatch = textVal.match(/(?:บ้านเลขที่\s*)?([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/) ||
+                     textVal.match(/^(?:บ้านเลขที่\s*)?([0-9]+(?:\/[0-9]+)?(?:-[0-9]+)?)\s/);
+      if (hMatch) houseInput.value = hMatch[1].trim();
     }
-    if (mMatch && mooInput && !mooInput.value.trim()) {
-      mooInput.value = mMatch[1].trim();
+  }
+
+  if (mooInput) {
+    if (itemMoo) {
+      mooInput.value = itemMoo;
+    } else if (textVal) {
+      const mMatch = textVal.match(/(?:ม\.|หมู่|หมู่ที่)\s*(\d+)/);
+      if (mMatch) mooInput.value = mMatch[1].trim();
     }
+  }
+
+  if (caseExtraInput && itemCaseExtra) {
+    caseExtraInput.value = itemCaseExtra;
   }
 
   // Refresh selection in list
@@ -17660,6 +17739,9 @@ window.selectRefPinChoice = function(prefix, lat, lng, refText, refImg, refNote)
 };
 
 window.clearSelectedRefPin = function(prefix) {
+  window[`_selectedRefRow_${prefix}`] = null;
+  window[`_selectedRefData_${prefix}`] = null;
+
   const latEl = document.getElementById(`${prefix}selectedLat`);
   const lngEl = document.getElementById(`${prefix}selectedLng`);
   const textEl = document.getElementById(`${prefix}selectedRefText`);
@@ -18837,15 +18919,19 @@ window.openMapAreaSelectorModal = function() {
         let imageUrl = data.customRoutePlanImg || data.selectedRefImg || '';
         let matchedRow = null;
         let dateTime = '';
+        const refData = window._selectedRefData_sched_ || {};
+        if (window._selectedRefRow_sched_) {
+          matchedRow = window._selectedRefRow_sched_;
+        }
 
         if (!lat || !lng) {
           const matchRes = matchSingleCaseWithHistory(
             data.caseNumber,
-            data.houseNo,
+            data.houseNo || refData.houseNo,
             data.subdistrict,
             data.district,
             data.locationText,
-            data.moo,
+            data.moo || refData.moo,
             data.province
           );
           lat = matchRes.lat;
@@ -18858,32 +18944,59 @@ window.openMapAreaSelectorModal = function() {
           if (matchRes.dateTime) {
             dateTime = matchRes.dateTime;
           }
-          matchedRow = matchRes.matchedRow || null;
+          if (!matchedRow) {
+            matchedRow = matchRes.matchedRow || null;
+          }
         }
 
-        const resolvedHouseNo = (data.houseNo || (matchedRow ? (matchedRow['บ้านเลขที่'] || '') : '') || '').trim();
+        const resolvedHouseNo = (
+          data.houseNo || 
+          refData.houseNo || 
+          (matchedRow ? (matchedRow['บ้านเลขที่'] || matchedRow['เลขที่'] || matchedRow['houseNo'] || '') : '') || 
+          ''
+        ).trim();
+
+        const resolvedMoo = (
+          data.moo || 
+          refData.moo || 
+          (matchedRow ? (matchedRow['หมู่'] || matchedRow['หมู่ที่'] || matchedRow['moo'] || '') : '') || 
+          ''
+        ).trim();
+
+        const resolvedCaseExtra = (
+          data.caseExtra || 
+          refData.caseExtra || 
+          (matchedRow ? (matchedRow['ข้อมูลเพิ่มเติม'] || matchedRow['ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)'] || matchedRow['caseExtra'] || (typeof extractCaseExtraFromCaseNo === 'function' ? extractCaseExtraFromCaseNo(matchedRow['เลขคดี']) : '')) : '') || 
+          ''
+        ).trim();
+
         let resolvedLocationText = data.locationText || '';
         if (!resolvedLocationText || !/^(?:บ้านเลขที่\s*)?\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(resolvedLocationText)) {
           const matchedFull = matchedRow ? (matchedRow['ที่ตั้งส่งหมาย (เต็ม)'] || matchedRow['ที่ตั้งส่งหมาย'] || '') : '';
           if (matchedFull && /^(?:บ้านเลขที่\s*)?\d+/.test(matchedFull)) {
             resolvedLocationText = matchedFull;
           } else if (resolvedHouseNo && resolvedHouseNo !== '-') {
-            resolvedLocationText = `บ้านเลขที่ ${resolvedHouseNo} ${resolvedLocationText}`.trim();
+            resolvedLocationText = `บ้านเลขที่ ${resolvedHouseNo} ${resolvedMoo ? `ม.${resolvedMoo} ` : ''}${resolvedLocationText}`.trim();
           }
+        }
+
+        let finalCaseNumber = data.caseNumber || `${data.prefix}${data.caseNo}/${data.caseYear}`.trim() || 'หมายส่ง';
+        if (resolvedCaseExtra && !finalCaseNumber.includes(resolvedCaseExtra)) {
+          finalCaseNumber = `${finalCaseNumber} ${resolvedCaseExtra}`.trim();
         }
 
         const stopItem = {
           id: 'stop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-          caseNumber: data.caseNumber || `${data.prefix}${data.caseNo}/${data.caseYear}`.trim() || 'หมายส่ง',
+          caseNumber: finalCaseNumber,
           courtType: data.courtType,
           courtCategory: data.courtCategory || (data.courtType === 'หมายศาลอื่น' ? 'หมายศาลอื่น' : 'ศาลจังหวัด'),
           prefix: data.prefix,
           caseNo: data.caseNo,
           caseYear: data.caseYear,
-          caseExtra: data.caseExtra,
+          caseExtra: resolvedCaseExtra,
           locationType: data.locationType,
           houseNo: resolvedHouseNo || data.houseNo,
-          moo: data.moo || (matchedRow ? (matchedRow['หมู่'] || matchedRow['หมู่ที่'] || '') : ''),
+          moo: resolvedMoo || (matchedRow ? (matchedRow['หมู่'] || matchedRow['หมู่ที่'] || '') : ''),
           localAdminName: data.localAdminName,
           customOtherLocationName: data.customOtherLocationName,
           locationText: resolvedLocationText,
@@ -18906,6 +19019,9 @@ window.openMapAreaSelectorModal = function() {
           isMatched: Boolean(lat && lng),
           hasCoords: Boolean(lat && lng)
         };
+
+        window._selectedRefRow_sched_ = null;
+        window._selectedRefData_sched_ = null;
 
         state.stagedScheduleStops.push(stopItem);
         if (imageUrl && imageUrl.startsWith('data:image/')) {
@@ -19224,6 +19340,20 @@ window.openMapAreaSelectorModal = function() {
 };
 
 /**
+ * สกัดข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี) จากสตริงเลขคดี เช่น "ผบ123/2567 ล.1-2" -> "ล.1-2"
+ */
+function extractCaseExtraFromCaseNo(caseStr) {
+  if (!caseStr || typeof caseStr !== 'string') return '';
+  const trimmed = caseStr.trim();
+  const match = trimmed.match(/^(?:[^\/\s]+(?:\s+[^\/\s]+)*\/\d+)\s+(.+)$/);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return '';
+}
+window.extractCaseExtraFromCaseNo = extractCaseExtraFromCaseNo;
+
+/**
  * เปิด Modal สำหรับเพิ่มหรือแก้ไขรายการส่งหมายเดี่ยว (จากแถบข้างลำดับเส้นทาง)
  */
 window.openAddRouteStopModal = function(editIndex = null) {
@@ -19268,16 +19398,20 @@ window.openAddRouteStopModal = function(editIndex = null) {
       let imageUrl = data.customRoutePlanImg || data.selectedRefImg || '';
       let matchedRow = null;
       let matchedDateTime = '';
+      const refData = window._selectedRefData_quick_ || {};
+      if (window._selectedRefRow_quick_) {
+        matchedRow = window._selectedRefRow_quick_;
+      }
 
       // หากผู้ใช้ไม่ได้คลิกเลือกหมุดอ้างอิงเอง และไม่ได้ระบุพิกัด ให้ประมวลผลหมุดอ้างอิงตามลำดับความใกล้เคียงในพื้นที่เดียวกัน
       if (!lat || !lng) {
         const matchRes = matchSingleCaseWithHistory(
           data.caseNumber,
-          data.houseNo,
+          data.houseNo || refData.houseNo,
           data.subdistrict,
           data.district,
           data.locationText,
-          data.moo,
+          data.moo || refData.moo,
           data.province
         );
         lat = matchRes.lat;
@@ -19288,34 +19422,64 @@ window.openAddRouteStopModal = function(editIndex = null) {
           imageUrl = matchRes.imageUrl;
         }
         matchedDateTime = matchRes.dateTime || '';
-        matchedRow = matchRes.matchedRow || null;
+        if (!matchedRow) {
+          matchedRow = matchRes.matchedRow || null;
+        }
       }
 
       const finalImage = imageUrl || (isEditing ? (state.currentRouteStops[editIndex]?.planImageUrl || state.currentRouteStops[editIndex]?.customRoutePlanImg || state.currentRouteStops[editIndex]?.imageUrl || '') : '');
 
-      const resolvedHouseNo = (data.houseNo || (matchedRow ? (matchedRow['บ้านเลขที่'] || '') : '') || (isEditing ? state.currentRouteStops[editIndex]?.houseNo : '') || '').trim();
+      const resolvedHouseNo = (
+        data.houseNo || 
+        refData.houseNo || 
+        (matchedRow ? (matchedRow['บ้านเลขที่'] || matchedRow['เลขที่'] || matchedRow['houseNo'] || '') : '') || 
+        (isEditing ? state.currentRouteStops[editIndex]?.houseNo : '') || 
+        ''
+      ).trim();
+
+      const resolvedMoo = (
+        data.moo || 
+        refData.moo || 
+        (matchedRow ? (matchedRow['หมู่'] || matchedRow['หมู่ที่'] || matchedRow['moo'] || '') : '') || 
+        (isEditing ? state.currentRouteStops[editIndex]?.moo : '') || 
+        ''
+      ).trim();
+
+      const resolvedCaseExtra = (
+        data.caseExtra || 
+        refData.caseExtra || 
+        (matchedRow ? (matchedRow['ข้อมูลเพิ่มเติม'] || matchedRow['ข้อมูลเพิ่มเติม (ต่อท้ายเลขคดี)'] || matchedRow['caseExtra'] || extractCaseExtraFromCaseNo(matchedRow['เลขคดี'])) : '') || 
+        (isEditing ? state.currentRouteStops[editIndex]?.caseExtra : '') || 
+        ''
+      ).trim();
+
       let resolvedLocationText = data.locationText || (isEditing ? state.currentRouteStops[editIndex]?.locationText : '') || '';
       if (!resolvedLocationText || !/^(?:บ้านเลขที่\s*)?\d+(?:\/\d+)?(?:-\d+)?\s*(?:ม\.|หมู่|ต\.|ตำบล|\s)/.test(resolvedLocationText)) {
         const matchedFull = matchedRow ? (matchedRow['ที่ตั้งส่งหมาย (เต็ม)'] || matchedRow['ที่ตั้งส่งหมาย'] || '') : '';
         if (matchedFull && /^(?:บ้านเลขที่\s*)?\d+/.test(matchedFull)) {
           resolvedLocationText = matchedFull;
         } else if (resolvedHouseNo && resolvedHouseNo !== '-') {
-          resolvedLocationText = `บ้านเลขที่ ${resolvedHouseNo} ${resolvedLocationText}`.trim();
+          resolvedLocationText = `บ้านเลขที่ ${resolvedHouseNo} ${resolvedMoo ? `ม.${resolvedMoo} ` : ''}${resolvedLocationText}`.trim();
         }
+      }
+
+      let finalCaseNumber = data.caseNumber || (data.prefix || data.caseNo ? `${data.prefix}${data.caseNo}/${data.caseYear}`.trim() : (data.localAdminName || data.customOtherLocationName || 'หมายส่ง'));
+      if (resolvedCaseExtra && !finalCaseNumber.includes(resolvedCaseExtra)) {
+        finalCaseNumber = `${finalCaseNumber} ${resolvedCaseExtra}`.trim();
       }
 
       const stopItem = {
         id: isEditing ? state.currentRouteStops[editIndex].id : ('stop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6)),
-        caseNumber: data.caseNumber || (data.prefix || data.caseNo ? `${data.prefix}${data.caseNo}/${data.caseYear}`.trim() : (data.localAdminName || data.customOtherLocationName || 'หมายส่ง')),
+        caseNumber: finalCaseNumber,
         courtType: data.courtType,
         courtCategory: data.courtCategory || (data.courtType === 'หมายศาลอื่น' ? 'หมายศาลอื่น' : 'ศาลจังหวัด'),
         prefix: data.prefix,
         caseNo: data.caseNo,
         caseYear: data.caseYear,
-        caseExtra: data.caseExtra,
+        caseExtra: resolvedCaseExtra,
         locationType: data.locationType,
         houseNo: resolvedHouseNo || data.houseNo,
-        moo: data.moo || (matchedRow ? (matchedRow['หมู่'] || matchedRow['หมู่ที่'] || '') : ''),
+        moo: resolvedMoo || (matchedRow ? (matchedRow['หมู่'] || matchedRow['หมู่ที่'] || '') : ''),
         localAdminName: data.localAdminName,
         customOtherLocationName: data.customOtherLocationName,
         locationText: resolvedLocationText,
@@ -19340,6 +19504,9 @@ window.openAddRouteStopModal = function(editIndex = null) {
         isMatched: Boolean(lat && lng),
         hasCoords: Boolean(lat && lng)
       };
+
+      window._selectedRefRow_quick_ = null;
+      window._selectedRefData_quick_ = null;
 
       if (isEditing) {
         state.currentRouteStops[editIndex] = stopItem;

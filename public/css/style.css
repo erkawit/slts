@@ -283,11 +283,81 @@ body.gyro-portrait #liveBadgeWrapper {
 }
 
 /* 1. เมื่อหมุนกล้องเป็นแนวนอน 90 องศา (Landscape Left: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์)
-   ตำแหน่งของ HUD ในกรอบภาพ 4:3 และ 3:4 จะต้องคงเดิมเหมือนแนวตั้ง 100%:
-   - เข็มทิศ: มุมซ้ายบน ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
-   - แผนที่ขนาดเล็ก: มุมซ้ายล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
-   - ลายน้ำข้อความ: มุมขวาล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3 และไม่ทับซ้อนแผนที่
+   จัดเลย์เอาต์ Sidebar Layout เหมือน Hardware Landscape โดยหมุน #cameraModal 90 องศา:
+   - cameraModal หมุน 90deg, ขนาด 100vh x 100vw
+   - Top Bar → Left Sidebar 68px (position: absolute)
+   - Controls Container → Right Sidebar 88px (position: absolute)
+   - ปุ่มแสดงตรง ไม่หมุน ไม่ dim
 */
+body.gyro-landscape-90 #cameraModal {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 100vh !important;
+  height: 100vw !important;
+  transform: translate(-50%, -50%) rotate(90deg) !important;
+  transform-origin: center center !important;
+  overflow: hidden !important;
+}
+
+body.gyro-landscape-90 #cameraTopBar {
+  position: absolute !important;
+  left: 0 !important;
+  right: auto !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 68px !important;
+  height: 100% !important;
+  padding: 0.75rem 0.5rem !important;
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px)) !important;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px)) !important;
+  padding-left: max(0.5rem, calc(env(safe-area-inset-left, 0px) + 4px)) !important;
+  padding-right: 0.35rem !important;
+  display: flex !important;
+  flex-direction: column-reverse !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%) !important;
+  z-index: 30 !important;
+  border-radius: 0 !important;
+}
+
+body.gyro-landscape-90 #cameraTopBar > div:first-child {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+body.gyro-landscape-90 #cameraTopBar > div:last-child {
+  display: flex !important;
+  flex-direction: column-reverse !important;
+  align-items: center !important;
+  gap: 0.6rem !important;
+}
+
+body.gyro-landscape-90 #cameraControlsContainer {
+  position: absolute !important;
+  right: 0 !important;
+  left: auto !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 88px !important;
+  height: 100% !important;
+  padding: 1rem 0.5rem !important;
+  padding-top: max(1rem, env(safe-area-inset-top, 0px)) !important;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)) !important;
+  padding-right: max(0.75rem, calc(env(safe-area-inset-right, 0px) + 6px)) !important;
+  padding-left: 0.35rem !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 1.5rem !important;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%) !important;
+  z-index: 30 !important;
+}
+
 body.gyro-landscape-90 #liveCompassWrapper {
   top: 0.75rem !important;
   left: 0.75rem !important;
@@ -313,35 +383,94 @@ body.gyro-landscape-90 #liveBadgeWrapper {
   max-width: calc(100% - 125px) !important;
 }
 
-/* หมุนปุ่มชัตเตอร์และปุ่มบนแถบด้านบน */
-body.gyro-landscape-90 #btnCameraBgQueue,
-body.gyro-landscape-90 #btnEditMobileForm,
-body.gyro-landscape-90 #btnCameraCaseSearch,
-body.gyro-landscape-90 #btnCameraRouteMap,
-body.gyro-landscape-90 #btnCameraAuth,
+body.gyro-landscape-90 #cameraTopBar #btnCameraBgQueue,
+body.gyro-landscape-90 #cameraTopBar #btnEditMobileForm,
+body.gyro-landscape-90 #cameraTopBar #btnCameraCaseSearch,
+body.gyro-landscape-90 #cameraTopBar #btnCameraRouteMap,
+body.gyro-landscape-90 #cameraTopBar #btnCameraAuth,
+body.gyro-landscape-90 #cameraTopBar #btnTabletSwitchToPc,
 body.gyro-landscape-90 #btnFlipCamera,
 body.gyro-landscape-90 #btnCapture,
-body.gyro-landscape-90 #btnFlipOrientationQuick,
-body.gyro-landscape-90 #btnTabletSwitchToPc {
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
-}
-
-/* ปิดความเด่นชัด (dim) ของปุ่มฟอร์ม/ค้นหา/แผนที่/คิว/ออกจากระบบ ในแนวนอน และมี cursor ช่วยเตือน */
-body.gyro-landscape-90 #btnCameraBgQueue,
-body.gyro-landscape-90 #btnEditMobileForm,
-body.gyro-landscape-90 #btnCameraCaseSearch,
-body.gyro-landscape-90 #btnCameraRouteMap,
-body.gyro-landscape-90 #btnCameraAuth {
-  opacity: 0.55 !important;
+body.gyro-landscape-90 #btnFlipOrientationQuick {
+  transform: none !important;
 }
 
 /* 2. เมื่อหมุนกล้องเป็นแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา)
-   ตำแหน่งของ HUD ในกรอบภาพ 4:3 และ 3:4 จะต้องคงเดิมเหมือนแนวตั้ง 100%:
-   - เข็มทิศ: มุมซ้ายบน ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
-   - แผนที่ขนาดเล็ก: มุมซ้ายล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3
-   - ลายน้ำข้อความ: มุมขวาล่าง ชิดกรอบ 0.75rem ไม่ล้นเส้นแนวขนาดภาพ 4:3 และไม่ทับซ้อนแผนที่
+   จัดเลย์เอาต์ Sidebar Layout เหมือน Hardware Landscape โดยหมุน #cameraModal -90 องศา:
+   - cameraModal หมุน -90deg, ขนาด 100vh x 100vw
+   - Top Bar → Left Sidebar 68px (position: absolute)
+   - Controls Container → Right Sidebar 88px (position: absolute)
+   - ปุ่มแสดงตรง ไม่หมุน ไม่ dim
 */
+body.gyro-landscape-270 #cameraModal {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 100vh !important;
+  height: 100vw !important;
+  transform: translate(-50%, -50%) rotate(-90deg) !important;
+  transform-origin: center center !important;
+  overflow: hidden !important;
+}
+
+body.gyro-landscape-270 #cameraTopBar {
+  position: absolute !important;
+  left: 0 !important;
+  right: auto !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 68px !important;
+  height: 100% !important;
+  padding: 0.75rem 0.5rem !important;
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px)) !important;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px)) !important;
+  padding-left: max(0.5rem, calc(env(safe-area-inset-left, 0px) + 4px)) !important;
+  padding-right: 0.35rem !important;
+  display: flex !important;
+  flex-direction: column-reverse !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%) !important;
+  z-index: 30 !important;
+  border-radius: 0 !important;
+}
+
+body.gyro-landscape-270 #cameraTopBar > div:first-child {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+body.gyro-landscape-270 #cameraTopBar > div:last-child {
+  display: flex !important;
+  flex-direction: column-reverse !important;
+  align-items: center !important;
+  gap: 0.6rem !important;
+}
+
+body.gyro-landscape-270 #cameraControlsContainer {
+  position: absolute !important;
+  right: 0 !important;
+  left: auto !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 88px !important;
+  height: 100% !important;
+  padding: 1rem 0.5rem !important;
+  padding-top: max(1rem, env(safe-area-inset-top, 0px)) !important;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)) !important;
+  padding-right: max(0.75rem, calc(env(safe-area-inset-right, 0px) + 6px)) !important;
+  padding-left: 0.35rem !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 1.5rem !important;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%) !important;
+  z-index: 30 !important;
+}
+
 body.gyro-landscape-270 #liveCompassWrapper {
   top: 0.75rem !important;
   left: 0.75rem !important;
@@ -367,26 +496,18 @@ body.gyro-landscape-270 #liveBadgeWrapper {
   max-width: calc(100% - 125px) !important;
 }
 
-body.gyro-landscape-270 #btnCameraBgQueue,
-body.gyro-landscape-270 #btnEditMobileForm,
-body.gyro-landscape-270 #btnCameraCaseSearch,
-body.gyro-landscape-270 #btnCameraRouteMap,
-body.gyro-landscape-270 #btnCameraAuth,
+body.gyro-landscape-270 #cameraTopBar #btnCameraBgQueue,
+body.gyro-landscape-270 #cameraTopBar #btnEditMobileForm,
+body.gyro-landscape-270 #cameraTopBar #btnCameraCaseSearch,
+body.gyro-landscape-270 #cameraTopBar #btnCameraRouteMap,
+body.gyro-landscape-270 #cameraTopBar #btnCameraAuth,
+body.gyro-landscape-270 #cameraTopBar #btnTabletSwitchToPc,
 body.gyro-landscape-270 #btnFlipCamera,
 body.gyro-landscape-270 #btnCapture,
-body.gyro-landscape-270 #btnFlipOrientationQuick,
-body.gyro-landscape-270 #btnTabletSwitchToPc {
-  transform: rotate(-90deg) !important;
-  transform-origin: center center !important;
+body.gyro-landscape-270 #btnFlipOrientationQuick {
+  transform: none !important;
 }
 
-body.gyro-landscape-270 #btnCameraBgQueue,
-body.gyro-landscape-270 #btnEditMobileForm,
-body.gyro-landscape-270 #btnCameraCaseSearch,
-body.gyro-landscape-270 #btnCameraRouteMap,
-body.gyro-landscape-270 #btnCameraAuth {
-  opacity: 0.55 !important;
-}
 
 /* ================================================================
    Landscape Gyro Warning Toast Pop Up (แสดงผลตรงกลางหน้าจอในมุมมองแนวนอน เมื่อแตะปุ่มที่ disabled)
