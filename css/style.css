@@ -333,10 +333,12 @@ body.gyro-landscape-90 .camera-live-frame {
   box-sizing: border-box !important;
 }
 
-/* ตำแหน่ง HUD ในมุมมองแนวนอน (หัวเครื่องไปทางซ้าย):
-   - เข็มทิศ: มุมบนซ้าย (Top-Left)
-   - แผนที่ย่อ: มุมล่างซ้าย (Bottom-Left)
-   - ข้อมูลสด: มุมล่างขวา (Bottom-Right)
+/* ตำแหน่ง HUD ในมุมมองแนวนอน 90 องศา (Landscape Left: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์):
+   เมื่อถือเครื่องในแนวนอนซ้าย:
+   - มุมซ้ายบน (Top-Left): เข็มทิศ (Live Compass) -> อยู่ใกล้ฝั่งขวาบนของหน้าต่างแนวตั้ง (CSS: top, right)
+   - มุมซ้ายล่าง (Bottom-Left): แผนที่ย่อ (Live Map) -> อยู่ใกล้ฝั่งขวาล่างของหน้าต่างแนวตั้ง (CSS: bottom, right)
+   - มุมขวาล่าง (Bottom-Right): ข้อมูลสด (Live Badge) -> อยู่ใกล้ฝั่งซ้ายล่างของหน้าต่างแนวตั้ง (CSS: bottom, left)
+   ทุกองค์ประกอบหมุน -90 องศา (หรือ 270 องศา) เพื่อให้ตัวอักษรและไอคอนตั้งตรงขึ้น (หมุนกลับ 180 องศาจากเดิม)
 */
 body.gyro-landscape-90 #liveCompassWrapper,
 body.gyro-landscape-90 .camera-live-frame #liveCompassWrapper,
@@ -346,7 +348,7 @@ body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveCompassWrapper {
   right: 0.75rem !important;
   bottom: auto !important;
   left: auto !important;
-  transform: rotate(90deg) !important;
+  transform: rotate(-90deg) !important;
   transform-origin: center center !important;
 }
 
@@ -354,12 +356,12 @@ body.gyro-landscape-90 #liveMapWrapper,
 body.gyro-landscape-90 .camera-live-frame #liveMapWrapper,
 body.gyro-landscape-90 .camera-live-frame.ratio-4-3 #liveMapWrapper,
 body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveMapWrapper {
-  top: 0.75rem !important;
-  left: 0.75rem !important;
-  bottom: auto !important;
-  right: auto !important;
-  transform: rotate(90deg) translateY(-100%) !important;
-  transform-origin: top left !important;
+  bottom: 0.75rem !important;
+  right: 0.75rem !important;
+  top: auto !important;
+  left: auto !important;
+  transform: rotate(-90deg) !important;
+  transform-origin: center center !important;
 }
 
 body.gyro-landscape-90 #liveBadgeWrapper,
@@ -370,7 +372,7 @@ body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
   left: 0.75rem !important;
   top: auto !important;
   right: auto !important;
-  transform: rotate(90deg) translateX(-100%) !important;
+  transform: rotate(-90deg) !important;
   transform-origin: bottom left !important;
   max-width: calc(100% - 125px) !important;
 }
@@ -378,8 +380,8 @@ body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
 
 /* 2. เมื่อหมุนกล้องเป็นแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา)
    - แถบเมนูด้านบนอยู่ทางขวา และแถบปุ่มถ่ายภาพอยู่ทางซ้าย (สลับที่กันซ้าย-ขวาอย่างเป็นธรรมชาติ)
-   - ปุ่มเมนูด้านขวา disabled ทั้งหมด และหมุนไอคอน -90 องศา
-   - ปุ่มชัตเตอร์ด้านซ้าย หมุนไอคอน -90 องศา
+   - ปุ่มเมนูด้านขวา disabled ทั้งหมด และหมุนไอคอน 90 องศา
+   - ปุ่มชัตเตอร์ด้านซ้าย หมุนไอคอน 90 องศา
    - กำหนดตำแหน่ง HUD ตามมุมมองแนวนอน:
      * เข็มทิศ: มุมบนซ้าย (Top-Left)
      * แผนที่ย่อ: มุมล่างซ้าย (Bottom-Left)
@@ -389,7 +391,7 @@ body.gyro-landscape-270 #cameraModal {
   flex-direction: column !important;
 }
 
-/* ปิดการใช้งานปุ่มเมนูทั้งหมด (Disabled) และหมุนไอคอน -90 องศา */
+/* ปิดการใช้งานปุ่มเมนูทั้งหมด (Disabled) และหมุนไอคอน 90 องศา */
 body.gyro-landscape-270 #cameraTopBar #btnCameraBgQueue,
 body.gyro-landscape-270 #cameraTopBar #btnEditMobileForm,
 body.gyro-landscape-270 #cameraTopBar #btnCameraCaseSearch,
@@ -399,15 +401,15 @@ body.gyro-landscape-270 #cameraTopBar #btnTabletSwitchToPc {
   opacity: 0.45 !important;
   pointer-events: none !important;
   cursor: not-allowed !important;
-  transform: rotate(-90deg) !important;
+  transform: rotate(90deg) !important;
   transform-origin: center center !important;
 }
 
-/* ปุ่มควบคุมชัตเตอร์ หมุนไอคอน -90 องศา */
+/* ปุ่มควบคุมชัตเตอร์ หมุนไอคอน 90 องศา */
 body.gyro-landscape-270 #btnFlipCamera,
 body.gyro-landscape-270 #btnCapture,
 body.gyro-landscape-270 #btnFlipOrientationQuick {
-  transform: rotate(-90deg) !important;
+  transform: rotate(90deg) !important;
   transform-origin: center center !important;
 }
 
@@ -427,10 +429,12 @@ body.gyro-landscape-270 .camera-live-frame {
   box-sizing: border-box !important;
 }
 
-/* ตำแหน่ง HUD ในมุมมองแนวนอน (หัวเครื่องไปทางขวา):
-   - เข็มทิศ: มุมบนซ้าย (Top-Left)
-   - แผนที่ย่อ: มุมล่างซ้าย (Bottom-Left)
-   - ข้อมูลสด: มุมล่างขวา (Bottom-Right)
+/* ตำแหน่ง HUD ในมุมมองแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา):
+   เมื่อถือเครื่องในแนวนอนขวา:
+   - มุมซ้ายบน (Top-Left): เข็มทิศ (Live Compass) -> อยู่ใกล้ฝั่งซ้ายล่างของหน้าต่างแนวตั้ง (CSS: bottom, left)
+   - มุมซ้ายล่าง (Bottom-Left): แผนที่ย่อ (Live Map) -> อยู่ใกล้ฝั่งซ้ายบนของหน้าต่างแนวตั้ง (CSS: top, left)
+   - มุมขวาล่าง (Bottom-Right): ข้อมูลสด (Live Badge) -> อยู่ใกล้ฝั่งขวาบนของหน้าต่างแนวตั้ง (CSS: top, right)
+   ทุกองค์ประกอบหมุน 90 องศา เพื่อให้ตัวอักษรและไอคอนตั้งตรงขึ้น (หมุนกลับ 180 องศาจากเดิม)
 */
 body.gyro-landscape-270 #liveCompassWrapper,
 body.gyro-landscape-270 .camera-live-frame #liveCompassWrapper,
@@ -440,7 +444,7 @@ body.gyro-landscape-270 .camera-live-frame.ratio-3-4 #liveCompassWrapper {
   left: 0.75rem !important;
   top: auto !important;
   right: auto !important;
-  transform: rotate(-90deg) !important;
+  transform: rotate(90deg) !important;
   transform-origin: center center !important;
 }
 
@@ -448,12 +452,12 @@ body.gyro-landscape-270 #liveMapWrapper,
 body.gyro-landscape-270 .camera-live-frame #liveMapWrapper,
 body.gyro-landscape-270 .camera-live-frame.ratio-4-3 #liveMapWrapper,
 body.gyro-landscape-270 .camera-live-frame.ratio-3-4 #liveMapWrapper {
-  bottom: 0.75rem !important;
-  right: 0.75rem !important;
-  top: auto !important;
-  left: auto !important;
-  transform: rotate(-90deg) translateX(100%) !important;
-  transform-origin: bottom right !important;
+  top: 0.75rem !important;
+  left: 0.75rem !important;
+  bottom: auto !important;
+  right: auto !important;
+  transform: rotate(90deg) !important;
+  transform-origin: center center !important;
 }
 
 body.gyro-landscape-270 #liveBadgeWrapper,
@@ -464,7 +468,7 @@ body.gyro-landscape-270 .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
   right: 0.75rem !important;
   bottom: auto !important;
   left: auto !important;
-  transform: rotate(-90deg) translateY(-100%) !important;
+  transform: rotate(90deg) !important;
   transform-origin: top right !important;
   max-width: calc(100% - 125px) !important;
 }
