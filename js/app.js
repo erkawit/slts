@@ -1633,7 +1633,9 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.liveBadgeCase.textContent = `⚖️  เลขคดี: ${state.activeRouteStopTarget.caseNumber}`;
       }
       if (elements.liveBadgeLocation && state.activeRouteStopTarget.locationText) {
-        elements.liveBadgeLocation.textContent = `🏠  ${state.activeRouteStopTarget.locationText}`;
+        const isLandscape = (typeof getEffectiveGyroOrientation === 'function' && getEffectiveGyroOrientation() !== 0) || (window.innerWidth > window.innerHeight);
+        const fmtLoc = (typeof formatWatermarkLocationText === 'function') ? formatWatermarkLocationText(state.activeRouteStopTarget.locationText, isLandscape) : state.activeRouteStopTarget.locationText;
+        elements.liveBadgeLocation.textContent = `🏠  ${fmtLoc}`;
       }
       updateCaptureButtonState();
     }
@@ -4602,7 +4604,8 @@ function applyGyroOrientation(orientation, angle) {
   }
 
   // ตรวจสอบว่าหน้าจอหมุนตามฮาร์ดแวร์จริงหรือไม่ (เช่น ตัวเครื่องเปิด Auto-Rotate และหมุนเป็นแนวนอน)
-  const isHardwareLandscape = (window.innerWidth > window.innerHeight) && (window.innerWidth < 1024);
+  const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  const isHardwareLandscape = (window.innerWidth > window.innerHeight) && isTouchDevice && (window.innerHeight < 600 || window.innerWidth <= 1024);
 
   document.body.classList.remove('gyro-landscape-90', 'gyro-landscape-270', 'gyro-portrait', 'hardware-landscape');
 
@@ -4611,8 +4614,7 @@ function applyGyroOrientation(orientation, angle) {
 
   if (isHardwareLandscape) {
     // โหมดหน้าจอหมุนแนวนอนจริงระดับฮาร์ดแวร์ (Auto-Rotate ON):
-    // สลับเป็นเลย์เอาต์ Native Camera แนวนอน (เหมือนภาพที่ 2): ท็อปบาร์อยู่ฝั่งซ้าย, ชัตเตอร์อยู่ฝั่งขวา
-    // โดยองค์ประกอบทั้งหมดไม่ต้องหมุน 90 องศาซ้ำซ้อน เพราะหน้าจอถูกหมุนโดยระบบปฏิบัติการแล้ว
+    // สลับเป็นเลย์เอาต์ Native Camera แนวนอน: ท็อปบาร์อยู่ฝั่งซ้าย, ชัตเตอร์อยู่ฝั่งขวา
     document.body.classList.add('hardware-landscape');
     if (cameraControls) {
       cameraControls.style.setProperty('left', 'auto', 'important');
@@ -4635,7 +4637,7 @@ function applyGyroOrientation(orientation, angle) {
       cameraTopBar.style.removeProperty('right');
     }
     // โหมดหน้าจออยู่ในแนวตั้ง (เช่น ตัวเครื่องเปิด Portrait Lock ไว้):
-    // ใช้ Gyroscope Sensor หมุนองค์ประกอบในตำแหน่งเดิม (Virtual Landscape เหมือนภาพที่ 2)
+    // ใช้ Gyroscope Sensor หมุนองค์ประกอบในตำแหน่งเดิม (Virtual Landscape)
     if (angle === 90) {
       document.body.classList.add('gyro-landscape-90');
     } else if (angle === -90 || angle === 270) {
@@ -4815,6 +4817,17 @@ function initResponsiveUI() {
   }
 
   handleResize();
+
+  const topBar = document.getElementById('cameraTopBar');
+  if (topBar && !topBar._hasLandscapeWarnListener) {
+    topBar._hasLandscapeWarnListener = true;
+    topBar.addEventListener('click', (e) => {
+      const gyro = (typeof getEffectiveGyroOrientation === 'function') ? getEffectiveGyroOrientation() : 0;
+      if (gyro !== 0) {
+        showLandscapeWarningToast('ใช้งานเมนูนี้');
+      }
+    }, true);
+  }
 }
 
 
@@ -14245,7 +14258,9 @@ function startLiveCameraHUD() {
         }
       }
       if (elements.liveBadgeLocation) {
-        elements.liveBadgeLocation.textContent = locText ? `🏠  ${locText}` : `🏠  (กด "ฟอร์มข้อมูล" เพื่อระบุสถานที่)`;
+        const isLandscape = (typeof getEffectiveGyroOrientation === 'function' && getEffectiveGyroOrientation() !== 0) || (window.innerWidth > window.innerHeight);
+        const fmtLoc = (typeof formatWatermarkLocationText === 'function') ? formatWatermarkLocationText(locText, isLandscape) : locText;
+        elements.liveBadgeLocation.textContent = fmtLoc ? `🏠  ${fmtLoc}` : `🏠  (กด "ฟอร์มข้อมูล" เพื่อระบุสถานที่)`;
       }
       if (elements.liveBadgeCase) {
         elements.liveBadgeCase.textContent = caseNum ? `⚖️  เลขคดี: ${caseNum}` : `⚖️  เลขคดี: (กด "ฟอร์มข้อมูล")`;
@@ -21932,7 +21947,9 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
     elements.liveBadgeCase.textContent = `⚖️  เลขคดี: ${displayCase}`;
   }
   if (elements.liveBadgeLocation && displayLoc) {
-    elements.liveBadgeLocation.textContent = `🏠  ${displayLoc}`;
+    const isLandscape = (typeof getEffectiveGyroOrientation === 'function' && getEffectiveGyroOrientation() !== 0) || (window.innerWidth > window.innerHeight);
+    const fmtLoc = (typeof formatWatermarkLocationText === 'function') ? formatWatermarkLocationText(displayLoc, isLandscape) : displayLoc;
+    elements.liveBadgeLocation.textContent = `🏠  ${fmtLoc}`;
   }
   updateCaptureButtonState();
 

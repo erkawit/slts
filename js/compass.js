@@ -52,11 +52,13 @@ class CompassManager {
 
       // หากแรงโน้มถ่วงตกที่แกน X ชัดเจน (เอียงซ้ายหรือขวา)
       if (Math.abs(x) > 5.5 && Math.abs(y) < 5.0) {
-        if (x > 5.5) {
-          // Landscape Left (หัวเครื่องไปซ้าย)
+        const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+        // Landscape Left (หัวเครื่องไปซ้าย มือขวาจับปุ่มชัตเตอร์): iOS x > 5.5, Android x < -5.5
+        const isLeft = isIOS ? (x > 5.5) : (x < -5.5);
+        if (isLeft) {
           this.setTargetTilt(90, 'landscape');
-        } else if (x < -5.5) {
-          // Landscape Right (หัวเครื่องไปขวา)
+        } else {
+          // Landscape Right (หัวเครื่องไปขวา มือซ้ายจับปุ่มชัตเตอร์)
           this.setTargetTilt(-90, 'landscape');
         }
       } else if (y > 5.0 && Math.abs(x) < 4.5) {
@@ -72,6 +74,18 @@ class CompassManager {
       window.addEventListener('deviceorientation', handleOrientationEvent, true);
       window.addEventListener('deviceorientationabsolute', handleOrientationEvent, true);
       window.addEventListener('devicemotion', handleMotionEvent, true);
+      window.addEventListener('orientationchange', () => {
+        let angle = 0;
+        if (typeof window.orientation !== 'undefined') {
+          angle = Number(window.orientation);
+        } else if (screen.orientation && screen.orientation.angle !== undefined) {
+          angle = Number(screen.orientation.angle);
+        }
+        if (angle === 90) this.setTargetTilt(90, 'landscape');
+        else if (angle === -90 || angle === 270) this.setTargetTilt(-90, 'landscape');
+        else if (angle === 0) this.setTargetTilt(0, 'portrait');
+        else if (angle === 180) this.setTargetTilt(180, 'portrait');
+      }, true);
     }
   }
 
@@ -116,13 +130,17 @@ class CompassManager {
       return;
     }
 
-    // หมุนจอแนวนอนไปทางซ้าย (ปุ่มชัตเตอร์อยู่ฝั่งขวาของมือผู้ใช้): gamma ติดลบมาก
-    if (gamma < -35 && absB < 65) {
+    const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+    // Landscape Left (หัวเครื่องไปซ้าย มือขวาจับปุ่มชัตเตอร์): iOS gamma < -35, Android gamma > 35
+    const isLandscapeLeft = isIOS ? (gamma < -35 && absB < 65) : (gamma > 35 && absB < 65);
+    // Landscape Right (หัวเครื่องไปขวา มือซ้ายจับปุ่มชัตเตอร์): iOS gamma > 35, Android gamma < -35
+    const isLandscapeRight = isIOS ? (gamma > 35 && absB < 65) : (gamma < -35 && absB < 65);
+
+    if (isLandscapeLeft) {
       newAngle = 90;
       newOrientation = 'landscape';
-    } 
-    // หมุนจอแนวนอนไปทางขวา: gamma เป็นบวกมาก
-    else if (gamma > 35 && absB < 65) {
+    } else if (isLandscapeRight) {
       newAngle = -90;
       newOrientation = 'landscape';
     } 

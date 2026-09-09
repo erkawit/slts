@@ -46,6 +46,31 @@ class WatermarkEngine {
   }
 
   /**
+   * ปรับแต่งและตัดทอนข้อความที่ตั้งสำหรับลายน้ำและ Live Badge
+   * - หากข้อความยาวปกติ (เช่น "บ้านเลขที่ 158 ม.5 ต.สามพร้าว อ.เมืองอุดรธานี จ.อุดรธานี" - 57 ตัวอักษร): แสดงตามปกติ
+   * - หากข้อความยาวเกินไป (เช่น "ที่ทำการปกครองส่วนท้องถิ่นหมู่ที่ 15 ต. สามพร้าว อ.เมืองอุดรธานี จ.อุดรธานี" - 73 ตัวอักษร):
+   *   ตัดการแสดงผลชื่อจังหวัดออกไปเลย แล้วใส่ จุดสามจุดต่อท้ายแทน (...)
+   */
+  static formatLocationText(locText, isLandscape = false) {
+    if (!locText) return '';
+    locText = String(locText).trim();
+
+    // เกณฑ์ความยาวที่ถือว่ายาวเกินไป (ความยาวมาตรฐานปกติอยู่ที่ประมาณ 55-58 ตัวอักษร)
+    const threshold = 58;
+
+    if (locText.length > threshold) {
+      // ตัดชื่อจังหวัดออกไป เช่น " จ.อุดรธานี" หรือ " จังหวัดอุดรธานี"
+      let withoutProvince = locText.replace(/\s*(?:จ\.|จังหวัด)\s*[\u0E00-\u0E7Fa-zA-Z0-9_.-]+/g, '').trim();
+      if (!withoutProvince.endsWith('...')) {
+        withoutProvince = withoutProvince.replace(/\.+$/, '') + '...';
+      }
+      return withoutProvince;
+    }
+
+    return locText;
+  }
+
+  /**
    * สร้างเนื้อหา Text File (.txt) ตามที่แสดงผลในมุมขวาล่างของภาพ
    */
   static generateTextFileContent(data) {
@@ -57,7 +82,7 @@ class WatermarkEngine {
     const dirText = window.compassManager ? window.compassManager.getDirectionText(headingDeg) : 'N';
     const coordStr = `${latFormatted} ${lngFormatted} ${headingDeg}° ${dirText}`;
 
-    const locationStr = data.locationText || 'อำเภอเมืองอุดรธานี';
+    const locationStr = this.formatLocationText(data.locationText || 'อำเภอเมืองอุดรธานี');
     const caseStr = `เลขคดี: ${data.caseNumber || '-'}`;
 
     return `${dateStr}\r\n${coordStr}\r\n${locationStr}\r\n${caseStr}`;
@@ -198,7 +223,8 @@ class WatermarkEngine {
     const coordWithHeadingStr = `${latFormatted} ${lngFormatted} ${headingDeg}° ${dirText}`;
 
     // 3. ที่ตั้ง (อำเภอ / ตำบล หรือที่ตั้งละเอียด)
-    const locationStr = data.locationText || 'อำเภอเมืองอุดรธานี';
+    const isLandscape = canvasWidth > canvasHeight;
+    const locationStr = this.formatLocationText(data.locationText || 'อำเภอเมืองอุดรธานี', isLandscape);
 
     // 4. เลขคดี (เช่น ต2188/2569)
     let rawCase = data.caseNumber ? String(data.caseNumber).trim() : '-';
@@ -375,3 +401,4 @@ class WatermarkEngine {
 }
 
 window.WatermarkEngine = WatermarkEngine;
+window.formatWatermarkLocationText = WatermarkEngine.formatLocationText;

@@ -286,7 +286,10 @@ body.gyro-portrait #liveBadgeWrapper {
    - แถบเมนูด้านบน (อยู่ด้านซ้ายเมื่อถือแนวนอน) และ แถบชัตเตอร์ (อยู่ด้านขวาเมื่อถือแนวนอน) คงเดิมเพื่อกำหนดขอบเขตพื้นที่แสดงผลกล้อง
    - ปุ่มเมนูด้านซ้าย disabled ทั้งหมด ไม่ให้กดได้ และหมุนไอคอนไปทางขวา 90 องศา
    - ปุ่มชัตเตอร์ด้านขวา หมุนไอคอน 90 องศา
-   - กำหนดเส้นแนวกระจาย HUD ให้อยู่ตามมุมมองแนวนอน
+   - กำหนดตำแหน่ง HUD ตามมุมมองแนวนอน:
+     * เข็มทิศ: มุมบนซ้าย (Top-Left)
+     * แผนที่ย่อ: มุมล่างซ้าย (Bottom-Left)
+     * ข้อมูลสด: มุมล่างขวา (Bottom-Right)
 */
 body.gyro-landscape-90 #cameraModal {
   flex-direction: column !important;
@@ -331,11 +334,14 @@ body.gyro-landscape-90 .camera-live-frame {
 }
 
 /* ตำแหน่ง HUD ในมุมมองแนวนอน (หัวเครื่องไปทางซ้าย):
-   - เข็มทิศ: มุมบนซ้าย
-   - แผนที่ย่อ: มุมล่างซ้าย
-   - ข้อมูลสด: มุมล่างขวา
+   - เข็มทิศ: มุมบนซ้าย (Top-Left)
+   - แผนที่ย่อ: มุมล่างซ้าย (Bottom-Left)
+   - ข้อมูลสด: มุมล่างขวา (Bottom-Right)
 */
-body.gyro-landscape-90 #liveCompassWrapper {
+body.gyro-landscape-90 #liveCompassWrapper,
+body.gyro-landscape-90 .camera-live-frame #liveCompassWrapper,
+body.gyro-landscape-90 .camera-live-frame.ratio-4-3 #liveCompassWrapper,
+body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveCompassWrapper {
   top: 0.75rem !important;
   right: 0.75rem !important;
   bottom: auto !important;
@@ -344,33 +350,43 @@ body.gyro-landscape-90 #liveCompassWrapper {
   transform-origin: center center !important;
 }
 
-body.gyro-landscape-90 #liveMapWrapper {
+body.gyro-landscape-90 #liveMapWrapper,
+body.gyro-landscape-90 .camera-live-frame #liveMapWrapper,
+body.gyro-landscape-90 .camera-live-frame.ratio-4-3 #liveMapWrapper,
+body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveMapWrapper {
   top: 0.75rem !important;
   left: 0.75rem !important;
   bottom: auto !important;
   right: auto !important;
-  transform: rotate(90deg) !important;
-  transform-origin: center center !important;
+  transform: rotate(90deg) translateY(-100%) !important;
+  transform-origin: top left !important;
 }
 
-body.gyro-landscape-90 #liveBadgeWrapper {
+body.gyro-landscape-90 #liveBadgeWrapper,
+body.gyro-landscape-90 .camera-live-frame #liveBadgeWrapper,
+body.gyro-landscape-90 .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
+body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
   bottom: 0.75rem !important;
   left: 0.75rem !important;
   top: auto !important;
   right: auto !important;
-  transform: rotate(90deg) !important;
+  transform: rotate(90deg) translateX(-100%) !important;
   transform-origin: bottom left !important;
   max-width: calc(100% - 125px) !important;
 }
 
 
 /* 2. เมื่อหมุนกล้องเป็นแนวนอน -90 องศา (Landscape Right: หัวเครื่องไปทางขวา)
-   - สลับตำแหน่งแถวเมนูด้านซ้าย กับแถบปุ่มถ่ายภาพทางขวาทั้งชุดสลับที่กัน (flex-direction: column-reverse)
-   - ปุ่มเมนู disabled ทั้งหมด และหมุนไอคอน -90 องศา
-   - ปุ่มชัตเตอร์ หมุนไอคอน -90 องศา
+   - แถบเมนูด้านบนอยู่ทางขวา และแถบปุ่มถ่ายภาพอยู่ทางซ้าย (สลับที่กันซ้าย-ขวาอย่างเป็นธรรมชาติ)
+   - ปุ่มเมนูด้านขวา disabled ทั้งหมด และหมุนไอคอน -90 องศา
+   - ปุ่มชัตเตอร์ด้านซ้าย หมุนไอคอน -90 องศา
+   - กำหนดตำแหน่ง HUD ตามมุมมองแนวนอน:
+     * เข็มทิศ: มุมบนซ้าย (Top-Left)
+     * แผนที่ย่อ: มุมล่างซ้าย (Bottom-Left)
+     * ข้อมูลสด: มุมล่างขวา (Bottom-Right)
 */
 body.gyro-landscape-270 #cameraModal {
-  flex-direction: column-reverse !important;
+  flex-direction: column !important;
 }
 
 /* ปิดการใช้งานปุ่มเมนูทั้งหมด (Disabled) และหมุนไอคอน -90 องศา */
@@ -412,11 +428,14 @@ body.gyro-landscape-270 .camera-live-frame {
 }
 
 /* ตำแหน่ง HUD ในมุมมองแนวนอน (หัวเครื่องไปทางขวา):
-   - เข็มทิศ: มุมบนซ้าย
-   - แผนที่ย่อ: มุมล่างซ้าย
-   - ข้อมูลสด: มุมล่างขวา
+   - เข็มทิศ: มุมบนซ้าย (Top-Left)
+   - แผนที่ย่อ: มุมล่างซ้าย (Bottom-Left)
+   - ข้อมูลสด: มุมล่างขวา (Bottom-Right)
 */
-body.gyro-landscape-270 #liveCompassWrapper {
+body.gyro-landscape-270 #liveCompassWrapper,
+body.gyro-landscape-270 .camera-live-frame #liveCompassWrapper,
+body.gyro-landscape-270 .camera-live-frame.ratio-4-3 #liveCompassWrapper,
+body.gyro-landscape-270 .camera-live-frame.ratio-3-4 #liveCompassWrapper {
   bottom: 0.75rem !important;
   left: 0.75rem !important;
   top: auto !important;
@@ -425,21 +444,27 @@ body.gyro-landscape-270 #liveCompassWrapper {
   transform-origin: center center !important;
 }
 
-body.gyro-landscape-270 #liveMapWrapper {
+body.gyro-landscape-270 #liveMapWrapper,
+body.gyro-landscape-270 .camera-live-frame #liveMapWrapper,
+body.gyro-landscape-270 .camera-live-frame.ratio-4-3 #liveMapWrapper,
+body.gyro-landscape-270 .camera-live-frame.ratio-3-4 #liveMapWrapper {
   bottom: 0.75rem !important;
   right: 0.75rem !important;
   top: auto !important;
   left: auto !important;
-  transform: rotate(-90deg) !important;
-  transform-origin: center center !important;
+  transform: rotate(-90deg) translateX(100%) !important;
+  transform-origin: bottom right !important;
 }
 
-body.gyro-landscape-270 #liveBadgeWrapper {
+body.gyro-landscape-270 #liveBadgeWrapper,
+body.gyro-landscape-270 .camera-live-frame #liveBadgeWrapper,
+body.gyro-landscape-270 .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
+body.gyro-landscape-270 .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
   top: 0.75rem !important;
   right: 0.75rem !important;
   bottom: auto !important;
   left: auto !important;
-  transform: rotate(-90deg) !important;
+  transform: rotate(-90deg) translateY(-100%) !important;
   transform-origin: top right !important;
   max-width: calc(100% - 125px) !important;
 }
@@ -2150,7 +2175,13 @@ body.hardware-landscape #cameraTopBar #btnEditMobileForm,
 body.hardware-landscape #cameraTopBar #btnCameraCaseSearch,
 body.hardware-landscape #cameraTopBar #btnCameraRouteMap,
 body.hardware-landscape #cameraTopBar #btnCameraAuth,
-body.hardware-landscape #cameraTopBar #btnTabletSwitchToPc,
+body.hardware-landscape #cameraTopBar #btnTabletSwitchToPc {
+  opacity: 0.45 !important;
+  pointer-events: none !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
 body.hardware-landscape #btnFlipCamera,
 body.hardware-landscape #btnCapture,
 body.hardware-landscape #btnFlipOrientationQuick {
@@ -2216,9 +2247,9 @@ body.hardware-landscape #btnFlipOrientationQuick {
     z-index: 30 !important;
   }
 
-  .camera-live-frame #liveCompassWrapper,
-  .camera-live-frame.ratio-4-3 #liveCompassWrapper,
-  .camera-live-frame.ratio-3-4 #liveCompassWrapper {
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame #liveCompassWrapper,
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame.ratio-4-3 #liveCompassWrapper,
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame.ratio-3-4 #liveCompassWrapper {
     top: 0.75rem !important;
     left: 0.75rem !important;
     right: auto !important;
@@ -2226,9 +2257,9 @@ body.hardware-landscape #btnFlipOrientationQuick {
     transform: none !important;
   }
 
-  .camera-live-frame #liveMapWrapper,
-  .camera-live-frame.ratio-4-3 #liveMapWrapper,
-  .camera-live-frame.ratio-3-4 #liveMapWrapper {
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame #liveMapWrapper,
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame.ratio-4-3 #liveMapWrapper,
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame.ratio-3-4 #liveMapWrapper {
     bottom: 0.75rem !important;
     left: 0.75rem !important;
     top: auto !important;
@@ -2236,9 +2267,9 @@ body.hardware-landscape #btnFlipOrientationQuick {
     transform: none !important;
   }
 
-  .camera-live-frame #liveBadgeWrapper,
-  .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
-  .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame #liveBadgeWrapper,
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
+  body:not(.gyro-landscape-90):not(.gyro-landscape-270) .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
     bottom: 0.75rem !important;
     right: 0.75rem !important;
     top: auto !important;
@@ -2252,7 +2283,13 @@ body.hardware-landscape #btnFlipOrientationQuick {
   #cameraTopBar #btnCameraCaseSearch,
   #cameraTopBar #btnCameraRouteMap,
   #cameraTopBar #btnCameraAuth,
-  #cameraTopBar #btnTabletSwitchToPc,
+  #cameraTopBar #btnTabletSwitchToPc {
+    opacity: 0.45 !important;
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+  }
+
   #btnFlipCamera,
   #btnCapture,
   #btnFlipOrientationQuick {
