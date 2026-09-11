@@ -4651,8 +4651,141 @@ function applyGyroOrientation(orientation, angle) {
       setCaptureOrientation(targetMode);
     }
   }
+
+  if (typeof repositionLandscapeHUD === 'function') {
+    repositionLandscapeHUD();
+  }
 }
 window.applyGyroOrientation = applyGyroOrientation;
+
+/**
+ * คำนวณตำแหน่งระนาบลายน้ำแบบไดนามิกในโหมดแนวนอน (Dynamic Landscape HUD Layout):
+ * - จัดวางกล่องข้อมูลตัวหนังสือ (Live Badge) ลงมาที่มุมขวาล่างตามกรอบสีแดง
+ * - จัดวางแผนที่ย่อ (Live Map) ลงมาที่มุมซ้ายล่างในระนาบเดียวกันเป๊ะ (Bottom Baseline เท่ากัน)
+ * - คำนวณระยะห่างจากขอบล่าง (dBottom) และขอบข้าง (dSide) ให้สมดุลเท่ากัน และยืดหยุ่นตามขนาดหน้าจอทุกรุ่น
+ */
+function repositionLandscapeHUD() {
+  const overlayFrame = (elements && elements.liveOverlayFrame) || document.getElementById('liveOverlayFrame');
+  const mapWrapper = (elements && elements.liveMapWrapper) || document.getElementById('liveMapWrapper');
+  const badgeWrapper = (elements && elements.liveBadgeWrapper) || document.getElementById('liveBadgeWrapper');
+  const cameraModal = (elements && elements.cameraModal) || document.getElementById('cameraModal');
+
+  if (!overlayFrame || !mapWrapper || !badgeWrapper || !cameraModal || cameraModal.classList.contains('hidden')) {
+    return;
+  }
+
+  const gyro = (typeof getEffectiveGyroOrientation === 'function') ? getEffectiveGyroOrientation() : 0;
+  const isHardwareLandscape = document.body.classList.contains('hardware-landscape') || 
+                              ((window.innerWidth > window.innerHeight) && (window.innerHeight < 600 || window.innerWidth <= 1024));
+
+  const frameRect = overlayFrame.getBoundingClientRect();
+  const W_dom = frameRect.width || overlayFrame.offsetWidth || window.innerWidth;
+  const H_dom = frameRect.height || overlayFrame.offsetHeight || (window.innerHeight - 150);
+
+  if (isHardwareLandscape) {
+    // 1. โหมดหน้าจอหมุนแนวนอนระดับฮาร์ดแวร์ (Auto-Rotate ON):
+    const dBottom = Math.max(16, Math.min(30, Math.round(H_dom * 0.065)));
+    const dSide = Math.max(18, Math.min(32, Math.round(W_dom * 0.04)));
+
+    mapWrapper.style.setProperty('bottom', `${dBottom}px`, 'important');
+    mapWrapper.style.setProperty('left', `${dSide}px`, 'important');
+    mapWrapper.style.setProperty('top', 'auto', 'important');
+    mapWrapper.style.setProperty('right', 'auto', 'important');
+    mapWrapper.style.setProperty('transform', 'none', 'important');
+    mapWrapper.style.setProperty('transform-origin', 'center center', 'important');
+
+    badgeWrapper.style.setProperty('bottom', `${dBottom}px`, 'important');
+    badgeWrapper.style.setProperty('right', `${dSide}px`, 'important');
+    badgeWrapper.style.setProperty('top', 'auto', 'important');
+    badgeWrapper.style.setProperty('left', 'auto', 'important');
+    badgeWrapper.style.setProperty('transform', 'none', 'important');
+    badgeWrapper.style.setProperty('transform-origin', 'center center', 'important');
+    badgeWrapper.style.setProperty('max-width', `calc(100% - ${mapWrapper.offsetWidth + dSide * 2 + 16}px)`, 'important');
+
+  } else if (gyro === 90 || document.body.classList.contains('gyro-landscape-90')) {
+    // 2. แนวนอนซ้าย (Virtual Landscape 90: หัวเครื่องไปทางซ้าย มือขวาจับปุ่มชัตเตอร์)
+    // Visual Height = W_dom (ขนาดแกนสั้นของโทรศัพท์)
+    // Visual Width = H_dom (ขนาดแกนยาวของโทรศัพท์)
+    const visualHeight = W_dom;
+    const visualWidth = H_dom;
+
+    // คำนวณระยะห่างระนาบล่าง (dBottom) และระยะห่างด้านข้าง (dSide) ให้เท่ากันและสมส่วนตามขนาดหน้าจอ
+    const dBottom = Math.max(18, Math.min(32, Math.round(visualHeight * 0.065)));
+    const dSide = Math.max(20, Math.min(36, Math.round(visualWidth * 0.04)));
+
+    const mapW = mapWrapper.offsetWidth || 100;
+    const mapH = mapWrapper.offsetHeight || 75;
+    const badgeW = badgeWrapper.offsetWidth || 240;
+    const badgeH = badgeWrapper.offsetHeight || 80;
+
+    // คำนวณพิกัด DOM ตามสมการทางเรขาคณิตการหมุน -90 องศา ด้วยจุดหมุน top left (0 0):
+    // ขอบล่างภาพของทั้งแผนที่และลายน้ำจะอยู่ที่ระนาบเดียวกันเป๊ะ: visualHeight - dBottom
+    // ระยะห่างจากขอบซ้ายของแผนที่ = dSide
+    // ระยะห่างจากขอบขวาของลายน้ำ = dSide
+    const x0_map = visualHeight - dBottom - mapH;
+    const y0_map = visualWidth - dSide;
+
+    const x0_badge = visualHeight - dBottom - badgeH;
+    const y0_badge = dSide + badgeW;
+
+    mapWrapper.style.setProperty('left', `${x0_map}px`, 'important');
+    mapWrapper.style.setProperty('top', `${y0_map}px`, 'important');
+    mapWrapper.style.setProperty('bottom', 'auto', 'important');
+    mapWrapper.style.setProperty('right', 'auto', 'important');
+    mapWrapper.style.setProperty('transform', 'rotate(-90deg)', 'important');
+    mapWrapper.style.setProperty('transform-origin', '0 0', 'important');
+
+    badgeWrapper.style.setProperty('left', `${x0_badge}px`, 'important');
+    badgeWrapper.style.setProperty('top', `${y0_badge}px`, 'important');
+    badgeWrapper.style.setProperty('bottom', 'auto', 'important');
+    badgeWrapper.style.setProperty('right', 'auto', 'important');
+    badgeWrapper.style.setProperty('transform', 'rotate(-90deg)', 'important');
+    badgeWrapper.style.setProperty('transform-origin', '0 0', 'important');
+    badgeWrapper.style.setProperty('max-width', `${visualWidth - dSide * 2 - mapW - 20}px`, 'important');
+
+  } else if (gyro === 270 || gyro === -90 || document.body.classList.contains('gyro-landscape-270')) {
+    // 3. แนวนอนขวา (Virtual Landscape 270 / -90: หัวเครื่องไปทางขวา มือซ้ายจับชัตเตอร์)
+    const visualHeight = W_dom;
+    const visualWidth = H_dom;
+
+    const dBottom = Math.max(18, Math.min(32, Math.round(visualHeight * 0.065)));
+    const dSide = Math.max(20, Math.min(36, Math.round(visualWidth * 0.04)));
+
+    const mapW = mapWrapper.offsetWidth || 100;
+    const mapH = mapWrapper.offsetHeight || 75;
+    const badgeW = badgeWrapper.offsetWidth || 240;
+    const badgeH = badgeWrapper.offsetHeight || 80;
+
+    const x0_map = dBottom + mapH;
+    const y0_map = dSide;
+
+    const x0_badge = dBottom + badgeH;
+    const y0_badge = visualWidth - dSide - badgeW;
+
+    mapWrapper.style.setProperty('left', `${x0_map}px`, 'important');
+    mapWrapper.style.setProperty('top', `${y0_map}px`, 'important');
+    mapWrapper.style.setProperty('bottom', 'auto', 'important');
+    mapWrapper.style.setProperty('right', 'auto', 'important');
+    mapWrapper.style.setProperty('transform', 'rotate(90deg)', 'important');
+    mapWrapper.style.setProperty('transform-origin', '0 0', 'important');
+
+    badgeWrapper.style.setProperty('left', `${x0_badge}px`, 'important');
+    badgeWrapper.style.setProperty('top', `${y0_badge}px`, 'important');
+    badgeWrapper.style.setProperty('bottom', 'auto', 'important');
+    badgeWrapper.style.setProperty('right', 'auto', 'important');
+    badgeWrapper.style.setProperty('transform', 'rotate(90deg)', 'important');
+    badgeWrapper.style.setProperty('transform-origin', '0 0', 'important');
+    badgeWrapper.style.setProperty('max-width', `${visualWidth - dSide * 2 - mapW - 20}px`, 'important');
+
+  } else {
+    // 4. แนวตั้งปกติ (Portrait): คืนค่าให้ CSS ปกติทำงาน
+    ['left', 'top', 'right', 'bottom', 'transform', 'transform-origin', 'max-width'].forEach(prop => {
+      mapWrapper.style.removeProperty(prop);
+      badgeWrapper.style.removeProperty(prop);
+    });
+  }
+}
+window.repositionLandscapeHUD = repositionLandscapeHUD;
 
 /**
  * ตรวจสอบทิศทางการหมุนของตัวเครื่องจาก Gyroscope Sensor อย่างละเอียด
@@ -14114,6 +14247,9 @@ async function openCameraModal() {
   }
   applySafariMobileCameraSafeAreas();
   updateCaptureButtonState();
+  if (typeof repositionLandscapeHUD === 'function') {
+    repositionLandscapeHUD();
+  }
 
   // 3. เริ่มต้นกล้องหรือใช้สตรีมที่ทำงานอยู่แล้ว โดยไม่ตัดสตรีมซ้ำซ้อน
   const isStreamLive = state.cameraStream && state.cameraStream.active && state.cameraStream.getVideoTracks().some(t => t.readyState === 'live');
@@ -14267,6 +14403,9 @@ function startLiveCameraHUD() {
       }
 
       updateCaptureButtonState();
+      if (typeof repositionLandscapeHUD === 'function') {
+        repositionLandscapeHUD();
+      }
     }
   };
 
@@ -14295,6 +14434,9 @@ async function updateLiveMapHUD() {
     const mapImg = await window.mapSnapshotManager.getMapImage(state.lat, state.lng, 100, 75);
     if (mapImg) {
       ctx.drawImage(mapImg, 0, 0, 100, 75);
+      if (typeof repositionLandscapeHUD === 'function') {
+        repositionLandscapeHUD();
+      }
     }
   } catch (e) {
     console.warn('Map HUD render error:', e);

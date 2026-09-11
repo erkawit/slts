@@ -292,24 +292,16 @@ body.gyro-landscape-90 #liveMapWrapper,
 body.gyro-landscape-90 .camera-live-frame #liveMapWrapper,
 body.gyro-landscape-90 .camera-live-frame.ratio-4-3 #liveMapWrapper,
 body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveMapWrapper {
-  bottom: 1.35rem !important;
-  right: 1.35rem !important;
-  top: auto !important;
-  left: auto !important;
   transform: rotate(-90deg) !important;
-  transform-origin: center center !important;
+  transform-origin: 0 0 !important;
 }
 
 body.gyro-landscape-90 #liveBadgeWrapper,
 body.gyro-landscape-90 .camera-live-frame #liveBadgeWrapper,
 body.gyro-landscape-90 .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
 body.gyro-landscape-90 .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
-  top: 0.75rem !important;
-  right: 0.75rem !important;
-  bottom: auto !important;
-  left: auto !important;
   transform: rotate(-90deg) !important;
-  transform-origin: bottom right !important;
+  transform-origin: 0 0 !important;
   max-width: calc(100% - 130px) !important;
 }
 
@@ -388,24 +380,16 @@ body.gyro-landscape-270 #liveMapWrapper,
 body.gyro-landscape-270 .camera-live-frame #liveMapWrapper,
 body.gyro-landscape-270 .camera-live-frame.ratio-4-3 #liveMapWrapper,
 body.gyro-landscape-270 .camera-live-frame.ratio-3-4 #liveMapWrapper {
-  top: 1.35rem !important;
-  left: 1.35rem !important;
-  bottom: auto !important;
-  right: auto !important;
   transform: rotate(90deg) !important;
-  transform-origin: center center !important;
+  transform-origin: 0 0 !important;
 }
 
 body.gyro-landscape-270 #liveBadgeWrapper,
 body.gyro-landscape-270 .camera-live-frame #liveBadgeWrapper,
 body.gyro-landscape-270 .camera-live-frame.ratio-4-3 #liveBadgeWrapper,
 body.gyro-landscape-270 .camera-live-frame.ratio-3-4 #liveBadgeWrapper {
-  bottom: 0.75rem !important;
-  left: 0.75rem !important;
-  top: auto !important;
-  right: auto !important;
   transform: rotate(90deg) !important;
-  transform-origin: bottom right !important;
+  transform-origin: 0 0 !important;
   max-width: calc(100% - 130px) !important;
 }
 
