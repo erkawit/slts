@@ -119,9 +119,11 @@ function doPost(e) {
       const hData = handoffSheet.getDataRange().getValues();
 
       let foundRow = -1;
+      let existingStatus = "";
       for (let i = hData.length - 1; i >= 1; i--) {
         if (String(hData[i][0] || '').trim().toLowerCase() === targetUserId) {
           foundRow = i + 1;
+          existingStatus = String(hData[i][7] || '').trim().toLowerCase();
           break;
         }
       }
@@ -131,6 +133,9 @@ function doPost(e) {
       const endJsonStr = safeHandoffJsonStringify(data.endLocation || '');
       const payloadJsonStr = safeHandoffJsonStringify(data);
 
+      // หากสถานะเดิมเป็น pending (กำลังส่ง Handoff ไปยังมือถือ) ให้คงสถานะ pending ไว้เพื่อไม่ให้ตัดหน้าการแจ้งเตือน
+      const newStatus = (existingStatus === "pending") ? "pending" : "active_route";
+
       const rowValues = [
         targetUserId,
         String(data.queryString || ''),
@@ -139,7 +144,7 @@ function doPost(e) {
         stopsJsonStr,
         String(data.lat || ''),
         String(data.lng || ''),
-        "active_route",
+        newStatus,
         timestamp,
         timestamp,
         targetUserId,
@@ -1134,33 +1139,49 @@ function ensureUsersSheetHeaders(sheet) {
 function safeHandoffJsonStringify(obj, maxLen) {
   if (!obj) return '';
   maxLen = maxLen || 45000;
-  let str = typeof obj === 'string' ? obj : JSON.stringify(obj);
-  if (str.length > maxLen) {
-    try {
-      if (typeof obj === 'object') {
-        const copy = JSON.parse(JSON.stringify(obj));
-        if (Array.isArray(copy)) {
-          copy.forEach(function(item) {
-            if (item && item.imageUrl && item.imageUrl.length > 300) delete item.imageUrl;
-          });
-        } else {
-          if (copy.stops && Array.isArray(copy.stops)) {
-            copy.stops.forEach(function(item) {
-              if (item && item.imageUrl && item.imageUrl.length > 300) delete item.imageUrl;
-            });
-          }
-          if (copy.routeRoadPolyline && Array.isArray(copy.routeRoadPolyline) && copy.routeRoadPolyline.length > 200) {
-            copy.routeRoadPolyline = copy.routeRoadPolyline.filter(function(_, idx) { return idx % 4 === 0; });
-          }
-        }
+
+  const sanitizeItem = function(item) {
+    if (!item || typeof item !== 'object') return;
+    const imgKeys = ['imageUrl', 'planImageUrl', 'customRoutePlanImg', 'capturedPhotoUrl', 'photo', 'dataUrl', 'previewUrl'];
+    for (let k = 0; k < imgKeys.length; k++) {
+      const prop = imgKeys[k];
+      if (item[prop] && typeof item[prop] === 'string' && (item[prop].indexOf('data:image/') === 0 || item[prop].length > 300)) {
+        delete item[prop];
+      }
+    }
+    if (item.matchedRow) delete item.matchedRow;
+  };
+
+  try {
+    let copy = (typeof obj === 'object') ? JSON.parse(JSON.stringify(obj)) : obj;
+    if (Array.isArray(copy)) {
+      copy.forEach(sanitizeItem);
+    } else if (copy && typeof copy === 'object') {
+      if (copy.stops && Array.isArray(copy.stops)) {
+        copy.stops.forEach(sanitizeItem);
+      }
+      if (copy.routeRoadPolyline && Array.isArray(copy.routeRoadPolyline) && copy.routeRoadPolyline.length > 50) {
+        const step = Math.ceil(copy.routeRoadPolyline.length / 50);
+        copy.routeRoadPolyline = copy.routeRoadPolyline.filter(function(_, idx) { return idx % step === 0; });
+      }
+    }
+
+    let str = JSON.stringify(copy);
+    if (str.length > maxLen && copy && typeof copy === 'object') {
+      // หากยังเกิน ให้ตัดเส้นทาง polyline ออก เพื่อรักษาข้อมูล stops และจุดหมายไว้ครบถ้วน
+      if (copy.routeRoadPolyline) {
+        delete copy.routeRoadPolyline;
         str = JSON.stringify(copy);
       }
-    } catch (e) {}
+    }
+    return str;
+  } catch (e) {
+    try {
+      return JSON.stringify(obj);
+    } catch (err2) {
+      return '';
+    }
   }
-  if (str.length > maxLen) {
-    str = str.substring(0, maxLen);
-  }
-  return str;
 }
 
 /**

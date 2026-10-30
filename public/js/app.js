@@ -878,6 +878,12 @@ window.updateCameraTopBarUI = function() {
     } else {
       bgBtn.disabled = false;
       bgBtn.removeAttribute('disabled');
+      // คำนวณสถานะความคืบหน้าการอัปโหลดเพื่อแสดงบนปุ่ม (ข้อกำหนด 2.4)
+      const progress = window.currentActiveItemProgress || 0;
+      const uploadingCount = queue.filter(q => q.status === 'uploading').length;
+      const completedInSession = (window._bgQueueSessionCompleted || 0);
+      const totalInSession = completedInSession + total;
+
       if (!isOnline) {
         // โหมดออฟไลน์: ปุ่มสีส้ม แสดงจำนวนที่รอซิงค์
         bgBtn.className = 'gyro-rotate px-2.5 py-1.5 bg-amber-600/95 hover:bg-amber-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-amber-400/50 shadow-md whitespace-nowrap cursor-pointer pointer-events-auto';
@@ -889,7 +895,12 @@ window.updateCameraTopBarUI = function() {
         bgBtn.title = `โหมดออนไลน์: กำลังนำส่งข้อมูล ${total} รายการ`;
         if (bgIcon) bgIcon.className = 'fa-solid fa-cloud-arrow-up text-xs animate-pulse';
       }
-      bgTxt.textContent = total;
+      // แสดงความคืบหน้าแบบละเอียดบนปุ่ม: "⬆2 45%" เมื่อกำลังอัปโหลด หรือ "2" เมื่อรอคิว
+      if (uploadingCount > 0 && progress > 0) {
+        bgTxt.textContent = `⬆${total} ${progress}%`;
+      } else {
+        bgTxt.textContent = total;
+      }
     }
   }
 
@@ -1413,6 +1424,10 @@ async function processBackgroundQueue() {
       percent += Math.floor(Math.random() * 8) + 4;
       if (percent > 88) percent = 88;
       window.currentActiveItemProgress = percent;
+      // อัปเดต UI แถบบนสุดของกล้องทุก tick เพื่อแสดงความคืบหน้าแบบ real-time (ข้อกำหนด 2.4)
+      if (typeof updateCameraTopBarUI === 'function') {
+        updateCameraTopBarUI();
+      }
     }
   }, 300);
 
@@ -4383,6 +4398,11 @@ window.switchTab = function(tabName) {
     // ตรวจสอบข้อมูลเส้นทางที่มีการส่งต่อข้ามอุปกรณ์หรือแชร์มาจากผู้อื่นทันที
     if (typeof checkHandoffForCurrentUser === 'function') {
       checkHandoffForCurrentUser(true);
+    }
+
+    // ดึงลำดับหมุดล่าสุดจาก Server เพื่อซิงค์ข้ามเครื่อง PC (ข้อกำหนด 1.1)
+    if (typeof fetchActiveRouteFromServer === 'function' && navigator.onLine) {
+      fetchActiveRouteFromServer();
     }
 
     // โหลดประวัติลำดับเส้นทางล่าสุดที่บันทึกไว้เสมอ (ป้องกันหน้าจอว่างเปล่า)
@@ -14318,8 +14338,13 @@ window.pauseCameraStream = function() {
  * สตรีมกล้องต่อทันทีเมื่อปิดหน้าต่างแผนที่หรือโมดอล
  */
 window.resumeCameraStream = async function() {
+  // ตรวจเฉพาะ SweetAlert Modal เต็มจอ (ไม่รวม Toast) ที่ยังเปิดอยู่
+  // Toast ไม่ควรขัดขวางการเปิดกล้อง เพราะแสดงเพียงแถบเล็กๆ ด้านบน/ล่างจอ
   if (typeof Swal !== 'undefined' && Swal.isVisible()) {
-    return;
+    const popup = Swal.getPopup();
+    if (popup && !popup.classList.contains('swal2-toast')) {
+      return;
+    }
   }
   if (elements.cameraModal && !elements.cameraModal.classList.contains('hidden')) {
     state.isCameraStreamPaused = false;
@@ -14863,18 +14888,21 @@ async function captureAndProcessPhoto() {
       navigator.vibrate([40, 30, 40]);
     }
 
-    // แสดงแจ้งเตือน Toast สั้นๆ ด้านบนจอ โดยไม่บังหน้าจอและไม่ขัดจังหวะการทำงาน
+    // แสดงแจ้งเตือน Toast สั้นๆ ด้านบนจอ พร้อมจำนวนคิวและ Progress Bar ให้ผู้ใช้ทราบว่ากำลังนำส่งข้อมูล
     if (typeof Swal !== 'undefined') {
+      const queueCount = (typeof getBackgroundQueue === 'function') ? getBackgroundQueue().length : 0;
       const Toast = Swal.mixin({
         toast: true,
         position: 'top',
         showConfirmButton: false,
         timer: 2200,
-        timerProgressBar: false
+        timerProgressBar: true
       });
       Toast.fire({
         icon: 'success',
-        title: 'ถ่ายภาพสำเร็จ บันทึกข้อมูลเบื้องหลังเรียบร้อย'
+        title: queueCount > 0 
+          ? `ถ่ายภาพสำเร็จ กำลังนำส่ง... (${queueCount} รายการ)` 
+          : 'ถ่ายภาพสำเร็จ บันทึกข้อมูลเบื้องหลังเรียบร้อย'
       });
     }
 
@@ -15265,7 +15293,8 @@ window.safeParseRouteTimestamp = function(val) {
 };
 
 /**
- * กรองและลบ Circular Structure (เช่น leafletMarker) ออกจาก Array ของ Stops ก่อนบันทึกหรือแปลงเป็น JSON
+ * กรองและลบ Circular Structure (เช่น leafletMarker), ข้อมูลแถวดิบ (matchedRow) และรูปภาพ Base64 ขนาดใหญ่ออกจาก Array ของ Stops
+ * เพื่อให้ Payload มีขนาดเล็กกะทัดรัด ไม่เกินขีดจำกัด Google Sheets (50,000 ตัวอักษร)
  */
 function cleanStopsForStorage(stops) {
   if (!Array.isArray(stops)) return [];
@@ -15273,12 +15302,35 @@ function cleanStopsForStorage(stops) {
     if (!s || typeof s !== 'object') return s;
     const clean = {};
     for (const key of Object.keys(s)) {
-      if (key !== 'leafletMarker' && typeof s[key] !== 'function') {
-        clean[key] = s[key];
+      if (key === 'leafletMarker' || key === 'matchedRow' || typeof s[key] === 'function') {
+        continue;
       }
+      // หากเป็นข้อมูลภาพ Base64 ขนาดใหญ่ ให้ข้ามไป ไม่ส่งเข้า JSON เพื่อประหยัดขนาด Payload
+      if (typeof s[key] === 'string' && s[key].startsWith('data:image/') && s[key].length > 300) {
+        continue;
+      }
+      clean[key] = s[key];
     }
     return clean;
   });
+}
+
+/**
+ * บีบอัดลดจำนวนจุดพิกัดเส้นทางถนน OSRM Polyline ให้เหลือไม่เกิน maxPoints (ค่าเริ่มต้น 60 จุด)
+ * เพื่อส่ง Handoff ข้ามอุปกรณ์ได้อย่างรวดเร็วและไม่ทำให้ข้อมูลล้นเซลล์ Google Sheets
+ */
+function compressPolylineForHandoff(latLngs, maxPoints = 60) {
+  if (!Array.isArray(latLngs) || latLngs.length <= maxPoints) return latLngs || null;
+  const step = Math.ceil(latLngs.length / maxPoints);
+  const result = [];
+  for (let i = 0; i < latLngs.length; i += step) {
+    result.push(latLngs[i]);
+  }
+  // เก็บจุดสุดท้ายไว้เสมอ
+  if (latLngs.length > 0 && result[result.length - 1] !== latLngs[latLngs.length - 1]) {
+    result.push(latLngs[latLngs.length - 1]);
+  }
+  return result;
 }
 
 /**
@@ -15309,6 +15361,13 @@ window.saveCurrentRouteStopsHistory = function(stops) {
     };
     // บันทึกเฉพาะแผนการจัดหมุดบนหน้าจอแผนที่ (ไม่เขียนลง slts_shared_route_stops จนกว่าจะกดยืนยันส่งไปมือถือ)
     localStorage.setItem('slts_saved_route_stops', JSON.stringify(dataToSave));
+
+    // ซิงค์ลำดับหมุดขึ้น Server อัตโนมัติเมื่อจัดลำดับเสร็จ (ข้อกำหนด 1.1)
+    // ใช้ saveRouteToServer ที่มี debounce 400ms ในตัว ป้องกันการเรียกถี่เกินไป
+    // ทำให้สามารถเปิดดูรายการปัจจุบันจาก PC เครื่องอื่นได้
+    if (typeof saveRouteToServer === 'function' && navigator.onLine && cleanStops.length > 0) {
+      saveRouteToServer(dataToSave);
+    }
   } catch (e) {
     console.warn('Error saving route stops history:', e);
   }
@@ -18605,6 +18664,14 @@ window.openMapAreaSelectorModal = function() {
   state.stagedScheduleStops = cleanStopsForStorage(state.currentRouteStops || []);
   let editingStagedIndex = null;
 
+  // รายการพื้นที่ตัวกรองที่เลือกไว้ (รองรับมากกว่า 1 อำเภอ/ตำบล ในจังหวัดเดียวกัน)
+  let stagedAreas = [];
+  if (state.currentMapFilter && Array.isArray(state.currentMapFilter.areas) && state.currentMapFilter.areas.length > 0 && (state.currentMapFilter.province === currentProvince)) {
+    stagedAreas = JSON.parse(JSON.stringify(state.currentMapFilter.areas));
+  } else if (currentDistrict || currentSubdistrict) {
+    stagedAreas = [{ district: currentDistrict, subdistrict: currentSubdistrict }];
+  }
+
   Swal.fire({
     title: '<div class="flex items-center justify-center gap-2 text-base sm:text-lg font-bold text-gray-900"><i class="fa-solid fa-map-location-dot text-rose-500 text-xl"></i> ระบุพื้นที่ & จัดเส้นทางส่งหมาย</div>',
     html: `
@@ -18626,16 +18693,21 @@ window.openMapAreaSelectorModal = function() {
           </button>
         </div>
 
-        <!-- Tab 1: Area Filter Content -->
-        <div id="modalTabContentArea" class="space-y-3.5">
+        <!-- Tab 1: Area Filter Content (รองรับมากกว่า 1 อำเภอ/ตำบล ในจังหวัดเดียวกัน) -->
+        <div id="modalTabContentArea" class="space-y-3">
           <p class="text-gray-600 leading-relaxed bg-blue-50 border border-blue-200 rounded-xl p-3">
             <i class="fa-solid fa-circle-info text-blue-600 mr-1"></i>
-            เลือกจังหวัด อำเภอ และตำบลที่ต้องการดูหมุด ระบบจะดึงพิกัดส่งหมายทั้งหมดที่มีในฐานข้อมูลมาปักหมุดและวางแผนเส้นทางให้อัตโนมัติ
+            ระบุจังหวัด และสามารถเลือกเพิ่มพื้นที่ส่งหมายได้มากกว่า 1 อำเภอ หรือตำบล (ต้องอยู่ในจังหวัดเดียวกัน) เพื่อดึงพิกัดทั้งหมดมาปักหมุดและวางแผนเส้นทางส่งหมาย
           </p>
 
-          <!-- 1. จังหวัด -->
+          <!-- 1. จังหวัด (ทุกพื้นที่ต้องอยู่ในจังหวัดเดียวกันเท่านั้น) -->
           <div>
-            <label class="block font-bold text-gray-800 mb-1">จังหวัด (พิมพ์ค้นหาหรือเลือก) *</label>
+            <div class="flex items-center justify-between mb-1">
+              <label class="font-bold text-gray-800">จังหวัด (พิมพ์ค้นหาหรือเลือก) *</label>
+              <span class="text-[10px] text-amber-800 font-semibold bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                <i class="fa-solid fa-lock text-[9px] text-amber-600"></i> จังหวัดเดียวกันเท่านั้น
+              </span>
+            </div>
             <div class="relative mb-1">
               <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-gray-400 text-xs"></i>
               <input type="text" id="map_provSearch" placeholder="พิมพ์ชื่อจังหวัดเพื่อค้นหา..." value="${currentProvince}" class="w-full bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-1.5 text-xs font-semibold text-gray-800" autocomplete="off">
@@ -18645,19 +18717,62 @@ window.openMapAreaSelectorModal = function() {
             </select>
           </div>
 
-          <!-- 2. อำเภอ & 3. ตำบล -->
-          <div class="grid grid-cols-2 gap-2.5">
-            <div>
-              <label class="block font-bold text-gray-800 mb-1">อำเภอ</label>
-              <select id="map_distSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
-                ${distOptionsHtml}
-              </select>
+          <!-- 2. กล่องเลือกอำเภอ & ตำบล เพื่อเพิ่มเข้าตัวกรอง -->
+          <div class="bg-gray-50/90 border border-blue-200/80 rounded-2xl p-3 space-y-2.5">
+            <div class="flex items-center justify-between text-xs font-bold text-gray-800">
+              <span class="flex items-center gap-1.5 text-blue-800">
+                <i class="fa-solid fa-map-pin text-rose-500"></i> เลือกอำเภอและตำบลที่ต้องการเพิ่ม
+              </span>
+              <span class="text-[10px] text-gray-500 font-normal">กด "+ เพิ่มพื้นที่นี้" เพื่อเพิ่มหลายอำเภอ/ตำบล</span>
             </div>
-            <div>
-              <label class="block font-bold text-gray-800 mb-1">ตำบล</label>
-              <select id="map_subSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500">
-                ${subOptionsHtml}
-              </select>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label class="block font-semibold text-gray-700 mb-1 text-[11px]">อำเภอ</label>
+                <select id="map_distSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-semibold text-gray-800 focus:border-blue-500">
+                  ${distOptionsHtml}
+                </select>
+              </div>
+              <div>
+                <label class="block font-semibold text-gray-700 mb-1 text-[11px]">ตำบล</label>
+                <select id="map_subSelect" class="w-full bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-semibold text-gray-800 focus:border-blue-500">
+                  ${subOptionsHtml}
+                </select>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 pt-0.5">
+              <button type="button" id="btnAddAreaToFilter" class="flex-1 bg-blue-600 hover:bg-blue-700 active:scale-98 text-white font-bold py-2 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer">
+                <i class="fa-solid fa-plus-circle"></i>
+                <span id="txtBtnAddArea">เพิ่มพื้นที่นี้เข้าตัวกรอง</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 3. รายการพื้นที่ทั้งหมดที่เลือกไว้ (รองรับหลายอำเภอ/ตำบล) -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-xs pt-1">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-gray-800">พื้นที่ที่เลือกรวม:</span>
+                <span id="stagedAreasCountBadge" class="bg-blue-100 text-blue-800 font-extrabold px-2 py-0.5 rounded-full text-[11px]">0 พื้นที่</span>
+              </div>
+              <button type="button" id="btnClearAllAreas" class="text-[11px] text-gray-400 hover:text-rose-600 font-semibold flex items-center gap-1 cursor-pointer transition">
+                <i class="fa-solid fa-trash-can text-[10px]"></i> ล้างพื้นที่ทั้งหมด
+              </button>
+            </div>
+
+            <!-- กล่องแสดงชิป/การ์ดพื้นที่ -->
+            <div id="stagedAreasListContainer" class="max-h-36 overflow-y-auto space-y-1.5 border border-gray-200 rounded-xl p-2 bg-white slts-swal-body-scroll min-h-[58px]">
+              <!-- Injected by JS: staged areas list -->
+            </div>
+
+            <!-- สรุปจำนวนหมุดทั้งหมดที่พบจากพื้นที่ที่เลือก -->
+            <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center justify-between text-xs">
+              <span class="text-emerald-900 font-medium flex items-center gap-1.5">
+                <i class="fa-solid fa-chart-simple text-emerald-600"></i>
+                <span>พบหมุดส่งหมายในฐานข้อมูลรวม:</span>
+              </span>
+              <strong id="totalStagedPinsCount" class="text-emerald-700 font-extrabold text-sm">0 หมุด</strong>
             </div>
           </div>
         </div>
@@ -19384,11 +19499,124 @@ window.openMapAreaSelectorModal = function() {
         switchModalTab('schedule');
       };
 
-      // Province search & select events in Tab 1
+      // Province search & select & multi-area events in Tab 1
       const provSearch = document.getElementById('map_provSearch');
       const provSelect = document.getElementById('map_provSelect');
       const distSelect = document.getElementById('map_distSelect');
       const subSelect = document.getElementById('map_subSelect');
+      const btnAddArea = document.getElementById('btnAddAreaToFilter');
+      const btnClearAllAreas = document.getElementById('btnClearAllAreas');
+      const txtBtnAdd = document.getElementById('txtBtnAddArea');
+
+      // ฟังก์ชันนับหมุดสำหรับพื้นที่เดี่ยว
+      function countPinsForArea(prov, dist, sub) {
+        const allRows = state.allSheetRows || [];
+        return allRows.filter(r => {
+          if (getRowProvince(r) !== prov) return false;
+          if (dist && (r['อำเภอ'] || r['district'] || '').trim() !== dist) return false;
+          if (sub && (r['ตำบล'] || r['subdistrict'] || '').trim() !== sub) return false;
+          const rawLat = r['ละติจูด (Lat)'] || r['ละติจูด'] || '';
+          const rawLng = r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || '';
+          const lat = parseFloat(rawLat);
+          const lng = parseFloat(rawLng);
+          return !isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0;
+        }).length;
+      }
+
+      // ฟังก์ชันนับหมุดรวมข้ามทุกพื้นที่ใน stagedAreas
+      function countTotalPinsForStagedAreas(prov, areas) {
+        const allRows = state.allSheetRows || [];
+        if (!areas || areas.length === 0) {
+          return allRows.filter(r => {
+            if (getRowProvince(r) !== prov) return false;
+            const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || '');
+            const lng = parseFloat(r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || '');
+            return !isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0;
+          }).length;
+        }
+        return allRows.filter(r => {
+          if (getRowProvince(r) !== prov) return false;
+          const rDist = (r['อำเภอ'] || r['district'] || '').trim();
+          const rSub = (r['ตำบล'] || r['subdistrict'] || '').trim();
+          const matchedAnyArea = areas.some(a => {
+            if (a.district && rDist !== a.district) return false;
+            if (a.subdistrict && rSub !== a.subdistrict) return false;
+            return true;
+          });
+          if (!matchedAnyArea) return false;
+          const lat = parseFloat(r['ละติจูด (Lat)'] || r['ละติจูด'] || '');
+          const lng = parseFloat(r['ลองจิจูด (Lng)'] || r['ลองจิจูด'] || '');
+          return !isNaN(lat) && !isNaN(lng) && lat > 0 && lng > 0;
+        }).length;
+      }
+
+      // อัปเดตข้อความบนปุ่มเพิ่มพื้นที่
+      function updateAddButtonText() {
+        if (!txtBtnAdd || !provSelect) return;
+        const prov = provSelect.value;
+        const dist = distSelect?.value || '';
+        const sub = subSelect?.value || '';
+        const count = countPinsForArea(prov, dist, sub);
+        const label = dist ? `เพิ่ม อ.${dist}${sub ? ` (ต.${sub})` : ''}` : 'เพิ่มทั้งจังหวัด';
+        txtBtnAdd.textContent = `${label} (${count} หมุด)`;
+      }
+
+      // เรนเดอร์รายการชิปพื้นที่ที่เลือกไว้
+      function renderStagedAreasList() {
+        const container = document.getElementById('stagedAreasListContainer');
+        const countBadge = document.getElementById('stagedAreasCountBadge');
+        const totalPinsEl = document.getElementById('totalStagedPinsCount');
+        const prov = provSelect?.value || currentProvince;
+
+        if (countBadge) countBadge.textContent = `${stagedAreas.length} พื้นที่`;
+        if (totalPinsEl) {
+          const total = countTotalPinsForStagedAreas(prov, stagedAreas);
+          totalPinsEl.textContent = `${total} หมุด`;
+        }
+
+        if (!container) return;
+        if (stagedAreas.length === 0) {
+          container.innerHTML = `<div class="text-center py-3 text-gray-400 text-xs"><i class="fa-solid fa-map-location-dot mr-1"></i> ยังไม่ได้เพิ่มพื้นที่ (หากไม่เพิ่ม ระบบจะดึงทุกอำเภอใน จ.${prov})</div>`;
+          return;
+        }
+
+        container.innerHTML = stagedAreas.map((a, idx) => {
+          const pinCount = countPinsForArea(prov, a.district, a.subdistrict);
+          const distLabel = a.district ? `อ.${a.district}` : `ทุกอำเภอใน จ.${prov}`;
+          const subLabel = a.subdistrict ? `ต.${a.subdistrict}` : (a.district ? 'ทุกตำบล' : '');
+          return `
+            <div class="flex items-center justify-between p-2 bg-gray-50 hover:bg-blue-50/50 border border-gray-200 hover:border-blue-300 rounded-xl text-xs transition">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <span class="w-5 h-5 rounded-md bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                  ${idx + 1}
+                </span>
+                <div class="truncate">
+                  <span class="font-bold text-gray-800">${distLabel}</span>
+                  ${subLabel ? `<span class="text-blue-700 text-[11px] font-semibold ml-1">> ${subLabel}</span>` : ''}
+                </div>
+                <span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-md font-bold ml-auto mr-1 flex-shrink-0">
+                  ${pinCount} หมุด
+                </span>
+              </div>
+              <button type="button" class="btn-remove-staged-area text-gray-400 hover:text-rose-600 p-1 transition cursor-pointer flex-shrink-0" data-index="${idx}" title="ลบพื้นที่นี้">
+                <i class="fa-solid fa-xmark text-sm"></i>
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        container.querySelectorAll('.btn-remove-staged-area').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const index = parseInt(btn.getAttribute('data-index'), 10);
+            if (!isNaN(index)) {
+              stagedAreas.splice(index, 1);
+              renderStagedAreasList();
+              updateAddButtonText();
+            }
+          });
+        });
+      }
 
       if (provSearch && provSelect) {
         provSearch.addEventListener('input', (e) => {
@@ -19405,11 +19633,17 @@ window.openMapAreaSelectorModal = function() {
         provSelect.addEventListener('change', (e) => {
           const prov = e.target.value;
           if (provSearch) provSearch.value = prov;
+          // เมื่อเปลี่ยนจังหวัด ต้องล้างพื้นที่เดิมออกทั้งหมดเพราะต้องอยู่ในจังหวัดเดียวกันเท่านั้น
+          if (stagedAreas.length > 0) {
+            stagedAreas = [];
+          }
           const dists = getDistrictsByProvince(prov);
           distSelect.innerHTML = `<option value="">-- ทุกอำเภอในจังหวัด --</option>` + dists.map(d => `<option value="${d}">${d}</option>`).join('');
           const firstDist = dists[0] || '';
           const subs = firstDist ? getSubdistrictsByDistrict(prov, firstDist) : [];
           subSelect.innerHTML = `<option value="">-- ทุกตำบลในอำเภอ --</option>` + subs.map(s => `<option value="${s}">${s}</option>`).join('');
+          renderStagedAreasList();
+          updateAddButtonText();
         });
 
         distSelect.addEventListener('change', (e) => {
@@ -19421,8 +19655,50 @@ window.openMapAreaSelectorModal = function() {
           } else {
             subSelect.innerHTML = `<option value="">-- ทุกตำบลในอำเภอ --</option>`;
           }
+          updateAddButtonText();
+        });
+
+        subSelect.addEventListener('change', () => {
+          updateAddButtonText();
         });
       }
+
+      // ปุ่มเพิ่มพื้นที่เข้าตัวกรอง
+      if (btnAddArea) {
+        btnAddArea.addEventListener('click', () => {
+          const dist = (distSelect?.value || '').trim();
+          const sub = (subSelect?.value || '').trim();
+          const prov = provSelect?.value || currentProvince;
+
+          // ตรวจสอบว่ามีพื้นที่นี้อยู่แล้วหรือไม่
+          const isDuplicate = stagedAreas.some(a => (a.district || '') === dist && (a.subdistrict || '') === sub);
+          if (isDuplicate) {
+            if (typeof Swal !== 'undefined') {
+              const Toast = Swal.mixin({ toast: true, position: 'top', showConfirmButton: false, timer: 1800 });
+              Toast.fire({ icon: 'info', title: 'พื้นที่นี้ถูกเพิ่มไว้ในรายการแล้ว' });
+            }
+            return;
+          }
+
+          stagedAreas.push({ district: dist, subdistrict: sub });
+          renderStagedAreasList();
+          updateAddButtonText();
+          if (navigator.vibrate) navigator.vibrate(30);
+        });
+      }
+
+      // ปุ่มล้างพื้นที่ทั้งหมด
+      if (btnClearAllAreas) {
+        btnClearAllAreas.addEventListener('click', () => {
+          stagedAreas = [];
+          renderStagedAreasList();
+          updateAddButtonText();
+        });
+      }
+
+      // เรนเดอร์พื้นที่เริ่มต้น
+      renderStagedAreasList();
+      updateAddButtonText();
     },
     preConfirm: () => {
       const contentSched = document.getElementById('modalTabContentSchedule');
@@ -19450,7 +19726,24 @@ window.openMapAreaSelectorModal = function() {
       const prov = document.getElementById('map_provSelect')?.value || currentProvince;
       const dist = document.getElementById('map_distSelect')?.value || '';
       const sub = document.getElementById('map_subSelect')?.value || '';
-      return { isManualSchedule: false, province: prov, district: dist, subdistrict: sub };
+
+      // หากผู้ใช้ไม่ได้กดปุ่ม "+ เพิ่มพื้นที่" แต่ได้เลือกอำเภอ/ตำบลไว้ ให้รวมเข้าไปเป็น 1 พื้นที่อัตโนมัติ
+      let finalAreas = stagedAreas.slice();
+      if (finalAreas.length === 0) {
+        if (dist || sub) {
+          finalAreas = [{ district: dist, subdistrict: sub }];
+        } else {
+          finalAreas = [{ district: '', subdistrict: '' }];
+        }
+      }
+
+      return {
+        isManualSchedule: false,
+        province: prov,
+        district: finalAreas[0]?.district || dist,
+        subdistrict: finalAreas[0]?.subdistrict || sub,
+        areas: finalAreas
+      };
     }
   }).then((res) => {
     if (res.isConfirmed && res.value) {
@@ -19490,7 +19783,7 @@ window.openMapAreaSelectorModal = function() {
         });
       } else {
         state.currentMapFilter = res.value;
-        renderMapAndPins(res.value.province, res.value.district, res.value.subdistrict);
+        renderMapAndPins(res.value.province, res.value.district, res.value.subdistrict, res.value.areas);
       }
     }
   });
@@ -20446,30 +20739,75 @@ window.handleRoundTripChange = async function(checked) {
 /**
  * เรนเดอร์หมุดจากตัวกรองพื้นที่
  */
-window.renderMapAndPins = function(province, district, subdistrict) {
+window.renderMapAndPins = function(province, district, subdistrict, areas = null) {
+  let targetProvince = province;
+  let targetDistrict = district;
+  let targetSubdistrict = subdistrict;
+  let targetAreas = areas;
+
+  if (province && typeof province === 'object' && !Array.isArray(province)) {
+    targetProvince = province.province;
+    targetDistrict = province.district;
+    targetSubdistrict = province.subdistrict;
+    targetAreas = province.areas;
+  }
+
+  // เตรียมรายการพื้นที่เป้าหมาย (รองรับมากกว่า 1 อำเภอ/ตำบล ในจังหวัดเดียวกัน)
+  let areaList = [];
+  if (Array.isArray(targetAreas) && targetAreas.length > 0) {
+    areaList = targetAreas.filter(a => a && (a.district !== undefined || a.subdistrict !== undefined));
+  } else if (targetDistrict || targetSubdistrict) {
+    areaList = [{ district: targetDistrict || '', subdistrict: targetSubdistrict || '' }];
+  }
+
   const badgeEl = document.getElementById('mapAreaCurrentBadge');
   if (badgeEl) {
-    let txt = `จ.${province}`;
-    if (district) txt += ` > อ.${district}`;
-    if (subdistrict) txt += ` > ต.${subdistrict}`;
-    if (!district) txt += ` (ทุกอำเภอ)`;
-    else if (!subdistrict) txt += ` (ทุกตำบล)`;
-    badgeEl.textContent = txt;
+    if (areaList.length > 1) {
+      const areasSummary = areaList.map(a => {
+        if (!a.district) return 'ทุกอำเภอ';
+        return `อ.${a.district}${a.subdistrict ? `(ต.${a.subdistrict})` : ''}`;
+      }).join(', ');
+      badgeEl.textContent = `จ.${targetProvince} (${areaList.length} พื้นที่: ${areasSummary})`;
+      badgeEl.title = `จังหวัด: ${targetProvince}\nพื้นที่ทั้งหมด (${areaList.length} พื้นที่):\n${areaList.map((a, i) => `${i+1}. อ.${a.district || 'ทุกอำเภอ'}${a.subdistrict ? ` > ต.${a.subdistrict}` : ''}`).join('\n')}`;
+    } else if (areaList.length === 1) {
+      const a = areaList[0];
+      let txt = `จ.${targetProvince}`;
+      if (a.district) txt += ` > อ.${a.district}`;
+      if (a.subdistrict) txt += ` > ต.${a.subdistrict}`;
+      if (!a.district) txt += ` (ทุกอำเภอ)`;
+      else if (!a.subdistrict) txt += ` (ทุกตำบล)`;
+      badgeEl.textContent = txt;
+      badgeEl.title = txt;
+    } else {
+      badgeEl.textContent = `จ.${targetProvince} (ทุกอำเภอ)`;
+      badgeEl.title = `จ.${targetProvince} (ทุกอำเภอ)`;
+    }
   }
 
   const allRows = state.allSheetRows || [];
   const matchedRows = allRows.filter(r => {
     const rProv = getRowProvince(r);
-    if (rProv !== province) return false;
-    if (district) {
-      const rDist = (r['อำเภอ'] || r['district'] || '').trim();
-      if (rDist !== district) return false;
-    }
-    if (subdistrict) {
-      const rSub = (r['ตำบล'] || r['subdistrict'] || '').trim();
-      if (rSub !== subdistrict) return false;
-    }
-    return true;
+    if (rProv !== targetProvince) return false;
+
+    // หากไม่มีการระบุอำเภอหรือตำบล ให้ดึงทุกหมุดในจังหวัด
+    if (areaList.length === 0) return true;
+
+    const rDist = (r['อำเภอ'] || r['district'] || '').trim();
+    const rSub = (r['ตำบล'] || r['subdistrict'] || '').trim();
+
+    // ต้องตรงกับพื้นที่ใดพื้นที่หนึ่งที่เลือกไว้ (OR logic)
+    return areaList.some(area => {
+      const aDist = (area.district || '').trim();
+      const aSub = (area.subdistrict || '').trim();
+
+      // ไม่ระบุอำเภอ = ครอบคลุมทุกอำเภอในจังหวัด
+      if (!aDist) return true;
+      if (rDist !== aDist) return false;
+
+      // ไม่ระบุตำบล = ครอบคลุมทุกตำบลในอำเภอนั้น
+      if (!aSub) return true;
+      return rSub === aSub;
+    });
   });
 
   const validStops = [];
@@ -20534,10 +20872,10 @@ window.renderMapAndPins = function(province, district, subdistrict) {
   localStorage.removeItem('slts_route_stop_status_' + uId);
   saveCurrentRouteStopsHistory(orderedStops);
 
-  logServerActivity('MAP_FILTER_AREA', `กรองดูหมุดพื้นที่ จ.${province} > อ.${district || 'ทุกอำเภอ'} > ต.${subdistrict || 'ทุกตำบล'} (พบ ${validStops.length} หมุด)`, {
-    province,
-    district,
-    subdistrict,
+  const summaryLog = areaList.length > 0 ? areaList.map(a => `${a.district || 'ทุกอำเภอ'}${a.subdistrict ? `/${a.subdistrict}` : ''}`).join(', ') : 'ทุกอำเภอ';
+  logServerActivity('MAP_FILTER_AREA', `กรองดูหมุดพื้นที่ จ.${targetProvince} (${areaList.length || 1} พื้นที่: ${summaryLog}) (พบ ${validStops.length} หมุด)`, {
+    province: targetProvince,
+    areas: areaList,
     pinsCount: validStops.length
   });
 
@@ -21490,7 +21828,7 @@ window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
     startLocation: start,
     endLocation: end,
     isRoundTrip: Boolean(state.isRoundTrip),
-    routeRoadPolyline: roadLatLngs,
+    routeRoadPolyline: compressPolylineForHandoff(roadLatLngs),
     totalDistanceKm: roadDistKm,
     status: 'pending',
     timestamp: new Date().toISOString()
@@ -21828,7 +22166,7 @@ window.openShareRouteModal = async function() {
       startLocation: start,
       endLocation: end,
       isRoundTrip: Boolean(state.isRoundTrip),
-      routeRoadPolyline: state.mapRoutePolylineCoords || null,
+      routeRoadPolyline: compressPolylineForHandoff(state.mapRoutePolylineCoords || null),
       totalDistanceKm: state.calculatedRoadDistanceKm || null,
       status: 'pending',
       timestamp: new Date().toISOString()
@@ -22407,7 +22745,7 @@ window.saveRouteToServer = function(routeData = null) {
         startLocation: start,
         endLocation: end,
         isRoundTrip: (routeData?.isRoundTrip !== undefined) ? routeData.isRoundTrip : Boolean(state.isRoundTrip),
-        routeRoadPolyline: state.routeRoadPolylineCoords || state.mapRoutePolylineCoords,
+        routeRoadPolyline: compressPolylineForHandoff(state.routeRoadPolylineCoords || state.mapRoutePolylineCoords),
         totalDistanceKm: state.calculatedRoadDistanceKm,
         status: 'active_route',
         timestamp: new Date().toISOString()
@@ -22519,6 +22857,10 @@ window.fetchActiveRouteFromServer = async function() {
           }
           if (state.interactiveLeafletMap && typeof recalculateRouteFromStops === 'function') {
             recalculateRouteFromStops(false);
+          }
+          if (document.querySelector('.slts-province-modal')) {
+            if (typeof initMobileModalMapInstance === 'function') initMobileModalMapInstance();
+            if (typeof renderMobileRouteList === 'function') renderMobileRouteList();
           }
         } else {
           // หากบนเครื่องมีข้อมูล stops อยู่แล้ว ให้ซิงค์สถานะการส่งหมาย และการแก้ไขที่ตั้งล่าสุดจาก Server
@@ -22682,6 +23024,10 @@ window.fetchActiveRouteFromServer = async function() {
             }
             if (state.interactiveLeafletMap && typeof recalculateRouteFromStops === 'function') {
               recalculateRouteFromStops(false);
+            }
+            if (document.querySelector('.slts-province-modal')) {
+              if (typeof initMobileModalMapInstance === 'function') initMobileModalMapInstance();
+              if (typeof renderMobileRouteList === 'function') renderMobileRouteList();
             }
           }
         }
@@ -23011,25 +23357,52 @@ function applyReceivedHandoff(handoff) {
     // อัปเดตสถานะและจำนวนจุดส่งหมายบนปุ่มแผนที่หน้าจอมือถือ
     updateMobileRouteMapButtonBadge(stopsCount);
 
-    // ตรวจสอบว่าเคยแสดงการแจ้งเตือนของชุดข้อมูลส่งหมายนี้ไปแล้วหรือยัง (แสดง 3 วินาที fade out และไม่แสดงซ้ำ)
-    const handoffKey = String(handoff.id || handoff.timestamp || (handoff.stops ? handoff.stops.length + '_' + (handoff.stops[0]?.caseNumber || '') : Date.now()));
-    const lastSeenHandoffKey = localStorage.getItem('slts_last_seen_handoff');
+    // ปรับปรุงข้อมูลในฟอร์มและ GPS ให้ตรงกับหมายแรกที่ได้รับ
+    if (handoff.stops && handoff.stops.length > 0) {
+      const firstStop = handoff.stops[0];
+      if (firstStop.district && elements.districtSelect) elements.districtSelect.value = firstStop.district;
+      if (firstStop.subdistrict && elements.subdistrictSelect) elements.subdistrictSelect.value = firstStop.subdistrict;
+      if (firstStop.houseNo && elements.houseNoInput) elements.houseNoInput.value = firstStop.houseNo;
+      if (firstStop.moo && elements.mooInput) elements.mooInput.value = firstStop.moo;
+      if (firstStop.caseNo && elements.udonCaseNoInput) elements.udonCaseNoInput.value = firstStop.caseNo;
+      if (firstStop.caseYear && elements.udonCaseYearSelect) elements.udonCaseYearSelect.value = firstStop.caseYear;
+      if (firstStop.prefix && elements.udonPrefixInput) elements.udonPrefixInput.value = firstStop.prefix;
+      if (firstStop.lat && firstStop.lng) {
+        state.lat = parseFloat(firstStop.lat);
+        state.lng = parseFloat(firstStop.lng);
+        if (elements.coordinatesInput) elements.coordinatesInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
+      }
+    }
 
+    // กรณีหน้าจอเปิดหน้าต่างแผนที่ค้างไว้อยู่แล้ว (slts-province-modal): ให้สั่งวาดหมุดใหม่ลงแผนที่และอัปเดตลิสต์ทันที
+    const isMapModalOpen = Boolean(document.querySelector('.slts-province-modal'));
+    if (isMapModalOpen) {
+      if (typeof initMobileModalMapInstance === 'function') initMobileModalMapInstance();
+      if (typeof renderMobileRouteList === 'function') renderMobileRouteList();
+      const provTextEl = document.querySelector('.slts-modal-header p');
+      if (provTextEl) {
+        const prov = state.selectedProvince || 'อุดรธานี';
+        provTextEl.textContent = `📍 จ.${prov} (${stopsCount} จุดหมาย)`;
+      }
+      if (typeof showSystemToast === 'function') {
+        showSystemToast(`📲 ได้รับเส้นทางและหมุด: ${stopsCount} จุดหมาย`, 'success');
+      }
+      return;
+    }
+
+    // กรณีไม่ได้เปิดหน้าต่างแผนที่: แสดงแถบ Floating Banner บนหน้ากล้อง
+    const firstCase = (handoff.stops && handoff.stops[0]) ? handoff.stops[0].caseNumber : '';
     const pill = document.getElementById('mobileHandoffPillBanner');
     const pillTitle = document.getElementById('mobileHandoffPillTitle');
     const pillSub = document.getElementById('mobileHandoffPillSub');
 
-    // ถ้ายังไม่เคยแสดงผล ให้แสดง 3 วินาทีแล้ว fade out ทันที และไม่แสดงซ้ำอีกในครั้งต่อไป
-    if (pill && handoffKey !== lastSeenHandoffKey) {
-      localStorage.setItem('slts_last_seen_handoff', handoffKey);
-
+    if (pill) {
       if (pillTitle) {
         pillTitle.textContent = isShareRoute
           ? `📲 ได้รับเส้นทางแชร์จาก ${senderName} (${stopsCount} จุดหมาย)`
           : `📲 ได้รับเส้นทางส่งหมาย ${stopsCount} จุดหมาย`;
       }
       if (pillSub) {
-        const firstCase = (handoff.stops && handoff.stops[0]) ? handoff.stops[0].caseNumber : '';
         pillSub.textContent = firstCase ? `คดี: ${firstCase} • แตะเพื่อเปิดดูแผนที่` : 'แตะเพื่อเปิดดูแผนที่';
       }
 
@@ -23044,10 +23417,51 @@ function applyReceivedHandoff(handoff) {
           pill.classList.add('hidden');
           pill.style.opacity = '1';
         }, 500);
-      }, 3000); // แสดงผล 3 วินาทีแล้ว fade out ทันที
+      }, 5000);
     }
 
-    return; // จบการทำงานบนมือถือ ไม่แสดง modal กลางจอ
+    // แสดงหน้าต่าง Modal แจ้งเตือนเพื่อให้ผู้ใช้เปิดดูแผนที่หรือเลือกจุดแรกได้ทันที
+    Swal.fire({
+      icon: 'info',
+      title: isShareRoute ? '🔔 ได้รับเส้นทางแชร์จากเพื่อนร่วมงาน' : '📲 ได้รับเส้นทางและหมุดจากคอมพิวเตอร์!',
+      html: `
+        <div class="text-left text-xs space-y-2 bg-gradient-to-r from-blue-50 to-indigo-50 p-3.5 rounded-2xl border border-blue-200 mt-1 select-none">
+          <div class="flex items-center justify-between pb-1.5 border-b border-blue-200">
+            <span class="font-bold text-gray-700">${isShareRoute ? `ผู้ส่ง: <strong class="text-indigo-700">${escapeHtml(senderName)}</strong>` : `ผู้รับ: <strong class="text-blue-700">@${currentUserId}</strong>`}</span>
+            <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">${stopsCount} จุดหมาย</span>
+          </div>
+          <p><strong>🏛️ จุดเริ่มต้น:</strong> <span class="text-blue-800 font-semibold">${escapeHtml(startName)}</span></p>
+          <p><strong>📍 จุดหมายแรก:</strong> <span class="text-gray-900 font-semibold">${escapeHtml(handoff.queryString || firstCase || '-')}</span></p>
+          ${handoff.fullAddress ? `<p class="text-gray-600 truncate"><strong>ที่อยู่:</strong> ${escapeHtml(handoff.fullAddress)}</p>` : ''}
+          ${handoff.note ? `<p class="text-indigo-800 italic bg-white p-2 rounded-lg border border-indigo-100">" ${escapeHtml(handoff.note)} "</p>` : ''}
+          <p class="text-[10px] text-emerald-700 pt-1 border-t border-blue-100 flex items-center gap-1 font-semibold">
+            <i class="fa-solid fa-route text-emerald-600"></i> พร้อมเปิดดูแผนที่และนำทางได้ทันที
+          </p>
+        </div>
+      `,
+      showCancelButton: true,
+      showDenyButton: true,
+      confirmButtonText: '<i class="fa-solid fa-map-location-dot mr-1"></i> เปิดดูแผนที่เส้นทาง',
+      denyButtonText: '<i class="fa-solid fa-camera mr-1"></i> เลือกจุดแรกถ่ายภาพ',
+      cancelButtonText: 'รับทราบ (ไว้ดูภายหลัง)',
+      confirmButtonColor: '#2563eb',
+      denyButtonColor: '#059669',
+      cancelButtonColor: '#6b7280',
+      customClass: {
+        popup: 'rounded-3xl',
+        confirmButton: 'text-xs py-2.5 px-3 font-bold shadow-md',
+        denyButton: 'text-xs py-2.5 px-3 font-bold shadow-md',
+        cancelButton: 'text-xs py-2.5 px-2.5 font-semibold'
+      }
+    }).then((res) => {
+      if (res.isConfirmed) {
+        showMobileRouteMapModal();
+      } else if (res.isDenied) {
+        loadRouteStopIntoSummonsFormAndCamera(0);
+      }
+    });
+
+    return; // จบการทำงานบนมือถือ
   }
 
   // -------------------------------------------------------------
@@ -25228,13 +25642,8 @@ window.showMobileRouteMapModal = function() {
             <p class="text-[10px] text-blue-100 truncate">📍 จ.${prov} (${stops.length} จุดหมาย)</p>
           </div>
           <div class="flex items-center gap-1.5 flex-shrink-0">
-            <!-- ปุ่ม 'ล้าง' แสดงผลเมื่อมีรายการส่งหมายอยู่ในแผนที่ -->
-            ${(stops.length > 0 || hasHandoffFromDesktop) ? `
-              <button type="button" onclick="clearMobileRouteHandoff(); window.handleMobileModalBackOrClose();" class="px-2 py-1.5 bg-rose-500/80 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="ล้างเส้นทางส่งหมาย">
-                <i class="fa-solid fa-trash-can text-[10px]"></i>
-                <span class="text-[10px]">ล้าง</span>
-              </button>
-            ` : ''}
+            <!-- ปุ่ม 'ล้าง' ถูกนำออกจากแผนที่เพื่อป้องกันการเผลอกดล้างข้อมูลเส้นทางส่งหมาย -->
+            <!-- การล้างข้อมูลจะทำได้เฉพาะเมื่ออัปโหลดครบทุกรายการแล้วเท่านั้น (auto-clear) -->
             <!-- ปุ่มกากบาทเพื่อปิดการแสดงผล Pop Up แผนที่ -->
             <button type="button" onclick="window.handleMobileModalBackOrClose()" class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-xs font-bold transition cursor-pointer" title="ปิดหน้าต่างแผนที่">
               <i class="fa-solid fa-xmark text-sm"></i>
@@ -25296,6 +25705,7 @@ window.showMobileRouteMapModal = function() {
       }, 200);
     },
     willClose: () => {
+      // ทำลายแผนที่ Leaflet ก่อนที่ Swal จะปิด (ป้องกัน memory leak)
       if (window.mobileModalMap) {
         try {
           window.mobileModalMap.stop();
@@ -25304,6 +25714,10 @@ window.showMobileRouteMapModal = function() {
         window.mobileModalMap = null;
         window.mobileModalMarkersLayer = null;
       }
+    },
+    didClose: () => {
+      // เรียก resume กล้องหลังจาก Swal ปิดสนิทแล้ว (Swal.isVisible() === false)
+      // ป้องกันปัญหากล้องมืดเนื่องจาก willClose ถูกเรียกขณะ Swal ยังอยู่ในช่วง transition
       if (typeof window.resumeCameraStream === 'function') {
         window.resumeCameraStream();
       }
