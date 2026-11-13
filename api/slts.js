@@ -297,7 +297,7 @@ actions.health = async () => {
   try { await db.query('SELECT 1'); dbOk = true; } catch (_) {}
   return {
     status: 'success', ok: true, db: dbOk, version: getVersionInfo().version,
-    driveBridge: drive.bridgeConfigured(), aiGateway: ai.aiConfigured(), time: new Date().toISOString(),
+    photoStorage: drive.storageMode(), driveBridge: drive.storageMode() === 'neon' || drive.bridgeConfigured(), aiGateway: ai.aiConfigured(), time: new Date().toISOString(),
   };
 };
 
@@ -546,7 +546,7 @@ actions.upload_image = async (data, ctx) => {
   let fileId = '';
   let fileUrl = '';
   if (data.imageBase64 && data.fileName) {
-    const up = await drive.uploadImage({ fileName: str(data.fileName), imageBase64: str(data.imageBase64) });
+    const up = await drive.uploadImage({ fileName: str(data.fileName), imageBase64: str(data.imageBase64), origin: ctx.origin });
     fileId = up.fileId; fileUrl = up.fileUrl;
   }
 
@@ -622,7 +622,7 @@ actions.edit_record = async (data, ctx) => {
     return { status: 'error', message: `ท่านไม่มีสิทธิ์แก้ไขข้อมูลนี้ (สามารถแก้ไขได้เฉพาะผู้บันทึก @${target.uploader} หรือผู้ดูแลระบบเท่านั้น)` };
   }
   if (data.imageBase64 && data.fileName) {
-    const up = await drive.uploadImage({ fileName: str(data.fileName), imageBase64: str(data.imageBase64) });
+    const up = await drive.uploadImage({ fileName: str(data.fileName), imageBase64: str(data.imageBase64), origin: ctx.origin });
     if (data.oldFileId) await drive.trashFile(str(data.oldFileId));
     fileId = up.fileId; fileUrl = up.fileUrl;
   }
@@ -680,9 +680,9 @@ actions.upload_route_reference_image = async (data, ctx) => {
   requireUser(ctx);
   if (!data.imageBase64) return { status: 'success', fileId: '', fileUrl: '', imageUrl: '' };
   const fileName = str(data.fileName || `route_ref_${data.caseNumber || 'stop'}_${Date.now()}.jpg`).replace(/[^\w.\-]/g, '_');
-  const up = await drive.uploadImage({ fileName, imageBase64: str(data.imageBase64), publicLink: true });
+  const up = await drive.uploadImage({ fileName, imageBase64: str(data.imageBase64), publicLink: true, origin: ctx.origin });
   return { status: 'success', message: 'อัปโหลดรูปภาพประกอบการวางแผนเส้นทางสำเร็จ', fileId: up.fileId, fileUrl: up.fileUrl,
-    imageUrl: up.fileId ? `https://lh3.googleusercontent.com/d/${up.fileId}` : up.fileUrl };
+    imageUrl: up.fileId && !String(up.fileId).startsWith('db-') ? `https://lh3.googleusercontent.com/d/${up.fileId}` : up.fileUrl };
 };
 
 // ---------- route handoff / share ----------
@@ -914,7 +914,9 @@ module.exports = async function handler(req, res) {
     res.statusCode = 405; return res.end();
   }
 
-  const ctx = { action: '', user: null };
+  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  const ctx = { action: '', user: null, origin: host ? `${host.startsWith('localhost') || host.startsWith('127.') ? 'http' : proto}://${host}` : '' };
   let status = 200;
   let out;
   try {

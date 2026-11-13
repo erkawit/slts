@@ -714,7 +714,7 @@
           <dl class="slts-dl">
             <dt>API</dt><dd><code>${esc(SLTS.apiUrl())}</code> ${ok(h && h.ok)}</dd>
             <dt>ฐานข้อมูล Neon</dt><dd>${ok(h && h.db)}</dd>
-            <dt>Google Drive (เก็บรูป)</dt><dd>${ok(h && h.driveBridge)} <small class="slts-muted">env: GAS_DRIVE_URL, GAS_BRIDGE_SECRET</small></dd>
+            <dt>ที่เก็บไฟล์ภาพ</dt><dd>${ok(h && h.driveBridge)} <small class="slts-muted">${h && h.photoStorage === 'google-drive' ? 'Google Drive (ผ่าน Apps Script)' : 'Neon Postgres'}</small></dd>
             <dt>Neon AI Gateway</dt><dd>${ok(h && h.aiGateway)} <small class="slts-muted">ใช้ช่วยอ่านบัญชีจ่ายหมาย</small></dd>
             <dt>เวอร์ชัน</dt><dd>เครื่องนี้ v${esc(SLTS.version)} • เซิร์ฟเวอร์ v${esc(h && h.version || '-')}</dd>
             <dt>อุปกรณ์</dt><dd>${esc(SLTS.platform)} • คิวรอส่ง ${queue.length} • คลังภาพรอส่ง ${vs.pending || 0}</dd>

@@ -5,7 +5,8 @@
   "outputDirectory": "public",
   "functions": {
     "api/slts.js": { "maxDuration": 60, "memory": 1024 },
-    "api/health.js": { "maxDuration": 10 }
+    "api/health.js": { "maxDuration": 10 },
+    "api/photo.js": { "maxDuration": 15 }
   },
   "headers": [
     {

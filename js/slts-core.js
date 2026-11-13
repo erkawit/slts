@@ -42,6 +42,23 @@
   };
 
   // ------------------------------------------------------------------
+  // ลิงก์รูปภาพ: รองรับทั้งภาพใน Neon (fileId = db-<id>-<sig>) และภาพเดิมใน Google Drive
+  // ------------------------------------------------------------------
+  const isNeonPhoto = (id) => /^db-\d+-/.test(String(id || '').trim());
+  window.sltsImgUrl = function (fileId, size) {
+    const id = String(fileId || '').trim();
+    if (!id) return '';
+    if (isNeonPhoto(id)) return SLTS.apiBase() + '/api/photo?f=' + encodeURIComponent(id);
+    return `https://lh3.googleusercontent.com/d/${id}=w${size || 1600}`;
+  };
+  window.sltsThumbUrl = function (fileId, size) {
+    const id = String(fileId || '').trim();
+    if (!id) return '';
+    if (isNeonPhoto(id)) return window.sltsImgUrl(id, size);
+    return `https://drive.google.com/thumbnail?id=${id}&sz=w${size || 800}`;
+  };
+
+  // ------------------------------------------------------------------
   // ล้างข้อมูลเสี่ยงจากเวอร์ชันเดิม (รหัสผ่าน plaintext ที่เคยเก็บในเครื่อง)
   // ------------------------------------------------------------------
   (function migrateLegacyStorage() {

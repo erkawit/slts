@@ -16,6 +16,7 @@ process.env.DATABASE_URL = DB;
 process.env.SESSION_SECRET = 'test-secret-0123456789abcdef';
 process.env.ADMIN_INITIAL_PASSWORD = 'Admin#2026x';
 process.env.GAS_BRIDGE_SECRET = 'bridge-secret';
+process.env.PHOTO_STORAGE = 'google-drive'; // ชุดทดสอบส่วนใหญ่ใช้ Drive จำลอง; มีทดสอบ Neon storage แยก
 
 const db = require('../lib/db');
 let apiBase, bridge, server;
@@ -61,7 +62,9 @@ test.before(async () => {
   process.env.GAS_DRIVE_URL = `http://127.0.0.1:${bridge.address().port}/exec`;
   const handler = require('../api/slts');
   const health = require('../api/health');
-  server = await startServer((req, res) => (req.url.startsWith('/api/health') ? health(req, res) : handler(req, res)));
+  const photo = require('../api/photo');
+  server = await startServer((req, res) => (req.url.startsWith('/api/health') ? health(req, res)
+    : req.url.startsWith('/api/photo') ? photo(req, res) : handler(req, res)));
   apiBase = `http://127.0.0.1:${server.address().port}`;
 });
 
@@ -156,13 +159,27 @@ test('upload_image is idempotent by clientUploadId and stores Drive id', async (
   assert.equal(rows.data[0]['ละติจูด (Lat)'], '17.4138');
 });
 
-test('upload without Drive bridge fails loudly (so the phone keeps it queued)', async () => {
-  const saved = process.env.GAS_DRIVE_URL;
-  delete process.env.GAS_DRIVE_URL;
-  const r = await call('upload_image', { clientUploadId: 'cap_nobridge', caseNumber: 'อ1/2569', fileName: 'a.jpg', imageBase64: 'xx' }, userToken);
-  process.env.GAS_DRIVE_URL = saved;
-  assert.equal(r.status, 'error');
-  assert.equal(r.http, 503);
+test('photo storage in Neon (no Google Drive): upload, view via signed URL, delete', async () => {
+  process.env.PHOTO_STORAGE = 'neon';
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 0xff, 0xd9]);
+  const r = await call('upload_image', { clientUploadId: 'cap_neon1', caseNumber: 'อ9/2569', fileName: 'อ9-2569.jpg',
+    imageBase64: 'data:image/jpeg;base64,' + jpeg.toString('base64') }, userToken);
+  process.env.PHOTO_STORAGE = 'google-drive';
+  assert.equal(r.status, 'success');
+  assert.match(r.fileId, /^db-\d+-[A-Za-z0-9]{16}$/);
+  assert.ok(r.fileUrl.includes('/api/photo?f='));
+  const img = await fetch(apiBase + new URL(r.fileUrl).pathname + new URL(r.fileUrl).search);
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get('content-type'), 'image/jpeg');
+  assert.deepEqual(Buffer.from(await img.arrayBuffer()), jpeg);
+  const forged = await fetch(`${apiBase}/api/photo?f=${r.fileId.replace(/-[A-Za-z0-9]{16}$/, '-AAAAAAAAAAAAAAAA')}`);
+  assert.equal(forged.status, 404, 'tampered signature rejected');
+  const h = await (await fetch(`${apiBase}/api/health`)).json();
+  assert.equal(h.photoStorage, 'google-drive');
+  const d = await call('delete', { recordId: r.recordId }, adminToken);
+  assert.equal(d.deletedFiles, 1);
+  const gone = await fetch(apiBase + new URL(r.fileUrl).pathname + new URL(r.fileUrl).search);
+  assert.equal(gone.status, 404);
 });
 
 test('edit_record: owner can edit, other user cannot', async () => {

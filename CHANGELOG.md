@@ -2,6 +2,15 @@
 
 สร้างอัตโนมัติจาก `version.json` ด้วย `npm run version:bump`
 
+## v2.1.0 — 2026-11-13
+
+**ใช้ฐานข้อมูล Neon อย่างเดียว (เก็บไฟล์ภาพใน Neon)**
+
+- ใช้ฐานข้อมูล Neon อย่างเดียว (เก็บไฟล์ภาพใน Neon)
+- เลิกใช้ Google Sheet / Google Drive / Apps Script — ภาพถ่ายเก็บในตาราง photo_files แสดงผ่าน /api/photo (ลิงก์มีลายเซ็น)
+- Google Drive ยังใช้ได้เป็นทางเลือก (PHOTO_STORAGE=google-drive) และภาพเก่าใน Drive ยังแสดงได้
+- ปรับคู่มือ docs/SETUP-NEON.md เป็นขั้นตอน Neon อย่างเดียว
+
 ## v2.0.0 — 2026-11-13
 
 **ย้ายฐานข้อมูลไป Neon + แชร์เส้นทางด้วย QR + โหมดออฟไลน์ภาพถ่าย**

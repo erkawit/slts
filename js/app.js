@@ -1511,7 +1511,7 @@ async function processBackgroundQueue() {
     }
 
     const driveFileId = resJson?.fileId || (resJson?.fileUrl ? extractDriveIdFromUrl(resJson.fileUrl) : '') || currentItem.driveFileId;
-    const drivePhotoUrl = resJson?.fileUrl || (driveFileId ? `https://lh3.googleusercontent.com/d/${driveFileId}=w1600` : '') || currentItem.capturedPhotoUrl || currentItem.payload?.imageBase64;
+    const drivePhotoUrl = resJson?.fileUrl || (driveFileId ? sltsImgUrl(driveFileId, 1600) : '') || currentItem.capturedPhotoUrl || currentItem.payload?.imageBase64;
 
     // สำเร็จ! นำออกจากคิว
     recordCompletedSubmission(currentItem.caseNumber, currentItem.fileName, {
@@ -6443,7 +6443,7 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
   }
   let directDisplayUrl = '';
   if (resolvedFileId) {
-    directDisplayUrl = `https://lh3.googleusercontent.com/d/${resolvedFileId}=w800`;
+    directDisplayUrl = sltsImgUrl(resolvedFileId, 800);
   } else if (imgUrl && String(imgUrl).startsWith('http')) {
     directDisplayUrl = imgUrl;
   }
@@ -7492,7 +7492,7 @@ window.openManualUploadModal = function() {
         const resJson = await uploadWithProgressBar(uploadPayload, `กำลังอัปโหลดภาพเลขคดี ${formData.caseNumber}...`);
 
         const driveFileId = resJson?.fileId || (resJson?.fileUrl ? extractDriveIdFromUrl(resJson.fileUrl) : '');
-        const drivePhotoUrl = resJson?.fileUrl || (driveFileId ? `https://lh3.googleusercontent.com/d/${driveFileId}=w1600` : '') || compressedImageBase64;
+        const drivePhotoUrl = resJson?.fileUrl || (driveFileId ? sltsImgUrl(driveFileId, 1600) : '') || compressedImageBase64;
 
         if (typeof recordCompletedSubmission === 'function') {
           recordCompletedSubmission(formData.caseNumber, imageFilename, {
@@ -8102,7 +8102,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
   let directImgUrl = imgUrl;
   const match = (imgUrl || '').match(/id=([a-zA-Z0-9_-]+)/) || (imgUrl || '').match(/\/d\/([a-zA-Z0-9_-]+)/);
   if (match && match[1]) {
-    directImgUrl = `https://lh3.googleusercontent.com/d/${match[1]}=w1200`;
+    directImgUrl = sltsImgUrl(match[1], 1200);
   }
 
   // หากอยู่บนมือถือ (< 768px) และมีข้อมูลเส้นทางส่งหมาย ให้ตรวจว่ามี stack ย้อนกลับหรือไม่
@@ -15788,18 +15788,21 @@ function getDirectDriveImageUrl(rawUrl, size = 800) {
   const trimmed = rawUrl.trim();
   if (!trimmed) return '';
   if (trimmed.startsWith('data:image') || trimmed.startsWith('blob:')) return trimmed;
+  // v2.0: ภาพที่เก็บใน Neon (/api/photo หรือ fileId แบบ db-...)
+  if (trimmed.includes('/api/photo?')) return trimmed;
+  if (/^db-\d+-/.test(trimmed)) return sltsImgUrl(trimmed, size);
 
   const match = trimmed.match(/id=([a-zA-Z0-9_-]+)/) ||
                 trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
                 trimmed.match(/id%3D([a-zA-Z0-9_-]+)/);
 
   if (match && match[1]) {
-    return `https://lh3.googleusercontent.com/d/${match[1]}=w${size}`;
+    return sltsImgUrl(match[1], size);
   }
 
   // หากเป็น Drive file ID โดยตรง (25-45 ตัวอักษร)
   if (/^[a-zA-Z0-9_-]{25,45}$/.test(trimmed)) {
-    return `https://lh3.googleusercontent.com/d/${trimmed}=w${size}`;
+    return sltsImgUrl(trimmed, size);
   }
 
   return trimmed;
@@ -15814,13 +15817,16 @@ function getDriveFallbackThumbnailUrl(rawUrl, size = 800) {
   const trimmed = rawUrl.trim();
   if (!trimmed) return '';
   if (trimmed.startsWith('data:image') || trimmed.startsWith('blob:')) return trimmed;
+  // v2.0: ภาพที่เก็บใน Neon (/api/photo หรือ fileId แบบ db-...)
+  if (trimmed.includes('/api/photo?')) return trimmed;
+  if (/^db-\d+-/.test(trimmed)) return sltsImgUrl(trimmed, size);
 
   const match = trimmed.match(/id=([a-zA-Z0-9_-]+)/) ||
                 trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
                 trimmed.match(/id%3D([a-zA-Z0-9_-]+)/);
   const fileId = match ? match[1] : (/^[a-zA-Z0-9_-]{25,45}$/.test(trimmed) ? trimmed : '');
   if (fileId) {
-    return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${size}`;
+    return sltsThumbUrl(fileId, size);
   }
   return trimmed;
 }
@@ -15888,7 +15894,7 @@ function getStopDisplayPhotoData(stop) {
 
   // 1.1 ตรวจสอบ driveFileId จาก Server หรือการบันทึก
   if (!captured && stop.driveFileId) {
-    captured = `https://lh3.googleusercontent.com/d/${String(stop.driveFileId).trim()}=w1600`;
+    captured = sltsImgUrl(String(stop.driveFileId).trim(), 1600);
   }
 
   // 1.2 ตรวจสอบ uploadedPhotoUrl หรือ photoUrl
@@ -24405,7 +24411,7 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
 
   // 1. ตรวจสอบถ้าสถานะใน Stop เป็น 'uploaded' ในรอบนี้ และมีรูปภาพจากกล้องหรือ Google Drive
   if (stop.deliveryStatus === 'uploaded') {
-    const driveUrl = stop.driveFileId ? `https://lh3.googleusercontent.com/d/${stop.driveFileId}=w1600` : '';
+    const driveUrl = stop.driveFileId ? sltsImgUrl(stop.driveFileId, 1600) : '';
     const photoUrl = stop.capturedPhotoUrl || (mapped && (mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl)) || driveUrl;
     if (photoUrl && !refImgs.includes(photoUrl)) {
       return {
@@ -24418,7 +24424,7 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
 
   // 2. ตรวจสอบใน statusMap
   if (mapped && mapped.deliveryStatus === 'uploaded') {
-    const driveUrl = mapped.driveFileId ? `https://lh3.googleusercontent.com/d/${mapped.driveFileId}=w1600` : '';
+    const driveUrl = mapped.driveFileId ? sltsImgUrl(mapped.driveFileId, 1600) : '';
     const photoUrl = mapped.capturedPhotoUrl || mapped.uploadedPhotoUrl || stop.capturedPhotoUrl || driveUrl;
     if (photoUrl && !refImgs.includes(photoUrl)) {
       return {
@@ -24436,7 +24442,7 @@ window.getNewlyUploadedPhotoForStop = function(stop) {
       const row = state.allSheetRows[i];
       if (typeof matchStopWithSheetRow === 'function' ? matchStopWithSheetRow(stop, row) : false) {
         const driveFileId = String(row['Drive File ID'] || '').trim() || (row['ลิงก์รูปภาพใน Google Drive'] ? extractDriveIdFromUrl(row['ลิงก์รูปภาพใน Google Drive']) : '');
-        const driveUrl = row['ลิงก์รูปภาพใน Google Drive'] || (driveFileId ? `https://lh3.googleusercontent.com/d/${driveFileId}=w1600` : '');
+        const driveUrl = row['ลิงก์รูปภาพใน Google Drive'] || (driveFileId ? sltsImgUrl(driveFileId, 1600) : '');
         if (driveUrl && !refImgs.includes(driveUrl)) {
           const rowTime = parseDateToTime(row['วัน-เวลาบันทึก']);
           if (routeStartTime === 0 || rowTime === 0 || rowTime >= (routeStartTime - 900000)) {
@@ -24484,7 +24490,7 @@ window.downloadSingleImageFile = async function(url, filename) {
   let fetchUrl = url;
   const driveMatch = fetchUrl.match(/id=([a-zA-Z0-9_-]+)/) || fetchUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
   if (driveMatch && driveMatch[1]) {
-    fetchUrl = `https://lh3.googleusercontent.com/d/${driveMatch[1]}=w1600`;
+    fetchUrl = sltsImgUrl(driveMatch[1], 1600);
   }
 
   Swal.fire({
@@ -24620,7 +24626,7 @@ window.syncStopsWithDeliveryStatus = function(stops) {
 
     if (sheetMatchedRow) {
       const driveFileId = String(sheetMatchedRow['Drive File ID'] || '').trim() || (sheetMatchedRow['ลิงก์รูปภาพใน Google Drive'] ? extractDriveIdFromUrl(sheetMatchedRow['ลิงก์รูปภาพใน Google Drive']) : '');
-      const driveUrl = sheetMatchedRow['ลิงก์รูปภาพใน Google Drive'] || (driveFileId ? `https://lh3.googleusercontent.com/d/${driveFileId}=w1600` : '');
+      const driveUrl = sheetMatchedRow['ลิงก์รูปภาพใน Google Drive'] || (driveFileId ? sltsImgUrl(driveFileId, 1600) : '');
       const uploadedTime = sheetMatchedRow['วัน-เวลาบันทึก'] || new Date().toISOString();
 
       stop.deliveryStatus = 'uploaded';
@@ -24940,8 +24946,8 @@ window.renderRouteBatchTab = function() {
       let fallbackImg = displayImg;
       const driveMatch = displayImg.match(/id=([a-zA-Z0-9_-]+)/) || displayImg.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if (driveMatch && driveMatch[1]) {
-        thumbImg = `https://lh3.googleusercontent.com/d/${driveMatch[1]}=w400`;
-        fallbackImg = `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w400`;
+        thumbImg = sltsImgUrl(driveMatch[1], 400);
+        fallbackImg = sltsThumbUrl(driveMatch[1], 400);
       }
       imgHtml = `
         <div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 border border-emerald-300 ring-1 ring-emerald-200 mx-auto cursor-pointer shadow-2xs hover:scale-105 active:scale-95 transition group relative" onclick="if(window.viewPhotoModal) window.viewPhotoModal('${safeImg}', '${safeCase}', '${safeLoc}', '${timestampText}', '${stop.lat || ''}', '${stop.lng || ''}')" title="คลิกดูภาพส่งหมาย">
@@ -25264,7 +25270,7 @@ window.downloadRouteBatchZip = async function() {
         let fetchUrl = item.url;
         const driveMatch = fetchUrl.match(/id=([a-zA-Z0-9_-]+)/) || fetchUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
         if (driveMatch && driveMatch[1]) {
-          fetchUrl = `https://lh3.googleusercontent.com/d/${driveMatch[1]}=w1600`;
+          fetchUrl = sltsImgUrl(driveMatch[1], 1600);
         }
         try {
           const res = await fetch(fetchUrl);

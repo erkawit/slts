@@ -28,6 +28,7 @@ const MIME = {
 const apiHandlers = {
   '/api/slts': require('../api/slts'),
   '/api/health': require('../api/health'),
+  '/api/photo': require('../api/photo'),
 };
 
 http.createServer(async (req, res) => {

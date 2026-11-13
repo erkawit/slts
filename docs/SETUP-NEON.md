@@ -1,115 +1,68 @@
-# ติดตั้ง SLTS v2 บน Neon + Vercel (ทำตามลำดับ)
+# ติดตั้ง SLTS v2 บน Neon + Vercel (ใช้ Neon อย่างเดียว ไม่ใช้ Google Sheet)
 
-> ใช้เวลาประมาณ 30–45 นาที • ทำบนเครื่องคอมพิวเตอร์ที่มี Node.js 20 ขึ้นไป
 > โปรเจกต์ Neon: org `org-lucky-bonus-48400982` • project `damp-feather-72127574` • branch `production`
 
-## ภาพรวมสถาปัตยกรรมใหม่
-
 ```
-มือถือ / PC / แอป APK ──► Vercel (หน้าเว็บ + /api/slts) ──► Neon Postgres (ข้อมูลทั้งหมด)
-                                         │                └─► Neon AI Gateway (ช่วยอ่านบัญชีจ่ายหมาย)
-                                         └──► Google Apps Script ──► Google Drive (เก็บไฟล์รูปเท่านั้น)
+มือถือ / PC / แอป ──► Vercel (หน้าเว็บ + /api/slts + /api/photo) ──► Neon Postgres
+                                                                    (ข้อมูล + ผู้ใช้ + เส้นทาง + ไฟล์ภาพ)
+                                                                 └► Neon AI Gateway (ไม่บังคับ)
 ```
 
-- ข้อมูลตาราง ผู้ใช้ เส้นทาง QR แชร์ ประวัติใช้งาน และบันทึกจุดบกพร่อง → **Neon**
-- ไฟล์ภาพ → ยังเก็บใน **Google Drive** โฟลเดอร์เดิม (ผ่าน Apps Script ที่ล็อกด้วย secret)
+ไม่ต้องใช้ Google Sheet, Google Drive หรือ Apps Script อีกต่อไป
 
----
-
-## ขั้นที่ 1 — ติดตั้งแพ็กเกจและ Neon CLI
+## 1) สร้างฐานข้อมูลและดึงค่าเชื่อมต่อ (บน Mac ในโฟลเดอร์โปรเจกต์)
 
 ```bash
-cd slts
-npm install                       # อัปเดต package-lock.json (เพิ่ม pg, @vercel/functions)
-npm i -g neon@latest              # ถ้าไม่ได้ ใช้ npx neon@latest แทนคำว่า neon ทุกคำสั่ง
-neon --version
-neon login                        # เปิดเบราว์เซอร์ให้ล็อกอิน Neon (ทำครั้งเดียว)
+npm install
+npx neon@latest login        # ล็อกอิน Neon ในเบราว์เซอร์ (ครั้งเดียว)
+npx neon@latest init -y --org-id org-lucky-bonus-48400982 --project-id damp-feather-72127574 --branch production --services postgres,ai-gateway
+npx neon@latest deploy       # สร้างไฟล์ .env.local ที่มี DATABASE_URL ฯลฯ
 ```
 
-## ขั้นที่ 2 — เชื่อมโปรเจกต์ Neon
+> ไม่สะดวกใช้คำสั่ง: เข้า console.neon.tech → โปรเจกต์ damp-feather → **Connect** → เปิด "Connection pooling" → คัดลอก connection string มาเป็น `DATABASE_URL`
 
-```bash
-neon init -y --org-id org-lucky-bonus-48400982 --project-id damp-feather-72127574 --branch production --services postgres,ai-gateway
-```
+## 2) ตั้งค่าใน Vercel (สำคัญที่สุด — ไม่ตั้ง = ล็อกอินไม่ได้)
 
-ไฟล์ `neon.ts` ในโปรเจกต์ประกาศ `aiGateway: true` ไว้แล้ว (Postgres มีให้อัตโนมัติ)
-
-## ขั้นที่ 3 — สร้างบริการและดึงค่า env
-
-```bash
-neon deploy
-```
-
-จะได้ไฟล์ `.env.local` ที่มี `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `NEON_AI_GATEWAY_BASE_URL`, `NEON_AI_GATEWAY_TOKEN`
-(ห้าม commit ไฟล์นี้ — `.gitignore` กันไว้แล้ว)
-
-> ⚠️ AI Gateway ต้องอยู่ใน region `aws-us-east-1/2`, `aws-eu-central-1` หรือ `aws-ap-southeast-1` และต้องเติมเครดิตที่หน้า Billing ก่อนจึงจะเรียกโมเดลได้
-> ถ้ายังไม่เปิด ระบบยังทำงานปกติ (เพียงไม่มีตัวช่วย AI อ่านบัญชีจ่ายหมาย)
-
-เพิ่มค่าที่ต้องตั้งเองลงท้าย `.env.local`:
-
-```bash
-# สุ่ม secret 64 ตัว
-node -e "console.log('SESSION_SECRET=' + require('crypto').randomBytes(32).toString('hex'))" >> .env.local
-node -e "console.log('GAS_BRIDGE_SECRET=' + require('crypto').randomBytes(24).toString('hex'))" >> .env.local
-echo "GAS_DRIVE_URL=https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec" >> .env.local
-```
-
-## ขั้นที่ 4 — อัปเดต Google Apps Script (สะพานเก็บรูป + ปิดช่องรั่ว)
-
-1. เปิด Apps Script โปรเจกต์เดิม → วางโค้ดจาก `google-apps-script/Code.gs` ทับทั้งหมด
-2. **Project Settings → Script Properties → Add**: `BRIDGE_SECRET` = ค่าเดียวกับ `GAS_BRIDGE_SECRET` ใน `.env.local`
-3. **Deploy → Manage deployments → Edit → Version: New version → Deploy** (URL เดิมไม่เปลี่ยน)
-
-หลังขั้นนี้ Apps Script จะตอบเฉพาะคำขอที่มี secret เท่านั้น (ปิดช่องที่ใครก็อ่านรายชื่อ+รหัสผ่านได้)
-
-## ขั้นที่ 5 — ย้ายข้อมูลเดิมจาก Google Sheet เข้า Neon
-
-```bash
-npm run migrate:sheet -- --dry    # ทดลองอ่าน ดูจำนวนผู้ใช้/แถว (ต้องไม่มีคำเตือนเรื่องรหัสผ่าน)
-npm run migrate:sheet             # ย้ายจริง (รันซ้ำได้ ไม่เกิดข้อมูลซ้ำ)
-```
-
-- รหัสผ่านถูกแปลงเป็น scrypt hash
-- ผู้ใช้ที่รหัสผ่านเป็นค่าที่เคยเปิดเผย (`admin`/`123456` ฯลฯ) จะถูก **บังคับตั้งรหัสใหม่** เมื่อเข้าระบบครั้งแรก
-
-## ขั้นที่ 6 — ทดสอบในเครื่อง
-
-```bash
-npm run build                     # ต้องผ่าน
-npm start                         # http://localhost:3000
-curl http://localhost:3000/api/health
-# {"status":"success","ok":true,"db":true,"version":"2.0.0","driveBridge":true,"aiGateway":true,...}
-```
-
-ทดสอบ API ทั้งชุด (ใช้ **branch ทดสอบ** เท่านั้น เพราะชุดทดสอบลบตาราง):
-
-```bash
-neon checkout test-api --create   # สร้าง branch ทดสอบ (env จะชี้ branch นี้)
-TEST_DATABASE_URL="$(grep ^DATABASE_URL_UNPOOLED .env.local | cut -d= -f2-)" npm run test:api
-neon checkout production          # กลับมา branch จริง
-```
-
-## ขั้นที่ 7 — ขึ้น Vercel
-
-ใส่ env ใน Vercel → Project → Settings → Environment Variables (Production):
+Vercel → โปรเจกต์ **slts** → Settings → **Environment Variables** → เพิ่ม (เลือก Production และ Preview):
 
 | ชื่อ | ค่า |
 |---|---|
-| `DATABASE_URL` | จาก `.env.local` (pooled) |
-| `NEON_AI_GATEWAY_BASE_URL`, `NEON_AI_GATEWAY_TOKEN` | จาก `.env.local` |
-| `SESSION_SECRET` | จาก `.env.local` |
-| `GAS_DRIVE_URL`, `GAS_BRIDGE_SECRET` | จาก `.env.local` |
-| `ADMIN_INITIAL_PASSWORD` | (ไม่บังคับ) ใช้เฉพาะเมื่อฐานข้อมูลยังว่าง |
+| `DATABASE_URL` | connection string แบบ pooled (มีคำว่า `-pooler`) จาก `.env.local` หรือ Neon Console |
+| `SESSION_SECRET` | สุ่มยาว ≥ 32 ตัว: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `ADMIN_INITIAL_PASSWORD` | รหัสผ่านเริ่มต้นของผู้ใช้ `admin` (≥ 8 ตัว) — ใช้ครั้งแรกเท่านั้น ระบบจะบังคับเปลี่ยน |
+| `NEON_AI_GATEWAY_BASE_URL`, `NEON_AI_GATEWAY_TOKEN` | (ไม่บังคับ) จาก `.env.local` |
 
-```bash
-npx vercel --prod
+จากนั้น Deployments → รายการล่าสุด → **⋯ → Redeploy**
+
+> ทางลัด: Vercel → Storage / Integrations → **Neon** → Connect กับโปรเจกต์ slts จะใส่ `DATABASE_URL` ให้อัตโนมัติ (ยังต้องเพิ่ม `SESSION_SECRET`, `ADMIN_INITIAL_PASSWORD` เอง)
+
+## 3) ตรวจว่าใช้งานได้
+
+เปิด `https://<โดเมน>/api/health` ต้องได้:
+
+```json
+{"status":"success","ok":true,"db":true,"photoStorage":"neon","driveBridge":true, ...}
 ```
 
-ตรวจ `https://<โดเมน>/api/health` ต้องได้ `"db":true` และ `"driveBridge":true`
+- `db:false` → `DATABASE_URL` ผิด/ยังไม่ Redeploy
+- เปิดหน้าเว็บ → ล็อกอิน `admin` + รหัส `ADMIN_INITIAL_PASSWORD` → ตั้งรหัสใหม่ → เพิ่มผู้ใช้ที่หน้า "จัดการผู้ใช้งาน"
+- ตารางทั้งหมดถูกสร้างอัตโนมัติในคำขอแรก (ไม่ต้องรัน SQL เอง; ดูโครงสร้างที่ `scripts/schema.sql`)
 
-## ขั้นที่ 8 — ปิดช่องรั่วที่เหลือ (สำคัญ)
+## 4) (ไม่บังคับ) ย้ายข้อมูลเก่าจาก Google Sheet ครั้งเดียว
 
-1. Google Sheet เดิม → Share → General access = **Restricted** (เดิมเปิดสาธารณะ ใครก็ดาวน์โหลด CSV ได้)
-2. ทำ GitHub repo เป็น **Private** (ประวัติ git เดิมมีรหัสผ่าน admin, ID ชีต/โฟลเดอร์)
-3. เข้าระบบด้วย admin แล้วตั้งรหัสผ่านใหม่ทันที (ระบบบังคับอยู่แล้ว)
+ข้ามได้ถ้าต้องการเริ่มฐานข้อมูลใหม่ ถ้าต้องการข้อมูลเดิม: deploy `google-apps-script/Code.gs` ฉบับใหม่ + ตั้ง Script Property `BRIDGE_SECRET`
+แล้วใส่ `GAS_DRIVE_URL`, `GAS_BRIDGE_SECRET` ใน `.env.local` และรัน `npm run migrate:sheet` (ภาพเก่ายังแสดงจาก Google Drive ได้ตามลิงก์เดิม)
+
+## 5) ทดสอบในเครื่อง (ไม่บังคับ)
+
+```bash
+npm run build && npm start          # http://localhost:3000 (อ่าน .env.local)
+npx neon@latest checkout test-api --create
+TEST_DATABASE_URL="$(grep ^DATABASE_URL_UNPOOLED .env.local | cut -d= -f2-)" npm run test:api
+npx neon@latest checkout production
+```
+
+## พื้นที่เก็บภาพ
+
+ภาพถูกบีบอัดเหลือ ~80–500 KB/ภาพ และเก็บในตาราง `photo_files` — Neon Free plan มีพื้นที่ 0.5 GB (≈ 1,500–5,000 ภาพ)
+ตรวจพื้นที่ได้ที่ Neon Console → Monitoring/Usage ถ้าใกล้เต็มให้อัปเกรดแผน
