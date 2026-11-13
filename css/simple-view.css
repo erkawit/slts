@@ -1,0 +1,186 @@
+/* ==========================================================================
+   SLTS v2 — Simple View + ส่วนประกอบใหม่ (เมนู, QR, คลังภาพ, ศูนย์ผู้ดูแล)
+   เปิด/ปิดได้จากเมนู (ค่าเริ่มต้น: เปิด) → <html class="slts-simple">
+   ========================================================================== */
+
+:root {
+  --slts-primary: #2563eb;
+  --slts-ink: #0f172a;
+  --slts-muted: #64748b;
+  --slts-line: #e2e8f0;
+  --slts-soft: #f8fafc;
+  --slts-ok: #059669;
+  --slts-bad: #dc2626;
+  --slts-warn: #b45309;
+  --slts-radius: 14px;
+}
+
+/* ---------- Simple View: อ่านง่าย ปุ่มใหญ่ ลดสิ่งรบกวน ---------- */
+html.slts-simple body { -webkit-text-size-adjust: 100%; }
+html.slts-simple .text-\[9px\] { font-size: 11px !important; }
+html.slts-simple .text-\[10px\] { font-size: 11.5px !important; }
+html.slts-simple .text-\[11px\] { font-size: 12.5px !important; }
+
+/* ช่องกรอกและปุ่มมีพื้นที่แตะอย่างน้อย 44px (มาตรฐานการใช้งานบนมือถือ) */
+html.slts-simple input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+html.slts-simple select { min-height: 44px; font-size: 16px; }
+html.slts-simple textarea { font-size: 16px; }
+html.slts-simple main button,
+html.slts-simple .swal2-actions button { min-height: 40px; }
+
+/* ลดเงา/ไล่สีที่หนาเกินไปบนการ์ด */
+html.slts-simple main .shadow-xl,
+html.slts-simple main .shadow-2xl,
+html.slts-simple main .shadow-lg { box-shadow: 0 1px 3px rgba(15, 23, 42, .08), 0 1px 2px rgba(15, 23, 42, .04) !important; }
+html.slts-simple :focus-visible { outline: 3px solid #93c5fd !important; outline-offset: 2px; }
+
+/* หัวเว็บ: ตัดคำบรรยายรองออกบนจอเล็ก/แท็บเล็ต */
+@media (max-width: 1100px) {
+  html.slts-simple header .text-\[10px\],
+  html.slts-simple header p.text-xs.text-gray-400 { display: none !important; }
+}
+
+/* หน้ากล้องบนมือถือ: ปุ่มด้านบนใหญ่ขึ้น กดง่ายด้วยนิ้วโป้ง */
+@media (max-width: 767px) {
+  html.slts-simple #cameraTopBar { padding: 10px 10px 18px !important; gap: 6px; }
+  html.slts-simple #cameraTopBar button.w-8 { width: 40px !important; height: 40px !important; border-radius: 12px !important; }
+  html.slts-simple #cameraTopBar button.h-8 { height: 40px !important; }
+  html.slts-simple #cameraTopBar button i { font-size: 16px !important; }
+  html.slts-simple #cameraTopBar .gap-1\.5 { gap: 6px !important; }
+}
+@media (max-width: 359px) {
+  html.slts-simple #cameraTopBar button.w-8 { width: 36px !important; height: 36px !important; }
+  html.slts-simple #btnCameraCaseSearch { display: none !important; }
+}
+
+/* ---------- แถบสถานะเครือข่าย ---------- */
+.slts-net-banner {
+  position: fixed; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 62px);
+  z-index: 55; max-width: calc(100vw - 24px); padding: 8px 14px; border-radius: 999px;
+  font: 600 13px/1.3 system-ui, -apple-system, "Sarabun", sans-serif; color: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .25); cursor: pointer; display: flex; align-items: center; gap: 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.slts-net-banner.hidden { display: none; }
+.slts-net-banner.offline { background: #b91c1c; }
+.slts-net-banner.syncing { background: #1d4ed8; }
+@media (min-width: 768px) { .slts-net-banner { top: auto; bottom: 18px; } }
+
+/* ---------- ปุ่ม/ตัวช่วยทั่วไปใน popup ---------- */
+.slts-muted { color: var(--slts-muted); font-size: 13px; line-height: 1.5; }
+.slts-warn { color: var(--slts-warn); background: #fffbeb; border: 1px solid #fde68a; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+.slts-empty { color: var(--slts-muted); text-align: center; padding: 18px; font-size: 14px; list-style: none; }
+.slts-btn-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
+.slts-btn {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 42px; padding: 0 16px; border-radius: 12px;
+  border: 1px solid var(--slts-line); background: #fff; color: var(--slts-ink); font-weight: 600; font-size: 14px; cursor: pointer;
+}
+.slts-btn:hover { background: var(--slts-soft); border-color: #cbd5e1; }
+.slts-btn:active { transform: scale(.97); }
+.slts-btn.sm { min-height: 34px; padding: 0 12px; font-size: 13px; }
+.slts-btn.danger { color: var(--slts-bad); border-color: #fecaca; }
+.slts-icon-btn {
+  width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--slts-line); background: #fff; color: var(--slts-ink);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.slts-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: #e2e8f0; color: #334155; }
+.slts-pill.ok { background: #d1fae5; color: #065f46; }
+.slts-pill.bad { background: #fee2e2; color: #991b1b; }
+.slts-pill.pending { background: #ffedd5; color: #9a3412; }
+.slts-pill.muted { background: #f1f5f9; color: #64748b; }
+.slts-badge { min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px; background: #f97316; color: #fff; font-weight: 800; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* ---------- เมนูแบบง่าย (bottom sheet บนมือถือ) ---------- */
+.slts-menu { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.slts-menu-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 12px; border-radius: var(--slts-radius);
+  background: #fff; border: 1px solid var(--slts-line); cursor: pointer; text-align: left;
+}
+.slts-menu-item:hover { background: var(--slts-soft); }
+.slts-menu-item:active { transform: scale(.985); }
+.slts-menu-item[disabled] { opacity: .45; cursor: not-allowed; }
+.slts-menu-icon { width: 42px; height: 42px; border-radius: 12px; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.slts-menu-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.slts-menu-text b { font-size: 15px; color: var(--slts-ink); }
+.slts-menu-text small { font-size: 12.5px; color: var(--slts-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slts-chev { color: #94a3b8; }
+@media (max-width: 767px) {
+  .swal2-container:has(.slts-sheet) { align-items: end !important; place-items: end center !important; padding: 0 !important; }
+  .swal2-popup.slts-sheet { width: 100% !important; max-width: 100% !important; margin: 0 !important; border-radius: 20px 20px 0 0 !important; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
+}
+
+/* ทางเลือกแชร์ */
+.slts-choice { display: grid; gap: 10px; }
+.slts-choice-btn {
+  display: flex; align-items: center; gap: 14px; padding: 14px; border: 1.5px solid var(--slts-line); border-radius: var(--slts-radius);
+  background: #fff; cursor: pointer; text-align: left; min-height: 68px;
+}
+.slts-choice-btn:hover { border-color: var(--slts-primary); background: #eff6ff; }
+.slts-choice-btn > i { font-size: 26px; color: var(--slts-primary); width: 34px; text-align: center; }
+.slts-choice-btn span { display: flex; flex-direction: column; }
+.slts-choice-btn b { font-size: 15px; color: var(--slts-ink); }
+.slts-choice-btn small { font-size: 12.5px; color: var(--slts-muted); }
+
+/* ---------- QR ---------- */
+.slts-qr-box { width: min(72vw, 280px); margin: 4px auto 8px; background: #fff; padding: 6px; border-radius: 12px; border: 1px solid var(--slts-line); }
+.slts-qr-box svg { width: 100%; height: auto; display: block; }
+.slts-qr-code { font: 800 26px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 3px; color: var(--slts-ink); margin: 4px 0 6px; }
+.slts-scan-wrap { position: relative; width: 100%; max-width: 360px; aspect-ratio: 1 / 1; margin: 0 auto 8px; background: #000; border-radius: 16px; overflow: hidden; }
+.slts-scan-wrap video { width: 100%; height: 100%; object-fit: cover; }
+.slts-scan-frame { position: absolute; inset: 18%; border: 3px solid rgba(255, 255, 255, .9); border-radius: 14px; box-shadow: 0 0 0 999px rgba(0, 0, 0, .35); }
+.slts-code-entry .swal2-input { margin: 8px auto 0; text-transform: uppercase; letter-spacing: 2px; text-align: center; max-width: 280px; }
+
+/* ---------- คลังภาพ ---------- */
+.slts-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.slts-stats div { background: var(--slts-soft); border: 1px solid var(--slts-line); border-radius: 12px; padding: 10px 6px; display: flex; flex-direction: column; }
+.slts-stats b { font-size: 18px; color: var(--slts-ink); }
+.slts-stats span { font-size: 12px; color: var(--slts-muted); }
+.slts-switch { display: flex; gap: 10px; align-items: flex-start; text-align: left; font-size: 13.5px; margin: 6px 0; cursor: pointer; }
+.slts-switch input { width: 20px; height: 20px; margin-top: 1px; flex-shrink: 0; }
+.slts-vault-list { list-style: none; padding: 0; margin: 10px 0 0; max-height: 46vh; overflow: auto; text-align: left; }
+.slts-vault-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-bottom: 1px solid var(--slts-line); }
+.slts-vault-item img { width: 64px; height: 48px; object-fit: cover; border-radius: 8px; background: #e2e8f0; flex-shrink: 0; }
+.slts-vault-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.slts-vault-meta b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slts-vault-meta small { font-size: 12px; color: var(--slts-muted); }
+.slts-vault-meta .slts-pill { align-self: flex-start; }
+.swal2-popup { max-width: calc(100vw - 16px) !important; }
+.slts-vault-actions { display: flex; gap: 6px; }
+
+/* ---------- เวอร์ชัน ---------- */
+.slts-releases { text-align: left; max-height: 60vh; overflow: auto; }
+.slts-releases section { border-left: 3px solid var(--slts-primary); padding: 2px 0 2px 12px; margin: 0 0 14px; }
+.slts-releases h4 { font-size: 16px; font-weight: 800; margin: 0; }
+.slts-releases h4 small { color: var(--slts-muted); font-weight: 500; font-size: 12px; margin-left: 6px; }
+.slts-releases ul { margin: 4px 0 0 18px; padding: 0; list-style: disc; font-size: 13.5px; color: #334155; }
+
+/* ---------- ศูนย์ผู้ดูแลระบบ ---------- */
+.swal2-popup.slts-admin { max-width: calc(100vw - 16px); }
+.slts-tabs, .slts-filter { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--slts-line); }
+.slts-tabs button, .slts-filter button {
+  white-space: nowrap; padding: 8px 12px; border-radius: 10px; border: 1px solid transparent; background: transparent;
+  font-weight: 600; font-size: 13.5px; color: var(--slts-muted); cursor: pointer; min-height: 38px;
+}
+.slts-tabs button.active, .slts-filter button.active { background: #eff6ff; color: var(--slts-primary); border-color: #bfdbfe; }
+.slts-filter { border-bottom: 0; }
+.slts-admin-body { text-align: left; min-height: 240px; max-height: 64vh; overflow: auto; }
+.slts-table-wrap { overflow-x: auto; }
+.slts-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.slts-table th { position: sticky; top: 0; background: var(--slts-soft); text-align: left; padding: 8px; border-bottom: 1px solid var(--slts-line); white-space: nowrap; }
+.slts-table td { padding: 7px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+.slts-err { border: 1px solid var(--slts-line); border-radius: 12px; margin-bottom: 8px; background: #fff; }
+.slts-err[open] { box-shadow: 0 2px 10px rgba(15, 23, 42, .06); }
+.slts-err summary { cursor: pointer; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; list-style: none; }
+.slts-err summary b { font-size: 13.5px; flex: 1 1 60%; word-break: break-word; }
+.slts-err summary small { color: var(--slts-muted); font-size: 12px; flex-basis: 100%; }
+.slts-err-body { padding: 0 12px 12px; font-size: 13px; }
+.slts-err-body pre { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 10px; overflow: auto; font-size: 11.5px; max-height: 220px; white-space: pre-wrap; }
+.slts-err-form { display: grid; grid-template-columns: 180px 1fr; gap: 8px; align-items: start; }
+.slts-err-form textarea { grid-column: 1 / -1; min-height: 64px; }
+.slts-err-form select, .slts-err-form input, .slts-err-form textarea { border: 1px solid #cbd5e1; border-radius: 10px; padding: 8px 10px; font-size: 14px; width: 100%; }
+.slts-dl { display: grid; grid-template-columns: 190px 1fr; gap: 8px 14px; font-size: 14px; }
+.slts-dl dt { font-weight: 700; color: #334155; }
+.slts-field { display: block; margin-top: 14px; font-weight: 600; font-size: 13.5px; }
+@media (max-width: 640px) {
+  .slts-dl, .slts-err-form { grid-template-columns: 1fr; }
+}

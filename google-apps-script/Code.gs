@@ -29,12 +29,54 @@ function doPost(e) {
       throw new Error("No data received");
     }
 
+    // ==========================================
+    // v2.0: ล็อกการเข้าถึงด้วย BRIDGE_SECRET (Script Properties)
+    // เมื่อตั้งค่าแล้ว จะรับคำขอเฉพาะจากเซิร์ฟเวอร์ /api ของระบบ (ที่รู้ secret) เท่านั้น
+    // ==========================================
+    if (!isBridgeAuthorized(data)) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "error",
+        message: "unauthorized: ระบบย้ายไปใช้ API ใหม่แล้ว กรุณาอัปเดตแอป"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     let folder;
     try {
       folder = DriveApp.getFolderById(FOLDER_ID);
     } catch (fe) {
       folder = DriveApp.getRootFolder();
     }
+
+    // ==========================================
+    // v2.0 ACTION: DRIVE_UPLOAD / DRIVE_TRASH (สะพานเก็บไฟล์ภาพสำหรับ API บน Vercel + Neon)
+    // ==========================================
+    if (data.action === "drive_upload") {
+      if (!data.imageBase64 || !data.fileName) throw new Error("imageBase64 and fileName are required");
+      let b64 = String(data.imageBase64);
+      if (b64.indexOf("base64,") !== -1) b64 = b64.split("base64,")[1];
+      const safeName = String(data.fileName).replace(/[\\\/:*?"<>|]/g, "_").slice(0, 180);
+      const blob = Utilities.newBlob(Utilities.base64Decode(b64), "image/jpeg", safeName);
+      const created = folder.createFile(blob);
+      if (data.publicLink) {
+        try { created.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (se) {}
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        fileId: created.getId(),
+        fileUrl: created.getUrl()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "drive_trash") {
+      let trashed = false;
+      try {
+        DriveApp.getFileById(String(data.fileId || "")).setTrashed(true);
+        trashed = true;
+      } catch (te) {}
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", trashed: trashed }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     const spreadsheet = getTargetSpreadsheetFile(folder);
 
     // ==========================================
@@ -407,6 +449,8 @@ function doPost(e) {
       const usersSheet = getUsersSheet(spreadsheet);
       const uData = usersSheet.getDataRange().getValues();
       const usersList = [];
+      // v2.0: ส่งรหัสผ่านกลับเฉพาะสคริปต์ย้ายข้อมูล (มี secret ถูกต้อง + includePasswords) เท่านั้น
+      const allowPasswords = Boolean(getBridgeSecret() && data.secret === getBridgeSecret() && data.includePasswords);
       for (let i = 1; i < uData.length; i++) {
         if (uData[i][0]) {
           const courtCat = String(uData[i][5] || 'ศาลจังหวัด').trim();
@@ -420,7 +464,7 @@ function doPost(e) {
           }
           usersList.push({
             username: String(uData[i][0] || '').trim(),
-            password: String(uData[i][1] || '').trim(),
+            password: allowPasswords ? String(uData[i][1] || '').trim() : undefined,
             role: String(uData[i][2] || 'user').trim(),
             name: String(uData[i][3] || uData[i][0]).trim(),
             createdAt: String(uData[i][4] || '').trim(),
@@ -975,6 +1019,24 @@ function doPost(e) {
 }
 
 /**
+ * v2.0: secret สำหรับให้เฉพาะเซิร์ฟเวอร์ /api เรียกใช้ Apps Script ได้
+ * ตั้งค่าที่ Project Settings > Script Properties > BRIDGE_SECRET (ค่าเดียวกับ GAS_BRIDGE_SECRET บน Vercel)
+ */
+function getBridgeSecret() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty("BRIDGE_SECRET") || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function isBridgeAuthorized(data) {
+  const secret = getBridgeSecret();
+  if (!secret) return true; // ยังไม่ล็อก (ช่วงย้ายระบบ) — ควรตั้งค่าโดยเร็ว
+  return Boolean(data && data.secret && String(data.secret) === secret);
+}
+
+/**
  * ดึง Google Spreadsheet Object ตาม Spreadsheet ID
  */
 function getTargetSpreadsheetFile(folder) {
@@ -1057,8 +1119,8 @@ function getUsersSheet(spreadsheet) {
     const headers = ["username", "password", "role", "name", "createdAt", "ประเภทศาล", "ศาลที่สังกัด", "จังหวัดที่ส่งหมาย"];
     sheet.appendRow(headers);
     
-    // สร้างผู้ดูแลระบบตั้งต้น (admin / caogikojt02)
-    sheet.appendRow(["admin", "caogikojt02", "admin", "ผู้ดูแลระบบ (Admin)", "25/08/2569", "ศาลจังหวัด", "ศาลจังหวัดอุดรธานี", "อุดรธานี"]);
+    // สร้างผู้ดูแลระบบตั้งต้น: รหัสผ่านสุ่ม (ดูได้ในชีต แล้วเปลี่ยนทันที) — ห้ามฝังรหัสผ่านจริงในซอร์สโค้ด
+    sheet.appendRow(["admin", Utilities.getUuid().slice(0, 12), "admin", "ผู้ดูแลระบบ (Admin)", "25/08/2569", "ศาลจังหวัด", "ศาลจังหวัดอุดรธานี", "อุดรธานี"]);
 
     const headerRange = sheet.getRange(1, 1, 1, headers.length);
     headerRange.setBackground("#7c3aed");
@@ -1240,6 +1302,13 @@ function getTargetSpreadsheet(folder) {
  * ฟังก์ชันทดสอบการทำงานผ่าน Browser (GET)
  */
 function doGet(e) {
+  // v2.0: เมื่อตั้ง BRIDGE_SECRET แล้ว ปิด GET ทั้งหมด (ข้อมูลอ่านผ่าน /api ของระบบใหม่เท่านั้น)
+  if (getBridgeSecret()) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: "unauthorized: ระบบย้ายไปใช้ API ใหม่แล้ว กรุณาอัปเดตแอป"
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
   if (e && e.parameter) {
     if (e.parameter.action === "get_users" || e.parameter.sheet === "users") {
       try {
@@ -1261,7 +1330,7 @@ function doGet(e) {
             }
             usersList.push({
               username: String(uData[i][0] || '').trim(),
-              password: String(uData[i][1] || '').trim(),
+              // v2.0: ไม่ส่งรหัสผ่านออกผ่าน GET อีกต่อไป
               role: String(uData[i][2] || 'user').trim(),
               name: String(uData[i][3] || uData[i][0]).trim(),
               createdAt: String(uData[i][4] || '').trim(),

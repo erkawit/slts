@@ -44,9 +44,11 @@ const state = {
   facingMode: 'environment',
   captureOrientation: 'landscape', // แนวนอน (4:3) เป็นโหมดพื้นฐาน
   hudIntervalId: null,
-  appsScriptUrl: localStorage.getItem('slts_apps_script_url') || 'https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec',
-  googleSheetCsvUrl: 'https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/gviz/tq?tqx=out:csv',
-  usersGoogleSheetCsvUrl: 'https://docs.google.com/spreadsheets/d/1fGlWXNMBNfieDdm_jp7eAfK4RgEB2lYRsichFrloQRo/gviz/tq?tqx=out:csv&sheet=users',
+  // v2.0: ข้อมูลทั้งหมดผ่าน API ของระบบ (Vercel + Neon) — ดู js/slts-core.js
+  appsScriptUrl: (window.SLTS && SLTS.apiUrl) ? SLTS.apiUrl() : '/api/slts',
+  // v2.0: ปิดการอ่าน Google Sheet แบบ CSV สาธารณะ (เคยทำให้ข้อมูลรั่วไหล) — ใช้ API ที่ต้องล็อกอินแทน
+  googleSheetCsvUrl: '',
+  usersGoogleSheetCsvUrl: '',
   isUploading: false,
   currentUser: null,
   dataTableInstance: null,
@@ -126,6 +128,7 @@ let bgQueueWorkerStartTime = 0;
 let bgQueueProgressInterval = null;
 let bgQueueModalTimer = null;
 let memoryBgQueue = null;
+let bgQueuePausedUntil = 0; // v2.0: พักคิวชั่วคราว (backoff) เมื่อเซิร์ฟเวอร์ยังไม่พร้อม เพื่อไม่ให้วนส่งถี่
 window.currentActiveItemProgress = 0;
 window.sessionCompletedTasks = [];
 
@@ -427,6 +430,8 @@ function initOfflineSyncSystem() {
 
   // 2. ดักจับเมื่อเชื่อมต่อเน็ตได้: อัปโหลดเบื้องหลังทันทีโดยไม่ต้องแจ้งเตือนใดๆ
   window.addEventListener('online', () => {
+    bgQueuePausedUntil = 0;
+    if (window.SLTS && SLTS.net) SLTS.net.markUnknown();
     updateOfflineBadgeUI();
     updateBackgroundQueueUI();
     updateCameraTopBarUI();
@@ -468,6 +473,7 @@ function initOfflineSyncSystem() {
  * ซิงค์ข้อมูลในคิว (หากเรียกแบบแมนนวลจาก Desktop Header)
  */
 async function syncOfflineQueue(isManual = false) {
+  if (isManual) bgQueuePausedUntil = 0;
   const queue = getBackgroundQueue();
 
   if (!navigator.onLine) {
@@ -684,15 +690,13 @@ function enqueueBackgroundUpload(taskData) {
   const queue = getBackgroundQueue();
 
   // 1. ป้องกันการอัปโหลดซ้ำซ้อนของไฟล์เดียวกันหรือ ID เดียวกันจากการกดรัวซ้ำ (Queue Deduplication Check)
+  // v2.0 (แก้บั๊ก): เดิมตัดทิ้งทุกงานที่ชื่อไฟล์ซ้ำในคิว ทำให้ "ถ่ายคดีเดิมซ้ำ" แล้วภาพที่ 2 หายเงียบ
+  // ตอนนี้กันซ้ำเฉพาะ id เดียวกัน (ภาพจากกล้องมี id ไม่ซ้ำทุกครั้ง) หรือ — กรณีงานที่ไม่มี id —
+  // ชื่อไฟล์เดียวกันภายใน 3 วินาที (กดรัว)
   const isDuplicate = queue.some(item => {
-    if (taskData.id && item.id === taskData.id) return true;
-    if (taskData.fileName && item.fileName && item.fileName === taskData.fileName) return true;
-    if (taskData.stopId && item.stopId && item.stopId === taskData.stopId && taskData.fileName && item.fileName && item.fileName === taskData.fileName) return true;
-    // หากมี fileName ตรงกันเป๊ะและอยู่ในช่วง 60 วินาที
-    if (taskData.caseNumber && item.caseNumber && 
-        String(item.caseNumber).trim() === String(taskData.caseNumber).trim() &&
-        taskData.fileName && item.fileName && item.fileName === taskData.fileName &&
-        (Date.now() - new Date(item.createdAt || 0).getTime()) < 60000) {
+    if (taskData.id) return item.id === taskData.id;
+    if (taskData.fileName && item.fileName && item.fileName === taskData.fileName &&
+        (Date.now() - new Date(item.createdAt || 0).getTime()) < 3000) {
       return true;
     }
     return false;
@@ -707,9 +711,9 @@ function enqueueBackgroundUpload(taskData) {
     const recentSubmissions = JSON.parse(localStorage.getItem('slts_recent_submissions') || '[]');
     const isRecentDuplicate = recentSubmissions.some(sub => 
       taskData.fileName && sub.fileName && sub.fileName === taskData.fileName &&
-      (Date.now() - sub.timestamp) < 60000
+      (Date.now() - sub.timestamp) < 3000
     );
-    if (!taskData.forceUpdate && !taskData.isManualUpload && isRecentDuplicate) {
+    if (!taskData.id && !taskData.forceUpdate && !taskData.isManualUpload && isRecentDuplicate) {
       console.warn('[BgQueue] Suppressed enqueue: file already completed within last 60s:', taskData.fileName);
       return null;
     }
@@ -756,11 +760,19 @@ function removeBackgroundQueueItem(id) {
 }
 
 function clearBackgroundQueue() {
+  if (window.SLTS && SLTS.vault) {
+    getBackgroundQueue().forEach(item => SLTS.vault.setStatus(item.id, 'cancelled'));
+  }
   saveBackgroundQueue([]);
   if (Swal.isVisible() && document.getElementById('bgQueueModalListContainer')) {
     renderBackgroundQueueModalContent();
   }
 }
+
+window.resumeBackgroundQueueNow = function() {
+  bgQueuePausedUntil = 0;
+  processBackgroundQueue();
+};
 
 window.cancelCurrentBackgroundQueue = async function() {
   const queue = getBackgroundQueue();
@@ -1124,6 +1136,7 @@ window.markQueueItemDelivered = async function(itemId) {
     });
   }
 
+  if (window.SLTS && SLTS.vault) SLTS.vault.setStatus(itemId, 'manual');
   removeBackgroundQueueItem(itemId);
   saveRouteToServer();
   localStorage.removeItem(CACHE_KEY_SHEET_DATA);
@@ -1352,10 +1365,11 @@ function renderBackgroundQueueModalContent() {
 }
 
 async function processBackgroundQueue() {
-  // Watchdog: หาก worker ติดค้างนานเกิน 45 วินาที ให้รีเซ็ต lock เพื่อให้คิวทำงานต่อได้
+  // Watchdog: หาก worker ติดค้างนานเกิน 90 วินาที ให้รีเซ็ต lock เพื่อให้คิวทำงานต่อได้
+  // v2.0 (แก้บั๊ก): เดิม 45 วินาที แต่ timeout ของการอัปโหลดคือ 60 วินาที → เน็ตช้าแล้วถูกส่งซ้ำ 2 รอบ
   if (isBgQueueWorkerRunning) {
-    if (bgQueueWorkerStartTime && (Date.now() - bgQueueWorkerStartTime > 45000)) {
-      console.warn('[BgQueue] Worker timed out (>45s), auto-resetting lock...');
+    if (bgQueueWorkerStartTime && (Date.now() - bgQueueWorkerStartTime > 90000)) {
+      console.warn('[BgQueue] Worker timed out (>90s), auto-resetting lock...');
       isBgQueueWorkerRunning = false;
     } else {
       return;
@@ -1375,7 +1389,31 @@ async function processBackgroundQueue() {
     return;
   }
 
+  if (Date.now() < bgQueuePausedUntil) {
+    return;
+  }
+
+  // v2.0: ยังไม่ล็อกอิน (ไม่มี token) → พักคิวไว้ก่อน ภาพยังอยู่ในเครื่องครบ
+  if (window.SLTS && SLTS.auth && !SLTS.auth.getToken()) {
+    console.log('[BgQueue] Not signed in. Queue paused until login.');
+    return;
+  }
+
   isBgQueueWorkerRunning = true;
+  bgQueueWorkerStartTime = Date.now();
+
+  // v2.0: navigator.onLine ไม่แม่นยำ (ต่อ Wi-Fi ที่ไม่มีเน็ตก็เป็น true) → ตรวจสัญญาณจริงกับเซิร์ฟเวอร์ก่อน
+  if (window.SLTS && SLTS.net && typeof SLTS.net.check === 'function') {
+    const reachable = await SLTS.net.check();
+    if (!reachable) {
+      isBgQueueWorkerRunning = false;
+      bgQueueWorkerStartTime = 0;
+      console.log('[BgQueue] Server unreachable. Will retry automatically.');
+      updateBackgroundQueueUI();
+      return;
+    }
+  }
+
   bgQueueWorkerStartTime = Date.now();
   updateBackgroundQueueUI();
 
@@ -1402,6 +1440,8 @@ async function processBackgroundQueue() {
   // มั่นใจว่า payload มี action: upload_image และข้อมูล uploader เสมอ
   if (currentItem.payload) {
     currentItem.payload.action = 'upload_image';
+    // v2.0: รหัสอ้างอิงงานถ่ายภาพ → เซิร์ฟเวอร์ใช้กันบันทึกซ้ำ เมื่อเน็ตหลุดตอนรอคำตอบแล้วส่งใหม่
+    if (!currentItem.payload.clientUploadId) currentItem.payload.clientUploadId = currentItem.id;
     if (!currentItem.payload.uploader) {
       currentItem.payload.uploader = state.currentUser?.username || '';
       currentItem.payload.uploadedBy = state.currentUser?.username || '';
@@ -1464,7 +1504,10 @@ async function processBackgroundQueue() {
     }
 
     if (resJson && resJson.status === 'error') {
-      throw new Error(resJson.message || 'เกิดข้อผิดพลาดจาก Google Apps Script');
+      const apiErr = new Error(resJson.message || 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์');
+      apiErr.code = resJson.code;
+      apiErr.httpStatus = response.status;
+      throw apiErr;
     }
 
     const driveFileId = resJson?.fileId || (resJson?.fileUrl ? extractDriveIdFromUrl(resJson.fileUrl) : '') || currentItem.driveFileId;
@@ -1479,6 +1522,9 @@ async function processBackgroundQueue() {
       driveFileId: driveFileId,
       id: currentItem.stopId || currentItem.payload?.stopId
     });
+    if (window.SLTS && SLTS.vault) {
+      SLTS.vault.setStatus(currentItem.id, 'uploaded', { driveFileId: driveFileId, recordId: resJson?.recordId || '' });
+    }
     removeBackgroundQueueItem(currentItem.id);
 
     // อัปเดตข้อมูลแถวสดเข้าสู่ state.allSheetRows และ LocalStorage ทันที (Instant Local DB Update)
@@ -1505,7 +1551,7 @@ async function processBackgroundQueue() {
       for (let i = 0; i < state.allSheetRows.length; i++) {
         const r = state.allSheetRows[i];
         const rCase = String(r['เลขคดี'] || r['หมายเลขคดี'] || r['caseNumber'] || '').trim();
-        if (rCase && rCase === currentItem.caseNumber.trim()) {
+        if (rCase && rCase === String(currentItem.caseNumber || '').trim()) {
           state.allSheetRows[i] = { ...r, ...newSheetRow };
           rowUpdated = true;
           break;
@@ -1539,6 +1585,28 @@ async function processBackgroundQueue() {
     clearTimeout(timeoutId);
     clearInterval(bgQueueProgressInterval);
     console.error('[BgQueue] Upload error for item:', currentItem.caseNumber, err);
+
+    // v2.0: เซสชันหมดอายุ / เซิร์ฟเวอร์ยังไม่พร้อม → ไม่นับเป็นความล้มเหลวของภาพ (เก็บไว้ส่งใหม่ภายหลัง)
+    const isTransient = err && (err.code === 'AUTH_REQUIRED' || err.code === 'NO_DRIVE_BRIDGE' || err.code === 'NO_DATABASE_URL' || err.name === 'AbortError' || err.name === 'TypeError');
+    if (isTransient) {
+      const q = getBackgroundQueue();
+      if (q.length > 0 && q[0].id === currentItem.id) {
+        q[0].status = 'pending';
+        q[0].lastError = err.message || String(err);
+        saveBackgroundQueue(q);
+      }
+      if (err.code === 'AUTH_REQUIRED' && window.SLTS && SLTS.auth) SLTS.auth.onExpired();
+      if (window.SLTS && SLTS.net) SLTS.net.markUnknown();
+      bgQueuePausedUntil = Date.now() + 30000; // ลองใหม่อัตโนมัติใน 30 วินาที
+      isBgQueueWorkerRunning = false;
+      bgQueueWorkerStartTime = 0;
+      window.currentActiveItemProgress = 0;
+      updateBackgroundQueueUI();
+      return;
+    }
+    if (window.SLTS && SLTS.reportError) {
+      SLTS.reportError(err, { where: 'processBackgroundQueue', caseNumber: currentItem.caseNumber, retry: currentItem.retryCount || 0 });
+    }
 
     currentItem.retryCount = (currentItem.retryCount || 0) + 1;
     if (currentItem.retryCount >= 5) {
@@ -1836,25 +1904,8 @@ function initDOMElements() {
 // =========================================================================
 
 function initAuthSystem() {
-  // สร้างผู้ใช้เริ่มต้น (Admin) หากยังไม่มีในระบบ
-  let users = JSON.parse(localStorage.getItem('slts_users') || '[]');
-  if (users.length === 0) {
-    users = [
-      {
-        username: 'admin',
-        password: 'caogikojt02',
-        role: 'admin',
-        name: 'ผู้ดูแลระบบ (Admin)',
-        createdAt: '25/08/2569'
-      }
-    ];
-    localStorage.setItem('slts_users', JSON.stringify(users));
-  }
-
-  // รหัสผ่านตั้งต้นสำหรับการรีเซ็ต (Default Reset Password: 123456)
-  if (!localStorage.getItem('slts_default_reset_pass') || localStorage.getItem('slts_default_reset_pass') === 'caogikojt02') {
-    localStorage.setItem('slts_default_reset_pass', '123456');
-  }
+  // v2.0: การยืนยันตัวตนทำที่เซิร์ฟเวอร์ (api/slts.js) — ไม่มีการสร้างผู้ใช้/รหัสผ่านในเครื่องอีกต่อไป
+  // (เดิมฝังรหัสผ่านผู้ดูแลระบบไว้ในซอร์สโค้ดซึ่งเปิดสาธารณะบน GitHub)
 
   // ดึงเซสชันผู้ใช้ปัจจุบัน
   const savedUser = localStorage.getItem('slts_current_user');
@@ -1962,19 +2013,6 @@ async function fetchUsersFromGasApi(showNotification = false) {
         };
       });
 
-      // ตรวจสอบความปลอดภัย: ให้มี admin หลักเสมอ
-      if (!sheetUsers.some(u => u.username.toLowerCase() === 'admin')) {
-        sheetUsers.unshift({
-          username: 'admin',
-          password: 'caogikojt02',
-          role: 'admin',
-          assignedProvince: 'อุดรธานี',
-          courtCategory: 'ศาลจังหวัด',
-          assignedCourt: 'ศาลจังหวัดอุดรธานี',
-          name: 'ผู้ดูแลระบบ (Admin)',
-          createdAt: '25/08/2569'
-        });
-      }
 
       if (sheetUsers.length > 0) {
         localStorage.setItem('slts_users', JSON.stringify(sheetUsers));
@@ -5226,6 +5264,8 @@ window.compressImageToMax500KB = compressImageToMax1MB;
  * ใช้ fetch กับ text/plain เพื่อป้องกันปัญหา CORS Preflight กับ Google Apps Script
  */
 window.getSanitizedAppsScriptUrl = function() {
+  // v2.0: ใช้ API ของระบบเสมอ
+  if (window.SLTS && SLTS.apiUrl) return SLTS.apiUrl();
   let url = (state.appsScriptUrl || localStorage.getItem('slts_apps_script_url') || '').trim();
   const defaultUrl = 'https://script.google.com/macros/s/AKfycbw-alwkXt6cRw3hKEpMhxWLIp6zs6FvcDCs2CwiCYdvOp1tAAuh84Y4_YEz6OTwq1SC/exec';
   if (!url) {
@@ -14705,6 +14745,9 @@ async function startCameraStream() {
 let isCaptureInProgress = false;
 
 async function captureAndProcessPhoto() {
+  // v2.0 (แก้บั๊ก): ประกาศไว้นอก try เพื่อให้ catch ใช้งานได้ (เดิมเกิด ReferenceError แล้วภาพหาย)
+  let uploadPayload = null;
+  let captureId = null;
   if (isCaptureInProgress) {
     console.warn('[Camera] Capture already in progress, duplicate tap ignored.');
     return;
@@ -14775,6 +14818,7 @@ async function captureAndProcessPhoto() {
     const caseNumber = getFormattedCaseNumber();
     const locationText = getFullLocationText();
     const currentHeading = window.compassManager ? window.compassManager.getHeading() : 0;
+    captureId = 'cap_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
 
     const finalProvince = state.selectedProvince || (elements.provinceSelect ? elements.provinceSelect.value : '') || localStorage.getItem('slts_selected_province') || 'อุดรธานี';
     const finalDistrict = state.selectedDistrict || (elements.districtSelect ? elements.districtSelect.value : '') || localStorage.getItem('slts_selected_district') || '';
@@ -14833,13 +14877,14 @@ async function captureAndProcessPhoto() {
     // ปรับลดขนาดรูปภาพให้ <= 1MB
     const compressedImageBase64 = await compressImageToMax1MB(result.dataUrl);
 
-    const uploadPayload = {
+    uploadPayload = {
       action: 'upload_image',
       uploader: payloadData.uploader,
       uploadedBy: payloadData.uploadedBy,
       user_id: payloadData.user_id,
       uploaderRole: payloadData.uploaderRole,
       ...payloadData,
+      clientUploadId: captureId,
       fileName: imageFilename,
       imageBase64: compressedImageBase64
     };
@@ -14848,8 +14893,28 @@ async function captureAndProcessPhoto() {
     const origCaseNumber = activeTarget?.caseNumber || caseNumber;
     const targetStopIndex = (activeTarget && typeof activeTarget.index === 'number') ? activeTarget.index : undefined;
 
+    // v2.0: บันทึกภาพลง "คลังภาพในเครื่อง" (IndexedDB) ให้เสร็จก่อน แล้วค่อยเข้าคิวอัปโหลด
+    // หากแอปถูกปิด/แบตหมด/ไม่มีเน็ต ภาพยังอยู่ และจะถูกนำขึ้นอัตโนมัติเมื่อเชื่อมต่อได้
+    if (window.SLTS && SLTS.vault) {
+      try {
+        await SLTS.vault.save({
+          id: captureId,
+          caseNumber: caseNumber,
+          fileName: imageFilename,
+          dataUrl: compressedImageBase64,
+          payload: { ...uploadPayload, imageBase64: undefined },
+          meta: { originalCaseNumber: origCaseNumber, routeStopIndex: targetStopIndex, stopId: activeTarget?.id, locationText: locationText, courtType: payloadData.courtType }
+        });
+        SLTS.vault.exportToDevice(captureId).catch(() => {});
+      } catch (vaultErr) {
+        console.warn('[Vault] save failed (continuing with queue only):', vaultErr);
+        if (SLTS.reportError) SLTS.reportError(vaultErr, { where: 'vault.save' });
+      }
+    }
+
     // จัดการคิวผ่านระบบ Unified Multi-Tier Queue (ทำงานเบื้องหลัง 100%)
     const enqueued = enqueueBackgroundUpload({
+      id: captureId,
       caseNumber: caseNumber,
       originalCaseNumber: origCaseNumber,
       routeStopIndex: targetStopIndex,
@@ -14912,11 +14977,16 @@ async function captureAndProcessPhoto() {
       hideCustomLoading();
     }
 
+    if (window.SLTS && SLTS.reportError) SLTS.reportError(error, { where: 'captureAndProcessPhoto' });
     const caseNumber = getFormattedCaseNumber();
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
-    showGasUploadErrorModal(error, uploadPayload, imageFilename, caseNumber);
-    resetFormForNextCase();
+    if (uploadPayload) {
+      // มีภาพแล้วแต่ขั้นตอนหลังจากนั้นผิดพลาด → แสดงทางเลือกบันทึกภาพ (ไม่ล้างฟอร์ม เพื่อไม่ให้ข้อมูลหาย)
+      showGasUploadErrorModal(error, uploadPayload, imageFilename, caseNumber);
+    } else {
+      Swal.fire({ icon: 'error', title: 'ถ่ายภาพไม่สำเร็จ', text: (error && error.message) || 'กรุณาลองใหม่อีกครั้ง', confirmButtonColor: '#2563eb' });
+    }
   } finally {
     setTimeout(() => {
       isCaptureInProgress = false;
@@ -18545,7 +18615,29 @@ async function parseImageDispatchFiles(files, onProgress) {
       .replace(/(\d+)\s*\/\s*(\d+)/g, '$1/$2');
 
     const lines = cleanedText.split('\n').map(l => l.trim()).filter(Boolean);
-    const fileRecords = extractDispatchRecordsFromLines(lines);
+    let fileRecords = extractDispatchRecordsFromLines(lines);
+
+    // v2.0: อ่านด้วยรูปแบบปกติไม่พบรายการ → ให้ Neon AI Gateway ช่วยแปลงข้อความ OCR (ถ้าเปิดใช้งาน)
+    if (fileRecords.length === 0 && cleanedText.trim().length > 20 && window.SLTSUI && SLTSUI.aiExtractDispatch && navigator.onLine) {
+      try {
+        if (onProgress) onProgress(Math.round(((idx + 0.9) / total) * 100), `ใช้ AI ช่วยอ่านภาพ ${idx + 1}/${total}...`);
+        const aiRecords = await SLTSUI.aiExtractDispatch(cleanedText);
+        fileRecords = aiRecords.filter(r => r.caseNumber).map(r => ({
+          caseNumber: r.caseNumber,
+          allCases: [r.caseNumber],
+          houseNo: r.houseNo || '',
+          moo: r.moo || '',
+          isCentralReg: false,
+          centralRegText: '',
+          subdistrict: r.subdistrict || 'นาข่า',
+          district: r.district || 'เมืองอุดรธานี',
+          rawText: [r.defendant, r.note].filter(Boolean).join(' '),
+          aiExtracted: true
+        }));
+      } catch (aiErr) {
+        console.warn('[AI] dispatch extraction failed:', aiErr);
+      }
+    }
 
     fileRecords.forEach(rec => {
       if (!allRecords.some(r => r.caseNumber === rec.caseNumber)) {
@@ -22192,17 +22284,29 @@ window.openShareRouteModal = async function() {
       } catch (e) {}
     }
 
-    // ส่งไปยัง Database Google Apps Script
-    if (state.appsScriptUrl && navigator.onLine) {
-      try {
-        fetch(state.appsScriptUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload)
-        }).catch(err => console.warn('share_route GAS POST warning:', err));
-      } catch (err) {
-        console.warn('share_route GAS POST warning:', err);
-      }
+    // v2.0 (แก้บั๊ก): เดิมส่งแบบไม่รอผล แล้วแจ้ง "แชร์สำเร็จ" เสมอแม้ไม่มีเน็ต/ส่งไม่สำเร็จ
+    let shareResult = null;
+    try {
+      const resp = await fetch(state.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      shareResult = await resp.json();
+    } catch (err) {
+      shareResult = { status: 'error', message: 'ไม่มีการเชื่อมต่ออินเทอร์เน็ต หรือเซิร์ฟเวอร์ไม่ตอบสนอง' };
+    }
+    if (!shareResult || shareResult.status !== 'success') {
+      Swal.fire({
+        icon: 'error',
+        title: 'แชร์เส้นทางไม่สำเร็จ',
+        text: (shareResult && shareResult.message) || 'กรุณาลองใหม่อีกครั้ง (หรือใช้การแชร์ด้วย QR Code)',
+        confirmButtonColor: '#2563eb'
+      });
+      return;
+    }
+    if (Array.isArray(shareResult.unknown_recipients) && shareResult.unknown_recipients.length > 0) {
+      console.warn('[share_route] unknown recipients:', shareResult.unknown_recipients);
     }
 
     logServerActivity('MAP_ROUTE_SHARED', `แชร์เส้นทาง ${cleanStops.length} จุดหมาย ให้ ${targetUserIds.length} ท่าน (${targetUserIds.map(u => '@' + u).join(', ')}) โดย @${fromUserId}`, {

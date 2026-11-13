@@ -1,9 +1,42 @@
 # ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System - SLTS)
-**สำหรับเจ้าพนักงานศาลจังหวัดอุดรธานี**
+**สำหรับเจ้าพนักงานศาลจังหวัดอุดรธานี** • เวอร์ชันปัจจุบันดูที่ `version.json` / [CHANGELOG.md](CHANGELOG.md)
 
-ระบบเว็บแอปพลิเคชันอำนวยความสะดวกในการบันทึกข้อมูลการส่งหมาย ระบุพิกัด GPS อัตโนมัติ ถ่ายภาพพร้อมประทับลายน้ำ (เข็มทิศ + แผนที่ + ข้อมูลส่งหมาย) และบันทึกลง Google Drive และ Google Sheets
+## 🆕 เวอร์ชัน 2 (Neon + Vercel)
+
+| เรื่อง | เอกสาร |
+|---|---|
+| ติดตั้ง/ย้ายข้อมูลไป Neon และขึ้น Vercel | [docs/SETUP-NEON.md](docs/SETUP-NEON.md) |
+| รายงานจุดบกพร่องที่พบและแก้ไข + ขั้นตอนต่อไป | [docs/AUDIT-v2.md](docs/AUDIT-v2.md) |
+| ทำแอป Android (APK) / iOS | [docs/MOBILE-APP.md](docs/MOBILE-APP.md) |
+| ประวัติการอัปเดต | [CHANGELOG.md](CHANGELOG.md) |
+
+**โครงสร้างใหม่ที่สำคัญ**
+
+```
+api/slts.js            API หลัก (แทน Apps Script) — action เดิมทั้งหมด + login, QR share, error log, AI
+api/health.js          ตรวจสัญญาณ/สถานะระบบ
+lib/                   db (Neon/pg), schema, auth (scrypt + token), drive (สะพาน Google Drive), ai (Neon AI Gateway)
+js/config.js           ตั้งค่า API_BASE (จำเป็นสำหรับแอปมือถือ)
+js/slts-core.js        token, ตัวดัก fetch, ตรวจเน็ตจริง, คลังภาพในเครื่อง, บันทึกจุดบกพร่อง
+js/slts-features.js    ล็อกอินผ่านเซิร์ฟเวอร์, แชร์/สแกน QR, เมนูแบบง่าย, ศูนย์ผู้ดูแลระบบ
+css/simple-view.css    มุมมองแบบง่าย + ส่วนประกอบใหม่
+scripts/               dev-server, migrate-from-sheet, bump-version, schema.sql
+tests/api.test.js      ทดสอบ API กับ Postgres จริง (npm run test:api)
+```
+
+**คำสั่งที่ใช้บ่อย**
+
+```bash
+npm run build                                   # สร้างโฟลเดอร์ public/
+npm start                                       # เซิร์ฟเวอร์ทดสอบ http://localhost:3000 (อ่าน .env.local)
+npm run test:api                                # ต้องตั้ง TEST_DATABASE_URL (branch ทดสอบ)
+npm run migrate:sheet                           # ย้ายข้อมูลจาก Google Sheet เดิม
+npm run version:bump -- patch "รายละเอียด"       # ออกเวอร์ชันใหม่ (patch/minor/major)
+```
 
 ---
+
+## เอกสารเดิม (v1)
 
 ## 🌟 คุณสมบัติเด่นของระบบ
 

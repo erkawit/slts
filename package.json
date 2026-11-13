@@ -1,36 +1,40 @@
 {
   "name": "slts",
-  "version": "1.0.0",
-  "description": "**สำหรับเจ้าพนักงานศาลจังหวัดอุดรธานี**",
-  "main": "index.js",
+  "version": "2.0.0",
+  "description": "ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (SLTS) — ศาลจังหวัดอุดรธานี",
+  "private": true,
   "scripts": {
     "build": "node build-public.js",
-    "sync-public": "node build-public.js",
+    "start": "node scripts/dev-server.js",
+    "dev": "node build-public.js && node scripts/dev-server.js",
+    "test": "node --test tests/",
+    "test:api": "node --test tests/api.test.js",
+    "migrate:sheet": "node scripts/migrate-from-sheet.js",
+    "schema:export": "node -e \"const s=require('./lib/schema').SCHEMA_SQL;require('fs').writeFileSync('scripts/schema.sql','-- SLTS v2 schema\\n'+s.trim()+'\\n')\"",
+    "version:bump": "node scripts/bump-version.js",
     "cap:sync": "node build-public.js && npx cap sync",
-    "cap:open": "node build-public.js && npx cap sync && npx cap open android",
-    "build:apk": "node build-public.js && npx cap sync && cd android && gradlew.bat assembleDebug",
-    "sync:neon": "node scripts/sync-to-neon.js",
-    "sync:neon:dry": "node scripts/sync-to-neon.js --dry-run"
+    "cap:android": "node build-public.js && npx cap sync android && npx cap open android",
+    "cap:ios": "node build-public.js && npx cap sync ios && npx cap open ios",
+    "build:apk": "node build-public.js && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "build:apk:win": "node build-public.js && npx cap sync android && cd android && gradlew.bat assembleDebug"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/erkawit/slts.git"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/erkawit/slts/issues"
+  "engines": {
+    "node": ">=20"
   },
-  "homepage": "https://github.com/erkawit/slts#readme",
   "dependencies": {
     "@capacitor/android": "^8.5.0",
     "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
     "@neon/config": "^1.3.0",
     "@neon/env": "^1.2.1",
-    "@neondatabase/serverless": "^1.1.0",
-    "dotenv": "^17.4.2"
+    "@vercel/functions": "^2.2.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.16.0"
   }
 }

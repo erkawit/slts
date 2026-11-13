@@ -2,6 +2,7 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
+  <meta name="slts-version" content="__APP_VERSION__">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย - ศาลจังหวัดอุดรธานี</title>
   
@@ -96,6 +97,7 @@
 
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="css/style.css?v=20260911_02">
+  <link rel="stylesheet" href="css/simple-view.css?v=__APP_VERSION__">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -209,7 +211,7 @@
         </button>
 
         <!-- Settings Button (แสดงเฉพาะจอ > 768px และเป็น Admin เท่านั้น) -->
-        <button id="btnSettings" type="button" title="ตั้งค่าเชื่อมต่อ Google Drive (เฉพาะ Admin)" class="hidden p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition border border-transparent hover:border-blue-200">
+        <button id="btnSettings" type="button" title="ศูนย์ผู้ดูแลระบบ (เฉพาะ Admin)" class="hidden p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition border border-transparent hover:border-blue-200">
           <i class="fa-solid fa-gear text-lg"></i>
         </button>
 
@@ -254,6 +256,10 @@
                 <button type="button" onclick="openChangePasswordModal()" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
                   <i class="fa-solid fa-key text-amber-600 w-4 text-center"></i>
                   <span>เปลี่ยนรหัสผ่าน</span>
+                </button>
+                <button type="button" onclick="SLTSUI.openQuickMenu()" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
+                  <i class="fa-solid fa-qrcode text-indigo-600 w-4 text-center"></i>
+                  <span>QR เส้นทาง • คลังภาพ • ตั้งค่า</span>
                 </button>
               </div>
 
@@ -1123,7 +1129,8 @@
 
   <!-- Main Footer -->
   <footer class="bg-white border-t border-gray-200 py-4 px-6 text-center text-xs text-gray-400">
-    <p>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System)</p>
+    <p>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (Summons Location Tracking System)
+      • <button type="button" onclick="SLTSUI.openAbout()" class="underline decoration-dotted hover:text-blue-600" id="footerVersion">v__APP_VERSION__</button></p>
   </footer>
 
   <!-- Modal: ล็อกอินเข้าสู่ระบบ (Login Modal) -->
@@ -1261,6 +1268,17 @@
         <button id="btnCameraRouteMap" type="button" onclick="showMobileRouteMapModal()" class="gyro-rotate h-8 sm:h-9 px-2.5 bg-teal-600/95 hover:bg-teal-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1 justify-center transition border border-teal-400/50 shadow-md whitespace-nowrap cursor-pointer" title="เปิดดูแผนที่และเส้นทางส่งหมาย">
           <i class="fa-solid fa-map-location-dot text-xs sm:text-sm"></i>
           <span id="txtCameraRouteMapCount" class="hidden text-[10px] font-mono font-bold bg-white/25 px-1.5 py-0.5 rounded-full"></span>
+        </button>
+
+        <!-- v2.0: สแกน QR รับเส้นทาง -->
+        <button id="btnCameraScanQR" type="button" onclick="SLTSUI.openScanRouteQR()" class="gyro-rotate w-8 h-8 sm:w-9 sm:h-9 bg-amber-500/95 hover:bg-amber-600 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center transition border border-amber-300/50 shadow-md cursor-pointer" title="สแกน QR รับเส้นทาง" aria-label="สแกน QR รับเส้นทาง">
+          <i class="fa-solid fa-qrcode text-xs sm:text-sm"></i>
+        </button>
+
+        <!-- v2.0: เมนูหลักแบบง่าย -->
+        <button id="btnCameraMenu" type="button" onclick="SLTSUI.openQuickMenu()" class="gyro-rotate w-8 h-8 sm:w-9 sm:h-9 bg-slate-700/95 hover:bg-slate-800 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center transition border border-slate-500/50 shadow-md cursor-pointer relative" title="เมนู" aria-label="เมนู">
+          <i class="fa-solid fa-bars text-xs sm:text-sm"></i>
+          <span id="cameraMenuPendingDot" class="hidden absolute -top-1 -right-1 w-3 h-3 rounded-full bg-orange-500 border-2 border-black"></span>
         </button>
 
         <!-- 4.5: ปุ่มออกจากระบบ / เข้าสู่ระบบ -->
@@ -1403,17 +1421,23 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/data.js?v=20260907_01"></script>
-  <script src="js/compass.js?v=20260909_01"></script>
-  <script src="js/map.js?v=20260907_01"></script>
-  <script src="js/watermark.js?v=20260909_01"></script>
-  <script src="js/app.js?v=20260909_01"></script>
+  <!-- v2.0: ค่าตั้งค่า + แกนกลาง (API/Neon, token, ตรวจสัญญาณ, คลังภาพในเครื่อง, บันทึกจุดบกพร่อง) ต้องโหลดก่อน app.js -->
+  <script src="js/config.js?v=__APP_VERSION__"></script>
+  <script src="js/slts-core.js?v=__APP_VERSION__"></script>
+  <script src="js/data.js?v=__APP_VERSION__"></script>
+  <script src="js/compass.js?v=__APP_VERSION__"></script>
+  <script src="js/map.js?v=__APP_VERSION__"></script>
+  <script src="js/watermark.js?v=__APP_VERSION__"></script>
+  <script src="js/app.js?v=__APP_VERSION__"></script>
+  <!-- v2.0: ล็อกอินผ่านเซิร์ฟเวอร์, แชร์/สแกน QR, เมนูแบบง่าย, ศูนย์ผู้ดูแลระบบ -->
+  <script src="js/vendor/qrcode.js?v=__APP_VERSION__"></script>
+  <script src="js/slts-features.js?v=__APP_VERSION__"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=20260909_01')
+        navigator.serviceWorker.register('./sw.js?v=__APP_VERSION__')
           .then((reg) => {
             console.log('[PWA] Service Worker registered successfully:', reg.scope);
             reg.update();

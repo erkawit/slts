@@ -1,44 +1,38 @@
+/**
+ * build-public.js — คัดลอกไฟล์หน้าเว็บไปโฟลเดอร์ public/ (ใช้ทั้ง Vercel และ Capacitor)
+ * และฝังเลขเวอร์ชันจาก version.json ลงใน sw.js / index.html (cache-busting อัตโนมัติ)
+ */
 const fs = require('fs');
 const path = require('path');
 
+const root = __dirname;
+const publicDir = path.join(root, 'public');
+const { version } = JSON.parse(fs.readFileSync(path.join(root, 'version.json'), 'utf8'));
+
 function copyDir(src, dest) {
-  if (!fs.existsSync(dest)) {
-    fs.mkdirSync(dest, { recursive: true });
-  }
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-
-  for (let entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-
-    if (entry.isDirectory()) {
-      copyDir(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(s, d);
+    else fs.copyFileSync(s, d);
   }
 }
 
-const publicDir = path.join(__dirname, 'public');
-if (!fs.existsSync(publicDir)) {
-  fs.mkdirSync(publicDir, { recursive: true });
+fs.rmSync(publicDir, { recursive: true, force: true });
+fs.mkdirSync(publicDir, { recursive: true });
+
+for (const file of ['manifest.json', 'version.json']) {
+  fs.copyFileSync(path.join(root, file), path.join(publicDir, file));
 }
+for (const folder of ['css', 'js', 'img']) copyDir(path.join(root, folder), path.join(publicDir, folder));
 
-// Copy files
-['index.html', 'manifest.json', 'sw.js'].forEach(file => {
-  const src = path.join(__dirname, file);
-  if (fs.existsSync(src)) {
-    fs.copyFileSync(src, path.join(publicDir, file));
-  }
-});
+// แทนที่ __APP_VERSION__ เพื่อให้มือถือได้ไฟล์ใหม่ทุกครั้งที่อัปเดตเวอร์ชัน
+const stamp = (file) => {
+  const src = fs.readFileSync(path.join(root, file), 'utf8').replace(/__APP_VERSION__/g, version);
+  fs.writeFileSync(path.join(publicDir, file), src);
+};
+stamp('index.html');
+stamp('sw.js');
 
-// Copy folders
-['css', 'js', 'img'].forEach(folder => {
-  const src = path.join(__dirname, folder);
-  const dest = path.join(publicDir, folder);
-  if (fs.existsSync(src)) {
-    copyDir(src, dest);
-  }
-});
-
-console.log('Successfully synced web assets into public/ directory!');
+console.log(`Successfully synced web assets into public/ (v${version})`);
