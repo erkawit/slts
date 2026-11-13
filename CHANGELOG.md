@@ -2,6 +2,14 @@
 
 สร้างอัตโนมัติจาก `version.json` ด้วย `npm run version:bump`
 
+## v2.1.1 — 2026-11-13
+
+**เก็บภาพใน Google Drive เหมือนเดิม (ข้อมูลอยู่ใน Neon, ไม่ใช้ Google Sheet)**
+
+- เก็บภาพใน Google Drive เหมือนเดิม (ข้อมูลอยู่ใน Neon, ไม่ใช้ Google Sheet)
+- เมื่อตั้ง GAS_DRIVE_URL + GAS_BRIDGE_SECRET ภาพจะถูกเก็บในโฟลเดอร์ Google Drive เดิมผ่าน Apps Script
+- ถ้ายังไม่ได้ตั้งค่า Drive ระบบจะเก็บภาพใน Neon ชั่วคราวอัตโนมัติ ภาพไม่หาย
+
 ## v2.1.0 — 2026-11-13
 
 **ใช้ฐานข้อมูล Neon อย่างเดียว (เก็บไฟล์ภาพใน Neon)**

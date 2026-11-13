@@ -16,7 +16,7 @@ process.env.DATABASE_URL = DB;
 process.env.SESSION_SECRET = 'test-secret-0123456789abcdef';
 process.env.ADMIN_INITIAL_PASSWORD = 'Admin#2026x';
 process.env.GAS_BRIDGE_SECRET = 'bridge-secret';
-process.env.PHOTO_STORAGE = 'google-drive'; // ชุดทดสอบส่วนใหญ่ใช้ Drive จำลอง; มีทดสอบ Neon storage แยก
+delete process.env.PHOTO_STORAGE; // ค่าเริ่มต้น: มี GAS_DRIVE_URL → ใช้ Google Drive (จำลอง)
 
 const db = require('../lib/db');
 let apiBase, bridge, server;
@@ -164,7 +164,7 @@ test('photo storage in Neon (no Google Drive): upload, view via signed URL, dele
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 0xff, 0xd9]);
   const r = await call('upload_image', { clientUploadId: 'cap_neon1', caseNumber: 'อ9/2569', fileName: 'อ9-2569.jpg',
     imageBase64: 'data:image/jpeg;base64,' + jpeg.toString('base64') }, userToken);
-  process.env.PHOTO_STORAGE = 'google-drive';
+  delete process.env.PHOTO_STORAGE;
   assert.equal(r.status, 'success');
   assert.match(r.fileId, /^db-\d+-[A-Za-z0-9]{16}$/);
   assert.ok(r.fileUrl.includes('/api/photo?f='));

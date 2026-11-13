@@ -1,7 +1,17 @@
 {
-  "version": "2.1.0",
+  "version": "2.1.1",
   "build": "2026-11-13",
   "releases": [
+    {
+      "version": "2.1.1",
+      "date": "2026-11-13",
+      "title": "เก็บภาพใน Google Drive เหมือนเดิม (ข้อมูลอยู่ใน Neon, ไม่ใช้ Google Sheet)",
+      "notes": [
+        "เก็บภาพใน Google Drive เหมือนเดิม (ข้อมูลอยู่ใน Neon, ไม่ใช้ Google Sheet)",
+        "เมื่อตั้ง GAS_DRIVE_URL + GAS_BRIDGE_SECRET ภาพจะถูกเก็บในโฟลเดอร์ Google Drive เดิมผ่าน Apps Script",
+        "ถ้ายังไม่ได้ตั้งค่า Drive ระบบจะเก็บภาพใน Neon ชั่วคราวอัตโนมัติ ภาพไม่หาย"
+      ]
+    },
     {
       "version": "2.1.0",
       "date": "2026-11-13",
