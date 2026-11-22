@@ -1,6 +1,12 @@
 package com.udoncourt.summonstracker;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.os.Build;
+import android.webkit.WebView;
+
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
@@ -43,6 +49,35 @@ public class MainActivity extends BridgeActivity {
         });
 
         hideSystemBars();
+        enableHardwareCameraInWebView();
+        requestCoreRuntimePermissions();
+    }
+
+    /**
+     * v2.3.5: กล้องในแอปเคยขึ้นเป็นไอคอน "เครื่องเล่นวีดีโอ" เพราะ WebView บล็อกการเล่นสื่ออัตโนมัติ
+     * (ภาพสดจากกล้องเป็น <video>) จนกว่าผู้ใช้จะแตะ → อนุญาตให้เล่นได้ทันทีเหมือนแอปกล้องทั่วไป
+     */
+    private void enableHardwareCameraInWebView() {
+        try {
+            WebView wv = getBridge() != null ? getBridge().getWebView() : null;
+            if (wv != null) {
+                wv.getSettings().setMediaPlaybackRequiresUserGesture(false);
+            }
+        } catch (Exception ignored) { }
+    }
+
+    /** ขอสิทธิ์กล้องและตำแหน่งตั้งแต่เปิดแอป (ระบบจะถามครั้งแรกครั้งเดียว) */
+    private void requestCoreRuntimePermissions() {
+        String[] perms = new String[] {
+            Manifest.permission.CAMERA,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        };
+        boolean need = false;
+        for (String p : perms) {
+            if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) { need = true; break; }
+        }
+        if (need) ActivityCompat.requestPermissions(this, perms, 4101);
     }
 
     private void hideSystemBars() {

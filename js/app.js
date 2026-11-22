@@ -15013,6 +15013,11 @@ async function startCameraStream() {
         await elements.videoPreview.play();
       } catch (pErr) {
         console.warn('Video preview play error:', pErr);
+        // v2.3.5: บางเครื่อง/WebView บล็อกการเล่นอัตโนมัติ → เริ่มภาพกล้องเมื่อแตะหน้าจอครั้งแรก
+        const resume = () => { try { elements.videoPreview.play(); } catch (_) {} };
+        document.addEventListener('touchstart', resume, { once: true, passive: true });
+        document.addEventListener('click', resume, { once: true });
+        if (elements.cameraStatus) elements.cameraStatus.textContent = 'แตะหน้าจอเพื่อเปิดภาพกล้อง';
       }
     }
     if (elements.cameraStatus) {
@@ -15023,6 +15028,37 @@ async function startCameraStream() {
     handleCameraAccessError(err);
   }
 }
+
+/**
+ * v2.3.5: ถ่ายภาพนิ่งความละเอียดเต็มจากเซนเซอร์กล้องโดยตรง (ImageCapture.takePhoto) แบบแอปกล้องทั่วไป
+ * เดิมใช้เฟรมจากภาพพรีวิว (1280x720) จึงไม่คมชัด — ถ้าเครื่องไม่รองรับ/ช้าเกิน/ทิศภาพไม่ตรงกับพรีวิว
+ * จะกลับไปใช้เฟรมพรีวิวตามเดิม (ปลอดภัย ไม่กระทบการหมุนภาพแนวนอน)
+ */
+async function sltsGrabHiResStill(video, stream) {
+  try {
+    if (!sltsMobileLogic() || typeof window.ImageCapture !== 'function' || !stream || !video) return null;
+    const track = stream.getVideoTracks && stream.getVideoTracks()[0];
+    if (!track || track.readyState !== 'live') return null;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const ic = new ImageCapture(track);
+    const blob = await Promise.race([
+      ic.takePhoto(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('takePhoto timeout')), 3500))
+    ]);
+    const bmp = await createImageBitmap(blob);
+    // ทิศของภาพนิ่งต้องตรงกับพรีวิว (แนวนอน/แนวตั้งเหมือนกัน) จึงใช้ค่าการหมุนชุดเดิมได้ถูกต้อง
+    if ((bmp.width >= bmp.height) !== (vw >= vh) || bmp.width < vw) {
+      bmp.close && bmp.close();
+      return null;
+    }
+    return bmp;
+  } catch (e) {
+    console.warn('[Camera] hi-res still unavailable, using preview frame:', e && e.message);
+    return null;
+  }
+}
+window.sltsGrabHiResStill = sltsGrabHiResStill;
 
 let isCaptureInProgress = false;
 
@@ -15138,7 +15174,13 @@ async function captureAndProcessPhoto() {
       : (state.deviceAngle || 0);
     rotationDeg = computeCaptureRotationDeg(state.captureOrientation, isHardwareLandscape,
       (typeof getEffectiveGyroOrientation === 'function') ? getEffectiveGyroOrientation() : 0, currentDeviceAngle);
-    const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation, rotationDeg);
+    const hiResStill = await sltsGrabHiResStill(elements.videoPreview, state.cameraStream);
+    let result;
+    try {
+      result = await WatermarkEngine.renderWatermark(hiResStill || elements.videoPreview, payloadData, state.captureOrientation, rotationDeg);
+    } finally {
+      if (hiResStill && hiResStill.close) hiResStill.close();
+    }
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
 
