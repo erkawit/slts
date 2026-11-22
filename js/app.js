@@ -4880,6 +4880,27 @@ function getEffectiveGyroOrientation() {
 window.getEffectiveGyroOrientation = getEffectiveGyroOrientation;
 
 /**
+ * v2.3.1: องศาที่ต้องหมุนภาพจากกล้องตอนบันทึก ให้ตรงกับสิ่งที่ผู้ใช้เห็นบนหน้าจอกล้อง
+ * hudGyro = ค่าที่หน้าจอกล้องใช้วาง HUD (90/270/0), deviceAngle = ค่าดิบจากเซ็นเซอร์ (ใช้สำรอง)
+ */
+function computeCaptureRotationDeg(captureOrientation, isHardwareLandscape, hudGyro, deviceAngle) {
+  if (captureOrientation === 'landscape') {
+    // จอหมุนแนวนอนจริง (Auto-Rotate เปิด) → กล้องส่งภาพแนวนอนตั้งตรงอยู่แล้ว
+    if (isHardwareLandscape) return 0;
+    let g = (hudGyro === 90 || hudGyro === 270) ? hudGyro : 0;
+    if (!g) {
+      if (deviceAngle === 90) g = 90;
+      else if (deviceAngle === -90 || deviceAngle === 270) g = 270;
+    }
+    if (g === 90) return 90;
+    if (g === 270) return -90;
+    return -90; // เลือกแนวนอนแต่ยังไม่ได้ค่าเซ็นเซอร์: คงพฤติกรรมเดิมของกรณี "ไม่ทราบทิศ"
+  }
+  return deviceAngle === 180 ? 180 : 0;
+}
+window.computeCaptureRotationDeg = computeCaptureRotationDeg;
+
+/**
  * แสดง Toast แจ้งเตือนเมื่ออยู่ในโหมดแนวนอน โดยคำนวณตำแหน่งจากความกว้างและความยาวของหน้าจอ
  * จัดวางกึ่งกลางหน้าจอ หมุนตาม Gyroscope Sensor หรือแสดงตรงเมื่ออยู่ในโหมดฮาร์ดแวร์แนวนอน
  */
@@ -15009,34 +15030,20 @@ async function captureAndProcessPhoto() {
       uploaderRole: state.currentUser?.role || 'user'
     };
 
+    // v2.3.1 (แก้บั๊ก: ภาพแนวนอนกลับหัว): การหมุนภาพตอนบันทึกต้องอ้างอิง "ทิศเดียวกับที่หน้าจอกล้องใช้วาง HUD/ลายน้ำ"
+    // เดิม commit 1225e9b กลับทิศการตรวจจับการเอียงบน Android (ให้ HUD ถูก) แต่ไม่ได้กลับทิศการหมุนภาพตาม
+    // ทำให้หน้าจอกล้องแสดงถูก แต่ภาพที่บันทึกกลับหัว 180°
+    // ความหมายของมุม (ตาม repositionLandscapeHUD): 90 → HUD หมุน -90° (เครื่องหมุนตามเข็มนาฬิกา หัวเครื่องไปขวา)
+    //                                         270 → HUD หมุน +90° (เครื่องหมุนทวนเข็ม หัวเครื่องไปซ้าย)
+    // ภาพจากกล้องขณะล็อกจอแนวตั้งจะเอียงสวนทางกับเครื่อง จึงต้องหมุนภาพ "ตรงข้ามกับ HUD":
+    //   มุม 90 → หมุนภาพ +90° (ตามเข็ม), มุม 270 → หมุนภาพ -90° (ทวนเข็ม)
     let rotationDeg = 0;
     const isHardwareLandscape = (window.innerWidth > window.innerHeight);
     const currentDeviceAngle = (window.compassManager && typeof window.compassManager.getDeviceAngle === 'function')
       ? window.compassManager.getDeviceAngle()
       : (state.deviceAngle || 0);
-
-    if (state.captureOrientation === 'landscape') {
-      if (isHardwareLandscape) {
-        // เมื่อเบราว์เซอร์หมุนหน้าจอแนวนอนระดับฮาร์ดแวร์แล้ว กล้องจับภาพในแนวนอนอยู่แล้ว ไม่ต้องหมุนชดเชย
-        rotationDeg = 0;
-      } else {
-        // เมื่อหน้าจออยู่ในแนวตั้ง (เช่น เปิด Portrait Lock ในตัวเครื่อง) แต่ถือเครื่องแนวนอน:
-        // หากโทรศัพท์เอียงซ้าย (Landscape Left, deviceAngle = 90): หมุนทวนเข็ม -90 องศาเพื่อชดเชยการเอียง
-        // หากโทรศัพท์เอียงขวา (Landscape Right, deviceAngle = -90 หรือ 270): หมุนตามเข็ม +90 องศาเพื่อชดเชย
-        if (currentDeviceAngle === -90 || currentDeviceAngle === 270) {
-          rotationDeg = 90;
-        } else {
-          rotationDeg = -90;
-        }
-      }
-    } else {
-      // โหมดแนวตั้ง (Portrait 3:4)
-      if (currentDeviceAngle === 180) {
-        rotationDeg = 180;
-      } else {
-        rotationDeg = 0;
-      }
-    }
+    rotationDeg = computeCaptureRotationDeg(state.captureOrientation, isHardwareLandscape,
+      (typeof getEffectiveGyroOrientation === 'function') ? getEffectiveGyroOrientation() : 0, currentDeviceAngle);
     const result = await WatermarkEngine.renderWatermark(elements.videoPreview, payloadData, state.captureOrientation, rotationDeg);
     const baseFilename = caseNumber.replace(/\//g, '-');
     const imageFilename = baseFilename + '.jpg';
