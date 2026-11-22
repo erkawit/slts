@@ -80,3 +80,31 @@ npm run cap:sync               # คัดลอกไฟล์เว็บล�
 
 เว็บบน Vercel อัปเดตทันทีเมื่อ deploy (มือถือที่เปิดเว็บจะเห็นแจ้งเตือน "มีอัปเดตระบบ")
 ส่วนแอปที่ติดตั้งแล้วจะแจ้ง "โปรดอัปเดตแอป" เมื่อเวอร์ชันบนเซิร์ฟเวอร์ใหม่กว่า
+
+## สร้าง APK ด้วย GitHub Actions (v2.3.3+)
+
+1. GitHub → แท็บ **Actions** → **Android APK** → **Run workflow**
+   (ค่า `api_base` ค่าเริ่มต้นคือ `https://slts-ochre.vercel.app`)
+2. เมื่อเสร็จ ดาวน์โหลดไฟล์จาก **Artifacts → slts-android-apk** ของรอบนั้น
+
+**การลงนามแอป (สำคัญ):** ต้องลงนามด้วยกุญแจเดิมทุกครั้ง มิฉะนั้นจะติดตั้งทับของเดิมไม่ได้
+(ต้องถอนแอปก่อน และข้อมูลที่ค้างในเครื่อง เช่น ภาพที่ยังไม่ได้ส่ง จะหาย)
+ตั้งค่าครั้งเดียวที่ GitHub → Settings → Secrets and variables → Actions → New repository secret:
+
+| ชื่อ Secret | ค่า |
+|---|---|
+| `SLTS_KEYSTORE_BASE64` | เนื้อหาไฟล์ `slts-release.jks.base64.txt` |
+| `SLTS_KEYSTORE_PASSWORD` | รหัสผ่านกุญแจ |
+| `SLTS_KEY_PASSWORD` | รหัสผ่านกุญแจ (ค่าเดียวกัน) |
+| `SLTS_KEY_ALIAS` | `slts` |
+
+เมื่อตั้งครบ workflow จะได้ `SLTS-vX.Y.Z.apk` ที่ลงนามแล้วพร้อมติดตั้ง
+ถ้ายังไม่ตั้ง จะได้ไฟล์ `-unsigned.apk` + `tools/` (apksigner/zipalign) สำหรับลงนามเองด้วยคำสั่ง:
+
+```bash
+LD_LIBRARY_PATH=tools/lib64 tools/zipalign -p -f 4 SLTS-vX.Y.Z-unsigned.apk aligned.apk
+java -jar tools/apksigner.jar sign --ks slts-release.jks --ks-key-alias slts --out SLTS-vX.Y.Z.apk aligned.apk
+```
+
+**หมายเหตุ:** แอปฝังไฟล์หน้าเว็บไว้ในเครื่อง (เปิดใช้ออฟไลน์ได้ทันที) — แก้ไขหน้าเว็บแล้วต้องสร้าง APK ใหม่
+แอปจะแจ้ง "มีอัปเดตระบบ" เมื่อเซิร์ฟเวอร์มีเวอร์ชันใหม่กว่า ส่วนข้อมูล/เซิร์ฟเวอร์อัปเดตทันทีโดยไม่ต้องติดตั้งใหม่
