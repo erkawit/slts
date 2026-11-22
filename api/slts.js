@@ -132,8 +132,10 @@ function handoffRowToItem(row) {
     lat: row.lat,
     lng: row.lng,
     status: row.status,
-    timestamp: bangkokStamp(new Date(row.created_at)),
-    updated_at: bangkokStamp(new Date(row.updated_at)),
+    // v2.2: ส่งเวลาแบบ ISO มีเขตเวลา (เดิมเป็นเวลาไทยไม่มีเขตเวลา ทำให้เปรียบเทียบเวลาล้างข้อมูลผิดพลาด)
+    timestamp: new Date(row.created_at).toISOString(),
+    updated_at: new Date(row.updated_at).toISOString(),
+    channel: row.channel || 'active',
     from_user_id: row.from_user || p.from_user_id || '',
     from_user_name: row.from_user_name || p.from_user_name || '',
     type: row.type || p.type || 'handoff',
@@ -686,20 +688,55 @@ actions.upload_route_reference_image = async (data, ctx) => {
 };
 
 // ---------- route handoff / share ----------
-async function upsertHandoff(target, fields) {
+// v2.2: แต่ละผู้ใช้มี 2 ช่อง — 'active' (เส้นทางที่ส่งไปมือถือ/กำลังใช้งาน) และ 'draft' (แผนที่กำลังจัดบน PC)
+const CHANNELS = ['active', 'draft'];
+const channelOf = (v) => (CHANNELS.includes(v) ? v : 'active');
+
+/** กุญแจระบุจุดส่งหมาย (ใช้ตรวจว่าเป็นเส้นทางเดิมที่ถูกล้างไปแล้วหรือไม่) */
+function stopKeys(stops) {
+  const keys = new Set();
+  for (const s of Array.isArray(stops) ? stops : []) {
+    if (!s || typeof s !== 'object') continue;
+    const k = (s.id && String(s.id)) || (s.caseNumber && 'c:' + String(s.caseNumber).replace(/\s+/g, '').toLowerCase())
+      || (s.locationText && 'l:' + String(s.locationText).replace(/\s+/g, '').toLowerCase());
+    if (k) keys.add(k);
+  }
+  return [...keys].sort();
+}
+
+/**
+ * @param mode 'send' = ส่งเส้นทางใหม่โดยเจตนา (PC กดส่ง/แชร์) — ยกเลิกสถานะล้างเสมอ
+ *             'sync' = บันทึก/ซิงค์สถานะอัตโนมัติ — ถ้าเป็นเส้นทางเดิมที่ถูกล้างแล้ว จะไม่ถูกนำกลับมา
+ */
+async function upsertHandoff(target, fields, { channel = 'active', mode = 'send' } = {}) {
+  const keys = stopKeys(fields.payload && fields.payload.stops);
+  const sig = keys.join('|');
+  const { rows: cur } = await db.query('SELECT * FROM route_handoffs WHERE target_user = $1 AND channel = $2', [target, channel]);
+  const existing = cur[0];
+  if (mode === 'sync' && existing && existing.status === 'cleared') {
+    const cleared = new Set(Array.isArray(existing.cleared_keys) ? existing.cleared_keys : []);
+    if (!keys.length || keys.every((k) => cleared.has(k))) {
+      return { ignored: true, row: existing };
+    }
+  }
+  const isNewRoute = !existing || existing.status === 'cleared' || existing.stops_sig !== sig || mode === 'send';
+  let status = fields.status;
+  if (mode === 'sync' && existing && existing.status === 'pending' && fields.keepPending) status = 'pending';
   const { rows } = await db.query(`INSERT INTO route_handoffs
-      (target_user, from_user, from_user_name, type, status, case_number, full_address, query_string, lat, lng, payload, created_at, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, NOW(), NOW())
-    ON CONFLICT (target_user) DO UPDATE SET
+      (target_user, channel, from_user, from_user_name, type, status, case_number, full_address, query_string, lat, lng, payload, stops_sig,
+       cleared_keys, cleared_at, created_at, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NULL, NULL, NOW(), NOW())
+    ON CONFLICT (target_user, channel) DO UPDATE SET
       from_user = EXCLUDED.from_user, from_user_name = EXCLUDED.from_user_name, type = EXCLUDED.type,
-      status = CASE WHEN $12::boolean AND route_handoffs.status = 'pending' THEN 'pending' ELSE EXCLUDED.status END,
-      case_number = EXCLUDED.case_number, full_address = EXCLUDED.full_address, query_string = EXCLUDED.query_string,
-      lat = EXCLUDED.lat, lng = EXCLUDED.lng, payload = EXCLUDED.payload,
-      created_at = NOW(), updated_at = NOW()
+      status = EXCLUDED.status, case_number = EXCLUDED.case_number, full_address = EXCLUDED.full_address,
+      query_string = EXCLUDED.query_string, lat = EXCLUDED.lat, lng = EXCLUDED.lng, payload = EXCLUDED.payload,
+      stops_sig = EXCLUDED.stops_sig, cleared_keys = NULL, cleared_at = NULL,
+      created_at = CASE WHEN $14::boolean THEN NOW() ELSE route_handoffs.created_at END,
+      updated_at = NOW()
     RETURNING *`,
-  [target, fields.from_user, fields.from_user_name, fields.type, fields.status, fields.case_number, fields.full_address,
-    fields.query_string, fields.lat, fields.lng, JSON.stringify(fields.payload), Boolean(fields.keepPending)]);
-  return rows[0];
+  [target, channel, fields.from_user, fields.from_user_name, fields.type, status, fields.case_number, fields.full_address,
+    fields.query_string, fields.lat, fields.lng, JSON.stringify(fields.payload), sig, isNewRoute]);
+  return { ignored: false, row: rows[0] };
 }
 
 actions.send_handoff = async (data, ctx) => {
@@ -724,7 +761,7 @@ actions.send_handoff = async (data, ctx) => {
       from_user: me.username, from_user_name: me.name || me.username, type, status: 'pending',
       case_number: str(data.caseNumber), full_address: str(data.fullAddress), query_string: str(data.queryString),
       lat: num(data.lat), lng: num(data.lng), payload,
-    });
+    }, { channel: 'active', mode: 'send' });
   }
   const sent = targets.filter((x) => valid.has(x));
   if (type === 'share_route') {
@@ -742,24 +779,36 @@ actions.share_route = actions.send_handoff;
 actions.save_user_route = async (data, ctx) => {
   const me = requireUser(ctx);
   const target = resolveSelfOrAdmin(ctx, data.user_id || data.target_user_id || data.username);
+  const channel = channelOf(data.channel);
   const payload = sanitizeRoutePayload({ ...data, from_user_id: target, from_user_name: data.userName || me.name, type: 'user_saved_route' });
-  await upsertHandoff(target, {
+  const r = await upsertHandoff(target, {
     from_user: target, from_user_name: str(data.userName || data.name || me.name || target), type: 'user_saved_route',
     status: 'active_route', keepPending: true, case_number: str(data.caseNumber), full_address: str(data.fullAddress),
     query_string: str(data.queryString), lat: num(data.lat), lng: num(data.lng), payload,
-  });
-  return { status: 'success', message: 'Route saved to server successfully', user_id: target, timestamp: bangkokStamp() };
+  }, { channel, mode: 'sync' });
+  if (r.ignored) {
+    // เส้นทางนี้ถูกล้างไปแล้ว — แจ้งให้เครื่องที่ส่งมาล้างของตัวเองด้วย
+    return { status: 'success', ignored: true, cleared: true, channel, message: 'เส้นทางนี้ถูกล้างไปแล้ว ไม่นำกลับมาใช้งาน' };
+  }
+  return { status: 'success', message: 'Route saved to server successfully', user_id: target, channel,
+    timestamp: new Date(r.row.created_at).toISOString() };
 };
 
 actions.get_user_route = async (data, ctx) => {
   const target = resolveSelfOrAdmin(ctx, data.target_user_id || data.user_id || data.username);
-  const { rows } = await db.query('SELECT * FROM route_handoffs WHERE target_user = $1', [target]);
-  let item = rows[0] && rows[0].status !== 'cleared' ? handoffRowToItem(rows[0]) : null;
+  const channel = channelOf(data.channel);
+  const { rows } = await db.query('SELECT * FROM route_handoffs WHERE target_user = $1 AND channel = $2', [target, channel]);
+  const row = rows[0];
+  let item = row && row.status !== 'cleared' ? handoffRowToItem(row) : null;
   if (item && data.action === 'get_pending_handoff' && item.status !== 'pending') item = null;
   return {
     status: 'success',
+    channel,
     hasPending: Boolean(item && item.status === 'pending'),
     hasRoute: Boolean(item && item.status !== 'cleared'),
+    cleared: Boolean(row && row.status === 'cleared'),
+    clearedAt: row && row.cleared_at ? new Date(row.cleared_at).toISOString() : null,
+    clearedKeys: row && row.status === 'cleared' && Array.isArray(row.cleared_keys) ? row.cleared_keys : [],
     handoff: item, route: item,
   };
 };
@@ -770,14 +819,23 @@ actions.ack_handoff = async (data, ctx) => {
   const target = resolveSelfOrAdmin(ctx, data.target_user_id || data.user_id || data.username);
   const { rowCount } = await db.query(`UPDATE route_handoffs
       SET status = CASE WHEN type = 'share_route' THEN 'shared_active' ELSE 'received' END, updated_at = NOW()
-      WHERE target_user = $1 AND status <> 'cleared'`, [target]);
-  return { status: 'success', message: rowCount ? 'Handoff status updated' : 'User record not found', updated: rowCount > 0, timestamp: bangkokStamp() };
+      WHERE target_user = $1 AND channel = 'active' AND status = 'pending'`, [target]);
+  return { status: 'success', message: rowCount ? 'Handoff status updated' : 'User record not found', updated: rowCount > 0, timestamp: new Date().toISOString() };
 };
 
 actions.clear_user_route = async (data, ctx) => {
   const target = resolveSelfOrAdmin(ctx, data.target_user_id || data.user_id || data.username);
-  const { rowCount } = await db.query(`UPDATE route_handoffs SET status = 'cleared', updated_at = NOW() WHERE target_user = $1`, [target]);
-  return { status: 'success', message: rowCount ? 'User route marked as cleared' : 'User record not found', cleared: rowCount > 0, timestamp: bangkokStamp() };
+  const channels = data.channel === 'all' ? CHANNELS : [channelOf(data.channel)];
+  const { rows } = await db.query('SELECT * FROM route_handoffs WHERE target_user = $1 AND channel = ANY($2)', [target, channels]);
+  for (const row of rows) {
+    // จำจุดทั้งหมดของเส้นทางที่ถูกล้าง เพื่อไม่ให้การซิงค์ค้างจากเครื่องอื่นนำกลับมาอีก
+    const keys = new Set([...(Array.isArray(row.cleared_keys) ? row.cleared_keys : []),
+      ...stopKeys(row.payload && row.payload.stops), ...stopKeys(data.stops)]);
+    await db.query(`UPDATE route_handoffs SET status = 'cleared', updated_at = NOW(), cleared_at = NOW(), cleared_keys = $2
+      WHERE id = $1`, [row.id, JSON.stringify([...keys])]);
+  }
+  if (ctx.user) await logActivity(ctx.user.username, ctx.user.role, 'ROUTE_CLEARED', `ล้างเส้นทาง @${target} (${channels.join(', ')})`);
+  return { status: 'success', message: rows.length ? 'User route marked as cleared' : 'User record not found', cleared: rows.length > 0, channels, timestamp: new Date().toISOString() };
 };
 actions.dismiss_handoff = actions.clear_user_route;
 
@@ -953,4 +1011,4 @@ module.exports = async function handler(req, res) {
 };
 
 // สำหรับทดสอบ
-module.exports._internal = { actions, parseThaiDateTime, sanitizeRoutePayload, summonsRowToSheet };
+module.exports._internal = { stopKeys, actions, parseThaiDateTime, sanitizeRoutePayload, summonsRowToSheet };

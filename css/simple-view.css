@@ -184,3 +184,30 @@ html.slts-simple :focus-visible { outline: 3px solid #93c5fd !important; outline
 @media (max-width: 640px) {
   .slts-dl, .slts-err-form { grid-template-columns: 1fr; }
 }
+
+/* ---------- v2.2: แถบล้างเส้นทางบนมือถือ ---------- */
+.slts-route-clear-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; margin: 0 0 8px; border-radius: 12px; background: #fff1f2; border: 1px solid #fecdd3;
+  font-size: 13px; font-weight: 700; color: #881337;
+}
+.slts-route-clear-bar .slts-btn { background: #fff; }
+
+/* ---------- v2.2: Tablet / จอสัมผัสในโหมด PC (Android tablet) ---------- */
+@media (pointer: coarse) and (min-width: 769px) {
+  html.slts-simple main button,
+  html.slts-simple header button,
+  html.slts-simple .swal2-popup button { min-height: 44px; }
+  html.slts-simple main input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  html.slts-simple main select { min-height: 46px; font-size: 16px; }
+  html.slts-simple main input[type="checkbox"],
+  html.slts-simple main input[type="radio"] { width: 22px; height: 22px; }
+  html.slts-simple #desktopNavTabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  html.slts-simple #desktopNavTabs::-webkit-scrollbar { display: none; }
+  html.slts-simple table td, html.slts-simple table th { padding-top: 10px; padding-bottom: 10px; }
+  html.slts-simple .leaflet-touch .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; }
+}
+/* Tablet โหมด Mobile: จำกัดความกว้าง popup ให้อ่านง่าย ไม่ยืดเต็มจอกว้าง */
+@media (min-width: 769px) {
+  html[data-device-mode="mobile"] .swal2-popup:not(.slts-admin) { max-width: min(720px, 96vw) !important; }
+}

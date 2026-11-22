@@ -89,6 +89,7 @@
     if (typeof loadGoogleSheetData === 'function') loadGoogleSheetData(true, true);
     if (typeof fetchUsersFromGasApi === 'function') fetchUsersFromGasApi(false);
     if (typeof window.resumeBackgroundQueueNow === 'function') window.resumeBackgroundQueueNow();
+    setTimeout(() => { SLTS.route.restore('login'); SLTS.route.flushPendingClears(); }, 800);
     SLTS.flushErrors();
     UI.toast(`ยินดีต้อนรับ ${res.user.name || res.user.username}`);
 
@@ -592,6 +593,7 @@
     const items = [
       { id: 'scan', icon: 'fa-qrcode', color: '#d97706', title: 'สแกน QR รับเส้นทาง', sub: 'รับเส้นทางจากเพื่อนร่วมงาน' },
       { id: 'share', icon: 'fa-share-nodes', color: '#4f46e5', title: 'แชร์เส้นทางเป็น QR', sub: stops ? `${stops} จุดส่งหมาย` : 'ยังไม่มีเส้นทาง', disabled: !stops },
+      ...(mobileLogic() && stops ? [{ id: 'clearroute', icon: 'fa-trash-can', color: '#e11d48', title: 'ล้างเส้นทางที่ได้รับ', sub: `${stops} จุด (ไม่กระทบภาพที่ถ่ายแล้ว)` }] : []),
       { id: 'vault', icon: 'fa-images', color: '#059669', title: 'คลังภาพในเครื่อง', sub: st.pending ? `${st.pending} ภาพรอส่ง` : 'ภาพทั้งหมดส่งแล้ว', badge: st.pending || 0 },
       { id: 'simple', icon: 'fa-eye', color: '#0ea5e9', title: UI.isSimple() ? 'ปิดมุมมองแบบง่าย' : 'เปิดมุมมองแบบง่าย', sub: 'ปุ่มใหญ่ ตัวอักษรอ่านง่าย' },
       { id: 'about', icon: 'fa-circle-info', color: '#64748b', title: `เวอร์ชัน ${SLTS.version}`, sub: 'ประวัติการอัปเดตระบบ' },
@@ -612,6 +614,7 @@
       case 'scan': return UI.openScanRouteQR();
       case 'share': return UI.openShareRouteQR();
       case 'vault': return UI.openVault();
+      case 'clearroute': return UI.confirmClearMobileRoute();
       case 'simple': UI.applySimpleView(!UI.isSimple()); return UI.toast(UI.isSimple() ? 'เปิดมุมมองแบบง่ายแล้ว' : 'ปิดมุมมองแบบง่ายแล้ว');
       case 'about': return UI.openAbout();
       case 'admin': return UI.openAdminCenter();
@@ -787,6 +790,244 @@
   }
 
   // =====================================================================
+  // 7) v2.2: เก็บเส้นทางที่ได้รับไว้ในเครื่อง — รีเฟรช/ปิดแอป/ไม่มีเน็ต เส้นทางไม่หาย และล้างได้จริง
+  // =====================================================================
+  const mobileLogic = () => (typeof window.sltsMobileLogic === 'function' ? window.sltsMobileLogic() : window.innerWidth <= 768);
+  const uid = () => String((me() || {}).username || '').trim().toLowerCase();
+  const routeKey = (kind) => `slts_route_keep_v22_${kind}_${uid()}`;
+  const clearedKey = (kind) => `slts_route_cleared_keys_v22_${kind}_${uid()}`;
+  const kindNow = () => (mobileLogic() ? 'mobile' : 'batch');
+  const stopsOf = (kind) => (kind === 'mobile' ? state.currentRouteStops : state.routeBatchStops) || [];
+  function keysOfStops(stops) {
+    const out = new Set();
+    (Array.isArray(stops) ? stops : []).forEach((st) => {
+      if (!st || typeof st !== 'object') return;
+      const k = (st.id && String(st.id)) || (st.caseNumber && 'c:' + String(st.caseNumber).replace(/\s+/g, '').toLowerCase())
+        || (st.locationText && 'l:' + String(st.locationText).replace(/\s+/g, '').toLowerCase());
+      if (k) out.add(k);
+    });
+    return [...out];
+  }
+  const readJSON = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (_) { return null; } };
+  let lastPersisted = { mobile: '', batch: '' };
+
+  const R = (SLTS.route = {
+    keysOfStops,
+    load(kind = kindNow()) {
+      if (!uid()) return null;
+      const r = readJSON(routeKey(kind));
+      if (!r || !Array.isArray(r.stops) || !r.stops.length) return null;
+      const cleared = new Set(readJSON(clearedKey(kind)) || []);
+      const keys = keysOfStops(r.stops);
+      if (cleared.size && keys.length && keys.every((k) => cleared.has(k))) return null;
+      return r;
+    },
+    persist(kind = kindNow()) {
+      if (!uid()) return;
+      const stops = stopsOf(kind);
+      if (!Array.isArray(stops) || !stops.length) return;
+      const clean = typeof cleanStopsForStorage === 'function' ? cleanStopsForStorage(stops) : stops;
+      const prev = readJSON(routeKey(kind)) || {};
+      const sameRoute = keysOfStops(prev.stops).join('|') === keysOfStops(clean).join('|');
+      const data = {
+        stops: clean,
+        startLocation: state.routeStartLocation || null,
+        endLocation: state.routeEndLocation || null,
+        isRoundTrip: Boolean(state.isRoundTrip),
+        routeRoadPolyline: kind === 'mobile' && Array.isArray(state.routeRoadPolylineCoords) ? state.routeRoadPolylineCoords.slice(0, 3000) : (prev.routeRoadPolyline || null),
+        totalDistanceKm: state.calculatedRoadDistanceKm || null,
+        user_id: uid(), target_user_id: uid(), status: 'active_route', type: 'device_saved_route',
+        timestamp: (sameRoute && prev.timestamp) || new Date().toISOString(),
+      };
+      const json = JSON.stringify(data);
+      if (json === lastPersisted[kind]) return;
+      try {
+        localStorage.setItem(routeKey(kind), json);
+        localStorage.removeItem(clearedKey(kind)); // ได้รับ/ใช้งานเส้นทางใหม่แล้ว
+        lastPersisted[kind] = json;
+      } catch (e) {
+        // พื้นที่เต็ม: ตัดเส้นถนนออกแล้วลองใหม่
+        try { data.routeRoadPolyline = null; localStorage.setItem(routeKey(kind), JSON.stringify(data)); } catch (_) {}
+      }
+    },
+    /** คืนเส้นทางจากเครื่องเมื่อหน้าจอว่าง (หลังรีเฟรช / ระบบเดิมล้าง state ผิดจังหวะ) */
+    restore(reason = '') {
+      const kind = kindNow();
+      if (!uid() || stopsOf(kind).length) return false;
+      const r = R.load(kind);
+      if (!r) return false;
+      const stops = typeof deduplicateRouteStops === 'function' ? deduplicateRouteStops(r.stops) : r.stops;
+      if (kind === 'mobile') {
+        state.currentRouteStops = stops;
+        if (r.startLocation) state.routeStartLocation = r.startLocation;
+        if (r.endLocation) state.routeEndLocation = r.endLocation;
+        if (r.isRoundTrip !== undefined) state.isRoundTrip = r.isRoundTrip;
+        if (Array.isArray(r.routeRoadPolyline) && r.routeRoadPolyline.length) {
+          state.routeRoadPolylineCoords = r.routeRoadPolyline;
+          state.mapRoutePolylineCoords = r.routeRoadPolyline;
+        }
+        if (r.totalDistanceKm) state.calculatedRoadDistanceKm = r.totalDistanceKm;
+        if (typeof syncStopsWithDeliveryStatus === 'function') { try { syncStopsWithDeliveryStatus(state.currentRouteStops); } catch (_) {} }
+        if (typeof updateMobileRouteMapButtonBadge === 'function') { try { updateMobileRouteMapButtonBadge(stops.length); } catch (_) {} }
+        if (document.querySelector('.slts-province-modal') && typeof renderMobileRouteList === 'function') { try { renderMobileRouteList(); } catch (_) {} }
+      } else {
+        state.routeBatchStops = stops;
+        const tab = document.getElementById('tabContentRouteBatch');
+        if (tab && !tab.classList.contains('hidden') && typeof renderRouteBatchTab === 'function') { try { renderRouteBatchTab(); } catch (_) {} }
+      }
+      lastPersisted[kind] = JSON.stringify(r);
+      console.log(`[SLTS.route] restored ${stops.length} stops (${kind}, ${reason})`);
+      return true;
+    },
+    /** ล้างเส้นทางที่เก็บในเครื่อง; reason='server' = ถูกล้างจากเครื่องอื่น → ล้างหน้าจอด้วย */
+    clearLocal(reason = 'user', kind = kindNow()) {
+      const prev = readJSON(routeKey(kind));
+      const keys = new Set([...(readJSON(clearedKey(kind)) || []), ...keysOfStops(prev && prev.stops), ...keysOfStops(stopsOf(kind))]);
+      try { localStorage.setItem(clearedKey(kind), JSON.stringify([...keys])); } catch (_) {}
+      localStorage.removeItem(routeKey(kind));
+      lastPersisted[kind] = '';
+      if (reason === 'server' && stopsOf(kind).length) {
+        if (kind === 'mobile') {
+          state.currentRouteStops = [];
+          state.activeRouteStopTarget = null;
+          ['slts_shared_route_stops', 'slts_shared_route_polyline', 'slts_shared_route_start', 'slts_shared_route_end', 'slts_latest_handoff']
+            .forEach((k) => localStorage.removeItem(k));
+          localStorage.removeItem('slts_user_route_' + uid());
+          localStorage.removeItem('slts_device_handoff_' + uid());
+          if (typeof updateMobileRouteMapButtonBadge === 'function') { try { updateMobileRouteMapButtonBadge(0); } catch (_) {} }
+          if (document.querySelector('.slts-province-modal') && typeof renderMobileRouteList === 'function') { try { renderMobileRouteList(); } catch (_) {} }
+        } else {
+          state.routeBatchStops = [];
+          if (typeof renderRouteBatchTab === 'function') { try { renderRouteBatchTab(); } catch (_) {} }
+        }
+        UI.toast('เส้นทางถูกล้างจากอีกเครื่องแล้ว', 'info', 2500);
+      }
+    },
+    onServerCleared(clearedKeys) {
+      const kind = kindNow();
+      const local = keysOfStops(stopsOf(kind).length ? stopsOf(kind) : (readJSON(routeKey(kind)) || {}).stops);
+      const set = new Set(clearedKeys || []);
+      if (local.length && set.size && local.every((k) => set.has(k))) R.clearLocal('server', kind);
+    },
+    /** ส่งคำสั่งล้างไปเซิร์ฟเวอร์ — ถ้าออฟไลน์จะจำไว้แล้วส่งเมื่อกลับมาออนไลน์ */
+    async requestServerClear(user = uid(), channel = 'active') {
+      if (!user) return;
+      const pendingKey = 'slts_pending_route_clear_v22';
+      const pend = readJSON(pendingKey) || {};
+      pend[user + '|' + channel] = Date.now();
+      localStorage.setItem(pendingKey, JSON.stringify(pend));
+      return R.flushPendingClears();
+    },
+    async flushPendingClears() {
+      const pendingKey = 'slts_pending_route_clear_v22';
+      const pend = readJSON(pendingKey) || {};
+      const items = Object.keys(pend);
+      if (!items.length || !SLTS.auth.getToken()) return;
+      for (const item of items) {
+        const [user, channel] = item.split('|');
+        if (user !== uid()) continue;
+        try {
+          const r = await SLTS.api('clear_user_route', { user_id: user, channel }, { timeoutMs: 15000 });
+          if (r && r.status === 'success') delete pend[item];
+        } catch (_) { /* ออฟไลน์ ลองใหม่ภายหลัง */ }
+      }
+      localStorage.setItem(pendingKey, JSON.stringify(pend));
+    },
+  });
+
+  // ระบบเดิมอ่านเส้นทางจากคีย์ที่มีเงื่อนไขเวลาซับซ้อน (หายได้ง่าย) → ถ้าไม่พบ ให้ใช้สำเนาในเครื่องแทน
+  if (typeof window.getUserActiveRoute === 'function') {
+    const origGetActive = window.getUserActiveRoute;
+    window.getUserActiveRoute = function () {
+      const r = origGetActive.apply(this, arguments);
+      if (r && Array.isArray(r.stops) && r.stops.length) return r;
+      if (mobileLogic()) {
+        const kept = R.load('mobile');
+        if (kept) return kept;
+      }
+      return r;
+    };
+  }
+  if (typeof window.initMobileHandoffReceiver === 'function') {
+    const origInit = window.initMobileHandoffReceiver;
+    window.initMobileHandoffReceiver = function () {
+      const out = origInit.apply(this, arguments);
+      setTimeout(() => R.restore('after-init'), 50);
+      return out;
+    };
+  }
+  if (typeof window.clearRouteBatchOnly === 'function') {
+    const origClearBatch = window.clearRouteBatchOnly;
+    window.clearRouteBatchOnly = function () {
+      R.clearLocal('user', 'batch');
+      return origClearBatch.apply(this, arguments);
+    };
+  }
+
+  // ปุ่ม "ล้างเส้นทาง" ในหน้ารายการเส้นทางบนมือถือ (เดิมมีแค่ในแถบแจ้งเตือนที่หายไปเองภายในไม่กี่วินาที)
+  UI.confirmClearMobileRoute = async function () {
+    const n = (state.currentRouteStops || []).length;
+    const r = await Swal.fire({
+      icon: 'warning', title: 'ล้างเส้นทางในเครื่องนี้?',
+      text: `รายการส่งหมาย ${n} จุดที่ได้รับจากคอมพิวเตอร์จะถูกลบออกจากมือถือ (ภาพที่ถ่ายแล้วไม่หาย)`,
+      showCancelButton: true, confirmButtonText: 'ล้างเส้นทาง', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#e11d48',
+    });
+    if (!r.isConfirmed) return;
+    if (typeof window.clearMobileRouteHandoff === 'function') window.clearMobileRouteHandoff();
+    else { R.clearLocal('user'); state.currentRouteStops = []; R.requestServerClear(); }
+    if (document.querySelector('.slts-province-modal') && typeof renderMobileRouteList === 'function') { try { renderMobileRouteList(); } catch (_) {} }
+    UI.toast('ล้างเส้นทางแล้ว');
+  };
+  if (typeof window.renderMobileRouteList === 'function') {
+    const origRenderList = window.renderMobileRouteList;
+    window.renderMobileRouteList = function () {
+      const out = origRenderList.apply(this, arguments);
+      const box = document.getElementById('mobileMapRouteStopsList');
+      const n = (state.currentRouteStops || []).length;
+      if (box && n && !box.querySelector('.slts-route-clear-bar')) {
+        const bar = document.createElement('div');
+        bar.className = 'slts-route-clear-bar';
+        bar.innerHTML = `<span><i class="fa-solid fa-route"></i> เส้นทาง ${n} จุด</span>
+          <button type="button" class="slts-btn sm danger"><i class="fa-solid fa-trash-can"></i> ล้างเส้นทาง</button>`;
+        bar.querySelector('button').onclick = (e) => { e.stopPropagation(); UI.confirmClearMobileRoute(); };
+        box.prepend(bar);
+      }
+      return out;
+    };
+  }
+
+  setInterval(() => {
+    if (!uid()) return;
+    const kind = kindNow();
+    if (stopsOf(kind).length) R.persist(kind);
+    else R.restore('watchdog');
+  }, 2500);
+  const persistNow = () => { try { if (uid() && stopsOf(kindNow()).length) R.persist(); } catch (_) {} };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { persistNow(); return; }
+    // กลับมาที่แอป: ตรวจเส้นทางใหม่จากคอมพิวเตอร์ทันที (ระหว่างอยู่เบื้องหลังระบบหยุดถามเซิร์ฟเวอร์)
+    if (uid()) {
+      R.restore('resume');
+      try { if (typeof checkHandoffForCurrentUser === 'function') checkHandoffForCurrentUser(); } catch (_) {}
+      try { if (typeof window.fetchActiveRouteFromServer === 'function') window.fetchActiveRouteFromServer(); } catch (_) {}
+      if (typeof window.resumeBackgroundQueueNow === 'function') window.resumeBackgroundQueueNow();
+    }
+  });
+  window.addEventListener('pagehide', persistNow);
+  window.addEventListener('online', () => setTimeout(() => R.flushPendingClears(), 1500));
+  if (window.BroadcastChannel) {
+    try {
+      const bcRoute = new BroadcastChannel('slts_device_handoff');
+      bcRoute.onmessage = (ev) => {
+        const d = ev && ev.data;
+        if (d && (d.type === 'clear_user_route' || d.action === 'clear_user_route') && String(d.user_id || '').toLowerCase() === uid()) {
+          R.clearLocal('user');
+        }
+      };
+    } catch (_) {}
+  }
+
+  // =====================================================================
   // เริ่มทำงาน
   // =====================================================================
   document.addEventListener('DOMContentLoaded', () => {
@@ -808,6 +1049,7 @@
     }
 
     SLTS.net.check(true).then((ok) => renderNetBanner(ok ? 'online' : SLTS.net.state));
+    setTimeout(() => { try { SLTS.route.restore('startup'); SLTS.route.flushPendingClears(); } catch (e) { SLTS.reportError(e, { where: 'route.restore' }); } }, 1200);
     setTimeout(async () => {
       try {
         if (typeof getBackgroundQueue === 'function' && typeof enqueueBackgroundUpload === 'function') {

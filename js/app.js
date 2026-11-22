@@ -2428,7 +2428,7 @@ window.handleMobileCameraAuthAction = function() {
  * ดำเนินการออกจากระบบในขั้นตอนเดียว พร้อมสลับหน้าจอตามขนาดอุปกรณ์ (Mobile vs Desktop)
  * @param {'mobile'|'desktop'} sourceMode 
  */
-window.performDirectLogout = function(sourceMode = (window.innerWidth < 768 ? 'mobile' : 'desktop')) {
+window.performDirectLogout = function(sourceMode = (sltsMobileLogic() ? 'mobile' : 'desktop')) {
   // บันทึกประวัติการออกจากระบบและขนาดหน้าจอเพื่อแยกการแสดงผล
   state.currentUser = null;
   state.currentRouteStops = [];
@@ -2448,7 +2448,7 @@ window.performDirectLogout = function(sourceMode = (window.innerWidth < 768 ? 'm
   // ปิด SweetAlert ทันที
   Swal.close();
 
-  if (sourceMode === 'mobile' || window.innerWidth < 768) {
+  if (sourceMode === 'mobile' || sltsMobileLogic()) {
     // บนหน้าจอมือถือ (< 768px): หากมีการกดออกจากระบบแล้ว ให้แสดงหน้าต่างล็อกอินทันทีเพื่อป้องกันการใช้งานหน้าจอโดยไม่ล็อกอิน
     openLoginModal(true);
   } else {
@@ -2502,7 +2502,7 @@ window.closeLoginModal = function() {
   elements.loginModal.classList.add('hidden');
   elements.loginModal.classList.remove('flex');
 
-  if (window.innerWidth < 768) {
+  if (sltsMobileLogic()) {
     const isLoggedIn = !!state.currentUser && state.currentUser.role && state.currentUser.role !== 'guest';
     if (isLoggedIn && elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
       openCameraModal().catch(e => console.warn(e));
@@ -2519,7 +2519,7 @@ function handleLogin(e) {
   const matched = users.find(user => (user.username || '').toLowerCase() === u.toLowerCase() && user.password === p);
 
   if (matched) {
-    const deviceMode = window.innerWidth < 768 ? 'mobile' : 'desktop';
+    const deviceMode = sltsMobileLogic() ? 'mobile' : 'desktop';
     const matchedProv = matched.assignedProvince || 'อุดรธานี';
     const matchedCourtCat = matched.courtCategory || 'ศาลจังหวัด';
     let matchedCourt = matched.assignedCourt || '';
@@ -2546,7 +2546,7 @@ function handleLogin(e) {
     updateAuthUI();
     initMobileHandoffReceiver();
 
-    if (deviceMode === 'mobile' || window.innerWidth < 768) {
+    if (deviceMode === 'mobile' || sltsMobileLogic()) {
       if (elements.cameraModal && elements.cameraModal.classList.contains('hidden')) {
         openCameraModal().catch(e => console.warn(e));
       }
@@ -2568,7 +2568,7 @@ function handleLogin(e) {
 
 function handleLogout() {
   if (elements.userDropdownMenu) elements.userDropdownMenu.classList.add('hidden');
-  const isMobile = window.innerWidth < 768;
+  const isMobile = sltsMobileLogic();
 
   Swal.fire({
     title: 'ต้องการออกจากระบบ?',
@@ -4143,6 +4143,15 @@ window.getTabletMode = function() {
  * ตรวจสอบว่าควรแสดงผลในมุมมอง Mobile หรือไม่
  * อ่านค่าจาก localStorage ทันที เพื่อความเร็วสูงสุดและไม่เกิดการกะพริบ
  */
+/**
+ * v2.2: ตรรกะการทำงานแบบมือถือ (เส้นทาง/กล้อง/GPS) — ครอบคลุม Tablet ที่เลือกโหมด Mobile ด้วย
+ * (เดิมใช้ความกว้างจอ <= 768 อย่างเดียว ทำให้ Tablet โหมด Mobile ไปใช้ตรรกะของ PC แล้วเส้นทางหาย)
+ */
+window.sltsMobileLogic = function() {
+  if (window.innerWidth <= 768) return true;
+  try { return typeof window.isMobileView === 'function' && window.isMobileView(); } catch (e) { return false; }
+};
+
 window.isMobileView = function() {
   const storedMode = localStorage.getItem('slts_device_mode');
   if (storedMode === 'mobile') return true;
@@ -5052,7 +5061,7 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
   }
 
   // ทั้งหน้าจอ Desktop (> 768px) และ Mobile (<= 768px) ไม่ต้องแสดงหน้าต่าง Pop Up โหลดข้อมูล ให้ทำงานในเบื้องหลังเท่านั้น
-  const isMobile = window.innerWidth <= 768;
+  const isMobile = sltsMobileLogic();
   const shouldShowLoading = false;
 
   // บนหน้าจอมือถือ ไม่ต้องแสดง Toast ซิงค์ข้อมูลเบื้องหลังเพื่อลดการรบกวนผู้ใช้
@@ -6145,7 +6154,7 @@ window.openTargetSearchModal = function() {
 function renderDataTable(rows, filterCriteria = null) {
   state.allSheetRows = rows;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
-  const isDesktop = window.innerWidth > 768;
+  const isDesktop = !sltsMobileLogic();
 
   // ดึงประวัติอักษรนำหน้าเลขคดีจากชีตมาอัปเดต autocomplete
   extractPrefixesFromRows(rows);
@@ -6888,7 +6897,7 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
 window.openCaseHistoryModal = function(caseNumber) {
   const records = (state.allSheetRows || []).filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim());
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
-  const isDesktop = window.innerWidth > 768;
+  const isDesktop = !sltsMobileLogic();
   const showDeleteCol = isAdmin && isDesktop;
   const currentUsername = (state.currentUser?.username || '').trim().toLowerCase();
 
@@ -8107,7 +8116,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
 
   // หากอยู่บนมือถือ (< 768px) และมีข้อมูลเส้นทางส่งหมาย ให้ตรวจว่ามี stack ย้อนกลับหรือไม่
   // หาก stack ว่างเปล่า ให้สร้างการย้อนกลับสู่หน้าแผนที่เส้นทางส่งหมายอัตโนมัติ (Fallback Safety Net)
-  if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+  if (sltsMobileLogic() && state.currentRouteStops && state.currentRouteStops.length > 0) {
     if (!window.mobileModalStack || window.mobileModalStack.length === 0) {
       if (typeof window.pushMobileModalState === 'function') {
         window.pushMobileModalState(() => window.showMobileRouteMapModal && window.showMobileRouteMapModal());
@@ -8116,7 +8125,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
   }
 
   const hasBackStack = Boolean(window.mobileModalStack && window.mobileModalStack.length > 0);
-  const showBackButton = hasBackStack || (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0);
+  const showBackButton = hasBackStack || (sltsMobileLogic() && state.currentRouteStops && state.currentRouteStops.length > 0);
   let isNavigatingToFullScreen = false;
   let hasHandledBack = false;
 
@@ -8125,7 +8134,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     hasHandledBack = true;
     if (hasBackStack) {
       window.handleMobileModalBackOrClose();
-    } else if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+    } else if (sltsMobileLogic() && state.currentRouteStops && state.currentRouteStops.length > 0) {
       if (typeof window.showMobileRouteMapModal === 'function') {
         window.showMobileRouteMapModal();
       } else {
@@ -8141,7 +8150,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
   window._openFullScreenFromPhotoModal = function() {
     isNavigatingToFullScreen = true;
     // ดูแลให้มี stack สำหรับย้อนกลับสู่หน้าแผนที่เสมอ
-    if (window.innerWidth < 768 && (!window.mobileModalStack || window.mobileModalStack.length === 0)) {
+    if (sltsMobileLogic() && (!window.mobileModalStack || window.mobileModalStack.length === 0)) {
       if (typeof window.pushMobileModalState === 'function') {
         window.pushMobileModalState(() => window.showMobileRouteMapModal && window.showMobileRouteMapModal());
       }
@@ -8205,7 +8214,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
         setTimeout(() => {
           window.handleMobileModalBackOrClose();
         }, 300);
-      } else if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+      } else if (sltsMobileLogic() && state.currentRouteStops && state.currentRouteStops.length > 0) {
         setTimeout(() => {
           if (typeof window.showMobileRouteMapModal === 'function') {
             window.showMobileRouteMapModal();
@@ -8215,7 +8224,7 @@ window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, la
     } else {
       if (hasBackStack) {
         window.handleMobileModalBackOrClose();
-      } else if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+      } else if (sltsMobileLogic() && state.currentRouteStops && state.currentRouteStops.length > 0) {
         if (typeof window.showMobileRouteMapModal === 'function') {
           window.showMobileRouteMapModal();
         }
@@ -8231,15 +8240,15 @@ window.openFullScreenImage = function(imgSrc, originalUrl = '', caseNo = '', loc
     isClosed = true;
     // เมื่อปิดภาพขนาดเต็ม หากมีข้อมูลเดิม ให้เปิด viewPhotoModal คืนกลับมา ทั้งบน Desktop และ Mobile
     if (originalUrl && caseNo) {
-      if (window.innerWidth < 768 && (!window.mobileModalStack || window.mobileModalStack.length === 0)) {
+      if (sltsMobileLogic() && (!window.mobileModalStack || window.mobileModalStack.length === 0)) {
         if (typeof window.pushMobileModalState === 'function') {
           window.pushMobileModalState(() => window.showMobileRouteMapModal && window.showMobileRouteMapModal());
         }
       }
       window.viewPhotoModal(originalUrl, caseNo, loc, time, lat, lng);
-    } else if (window.innerWidth < 768 && window.mobileModalStack && window.mobileModalStack.length > 0) {
+    } else if (sltsMobileLogic() && window.mobileModalStack && window.mobileModalStack.length > 0) {
       window.handleMobileModalBackOrClose();
-    } else if (window.innerWidth < 768 && state.currentRouteStops && state.currentRouteStops.length > 0) {
+    } else if (sltsMobileLogic() && state.currentRouteStops && state.currentRouteStops.length > 0) {
       if (typeof window.showMobileRouteMapModal === 'function') {
         window.showMobileRouteMapModal();
       }
@@ -8527,7 +8536,7 @@ window.getUserAssignedProvince = function() {
 };
 
 window.isUserOutsideAssignedProvince = function() {
-  if (window.innerWidth >= 768) return false;
+  if (!sltsMobileLogic()) return false;
   if (!state.currentUser || state.currentUser.role === 'guest' || !state.currentUser.username) return false;
 
   // 1. Role => Admin ดูแล และเข้าถึงทุกอย่างในระบบทั้งในหน้าจอความกว้างมากกว่า หรือน้อยกว่า 768 pixel
@@ -8539,7 +8548,7 @@ window.isUserOutsideAssignedProvince = function() {
 };
 
 window.enforceProvinceBoundaryOnStartup = function() {
-  if (window.innerWidth < 768 && state.currentUser && state.currentUser.role !== 'guest' && !!state.currentUser.username) {
+  if (sltsMobileLogic() && state.currentUser && state.currentUser.role !== 'guest' && !!state.currentUser.username) {
     if (isUserOutsideAssignedProvince()) {
       setTimeout(() => {
         openMobileCaseSearchModal('', true);
@@ -8565,7 +8574,7 @@ function setProvince(provinceName) {
   updateFloatingProvinceBadge();
 
   // ปรับชื่อประเภทศาลบน Desktop ให้ตรงกับจังหวัดที่เลือก
-  const isDesktop = window.innerWidth > 768;
+  const isDesktop = !sltsMobileLogic();
   if (isDesktop) {
     const currentCat = state.desktopCourtCategory || localStorage.getItem('slts_desktop_court_category') || 'ศาลจังหวัด';
     if (currentCat !== 'ศาลที่ไม่สังกัดภาค' && currentCat !== 'ศาลอื่น' && currentCat !== 'หมายศาลอื่น') {
@@ -8791,7 +8800,7 @@ window.selectProvinceAndProceed = function(provinceName) {
   setProvince(provinceName);
   Swal.close();
 
-  const isMobile = window.innerWidth < 768;
+  const isMobile = sltsMobileLogic();
 
   if (isMobile) {
     // ในหน้าจอ < 768 pixel:
@@ -9009,7 +9018,7 @@ window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = '
   if (!lat || !lng) return null;
 
   // บนมือถือ (<= 768px): ห้ามเขียนทับอำเภอและตำบลที่ผู้ใช้กรอกหรือเลือกไว้แล้วโดยเด็ดขาด
-  if (window.innerWidth <= 768 && state.selectedSubdistrict) {
+  if (sltsMobileLogic() && state.selectedSubdistrict) {
     console.log('[GPS] Mobile device: subdistrict already selected (' + state.selectedSubdistrict + '), skipping auto address overwrite');
     return null;
   }
@@ -9226,7 +9235,7 @@ window.selectDesktopCourtType = function(category, provinceName) {
 };
 
 window.selectCourtTypeChoice = function(category, provinceName, isReturnToForm = false) {
-  const isDesktop = window.innerWidth > 768;
+  const isDesktop = !sltsMobileLogic();
 
   if (category === 'ศาลที่ไม่สังกัดภาค') {
     Swal.fire({
@@ -10286,31 +10295,64 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
           const sizeKb = Math.round(file.size / 1024);
           if (fileInfo) fileInfo.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600 mr-1"></i>${escapeHtml(file.name)} (${sizeKb} KB)`;
 
-          // สกัดพิกัด EXIF GPS ถ้ามี
-          if (typeof exifr !== 'undefined') {
-            try {
-              const gps = await exifr.gps(file);
-              if (gps && gps.latitude && gps.longitude) {
-                extractedLat = gps.latitude;
-                extractedLng = gps.longitude;
-                if (latInput) latInput.value = formatFullCoordinateString(extractedLat, 6);
-                if (lngInput) lngInput.value = formatFullCoordinateString(extractedLng, 6);
-                if (gpsBox) gpsBox.classList.remove('hidden');
-                if (gpsText) {
-                  gpsText.innerHTML = `<b class="text-emerald-700"><i class="fa-solid fa-satellite mr-1"></i>พบพิกัดในรูปถ่าย:</b> ${formatFullCoordinateString(extractedLat, 6)}, ${formatFullCoordinateString(extractedLng, 6)}`;
-                }
-              } else {
-                if (gpsBox) gpsBox.classList.remove('hidden');
-                if (gpsText) {
-                  gpsText.innerHTML = `<span class="text-amber-700"><i class="fa-solid fa-circle-exclamation mr-1"></i>ไม่พบพิกัดในรูปถ่าย (สามารถพิมพ์ระบุเองด้านล่างได้)</span>`;
-                }
+          // v2.2: อ่านพิกัดจาก EXIF ก่อน ถ้าไม่มี (Android มักตัด GPS ออก / ภาพจากกล้อง SLTS ไม่มี EXIF)
+          // ให้อ่านจากลายน้ำพิกัดบนภาพด้วย OCR — และไม่ใช้ GPS ปัจจุบันของเครื่องแทนโดยอัตโนมัติ
+          extractedLat = null;
+          extractedLng = null;
+          if (latInput) latInput.value = '';
+          if (lngInput) lngInput.value = '';
+          if (gpsBox) gpsBox.classList.remove('hidden');
+          const setGpsMsg = (html) => { if (gpsText) gpsText.innerHTML = html; };
+          setGpsMsg(`<span class="text-blue-700"><i class="fa-solid fa-spinner fa-spin mr-1"></i>กำลังอ่านพิกัดจากรูปภาพ...</span>`);
+          const confirmBtn = Swal.getConfirmButton && Swal.getConfirmButton();
+          if (confirmBtn) confirmBtn.disabled = true;
+          let found = null;
+          try {
+            const chk = document.getElementById('chkMobileHasWatermark');
+            found = (window.SLTS && SLTS.geo) ? await SLTS.geo.extractFromFile(file, {
+              dataUrl: selectedDataUrl,
+              preferWatermark: !!(chk && chk.checked),
+              onProgress: (st) => {
+                if (String(st).startsWith('ocr')) setGpsMsg(`<span class="text-blue-700"><i class="fa-solid fa-spinner fa-spin mr-1"></i>ไม่พบพิกัดในไฟล์ กำลังอ่านลายน้ำพิกัดบนภาพ${st.includes('/') ? ' (' + st.split(':')[1] + ')' : ''}...</span>`);
               }
-            } catch (exErr) {
-              console.warn('exifr extraction failed:', exErr);
-              if (gpsBox) gpsBox.classList.remove('hidden');
+            }) : null;
+          } catch (geoErr) {
+            console.warn('[mobile upload] geo extraction failed:', geoErr);
+          }
+          if (confirmBtn) confirmBtn.disabled = false;
+          if (found && found.lat && found.lng) {
+            extractedLat = found.lat;
+            extractedLng = found.lng;
+            if (latInput) latInput.value = formatFullCoordinateString(extractedLat, 6);
+            if (lngInput) lngInput.value = formatFullCoordinateString(extractedLng, 6);
+            const srcLabel = found.source === 'exif' ? 'ข้อมูล GPS ในไฟล์ (EXIF)' : 'ลายน้ำพิกัดบนภาพ';
+            if (found.source === 'watermark') {
+              // ภาพมีลายน้ำพิกัดอยู่แล้ว → ไม่ประทับลายน้ำซ้ำ
+              const chkWm = document.getElementById('chkMobileHasWatermark');
+              if (chkWm && !chkWm.checked) { chkWm.checked = true; chkWm.dispatchEvent(new Event('change')); }
             }
+            setGpsMsg(`<b class="text-emerald-700"><i class="fa-solid fa-satellite mr-1"></i>พิกัดจาก${srcLabel}:</b> ${formatFullCoordinateString(extractedLat, 6)}, ${formatFullCoordinateString(extractedLng, 6)}${found.source === 'watermark' ? '<br><span class="text-[10px] text-gray-500">โปรดตรวจตัวเลขให้ตรงกับบนภาพอีกครั้ง</span>' : ''}`);
           } else {
-            if (gpsBox) gpsBox.classList.remove('hidden');
+            const isAndroid = /Android/i.test(navigator.userAgent || '');
+            setGpsMsg(`<span class="text-amber-700"><i class="fa-solid fa-circle-exclamation mr-1"></i>ไม่พบพิกัดในรูปนี้ — กรุณาพิมพ์พิกัดตามภาพ หรือกด "ใช้ตำแหน่งปัจจุบัน"</span>` +
+              (isAndroid ? `<br><span class="text-[10px] text-gray-500">Android มักตัดพิกัดออกเมื่อเลือกจาก "แกลเลอรี/รูปภาพ" ให้เลือกผ่านแอป "ไฟล์ (Files)" แทน</span>` : ''));
+          }
+          if (gpsBox && !document.getElementById('mobileUploadUseCurrentGps')) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.id = 'mobileUploadUseCurrentGps';
+            btn.className = 'w-full mt-1 px-3 py-2 rounded-lg bg-white border border-blue-300 text-blue-700 text-xs font-bold';
+            btn.innerHTML = '<i class="fa-solid fa-location-crosshairs mr-1"></i> ใช้ตำแหน่งปัจจุบันของเครื่อง';
+            btn.onclick = () => {
+              if (state.lat && state.lng) {
+                if (latInput) latInput.value = formatFullCoordinateString(state.lat, 6);
+                if (lngInput) lngInput.value = formatFullCoordinateString(state.lng, 6);
+                setGpsMsg(`<span class="text-blue-700"><i class="fa-solid fa-location-dot mr-1"></i>ใช้ตำแหน่งปัจจุบันของเครื่อง (ไม่ใช่พิกัดจากภาพ)</span>`);
+              } else {
+                setGpsMsg(`<span class="text-red-600">ยังไม่มีพิกัด GPS ของเครื่อง</span>`);
+              }
+            };
+            gpsBox.appendChild(btn);
           }
         };
         reader.readAsDataURL(file);
@@ -10337,6 +10379,10 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
       if (lngInput && lngInput.value.trim()) {
         const pLng = parseFloat(lngInput.value.trim());
         if (!isNaN(pLng)) finalLng = pLng;
+      }
+      if (!finalLat || !finalLng || isNaN(finalLat) || isNaN(finalLng)) {
+        Swal.showValidationMessage('ไม่พบพิกัดของภาพ: กรุณาพิมพ์ละติจูด/ลองจิจูดตามภาพ หรือกด "ใช้ตำแหน่งปัจจุบันของเครื่อง"');
+        return false;
       }
       return {
         dataUrl: selectedDataUrl,
@@ -11630,7 +11676,7 @@ let _desktopSimilarSearchTimer = null;
  * @param {boolean} immediate - หากเป็น true จะประมวลผลทันทีโดยไม่ต้องรอ debounce (เช่น เมื่อเปลี่ยนอำเภอ ตำบล หรือได้พิกัดภาพ)
  */
 function triggerDesktopSimilarSearch(immediate = false) {
-  if (window.innerWidth <= 768) return; // ทำงานเฉพาะหน้าจอคอมพิวเตอร์ตามข้อกำหนด
+  if (sltsMobileLogic()) return; // ทำงานเฉพาะหน้าจอคอมพิวเตอร์ตามข้อกำหนด
 
   if (_desktopSimilarSearchTimer) {
     clearTimeout(_desktopSimilarSearchTimer);
@@ -11658,7 +11704,7 @@ window.triggerDesktopSimilarSearch = triggerDesktopSimilarSearch;
  * 5. ตรวจสอบตัวเลขคดีเป็นอันดับสุดท้าย
  */
 function performDesktopSimilarSearch() {
-  if (window.innerWidth <= 768) return;
+  if (sltsMobileLogic()) return;
 
   const card = document.getElementById('desktopSimilarRecordsCard');
   const list = document.getElementById('desktopSimilarRecordsList');
@@ -12326,7 +12372,7 @@ const LOCATION_MODAL_COOLDOWN_MS = 45000; // 45 วินาที สำหร�
  * เด้งหน้าต่างเตือนเมื่ออุปกรณ์ปิด Location Service (GPS) หรือยังไม่ได้รับสิทธิ์ (เฉพาะมือถือ <= 768px)
  */
 function showLocationServiceDisabledModal(errorType = 'POSITION_UNAVAILABLE') {
-  if (window.innerWidth > 768) return;
+  if (!sltsMobileLogic()) return;
   if (Swal.isVisible()) return;
 
   lastLocationModalShownTime = Date.now();
@@ -12406,7 +12452,7 @@ window.showLocationServiceDisabledModal = showLocationServiceDisabledModal;
  * เด้งหน้าต่างคำแนะนำการแก้ไขเมื่อเปิด Location Service แล้ว แต่ยังไม่สามารถตรวจหาพิกัดได้ (เช่น อยู่ในอาคาร/จุดอับสัญญาณ)
  */
 function showLocationTroubleshootingModal(onRetry) {
-  if (window.innerWidth > 768) return;
+  if (!sltsMobileLogic()) return;
   if (Swal.isVisible()) return;
 
   lastLocationModalShownTime = Date.now();
@@ -12529,7 +12575,7 @@ function initLocationService() {
     }
 
     // ตรวจสอบสิทธิ์เบื้องต้นผ่าน Permissions API บนมือถือ (Chrome/Safari)
-    if (window.innerWidth <= 768 && navigator.permissions && navigator.permissions.query) {
+    if (sltsMobileLogic() && navigator.permissions && navigator.permissions.query) {
       try {
         navigator.permissions.query({ name: 'geolocation' }).then((result) => {
           if (result.state === 'denied') {
@@ -12538,7 +12584,7 @@ function initLocationService() {
           result.onchange = () => {
             if (result.state === 'granted') {
               fetchCurrentLocation(true);
-            } else if (result.state === 'denied' && window.innerWidth <= 768) {
+            } else if (result.state === 'denied' && sltsMobileLogic()) {
               showLocationServiceDisabledModal('PERMISSION_DENIED');
             }
           };
@@ -12548,12 +12594,12 @@ function initLocationService() {
 
     // บนมือถือ (<= 768px): ดึงพิกัดและเริ่ม interval ตรวจจับพิกัดสด
     // บน Desktop (> 768px): ไม่รัน interval อัปเดตพิกัดอัตโนมัติ เพื่อให้ผู้ใช้พิมพ์แก้ไขหรือรับพิกัดจากรูปภาพได้โดยไม่ถูกเขียนทับ
-    if (window.innerWidth <= 768) {
+    if (sltsMobileLogic()) {
       fetchCurrentLocation(true);
       startLocationInterval();
     }
   } else {
-    if (window.innerWidth <= 768) {
+    if (sltsMobileLogic()) {
       showLocationServiceDisabledModal('NOT_SUPPORTED');
     }
   }
@@ -12566,7 +12612,7 @@ function startLocationInterval() {
     clearInterval(state.locationIntervalId);
   }
   // รันเฉพาะบนอุปกรณ์หน้าจอขนาดเล็ก (Mobile <= 768px) เท่านั้น - ตรวจสอบพิกัดเบื้องหลังทุก 5 วินาทีเพื่อประหยัดแบตเตอรี่
-  if (window.innerWidth <= 768) {
+  if (sltsMobileLogic()) {
     state.locationIntervalId = setInterval(() => {
       fetchCurrentLocation(false);
     }, 5000);
@@ -12580,7 +12626,7 @@ function startLocationInterval() {
  */
 function fetchCurrentLocation(isManual = false, isFallbackPhase = false, callback = null) {
   if (!navigator.geolocation) {
-    if (window.innerWidth <= 768 && (isManual || Date.now() - lastLocationModalShownTime > LOCATION_MODAL_COOLDOWN_MS)) {
+    if (sltsMobileLogic() && (isManual || Date.now() - lastLocationModalShownTime > LOCATION_MODAL_COOLDOWN_MS)) {
       showLocationServiceDisabledModal('NOT_SUPPORTED');
     }
     if (callback) callback(false, { code: 0, message: 'Geolocation not supported' });
@@ -12638,7 +12684,11 @@ function fetchCurrentLocation(isManual = false, isFallbackPhase = false, callbac
 
       // บนหน้าจอ Desktop (> 768px): จะอัปเดตช่องพิกัดเฉพาะเมื่อผู้ใช้กดปุ่ม 'เช็คพิกัดใหม่' ด้วยตนเอง (isManual = true) เท่านั้น
       // ไม่ทำการเขียนทับอัตโนมัติ เพื่อป้องกันการทับค่าที่ผู้ใช้พิมพ์แก้ไข หรือค่าที่ตรวจพบจากภาพถ่าย
-      const shouldUpdateForm = (window.innerWidth <= 768) ? (!state.isManuallyEditedCoords || isManual) : isManual;
+      // v2.2 (แก้บั๊ก): ขณะแนบรูปที่อัปโหลดเอง ห้ามเอา GPS ปัจจุบันของเครื่องไปเขียนทับพิกัดที่อ่านได้จากรูป
+      // (เดิมตัวจับเวลาพิกัดเขียนทับช่อง m_coords ทุกรอบ ทำให้พิกัดที่บันทึกไม่ตรงกับในภาพ)
+      const photoCoordsLocked = !!(state.attachedManualUpload && state.attachedManualUpload.attachedImage);
+      const shouldUpdateForm = photoCoordsLocked ? false
+        : ((sltsMobileLogic()) ? (!state.isManuallyEditedCoords || isManual) : isManual);
 
       if (shouldUpdateForm) {
         if (elements.coordinatesInput) {
@@ -12649,7 +12699,7 @@ function fetchCurrentLocation(isManual = false, isFallbackPhase = false, callbac
           modalCoordInput.value = `${state.lat.toFixed(6)}, ${state.lng.toFixed(6)}`;
         }
         state.isManuallyEditedCoords = false;
-        if (isManual && window.innerWidth > 768) {
+        if (isManual && !sltsMobileLogic()) {
           autoFillAddressFromCoordinates(state.lat, state.lng, 'GPS ปัจจุบัน');
         }
       }
@@ -12691,7 +12741,7 @@ function fetchCurrentLocation(isManual = false, isFallbackPhase = false, callbac
       }
 
       // ตรวจสอบการแจ้งเตือน Modal บนมือถือ
-      if (window.innerWidth <= 768) {
+      if (sltsMobileLogic()) {
         const canShow = isManual || (Date.now() - lastLocationModalShownTime > LOCATION_MODAL_COOLDOWN_MS);
         if (canShow) {
           if (error.code === error.PERMISSION_DENIED) {
@@ -12764,7 +12814,7 @@ function initCameraEvents() {
 
   if (elements.btnCloseCamera) {
     elements.btnCloseCamera.addEventListener('click', () => {
-      if (window.innerWidth < 768) {
+      if (sltsMobileLogic()) {
         showMobileSummonsFormModal(true);
       } else {
         switchTab('table');
@@ -12893,7 +12943,7 @@ function initCameraResumeLifecycle() {
           }
 
           // ฟื้นฟู GPS Polling Interval ที่หยุดไว้ขณะพับหน้าจอ
-          if (!state.locationIntervalId && window.innerWidth <= 768 && typeof startLocationInterval === 'function') {
+          if (!state.locationIntervalId && sltsMobileLogic() && typeof startLocationInterval === 'function') {
             startLocationInterval();
           }
         }
@@ -12938,7 +12988,7 @@ function initCameraResumeLifecycle() {
  * 2. หากไม่พบ EXIF ให้ใช้ OCR สแกนข้อความบนภาพ (เน้นโซนล่างและลายน้ำ)
  */
 async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
-  if (window.innerWidth <= 768) return null;
+  if (sltsMobileLogic()) return null;
 
   const scanningNotice = document.getElementById('desktopGpsScanningNotice');
   const detectNotice = document.getElementById('desktopGpsDetectNotice');
@@ -12963,6 +13013,16 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
       }
     } catch (err) {
       console.warn('[GPS Detection] EXIF error:', err);
+    }
+  }
+
+  // 1.5 (v2.2): อ่านลายน้ำพิกัดมุมขวาล่างแบบเร็ว (ภาษาอังกฤษ + ปรับภาพขาวดำ) ก่อน OCR เต็มภาพ
+  if (!result && dataUrl && window.SLTS && SLTS.geo) {
+    try {
+      const wm = await SLTS.geo.readWatermark(dataUrl);
+      if (wm) result = { lat: wm.lat, lng: wm.lng, source: 'ocr' };
+    } catch (wmErr) {
+      console.warn('[GPS Detection] watermark OCR error:', wmErr);
     }
   }
 
@@ -13187,7 +13247,7 @@ function initDesktopUploadEvents() {
         }
 
         // ตรวจสอบและดึงพิกัด GPS จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
-        if (window.innerWidth > 768) {
+        if (!sltsMobileLogic()) {
           const gpsResult = await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
           if (gpsResult && typeof gpsResult.lat === 'number' && typeof gpsResult.lng === 'number') {
             state.desktopPhotoHadGps = true;
@@ -13324,7 +13384,7 @@ async function handleDesktopUpload() {
   }
 
   // 3. ตรวจสอบกรณีภาพที่แนบไม่มีพิกัดในตัวภาพ (เฉพาะ Desktop > 768px)
-  if (window.innerWidth > 768 && state.desktopPhotoHadGps === false) {
+  if (!sltsMobileLogic() && state.desktopPhotoHadGps === false) {
     const currentLat = state.lat;
     const currentLng = state.lng;
     const baseline = state.desktopBaselineLocation;
@@ -14279,7 +14339,7 @@ async function openCameraModal() {
   // 1. ดึงพิกัด Latitude, Longitude ทันทีเป็นอันดับต้นที่สุดเสมอเมื่อเข้าสู่โหมดกล้อง (isManual = true เพื่อบังคับเช็คพิกัดสดและเตือนทันทีหาก Location Service ปิดอยู่)
   if (typeof fetchCurrentLocation === 'function') {
     fetchCurrentLocation(true, false, (success, err) => {
-      if (!success && window.innerWidth <= 768) {
+      if (!success && sltsMobileLogic()) {
         if (err && (err.code === 1 || err.code === 2)) {
           showLocationServiceDisabledModal(err.code === 1 ? 'PERMISSION_DENIED' : 'POSITION_UNAVAILABLE');
         }
@@ -14707,7 +14767,7 @@ async function startCameraStream() {
   }
 
   try {
-    const isMobile = window.innerWidth < 768;
+    const isMobile = sltsMobileLogic();
     const constraints = {
       video: {
         facingMode: { ideal: state.facingMode || 'environment' },
@@ -21994,7 +22054,7 @@ window.sendActiveRouteToMobileHandoff = async function(targetStop = null) {
  * - บนมือถือ: แสดงเป็นแถบสีเขียวลอยตัวขึ้นมา 2 วินาที
  */
 window.showHandoffSentFeedback = function(message, detailText = '') {
-  if (window.innerWidth <= 768) {
+  if (sltsMobileLogic()) {
     const pill = document.getElementById('mobileHandoffPillBanner');
     const pillTitle = document.getElementById('mobileHandoffPillTitle');
     const pillSub = document.getElementById('mobileHandoffPillSub');
@@ -22544,7 +22604,7 @@ window.loadRouteStopIntoSummonsFormAndCamera = async function(stopIndex) {
   updateCaptureButtonState();
 
   // 6. เปิดกล้องทันทีบนมือถือ หรือสลับไปยังฟอร์มบน Desktop
-  const isMobile = window.innerWidth <= 768;
+  const isMobile = sltsMobileLogic();
   if (isMobile) {
     await openCameraModal();
   } else {
@@ -22858,6 +22918,8 @@ window.saveRouteToServer = function(routeData = null) {
         routeRoadPolyline: compressPolylineForHandoff(state.routeRoadPolylineCoords || state.mapRoutePolylineCoords),
         totalDistanceKm: state.calculatedRoadDistanceKm,
         status: 'active_route',
+        // v2.2: มือถือ/แท็บเล็ตโหมดมือถือ = เส้นทางที่ใช้งาน (active), PC = แผนที่กำลังจัด (draft) — ไม่ทับกัน
+        channel: routeData?.channel || (sltsMobileLogic() ? 'active' : 'draft'),
         timestamp: new Date().toISOString()
       };
 
@@ -22873,11 +22935,16 @@ window.saveRouteToServer = function(routeData = null) {
         } catch (bce) {}
       }
 
-      await fetch(state.appsScriptUrl, {
+      const saveRes = await fetch(state.appsScriptUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload)
       });
+      const saveJson = await saveRes.json().catch(() => null);
+      // v2.2: เซิร์ฟเวอร์แจ้งว่าเส้นทางนี้ถูกล้างไปแล้ว (เช่น ล้างจากอีกเครื่อง) → ล้างในเครื่องนี้ด้วย
+      if (saveJson && saveJson.ignored && saveJson.cleared && payload.channel === 'active' && window.SLTS && SLTS.route) {
+        SLTS.route.clearLocal('server');
+      }
     } catch (e) {
       console.warn('saveRouteToServer error:', e);
     }
@@ -22897,6 +22964,10 @@ window.fetchActiveRouteFromServer = async function() {
     const url = `${state.appsScriptUrl}?action=get_user_route&user_id=${encodeURIComponent(userId)}&_t=${Date.now()}`;
     const res = await fetch(url, { cache: 'no-store' });
     const data = await res.json();
+    if (data && data.status === 'success' && !data.hasRoute && data.cleared && window.SLTS && SLTS.route) {
+      SLTS.route.onServerCleared(data.clearedKeys || []);
+      return;
+    }
     if (data && data.status === 'success' && data.hasRoute && data.route) {
       const r = data.route;
       if (!r || r.status === 'cleared') return;
@@ -22928,7 +22999,7 @@ window.fetchActiveRouteFromServer = async function() {
         // บนหน้าจอ PC (จอ > 768px): แยกข้อมูลอย่างเด็ดขาด
         // อัปเดตเฉพาะ state.routeBatchStops และ Tab 4 ("รายการส่งหมายรอบนี้")
         // ไม่แตะต้อง state.currentRouteStops ที่กำลังจัดเตรียม/วางแผนอยู่ในหน้า "แผนที่และหมุด" (Tab 3)
-        if (window.innerWidth > 768) {
+        if (!sltsMobileLogic()) {
           state.routeBatchStops = r.stops;
           if (typeof syncStopsWithDeliveryStatus === 'function') {
             syncStopsWithDeliveryStatus(state.routeBatchStops);
@@ -23174,7 +23245,7 @@ window.initMobileHandoffReceiver = function() {
           // ตรวจสอบกรณีเป็นคำสั่งล้างเส้นทาง (Clear Route) ข้ามอุปกรณ์
           if (event.data.type === 'clear_user_route' || event.data.action === 'clear_user_route') {
             if (!targetUserId || targetUserId === uId) {
-              if (window.innerWidth <= 768) {
+              if (sltsMobileLogic()) {
                 state.currentRouteStops = [];
                 state.routeRoadPolylineCoords = [];
                 state.mapRoutePolylineCoords = [];
@@ -23201,7 +23272,7 @@ window.initMobileHandoffReceiver = function() {
           // ตรวจสอบกรณีเป็นการอัปเดตสถานะการส่งหมายรายจุด (Route Status Update)
           if (event.data.type === 'route_status_update') {
             if (uId && targetUserId === uId && Array.isArray(event.data.stops)) {
-              if (window.innerWidth > 768) {
+              if (!sltsMobileLogic()) {
                 state.routeBatchStops = event.data.stops;
               } else {
                 state.currentRouteStops = event.data.stops;
@@ -23230,7 +23301,7 @@ window.initMobileHandoffReceiver = function() {
   // 3. ตรวจสอบและซิงค์แคชของ User นั้นโดยเฉพาะเมื่อเริ่มต้นระบบ (Strict User Isolation)
   const activeRoute = currentUserId ? getUserActiveRoute(currentUserId) : null;
   if (activeRoute && Array.isArray(activeRoute.stops) && activeRoute.stops.length > 0) {
-    if (window.innerWidth <= 768) {
+    if (sltsMobileLogic()) {
       state.currentRouteStops = deduplicateRouteStops(activeRoute.stops);
       if (activeRoute.startLocation) state.routeStartLocation = activeRoute.startLocation;
       if (activeRoute.endLocation) state.routeEndLocation = activeRoute.endLocation;
@@ -23245,7 +23316,7 @@ window.initMobileHandoffReceiver = function() {
       state.routeBatchStops = deduplicateRouteStops(activeRoute.stops);
     }
   } else {
-    if (window.innerWidth <= 768) {
+    if (sltsMobileLogic()) {
       state.currentRouteStops = [];
       updateMobileRouteMapButtonBadge(0);
     } else {
@@ -23260,6 +23331,8 @@ window.initMobileHandoffReceiver = function() {
   // 5. Polling ตรวจสอบจาก Database (Google Apps Script API) ทุก 2.5 วินาที สำหรับผู้ใช้ที่ล็อกอินอยู่
   let handoffPollTick = 0;
   handoffPollInterval = setInterval(() => {
+    // v2.2: ประหยัดแบตเตอรี่/เน็ตมือถือ — ไม่ถามเซิร์ฟเวอร์ขณะแอปอยู่เบื้องหลัง (กลับมาหน้าแอปแล้วตรวจทันที)
+    if (document.hidden) return;
     checkHandoffForCurrentUser();
     handoffPollTick++;
     if (handoffPollTick % 2 === 0 && typeof fetchActiveRouteFromServer === 'function') {
@@ -23311,7 +23384,7 @@ function checkLocalHandoffData() {
     if (handoff.status === 'pending' && handoff.timestamp !== lastReceivedHandoffTime && handoff.timestamp !== window.dismissedHandoffTime) {
       applyReceivedHandoff(handoff);
     } else if (handoff.status === 'shared_active' || handoff.status === 'active_route') {
-      if (window.innerWidth <= 768) {
+      if (sltsMobileLogic()) {
         if ((!state.currentRouteStops || state.currentRouteStops.length === 0) && Array.isArray(handoff.stops) && handoff.stops.length > 0) {
           state.currentRouteStops = handoff.stops;
           updateMobileRouteMapButtonBadge(handoff.stops.length);
@@ -23449,7 +23522,7 @@ function applyReceivedHandoff(handoff) {
   // ไม่ต้องแสดง modal กลางหน้าจอ ให้แสดงแถบสีเขียวลอยตัวขึ้นมา 3-5 วินาที
   // แล้วจางหายไปอย่างราบรื่น และให้แสดงจำนวนจุดส่งหมายที่ปุ่มแผนที่ด้วย
   // -------------------------------------------------------------
-  if (window.innerWidth <= 768) {
+  if (sltsMobileLogic()) {
     if (state.appsScriptUrl && navigator.onLine) {
       fetch(state.appsScriptUrl, {
         method: 'POST',
@@ -23673,7 +23746,7 @@ function applyReceivedHandoff(handoff) {
 
         updateMobileRouteMapButtonBadge(handoff.stops ? handoff.stops.length : 0);
 
-        if (window.innerWidth <= 768) {
+        if (sltsMobileLogic()) {
           showMobileRouteMapModal();
         } else {
           switchTab('map');
@@ -23686,7 +23759,7 @@ function applyReceivedHandoff(handoff) {
           }
         }
 
-        if (window.innerWidth > 768) {
+        if (!sltsMobileLogic()) {
           Swal.fire({
             toast: true,
             position: 'top-end',
@@ -23794,7 +23867,7 @@ function applyReceivedHandoff(handoff) {
       const prov = state.selectedProvince || 'อุดรธานี';
       provTextEl.textContent = `📍 จ.${prov} (${handoff.stops ? handoff.stops.length : 0} จุดหมาย)`;
     }
-    if (window.innerWidth > 768) {
+    if (!sltsMobileLogic()) {
       Swal.fire({
         toast: true,
         position: 'top-end',
@@ -23843,7 +23916,7 @@ function applyReceivedHandoff(handoff) {
       if (res.isConfirmed) {
         loadRouteStopIntoSummonsFormAndCamera(0);
       } else if (res.isDenied) {
-        if (window.innerWidth <= 768) {
+        if (sltsMobileLogic()) {
           showMobileRouteMapModal();
         } else {
           switchTab('map');
@@ -23998,18 +24071,16 @@ window.clearMobileRouteHandoff = function(event) {
   }
 
   // 2. แจ้ง Server ผ่าน API เพื่อปลด pending handoff และล้าง active route
-  if (state.appsScriptUrl && navigator.onLine) {
-    candidateUserIds.forEach(uId => {
-      fetch(state.appsScriptUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'clear_user_route',
-          user_id: uId,
-          timestamp: new Date().toISOString()
-        })
-      }).catch(() => {});
-    });
+  // v2.2: ล้างเฉพาะบัญชีที่ล็อกอิน (เซิร์ฟเวอร์ไม่อนุญาตให้ล้างของผู้อื่น) และจำไว้ส่งซ้ำถ้ายังออฟไลน์
+  if (window.SLTS && SLTS.route) {
+    SLTS.route.clearLocal('user');
+    SLTS.route.requestServerClear(rawAuth, 'active');
+  } else if (state.appsScriptUrl && navigator.onLine && rawAuth) {
+    fetch(state.appsScriptUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'clear_user_route', user_id: rawAuth, channel: 'active', timestamp: new Date().toISOString() })
+    }).catch(() => {});
   }
 
   // 3. ปิดการแจ้งเตือนบนหน้าจอกล้อง และรีเซ็ตปุ่มแผนที่

@@ -229,6 +229,45 @@ test('share_route to users + pending/ack/clear lifecycle', async () => {
   assert.equal(c.hasRoute, false);
 });
 
+test('route channels: PC draft does not overwrite active route; cleared route is not resurrected', async () => {
+  const nidToken = (await call('login', { username: 'nid', password: 'pass5678' })).token;
+  const A = [{ id: 's1', caseNumber: 'อ1/2569' }, { id: 's2', caseNumber: 'อ2/2569' }];
+  // PC ส่งเส้นทางไปมือถือ (active)
+  await call('send_handoff', { user_id: 'nid', stops: A }, nidToken);
+  // PC ยังจัดแผนต่อ (draft) — ต้องไม่ทับเส้นทางในมือถือ
+  await call('save_user_route', { user_id: 'nid', channel: 'draft', stops: [{ id: 'x9' }] }, nidToken);
+  let act = await call('get_user_route', { user_id: 'nid' }, nidToken, 'GET');
+  assert.deepEqual(act.route.stops.map((x) => x.id), ['s1', 's2']);
+  const t0 = act.route.timestamp;
+  assert.match(t0, /Z$/, 'ISO timestamp');
+  // มือถือซิงค์สถานะ (เส้นทางเดิม) → เวลาเส้นทางไม่เปลี่ยน
+  await call('save_user_route', { user_id: 'nid', stops: [{ ...A[0], deliveryStatus: 'uploaded' }, A[1]] }, nidToken);
+  act = await call('get_user_route', { user_id: 'nid' }, nidToken, 'GET');
+  assert.equal(act.route.timestamp, t0);
+  assert.equal(act.route.stops[0].deliveryStatus, 'uploaded');
+  // มือถือล้างเส้นทาง
+  await call('clear_user_route', { user_id: 'nid' }, nidToken);
+  act = await call('get_user_route', { user_id: 'nid' }, nidToken, 'GET');
+  assert.equal(act.hasRoute, false);
+  assert.equal(act.cleared, true);
+  // การซิงค์ค้างของเส้นทางเดิมต้องไม่ทำให้กลับมา
+  const late = await call('save_user_route', { user_id: 'nid', stops: A }, nidToken);
+  assert.equal(late.ignored, true);
+  act = await call('get_user_route', { user_id: 'nid' }, nidToken, 'GET');
+  assert.equal(act.hasRoute, false);
+  // draft ของ PC ยังอยู่
+  const dr = await call('get_user_route', { user_id: 'nid', channel: 'draft' }, nidToken, 'GET');
+  assert.equal(dr.route.stops[0].id, 'x9');
+  // PC ส่งเส้นทางเดิมซ้ำโดยตั้งใจ → ได้รับใหม่
+  await call('send_handoff', { user_id: 'nid', stops: A }, nidToken);
+  act = await call('get_user_route', { user_id: 'nid' }, nidToken, 'GET');
+  assert.equal(act.hasPending, true);
+  // ล้างทั้งหมด
+  await call('clear_user_route', { user_id: 'nid', channel: 'all' }, nidToken);
+  const d2 = await call('get_user_route', { user_id: 'nid', channel: 'draft' }, nidToken, 'GET');
+  assert.equal(d2.hasRoute, false);
+});
+
 test('password change requires current password and rotates token', async () => {
   // ครั้งแรก (แอดมินสร้าง/รีเซ็ตให้) ระบบบังคับเปลี่ยนรหัสโดยไม่ต้องกรอกรหัสเดิม
   const first = await call('update_user_password', { username: 'somchai', password: 'pass1234b' }, userToken);
