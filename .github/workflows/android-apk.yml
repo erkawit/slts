@@ -8,6 +8,13 @@ on:
         description: 'โดเมนเซิร์ฟเวอร์ (Vercel) ที่แอปจะเรียก API'
         required: false
         default: 'https://slts-ochre.vercel.app'
+      publish_branch:
+        description: 'ส่งไฟล์ APK ขึ้น branch apk-builds ด้วย (สำหรับดึงไปลงนามนอก CI)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -82,3 +89,13 @@ jobs:
           name: slts-android-apk
           path: out/
           retention-days: 30
+
+      - name: Publish to apk-builds branch
+        if: ${{ inputs.publish_branch }}
+        run: |
+          cd out
+          git init -q -b apk-builds
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A && git commit -q -m "APK build ${GITHUB_SHA::7}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" apk-builds
