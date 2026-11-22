@@ -35,4 +35,17 @@ const stamp = (file) => {
 stamp('index.html');
 stamp('sw.js');
 
+// แอป Android/iOS (Capacitor): ไฟล์หน้าเว็บอยู่ในเครื่อง จึงต้องฝังโดเมนเซิร์ฟเวอร์ให้เรียก API ได้
+// ใช้: SLTS_API_BASE=https://slts-ochre.vercel.app node build-public.js
+if (process.env.SLTS_API_BASE) {
+  const base = process.env.SLTS_API_BASE.replace(/\/+$/, '');
+  const pub = (process.env.SLTS_PUBLIC_WEB_URL || base).replace(/\/+$/, '');
+  const cfgPath = path.join(publicDir, 'js', 'config.js');
+  let cfg = fs.readFileSync(cfgPath, 'utf8');
+  cfg = cfg.replace(/API_BASE:\s*''/, `API_BASE: '${base}'`).replace(/PUBLIC_WEB_URL:\s*''/, `PUBLIC_WEB_URL: '${pub}'`);
+  if (!cfg.includes(`API_BASE: '${base}'`)) throw new Error('ไม่พบ API_BASE ใน js/config.js');
+  fs.writeFileSync(cfgPath, cfg);
+  console.log(`Native build: API_BASE = ${base}`);
+}
+
 console.log(`Successfully synced web assets into public/ (v${version})`);

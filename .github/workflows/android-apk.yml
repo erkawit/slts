@@ -1,0 +1,82 @@
+name: Android APK
+
+# สร้างไฟล์ติดตั้งแอป Android (APK) — กด Run workflow ในแท็บ Actions หรือสั่ง `gh workflow run android-apk.yml`
+on:
+  workflow_dispatch:
+    inputs:
+      api_base:
+        description: 'โดเมนเซิร์ฟเวอร์ (Vercel) ที่แอปจะเรียก API'
+        required: false
+        default: 'https://slts-ochre.vercel.app'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets (bundled into the app)
+        env:
+          SLTS_API_BASE: ${{ inputs.api_base || 'https://slts-ochre.vercel.app' }}
+        run: node build-public.js
+
+      - name: Capacitor sync
+        run: npx cap sync android
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.SLTS_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/slts-release.jks"
+            echo "SLTS_KEYSTORE_FILE=$RUNNER_TEMP/slts-release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::ไม่มี SLTS_KEYSTORE_BASE64 — จะสร้าง APK แบบ debug แทน"
+          fi
+
+      - name: Build APK
+        working-directory: android
+        env:
+          SLTS_KEYSTORE_PASSWORD: ${{ secrets.SLTS_KEYSTORE_PASSWORD }}
+          SLTS_KEY_ALIAS: ${{ secrets.SLTS_KEY_ALIAS }}
+          SLTS_KEY_PASSWORD: ${{ secrets.SLTS_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Collect APK
+        run: |
+          VER=$(node -p "require('./version.json').version")
+          mkdir -p out
+          SIGNED=$(ls android/app/build/outputs/apk/release/*-release.apk 2>/dev/null | grep -v unsigned | head -1 || true)
+          if [ -n "$SIGNED" ]; then
+            cp "$SIGNED" "out/SLTS-v${VER}.apk"
+          else
+            # ยังไม่ได้ตั้ง Secrets → ส่ง APK ที่ยังไม่ลงนาม + เครื่องมือลงนาม (apksigner/zipalign) ไปลงนามนอก CI
+            cp android/app/build/outputs/apk/release/*-unsigned.apk "out/SLTS-v${VER}-unsigned.apk"
+            BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+            mkdir -p out/tools && cp "$BT/lib/apksigner.jar" "$BT/zipalign" out/tools/ && cp -r "$BT/lib64" out/tools/ 2>/dev/null || true
+          fi
+          ls -laR out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slts-android-apk
+          path: out/
+          retention-days: 30

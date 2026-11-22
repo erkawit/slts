@@ -1436,7 +1436,9 @@
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>
-    if ('serviceWorker' in navigator) {
+    // แอป Android/iOS: ไฟล์อยู่ในเครื่องแล้ว ไม่ต้องใช้ Service Worker (กันแคชไฟล์เก่าค้างหลังอัปเดตแอป)
+    const sltsIsNativeApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    if ('serviceWorker' in navigator && !sltsIsNativeApp) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js?v=__APP_VERSION__')
           .then((reg) => {

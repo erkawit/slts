@@ -43,5 +43,5 @@
 
     <!-- คุณสมบัติฮาร์ดแวร์ที่แอปต้องการ -->
     <uses-feature android:name="android.hardware.camera" android:required="true" />
-    <uses-feature android:name="android.hardware.location.gps" android:required="true" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>
