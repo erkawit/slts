@@ -311,6 +311,33 @@ test('login rate limit after repeated failures', async () => {
   assert.equal(r.http, 429);
 });
 
+test('data_version changes only when records change (v2.3)', async () => {
+  const v1 = await call('data_version', {}, adminToken, 'GET');
+  assert.equal(v1.status, 'success');
+  const v2 = await call('data_version', {}, adminToken, 'GET');
+  assert.equal(v2.version, v1.version);
+  const d = await call('get_data', {}, adminToken, 'GET');
+  assert.equal(d.version, v1.version);
+  await call('upload_image', { caseNumber: 'พ.999/2569', fileName: 'v.jpg', imageBase64: 'data:image/jpeg;base64,/9j/4AAQ', clientUploadId: 'ver-1' }, adminToken);
+  const v3 = await call('data_version', {}, adminToken, 'GET');
+  assert.notEqual(v3.version, v1.version);
+});
+
+test('ip_locate uses Vercel geo headers, needs login (v2.3)', async () => {
+  const anon = await call('ip_locate', {}, null, 'GET');
+  assert.equal(anon.http, 401);
+  const none = await call('ip_locate', {}, adminToken, 'GET');
+  assert.equal(none.status, 'error');
+  const res = await fetch(`${apiBase}/api/slts?action=ip_locate`, { headers: {
+    Authorization: 'Bearer ' + adminToken, 'x-vercel-ip-latitude': '17.4138', 'x-vercel-ip-longitude': '102.7872',
+    'x-vercel-ip-city': encodeURIComponent('Udon Thani'), 'x-vercel-ip-country': 'TH' } });
+  const j = await res.json();
+  assert.equal(j.status, 'success');
+  assert.equal(j.lat, 17.4138);
+  assert.equal(j.approximate, true);
+  assert.equal(j.city, 'Udon Thani');
+});
+
 test('thai date parsing', () => {
   const { parseThaiDateTime } = require('../api/slts')._internal;
   assert.equal(parseThaiDateTime('25 ส.ค. 2569 16:15:32').toISOString(), '2026-08-25T09:15:32.000Z');

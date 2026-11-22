@@ -464,10 +464,44 @@ actions.sync_all_users = async (data, ctx) => {
 actions.sync_users_structure = actions.sync_all_users;
 
 // ---------- summons records ----------
+async function summonsVersion() {
+  const { rows } = await db.query(
+    "SELECT COUNT(*) FILTER (WHERE deleted_at IS NULL)::int AS n, COALESCE(MAX(id),0)::bigint AS max_id, " +
+    "COALESCE(EXTRACT(EPOCH FROM MAX(updated_at))*1000,0)::bigint AS ts FROM summons");
+  const r = rows[0] || {};
+  return `${r.n || 0}-${r.max_id || 0}-${r.ts || 0}`;
+}
+
 actions.get_data = async (data, ctx) => {
   requireUser(ctx);
-  const { rows } = await db.query('SELECT * FROM summons WHERE deleted_at IS NULL ORDER BY id ASC');
-  return { status: 'success', data: rows.map(summonsRowToSheet), count: rows.length };
+  const [{ rows }, version] = await Promise.all([
+    db.query('SELECT * FROM summons WHERE deleted_at IS NULL ORDER BY id ASC'),
+    summonsVersion()
+  ]);
+  return { status: 'success', data: rows.map(summonsRowToSheet), count: rows.length, version };
+};
+
+// v2.3: ตรวจว่าข้อมูลหมายเปลี่ยนหรือไม่ (เบามาก) — หน้าเว็บจะดึงข้อมูลทั้งชุดเฉพาะเมื่อเวอร์ชันเปลี่ยน
+actions.data_version = async (data, ctx) => {
+  requireUser(ctx);
+  return { status: 'success', version: await summonsVersion() };
+};
+
+// v2.3: หาตำแหน่งโดยประมาณจากเครือข่ายอินเทอร์เน็ต (IP) เมื่อเครื่องใช้ Location Service ไม่ได้
+// ใช้ข้อมูลที่ Vercel แนบมากับคำขอ (x-vercel-ip-*) — ไม่ส่ง IP ไปบริการภายนอก ความแม่นยำระดับเมือง/จังหวัด
+actions.ip_locate = async (data, ctx) => {
+  requireUser(ctx);
+  const h = ctx.headers || {};
+  const lat = Number(h['x-vercel-ip-latitude']);
+  const lng = Number(h['x-vercel-ip-longitude']);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+    return { status: 'error', message: 'ไม่สามารถระบุตำแหน่งจากเครือข่ายได้ (ระบบไม่ได้รับข้อมูลตำแหน่งของ IP)' };
+  }
+  const dec = (v) => { try { return decodeURIComponent(String(v || '')); } catch (_) { return String(v || ''); } };
+  return {
+    status: 'success', lat, lng, approximate: true, source: 'ip', accuracyKm: 25,
+    city: dec(h['x-vercel-ip-city']), region: dec(h['x-vercel-ip-country-region']), country: dec(h['x-vercel-ip-country'])
+  };
 };
 actions.get_summons = actions.get_data;
 
@@ -974,7 +1008,7 @@ module.exports = async function handler(req, res) {
 
   const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
   const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
-  const ctx = { action: '', user: null, origin: host ? `${host.startsWith('localhost') || host.startsWith('127.') ? 'http' : proto}://${host}` : '' };
+  const ctx = { action: '', user: null, headers: req.headers || {}, origin: host ? `${host.startsWith('localhost') || host.startsWith('127.') ? 'http' : proto}://${host}` : '' };
   let status = 200;
   let out;
   try {
@@ -987,7 +1021,7 @@ module.exports = async function handler(req, res) {
     const fn = Object.prototype.hasOwnProperty.call(actions, action) ? actions[action] : null;
     if (!fn) throw new HttpError(400, `ไม่รู้จักคำสั่ง (action): ${action || '-'}`, 'UNKNOWN_ACTION');
     if (req.method === 'GET' && !['health', 'get_version', 'get_data', 'get_summons', 'get_users', 'get_user_route', 'get_pending_handoff',
-      'get_latest_handoff', 'search_place', 'geocode', 'get_share_code', 'list_share_codes', 'list_errors', 'get_activity_logs', 'me', 'sync_all_users', 'sync_users_structure'].includes(action)) {
+      'get_latest_handoff', 'data_version', 'ip_locate', 'search_place', 'geocode', 'get_share_code', 'list_share_codes', 'list_errors', 'get_activity_logs', 'me', 'sync_all_users', 'sync_users_structure'].includes(action)) {
       throw new HttpError(405, 'คำสั่งนี้ต้องใช้ POST');
     }
     if (!PUBLIC_ACTIONS.has(action) || action === 'log_error' || action === 'logout') {

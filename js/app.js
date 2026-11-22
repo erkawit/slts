@@ -5053,6 +5053,7 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
       const cachedRows = JSON.parse(cachedDataStr);
       const timeStr = new Date(lastFetchTime).toLocaleTimeString('th-TH');
       updateCacheBadgeUI(true, timeStr);
+      window.__sltsTableRenderedOnce = true;
       renderDataTable(cachedRows);
       return;
     } catch (e) {
@@ -5072,6 +5073,25 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
 
   let rows = null;
 
+  // v2.3 (ประสิทธิภาพ): ถ้ามีข้อมูลในเครื่องแล้ว ให้ถามเซิร์ฟเวอร์ก่อนว่าข้อมูลเปลี่ยนไหม (คำขอเล็กมาก)
+  // ถ้าไม่เปลี่ยน → ไม่ต้องโหลดทั้งตาราง/ไม่ต้องวาดตารางใหม่ (เดิมโหลด+วาดใหม่ทั้งหมดทุก 4 วินาทีในหน้าจัดเส้นทาง)
+  const cachedVersion = localStorage.getItem('slts_sheet_data_version_v23') || '';
+  if (cachedDataStr && cachedVersion) {
+    try {
+      const vRes = await fetch(`${state.appsScriptUrl}?action=data_version&_t=${now}`, { cache: 'no-store' });
+      const vJson = await vRes.json();
+      if (vJson && vJson.status === 'success' && vJson.version === cachedVersion) {
+        localStorage.setItem(CACHE_KEY_SHEET_TIME, String(Date.now()));
+        updateCacheBadgeUI(false, new Date().toLocaleTimeString('th-TH'));
+        if (!window.__sltsTableRenderedOnce) {
+          window.__sltsTableRenderedOnce = true;
+          renderDataTable(JSON.parse(cachedDataStr));
+        }
+        return { changed: false };
+      }
+    } catch (e) { /* ตรวจเวอร์ชันไม่ได้ → โหลดเต็มตามปกติ */ }
+  }
+
   // 2.1 ลองดึงผ่าน GET API: ?action=get_data
   try {
     const apiUrl = `${state.appsScriptUrl}?action=get_data&_t=${now}`;
@@ -5080,6 +5100,10 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
 
     if (jsonResult && jsonResult.status === 'success' && Array.isArray(jsonResult.data)) {
       rows = jsonResult.data;
+      try {
+        if (jsonResult.version) localStorage.setItem('slts_sheet_data_version_v23', jsonResult.version);
+        else localStorage.removeItem('slts_sheet_data_version_v23');
+      } catch (_) {}
     }
   } catch (e) {
     console.warn('GAS GET get_data failed:', e);
@@ -5134,6 +5158,7 @@ window.loadGoogleSheetData = async function(forceRefresh = false, silent = false
 
     const timeStr = new Date().toLocaleTimeString('th-TH');
     updateCacheBadgeUI(false, timeStr);
+    window.__sltsTableRenderedOnce = true;
     renderDataTable(rows);
 
     // หากเปิดหน้าแผนที่อยู่และมีรายการส่งหมาย ให้รีเฟรชภาพ Preview และข้อมูลหมุดทันทีที่ข้อมูลชีตพร้อม
@@ -8506,7 +8531,10 @@ function initProvinceSystem() {
     });
   }
 
-  updateDistricts(state.selectedProvince);
+  // v2.3: โหลดอำเภอ/ตำบลล่าสุดที่จำไว้ (แม้ปิดแอปไปแล้ว)
+  updateDistricts(state.selectedProvince,
+    localStorage.getItem('slts_selected_district') || state.selectedDistrict || null,
+    localStorage.getItem('slts_selected_subdistrict') || state.selectedSubdistrict || null);
   updateFloatingProvinceBadge();
 
   // กำหนดประเภทศาลบน Desktop เริ่มต้น
@@ -8614,6 +8642,12 @@ function updateDistricts(provinceName, selectDistrict = null, selectSubdistrict 
       const matched = districts.find(d => d.includes(cleanSelDist) || cleanSelDist.includes(d));
       if (matched) chosenDistrict = matched;
     }
+  }
+  // v2.3 (แก้บั๊ก): เดิมถ้าไม่ระบุอำเภอจะเลือกอำเภอแรกของจังหวัดเสมอ แล้วบันทึกทับค่าเดิม
+  // ทำให้เปิดแอปใหม่ทุกครั้ง อำเภอ/ตำบลที่ใช้ล่าสุดหายไป → ใช้ค่าล่าสุดที่จำไว้ก่อน
+  if (!chosenDistrict) {
+    const rememberedDist = state.selectedDistrict || localStorage.getItem('slts_selected_district') || '';
+    if (rememberedDist && districts.includes(rememberedDist)) chosenDistrict = rememberedDist;
   }
   if (!chosenDistrict) {
     chosenDistrict = districts[0] || '';
@@ -9014,11 +9048,13 @@ function matchWithThailandDatabase(rawProv, rawDist, rawSub, fullDisplayName = '
 /**
  * นำพิกัดไปอ้างอิงและเติม อำเภอ/ตำบล ในฟอร์มให้อัตโนมัติ (Auto-fill Address from Coordinates)
  */
-window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = 'พิกัด') {
+window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = 'พิกัด', opts = {}) {
   if (!lat || !lng) return null;
+  // v2.3: พิกัดที่อ่านจากภาพถ่าย → ใช้ที่ตั้งตามพิกัดของภาพเสมอ (ยกเว้นจากกฎ "จำที่ตั้งล่าสุด")
+  const fromPhoto = !!(opts && opts.force) || sourceLabel === 'พิกัดภาพถ่าย';
 
   // บนมือถือ (<= 768px): ห้ามเขียนทับอำเภอและตำบลที่ผู้ใช้กรอกหรือเลือกไว้แล้วโดยเด็ดขาด
-  if (sltsMobileLogic() && state.selectedSubdistrict) {
+  if (!fromPhoto && sltsMobileLogic() && state.selectedSubdistrict) {
     console.log('[GPS] Mobile device: subdistrict already selected (' + state.selectedSubdistrict + '), skipping auto address overwrite');
     return null;
   }
@@ -9059,6 +9095,13 @@ window.autoFillAddressFromCoordinates = async function(lat, lng, sourceLabel = '
     updateSubdistricts(result.province || state.selectedProvince, result.district || elements.districtSelect?.value, result.subdistrict);
     elements.subdistrictSelect.value = result.subdistrict;
     changesApplied.push(`ต.${result.subdistrict}`);
+  }
+
+  // 3.5 ค่าชั่วคราวของฟอร์มมือถือ (ฟอร์มจะแสดงอำเภอ/ตำบลตามพิกัดภาพเมื่อเปิดขึ้นมา)
+  if (fromPhoto) {
+    state.tempModalValues = state.tempModalValues || {};
+    if (result.district) state.tempModalValues.district = result.district;
+    if (result.subdistrict) state.tempModalValues.subdistrict = result.subdistrict;
   }
 
   // 4. อัปเดตฟอร์มบน Mobile Modal (ถ้าเปิดอยู่)
@@ -10326,6 +10369,14 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
             if (latInput) latInput.value = formatFullCoordinateString(extractedLat, 6);
             if (lngInput) lngInput.value = formatFullCoordinateString(extractedLng, 6);
             const srcLabel = found.source === 'exif' ? 'ข้อมูล GPS ในไฟล์ (EXIF)' : 'ลายน้ำพิกัดบนภาพ';
+            // v2.3: ดึงจังหวัด/อำเภอ/ตำบลตามพิกัดของภาพ (ต้องมีอินเทอร์เน็ต; ถ้าไม่มีจะใช้ที่ตั้งล่าสุดตามเดิม)
+            if (typeof autoFillAddressFromCoordinates === 'function') {
+              autoFillAddressFromCoordinates(found.lat, found.lng, 'พิกัดภาพถ่าย', { force: true }).then((addr) => {
+                if (addr && gpsText && (addr.district || addr.subdistrict)) {
+                  gpsText.insertAdjacentHTML('beforeend', `<br><span class="text-emerald-700 text-[11px]"><i class="fa-solid fa-map-pin mr-1"></i>ที่ตั้งตามพิกัดภาพ: ${addr.subdistrict ? 'ต.' + escapeHtml(addr.subdistrict) + ' ' : ''}${addr.district ? 'อ.' + escapeHtml(addr.district) + ' ' : ''}${addr.province ? 'จ.' + escapeHtml(addr.province) : ''}</span>`);
+                }
+              }).catch(() => {});
+            }
             if (found.source === 'watermark') {
               // ภาพมีลายน้ำพิกัดอยู่แล้ว → ไม่ประทับลายน้ำซ้ำ
               const chkWm = document.getElementById('chkMobileHasWatermark');
@@ -12614,6 +12665,7 @@ function startLocationInterval() {
   // รันเฉพาะบนอุปกรณ์หน้าจอขนาดเล็ก (Mobile <= 768px) เท่านั้น - ตรวจสอบพิกัดเบื้องหลังทุก 5 วินาทีเพื่อประหยัดแบตเตอรี่
   if (sltsMobileLogic()) {
     state.locationIntervalId = setInterval(() => {
+      if (document.hidden) return; // v2.3: ไม่ใช้ GPS ขณะแอปอยู่เบื้องหลัง (ประหยัดแบตเตอรี่)
       fetchCurrentLocation(false);
     }, 5000);
   }
@@ -12624,7 +12676,54 @@ function startLocationInterval() {
  * Phase 1: High-Accuracy Satellite GPS (ความแม่นยำสูง)
  * Phase 2: Network / Assisted Wi-Fi Positioning (ค้นหาฉับไวผ่านเครือข่ายเมื่ออยู่ในอาคาร)
  */
+/**
+ * v2.3: หาตำแหน่งโดยประมาณจากเครือข่ายอินเทอร์เน็ต (IP) — ใช้เมื่อคอมพิวเตอร์ไม่มี/ใช้ Location Service ไม่ได้
+ * ความแม่นยำระดับเมือง/จังหวัด (คลาดได้หลายสิบกิโลเมตร) จึงไม่ไปเปลี่ยนอำเภอ/ตำบลที่จำไว้ และเตือนให้ตรวจพิกัดเสมอ
+ */
+window.sltsIpLocate = async function(isManual = false, callback = null) {
+  const setStatus = (html, cls) => {
+    if (elements.locationStatus) { elements.locationStatus.innerHTML = html; elements.locationStatus.className = cls; }
+  };
+  if (!navigator.onLine) {
+    setStatus('ไม่สามารถดึงพิกัดได้ (ไม่มี Location Service และไม่ได้เชื่อมต่ออินเทอร์เน็ต)', 'text-xs text-red-500');
+    if (callback) callback(false, { code: 'OFFLINE' });
+    return null;
+  }
+  setStatus('<i class="fa-solid fa-spinner fa-spin mr-1"></i>กำลังหาตำแหน่งโดยประมาณจากเครือข่ายอินเทอร์เน็ต...', 'text-xs text-blue-600');
+  try {
+    const res = await fetch(`${state.appsScriptUrl}?action=ip_locate&_t=${Date.now()}`, { cache: 'no-store' });
+    const j = await res.json();
+    if (!j || j.status !== 'success' || !Number.isFinite(Number(j.lat)) || !Number.isFinite(Number(j.lng))) {
+      throw new Error((j && j.message) || 'ip_locate failed');
+    }
+    const lat = Number(Number(j.lat).toFixed(6)), lng = Number(Number(j.lng).toFixed(6));
+    // ใช้เป็นตำแหน่งของเครื่อง (เช่น จุดเริ่มต้นเส้นทาง/จัดกึ่งกลางแผนที่) เฉพาะเมื่อยังไม่มีพิกัดที่แม่นกว่า
+    if (!state.lat || !state.lng || state.locationSource === 'ip') {
+      state.lat = lat; state.lng = lng;
+      state.accuracy = (Number(j.accuracyKm) || 25) * 1000;
+      state.lastLocationTime = new Date();
+      state.locationSource = 'ip';
+    }
+    const place = [j.city, j.region].filter(Boolean).join(', ');
+    if (isManual) {
+      if (elements.coordinatesInput) elements.coordinatesInput.value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      state.isManuallyEditedCoords = false;
+    }
+    setStatus(`<span class="text-amber-700 font-semibold"><i class="fa-solid fa-wifi mr-1"></i>ตำแหน่งโดยประมาณจากเครือข่ายอินเทอร์เน็ต${place ? ' (' + escapeHtml(place) + ')' : ''}: ${lat.toFixed(4)}, ${lng.toFixed(4)} — คลาดเคลื่อนได้หลายสิบ กม. โปรดตรวจหรือแก้พิกัดก่อนบันทึก</span>`, 'text-xs');
+    if (callback) callback(true, { coords: { latitude: lat, longitude: lng, accuracy: state.accuracy }, approximate: true, source: 'ip' });
+    return { lat, lng, place };
+  } catch (e) {
+    setStatus('ไม่สามารถดึงพิกัดได้ ทั้งจาก Location Service และจากเครือข่ายอินเทอร์เน็ต — กรุณากรอกพิกัดเองหรือแนบภาพที่มีพิกัด', 'text-xs text-red-500');
+    if (callback) callback(false, { code: 'IP_LOCATE_FAILED' });
+    return null;
+  }
+};
+
 function fetchCurrentLocation(isManual = false, isFallbackPhase = false, callback = null) {
+  if (!navigator.geolocation && !sltsMobileLogic()) {
+    window.sltsIpLocate(isManual, callback);
+    return;
+  }
   if (!navigator.geolocation) {
     if (sltsMobileLogic() && (isManual || Date.now() - lastLocationModalShownTime > LOCATION_MODAL_COOLDOWN_MS)) {
       showLocationServiceDisabledModal('NOT_SUPPORTED');
@@ -12666,6 +12765,7 @@ function fetchCurrentLocation(isManual = false, isFallbackPhase = false, callbac
   navigator.geolocation.getCurrentPosition(
     (position) => {
       isFetchingLocation = false;
+      state.locationSource = 'gps';
       state.lat = Number(position.coords.latitude.toFixed(6));
       state.lng = Number(position.coords.longitude.toFixed(6));
       state.accuracy = Math.round(position.coords.accuracy);
@@ -12741,6 +12841,12 @@ function fetchCurrentLocation(isManual = false, isFallbackPhase = false, callbac
       }
 
       // ตรวจสอบการแจ้งเตือน Modal บนมือถือ
+      // v2.3: คอมพิวเตอร์ที่ใช้ Location Service ไม่ได้ → หาตำแหน่งโดยประมาณจากเครือข่ายอินเทอร์เน็ต (IP)
+      if (!sltsMobileLogic() && typeof window.sltsIpLocate === 'function') {
+        window.sltsIpLocate(isManual, callback);
+        return;
+      }
+
       if (sltsMobileLogic()) {
         const canShow = isManual || (Date.now() - lastLocationModalShownTime > LOCATION_MODAL_COOLDOWN_MS);
         if (canShow) {
@@ -13130,7 +13236,7 @@ async function extractGpsFromImage(file, dataUrl, updateFormFields = true) {
       }
 
       // อ้างอิงและเติม จังหวัด, อำเภอ, ตำบล จากพิกัดภาพถ่ายให้อัตโนมัติทันที
-      await autoFillAddressFromCoordinates(latNum, lngNum, 'พิกัดภาพถ่าย');
+      await autoFillAddressFromCoordinates(latNum, lngNum, 'พิกัดภาพถ่าย', { force: true });
 
       // เริ่มค้นหาข้อมูลที่ตั้งหมายที่ใกล้เคียงจากพิกัดภาพถ่ายทันที
       if (typeof triggerDesktopSimilarSearch === 'function') {
@@ -14474,6 +14580,7 @@ function startLiveCameraHUD() {
   let lastSecondKey = '';
 
   const updateHUD = () => {
+    if (document.hidden) return; // v2.3: ไม่วาด HUD ขณะแอปอยู่เบื้องหลัง
     if (!elements.cameraModal || elements.cameraModal.classList.contains('hidden')) return;
 
     // การลดการกินทรัพยากร: หากมี SweetAlert หรือ Login Modal เปิดบังหน้าจอ ให้ข้ามการวาด Canvas และอัปเดต DOM
@@ -23329,16 +23436,28 @@ window.initMobileHandoffReceiver = function() {
   fetchActiveRouteFromServer();
 
   // 5. Polling ตรวจสอบจาก Database (Google Apps Script API) ทุก 2.5 วินาที สำหรับผู้ใช้ที่ล็อกอินอยู่
+  // v2.3 (ประสิทธิภาพ): เดิมถามเซิร์ฟเวอร์ทุก 2.5 วิ (~36 คำขอ/นาที/เครื่อง แม้เปิดทิ้งไว้เฉยๆ)
+  // ทำให้ฐานข้อมูล Neon ไม่เคยได้พัก → ลดเป็นทุก 10 วิ บนมือถือ / 30 วิ บนคอมพิวเตอร์
+  // และตรวจทันทีเมื่อกลับเข้าแอป/เน็ตกลับมา (ผู้รับยังได้เส้นทางภายในไม่กี่วินาทีตามเดิมเมื่อเปิดหน้าจออยู่)
   let handoffPollTick = 0;
+  const handoffEvery = sltsMobileLogic() ? 10000 : 30000;
   handoffPollInterval = setInterval(() => {
-    // v2.2: ประหยัดแบตเตอรี่/เน็ตมือถือ — ไม่ถามเซิร์ฟเวอร์ขณะแอปอยู่เบื้องหลัง (กลับมาหน้าแอปแล้วตรวจทันที)
-    if (document.hidden) return;
+    if (document.hidden || !navigator.onLine) return;
     checkHandoffForCurrentUser();
     handoffPollTick++;
-    if (handoffPollTick % 2 === 0 && typeof fetchActiveRouteFromServer === 'function') {
+    // มีเส้นทางค้างอยู่ในมือถือ → เช็คทุกรอบ (ให้รู้ทันทีเมื่อ PC ล้าง/เปลี่ยนเส้นทาง) ไม่มี → ทุก 3 รอบ
+    const hasRoute = sltsMobileLogic() && Array.isArray(state.currentRouteStops) && state.currentRouteStops.length > 0;
+    if ((hasRoute || handoffPollTick % 3 === 0) && typeof fetchActiveRouteFromServer === 'function') {
       fetchActiveRouteFromServer();
     }
-  }, 2500);
+  }, handoffEvery);
+  if (!window.__sltsHandoffWakeBound) {
+    window.__sltsHandoffWakeBound = true;
+    const wake = () => { if (!document.hidden && navigator.onLine && state.currentUser && state.currentUser.username) checkHandoffForCurrentUser(); };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('focus', wake);
+  }
 };
 
 function checkLocalHandoffData() {
@@ -25528,13 +25647,19 @@ window.confirmClearBatchHistory = function() {
 };
 
 window.refreshRouteBatchData = async function(silent = false) {
+  let res = null;
   if (typeof loadGoogleSheetData === 'function') {
-    await loadGoogleSheetData(true, true);
+    res = await loadGoogleSheetData(true, true);
   }
   if (typeof fetchActiveRouteFromServer === 'function') {
     await fetchActiveRouteFromServer();
   }
-  renderRouteBatchTab();
+  // v2.3: วาดหน้าจัดเส้นทางใหม่เฉพาะเมื่อข้อมูลเปลี่ยน หรือเรียกครั้งแรก/ผู้ใช้กดเอง
+  const routeSig = JSON.stringify((state.currentRouteStops || []).map(s => s && (s.id || s.caseNo || s.name)));
+  if (!silent || !res || res.changed !== false || routeSig !== window.__sltsRouteBatchSig) {
+    window.__sltsRouteBatchSig = routeSig;
+    renderRouteBatchTab();
+  }
 };
 
 let routeBatchPollerTimer = null;
@@ -25550,7 +25675,7 @@ window.startRouteBatchRealtimePoller = function() {
   routeBatchPollerTimer = setInterval(async () => {
     const pane = document.getElementById('tabContentRouteBatch');
     if (!pane || pane.classList.contains('hidden') || isRouteBatchPolling) return;
-    if (!navigator.onLine) return;
+    if (!navigator.onLine || document.hidden) return;
 
     isRouteBatchPolling = true;
     try {
@@ -25560,7 +25685,7 @@ window.startRouteBatchRealtimePoller = function() {
     } finally {
       isRouteBatchPolling = false;
     }
-  }, 4000);
+  }, 15000); // v2.3: 4 วิ → 15 วิ (ตรวจเวอร์ชันข้อมูลก่อน ไม่โหลดทั้งตารางซ้ำ)
 };
 
 window.stopRouteBatchRealtimePoller = function() {

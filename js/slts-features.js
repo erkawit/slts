@@ -16,6 +16,55 @@
   const me = () => (typeof state !== 'undefined' && state.currentUser) || null;
   const isAdmin = () => (me() || {}).role === 'admin';
 
+  // v2.3 (แก้บั๊ก): Swal แสดงได้ทีละหน้าต่าง — toast ที่เด้งเข้ามา (เช่น "เส้นทางถูกล้างจากอีกเครื่องแล้ว")
+  // เคยไปปิดหน้าต่างที่ผู้ใช้กำลังกรอกอยู่ (อัปโหลดภาพ/ฟอร์มบันทึก) ทำให้ข้อมูลที่กรอกหาย
+  // → ถ้ามีหน้าต่างอื่นเปิดอยู่ ให้แสดง toast แบบแยก (DOM ของเราเอง) แทน
+  function domToast(o) {
+    let host = document.getElementById('slts-toast-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'slts-toast-host';
+      host.style.cssText = 'position:fixed;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:20000;display:flex;flex-direction:column;gap:6px;pointer-events:none;max-width:92vw';
+      document.body.appendChild(host);
+    }
+    const colors = { success: '#059669', error: '#dc2626', warning: '#d97706', info: '#2563eb', question: '#2563eb' };
+    const el = document.createElement('div');
+    el.style.cssText = `background:#fff;border-left:4px solid ${colors[o.icon] || '#2563eb'};box-shadow:0 6px 20px rgba(0,0,0,.18);border-radius:10px;padding:8px 12px;font-size:13px;color:#111827;font-family:inherit`;
+    const tmp = document.createElement('div'); tmp.innerHTML = String(o.title || o.text || o.html || '');
+    el.textContent = tmp.textContent || '';
+    host.appendChild(el);
+    setTimeout(() => el.remove(), Math.max(1500, Number(o.timer) || 2500));
+    return Promise.resolve({ isConfirmed: false, isDismissed: true, dismiss: 'timer' });
+  }
+  function guardSwalToasts() {
+    if (typeof Swal === 'undefined' || Swal.__sltsToastGuard) return;
+    const origFire = Swal.fire;
+    const origMixin = Swal.mixin;
+    const busyWithDialog = () => {
+      const popup = typeof Swal.getPopup === 'function' ? Swal.getPopup() : null;
+      return !!(Swal.isVisible() && popup && !popup.classList.contains('swal2-toast'));
+    };
+    Swal.fire = function (...args) {
+      const o = args[0];
+      const isToast = (o && typeof o === 'object' && o.toast) || (this && this.__sltsMixinToast);
+      if (isToast && busyWithDialog()) {
+        const base = (this && this.__sltsMixinParams) || {};
+        return domToast(Object.assign({}, base, (o && typeof o === 'object') ? o : { title: args[0], text: args[1], icon: args[2] }));
+      }
+      return origFire.apply(this, args);
+    };
+    Swal.mixin = function (params) {
+      const M = origMixin.call(this, params);
+      try {
+        if (params && params.toast) { M.__sltsMixinToast = true; M.__sltsMixinParams = params; }
+      } catch (_) {}
+      return M;
+    };
+    Swal.__sltsToastGuard = true;
+  }
+  guardSwalToasts();
+  document.addEventListener('DOMContentLoaded', guardSwalToasts);
+
   UI.toast = function (title, icon = 'success', ms = 2200) {
     if (typeof Swal === 'undefined') return;
     Swal.fire({ toast: true, position: 'top', icon, title, timer: ms, showConfirmButton: false, timerProgressBar: true });
@@ -996,12 +1045,13 @@
     };
   }
 
+  // v2.3: 2.5 วิ → 6 วิ และหยุดขณะแอปอยู่เบื้องหลัง (ยังบันทึกทันทีตอนสลับแอป/ปิดหน้าผ่าน pagehide/visibilitychange)
   setInterval(() => {
-    if (!uid()) return;
+    if (!uid() || document.hidden) return;
     const kind = kindNow();
     if (stopsOf(kind).length) R.persist(kind);
     else R.restore('watchdog');
-  }, 2500);
+  }, 6000);
   const persistNow = () => { try { if (uid() && stopsOf(kindNow()).length) R.persist(); } catch (_) {} };
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { persistNow(); return; }
