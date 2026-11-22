@@ -1726,6 +1726,11 @@ document.addEventListener('DOMContentLoaded', () => {
     console.warn('[Restore] Failed to restore active route target:', e);
   }
 
+  // v2.3.2: คืนค่าข้อมูลที่กรอกล่าสุด (กรณีไม่ได้กำลังถ่ายหมายจากรายการเส้นทาง ซึ่งมีข้อมูลของจุดนั้นอยู่แล้ว)
+  try {
+    if (!state.activeRouteStopTarget && typeof restoreFormDraft === 'function') restoreFormDraft();
+  } catch (e) { console.warn('[Restore] form draft:', e); }
+
   // ตรวจสอบการเปิดผ่าน LINE: หากเป็น LINE In-App Browser ให้สลับไปเปิดในเบราว์เซอร์ภายนอก (Chrome/Safari) ทันที
   if (/Line/i.test(navigator.userAgent) && !window.location.search.includes('openExternalBrowser=1')) {
     const currentUrl = window.location.href.split('#')[0];
@@ -11387,7 +11392,96 @@ function applyModalFormValues(val) {
     elements.coordinatesInput.value = val.coords;
   }
   updateCaptureButtonState();
+  if (typeof saveFormDraft === 'function') saveFormDraft('apply');
 }
+
+// -------------------------------------------------------------------------
+// v2.3.2: จำข้อมูลที่กรอกล่าสุด (เลขคดี / ข้อมูลเพิ่มเติม / ประเภทสถานที่ / บ้านเลขที่ / หมู่ / ชื่อสถานที่)
+// เก็บลงเครื่องทุกครั้งที่พิมพ์ — ปิดแอป/รีเฟรช/ปิดเบราว์เซอร์ แล้วเปิดใหม่ ข้อมูลล่าสุดกลับมาครบ
+// (จังหวัด/อำเภอ/ตำบล จำแยกไว้แล้วใน slts_selected_*; พิกัดไม่จำ เพราะต้องเป็นตำแหน่งปัจจุบันเสมอ)
+// -------------------------------------------------------------------------
+const SLTS_FORM_DRAFT_KEY = 'slts_form_draft_v23';
+const SLTS_DRAFT_FIELDS = {
+  udonPrefix: 'prefix', udonCaseNo: 'caseNo', udonCaseYear: 'caseYear',
+  otherCaseNo: 'otherCaseNo', otherCaseYear: 'otherCaseYear', caseExtraInput: 'caseExtra',
+  locationType: 'locType', houseNo: 'houseNo', moo: 'moo',
+  localAdminName: 'adminName', customOtherLocationName: 'otherLocName'
+};
+const SLTS_DRAFT_KEYS = ['prefix', 'caseNo', 'caseYear', 'otherCaseNo', 'otherCaseYear', 'caseExtra', 'locType',
+  'houseNo', 'moo', 'adminName', 'otherLocName', 'courtCategory', 'courtType', 'courtName'];
+
+function sltsDraftUserKey() {
+  const u = (state.currentUser && state.currentUser.username) ? String(state.currentUser.username).toLowerCase() : 'guest';
+  return `${SLTS_FORM_DRAFT_KEY}_${u}`;
+}
+
+window.saveFormDraft = function(source = 'auto') {
+  try {
+    const v = {};
+    // 1) ฟอร์มหลัก (หน้าจอคอมพิวเตอร์ และฟอร์มที่ใช้ร่วมกันบนมือถือ)
+    Object.entries(SLTS_DRAFT_FIELDS).forEach(([id, key]) => {
+      const el = document.getElementById(id);
+      if (el) v[key] = el.value;
+    });
+    // 2) ฟอร์มกรอกข้อมูลบนมือถือ (ถ้ากำลังเปิดอยู่ ให้ดึงค่าที่พิมพ์ล่าสุดก่อน)
+    if (document.getElementById('m_caseNo') || document.getElementById('m_houseNo') || document.getElementById('m_otherCaseNo')) {
+      if (typeof saveTempModalFormState === 'function') saveTempModalFormState();
+    }
+    const t = state.tempModalValues || {};
+    SLTS_DRAFT_KEYS.forEach((k) => { if (t[k] !== undefined && t[k] !== null) v[k] = t[k]; });
+    localStorage.setItem(sltsDraftUserKey(), JSON.stringify({ v, at: new Date().toISOString(), source }));
+  } catch (e) { /* ที่เก็บในเครื่องเต็ม/ปิดอยู่ — ไม่ขัดการใช้งาน */ }
+};
+
+window.restoreFormDraft = function() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(sltsDraftUserKey()) || 'null'); } catch (_) {}
+  if (!saved || !saved.v) return false;
+  const v = saved.v;
+  // ฟอร์มหลัก: ตั้งประเภทสถานที่ก่อน แล้วแสดงช่องที่ตรงกัน (ไม่ยิง change เพื่อไม่ให้แป้นพิมพ์เด้งขึ้น)
+  const lt = elements.locationTypeSelect;
+  if (lt && v.locType) {
+    lt.value = v.locType === 'สถานที่อื่นๆ' ? 'อื่นๆ' : v.locType;
+    const val = lt.value;
+    elements.houseAddressFields?.classList.toggle('hidden', val !== 'หมายบ้าน');
+    elements.localAdminAddressFields?.classList.toggle('hidden', val !== 'ที่ทำการปกครองส่วนท้องถิ่น');
+    elements.customOtherAddressFields?.classList.toggle('hidden', val !== 'อื่นๆ');
+    if (elements.houseNoInput) {
+      if (val === 'หมายบ้าน') elements.houseNoInput.setAttribute('required', 'required');
+      else elements.houseNoInput.removeAttribute('required');
+    }
+  }
+  Object.entries(SLTS_DRAFT_FIELDS).forEach(([id, key]) => {
+    if (id === 'locationType') return;
+    const el = document.getElementById(id);
+    if (!el || v[key] === undefined || v[key] === null || v[key] === '') return;
+    if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === String(v[key]))) return;
+    el.value = v[key];
+  });
+  // ฟอร์มบนมือถือดึงค่าจาก state.tempModalValues เมื่อเปิดขึ้นมา
+  const t = {};
+  SLTS_DRAFT_KEYS.forEach((k) => { if (v[k] !== undefined) t[k] = v[k]; });
+  t.district = state.selectedDistrict || '';
+  t.subdistrict = state.selectedSubdistrict || '';
+  state.tempModalValues = Object.assign({}, state.tempModalValues || {}, t);
+  if (typeof updateCaptureButtonState === 'function') updateCaptureButtonState();
+  return true;
+};
+
+(function bindFormDraftAutosave() {
+  let timer = null;
+  const isDraftField = (el) => el && el.id && (Object.prototype.hasOwnProperty.call(SLTS_DRAFT_FIELDS, el.id) || /^m_/.test(el.id));
+  const schedule = (e) => {
+    if (!isDraftField(e.target)) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => saveFormDraft('input'), 250);
+  };
+  document.addEventListener('input', schedule, true);
+  document.addEventListener('change', schedule, true);
+  const flush = () => { clearTimeout(timer); saveFormDraft('hide'); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+  window.addEventListener('pagehide', flush);
+})();
 
 // -------------------------------------------------------------------------
 // ฟังก์ชันรีเซ็ตจังหวัดตั้งต้น (Reset Province)
@@ -15449,6 +15543,9 @@ function resetFormForNextCase() {
   } catch (e) {}
 
   // ข้อ 2: ยกเลิกการแสดง Pop Up "ฟอร์มบันทึกการส่งหมาย" เมื่อมีการถ่ายภาพแล้ว (พร้อมถ่ายภาพหมายถัดไปทันที)
+
+  // v2.3.2: บันทึกสถานะหลังรีเซ็ตด้วย — ไม่ให้เลขคดีของหมายที่ถ่ายไปแล้วกลับมาเมื่อเปิดแอปใหม่
+  if (typeof saveFormDraft === 'function') saveFormDraft('reset');
 }
 
 function initSettings() {

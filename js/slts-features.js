@@ -138,7 +138,7 @@
     if (typeof loadGoogleSheetData === 'function') loadGoogleSheetData(true, true);
     if (typeof fetchUsersFromGasApi === 'function') fetchUsersFromGasApi(false);
     if (typeof window.resumeBackgroundQueueNow === 'function') window.resumeBackgroundQueueNow();
-    setTimeout(() => { SLTS.route.restore('login'); SLTS.route.flushPendingClears(); }, 800);
+    setTimeout(() => { SLTS.route.restore('login'); SLTS.route.flushPendingClears(); try { if (!state.activeRouteStopTarget && typeof restoreFormDraft === 'function') restoreFormDraft(); } catch (_) {} }, 800);
     SLTS.flushErrors();
     UI.toast(`ยินดีต้อนรับ ${res.user.name || res.user.username}`);
 
