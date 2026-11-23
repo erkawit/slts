@@ -1,9 +1,9 @@
 {
-  "version": "2.4.0",
+  "version": "2.4.1",
   "build": "2026-11-23",
   "releases": [
     {
-      "version": "2.4.0",
+      "version": "2.4.1",
       "date": "2026-11-23",
       "title": "ระบบรายงานผลหมาย (ผนวกรวม summon-report) + หน้าตาแบบทางการบน PC",
       "notes": [

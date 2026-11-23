@@ -30,6 +30,7 @@ const STATIC_ASSETS = [
   'js/report-xlsx.js',
   'js/report-exports.js',
   'js/slts-report.js',
+  'js/pc-sidebar.js',
   'js/app.js',
   'js/data.js',
   'js/watermark.js',

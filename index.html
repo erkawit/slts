@@ -108,7 +108,8 @@
     <div class="w-full max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
       
       <!-- Brand Logo & Court Name -->
-      <div class="flex items-center space-x-3.5 cursor-pointer select-none" onclick="switchTab('form')">
+      <div id="pcPageTitle" class="pc-page-title" aria-live="polite"></div>
+      <div id="headerBrand" class="flex items-center space-x-3.5 cursor-pointer select-none" onclick="switchTab('form')">
         <div class="w-11 h-11 sm:w-12 sm:h-12 flex items-center justify-center flex-shrink-0">
           <img src="img/logo.png" alt="ตราศาลจังหวัดอุดรธานี" class="w-full h-full object-contain drop-shadow-sm transition-transform hover:scale-105">
         </div>
@@ -1454,6 +1455,7 @@
   <script src="js/report-xlsx.js?v=__APP_VERSION__"></script>
   <script src="js/report-exports.js?v=__APP_VERSION__"></script>
   <script src="js/slts-report.js?v=__APP_VERSION__"></script>
+  <script src="js/pc-sidebar.js?v=__APP_VERSION__"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>

@@ -290,6 +290,7 @@
   }
   function renderSub() {
     $$('#srTabs .sr-tab').forEach((t) => t.classList.toggle('active', t.dataset.sub === R.sub));
+    if (window.SltsSidebar) window.SltsSidebar.sync();
     const body = $('#srBody'); if (!body) return;
     if (R.sub === 'issued') return renderIssued(body);
     if (R.sub === 'memos') return renderMemos(body);
@@ -1303,5 +1304,5 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
   // ให้ทดสอบ/เรียกจากที่อื่นได้
-  window.SltsReportUI = { open: () => window.switchTab('report'), openReportForm, refreshUploadsCard, R };
+  window.SltsReportUI = { open: () => window.switchTab('report'), openSub: (sub) => { R.sub = sub; window.switchTab('report'); }, openReportForm, refreshUploadsCard, R };
 })();
