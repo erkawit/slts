@@ -227,7 +227,29 @@
 
   /** แยกบรรทัดของเซลล์ Excel ("ต2980/2569\nฟ41/2567") */
   const lines = (v) => String(v == null ? '' : v).split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-  const isTNo = (s) => /^ต\s*\d+\s*\/\s*\d{2,4}$/.test(String(s || '').trim());
+  /**
+   * ดึงเลขคดีทุกชุดในช่อง (เช่น "ต2980/2569\nฟ41/2567") — พิจารณาถึงปี พ.ศ. หลัง "/" เท่านั้น
+   * ข้อความหลังปี (เช่น "ต3086/2569 (ฟ.)", "ผบE2749/2568ก") ไม่นำมาพิจารณา
+   * คืน [{ prefix, num, year, text: 'ต3086/2569', key: 'ต3086/2569', isT }]
+   */
+  const CASE_RE = /([ก-ฮA-Za-z][ก-ฮA-Za-z.]{0,7}?)\s*\.?\s*(\d{1,7})\s*\/\s*(\d{4}|\d{2})(?!\d)/g;
+  function caseNos(v) {
+    const src = toArabicDigits(thNorm(String(v == null ? '' : v)));
+    const out = [];
+    let m;
+    CASE_RE.lastIndex = 0;
+    while ((m = CASE_RE.exec(src))) {
+      const prefix = m[1].replace(/\./g, '').replace(/[a-z]/g, (c) => c.toUpperCase());
+      const num = String(parseInt(m[2], 10));
+      const year = m[3].length === 2 ? '25' + m[3] : m[3];
+      const text = `${prefix}${num}/${year}`;
+      out.push({ prefix, num, year, text, key: text, isT: prefix === 'ต' });
+    }
+    return out;
+  }
+  /** คีย์เปรียบเทียบเลขคดี: ตัวอักษรนำหน้า + เลข + / + ปี (ไม่สนใจข้อความหลังปี) */
+  const caseKey = (s) => { const c = caseNos(s)[0]; return c ? c.key : toArabicDigits(String(s || '')).replace(/\s+/g, '').toUpperCase(); };
+  const isTNo = (s) => { const c = caseNos(s); return c.length > 0 && c[0].isT; };
 
   // ---------------------------------------------------------------
   // นำเข้า Excel: บัญชีจ่ายหมาย พนักงานศาลนี้ส่ง (litigant_rpt_issued_sendbyofficer)
@@ -270,22 +292,49 @@
     const items = [];
     for (let i = h.index + 1; i < rows.length; i++) {
       const r = rows[i] || [];
-      const seq = parseInt(toArabicDigits(get(r, 'seq')), 10);
-      const blackLines = lines(thNorm(r[col.black]));
-      if (!seq || !blackLines.length) continue;
-      const isT = isTNo(blackLines[0]);
+      const cells = r.map((x) => String(x == null ? '' : x).replace(/\s+/g, ''));
+      // หัวตารางซ้ำ (ไฟล์หลายหน้า) / ท้ายตาราง → ข้าม
+      if (cells.some((x) => x === 'เลขดำที่') || cells.some((x) => x === 'หมายถึงใคร')) continue;
+      const seqRaw = toArabicDigits(get(r, 'seq'));
+      const seq = /^\d+$/.test(seqRaw.replace(/\.$/, '')) ? parseInt(seqRaw, 10) : 0;
+      const nos = caseNos(r[col.black]);
+      const recipient = get(r, 'recipient').replace(/\s+/g, ' ').trim();
+      const stype = get(r, 'stype').replace(/\s+/g, ' ');
+      // แถวต่อเนื่อง (เซลล์เลขคดีถูกแยกเป็น 2 แถว): ไม่มีลำดับ/ผู้รับ → เติมเลขคดีให้รายการก่อนหน้า
+      if (!seq && !recipient && !stype) {
+        const prev = items[items.length - 1];
+        if (prev && nos.length) {
+          const t = nos.find((n) => n.isT);
+          if (t && !prev.t_no) { prev.t_no = t.text; prev.kind = 'T'; }
+          const o = nos.find((n) => !n.isT);
+          if (o && !prev.black_no) prev.black_no = o.text;
+        }
+        continue;
+      }
+      if (!nos.length && !recipient) continue;
+      // หมายต่างจังหวัด = ช่องเลขดำมีเลขที่ขึ้นต้นด้วย "ต" (ใช้เลข ต. เป็นเลขหลักของหมาย)
+      let tNo = nos.find((n) => n.isT);
+      let other = nos.find((n) => !n.isT);
+      // ช่องเลขคดีว่าง (เซลล์ผสาน/คดีเดียวกันหลายผู้รับ) → ใช้เลขคดีของรายการก่อนหน้า
+      if (!nos.length && items.length) {
+        const prev = items[items.length - 1];
+        if (prev.t_no) tNo = { text: prev.t_no, isT: true };
+        if (prev.black_no) other = { text: prev.black_no, isT: false };
+      }
+      const isT = !!tNo;
       const addr = parseAddress(get(r, 'addr'));
       const price = parseMoney(get(r, 'price')) || 0;
       items.push({
-        seq,
+        seq: seq || (items.length ? items[items.length - 1].seq + 1 : 1),
         kind: isT ? 'T' : 'LOCAL',
-        t_no: isT ? blackLines[0].replace(/\s/g, '') : '',
-        black_no: (isT ? (blackLines[1] || '') : blackLines[0]).replace(/\s+/g, ''),
-        red_no: lines(thNorm(r[col.red])).join(' ').replace(/^-$/, ''),
+        t_no: isT ? tNo.text : '',
+        // หมาย ต.: เก็บเลขคดีของศาลต้นทางไว้แสดงในแบบฟอร์มเท่านั้น (ไม่ใช้จับคู่/ตรวจซ้ำ)
+        black_no: other ? other.text : (isT ? '' : (lines(thNorm(r[col.black]))[0] || '').replace(/\s+/g, '')),
+        red_no: caseNos(r[col.red]).map((n) => n.text).join(' ') || lines(thNorm(r[col.red])).join(' ').replace(/^-$/, ''),
         plaintiff: get(r, 'plaintiff').replace(/\s+/g, ' '),
         defendant: get(r, 'defendant').replace(/\s+/g, ' '),
-        summon_type: get(r, 'stype').replace(/\s+/g, ' '),
-        recipient: get(r, 'recipient').replace(/\s+/g, ' ').trim(),
+        summon_type: stype,
+        recipient,
         address_raw: get(r, 'addr').replace(/\s+/g, ' '),
         house_no: addr.house_no, moo: addr.moo, soi: addr.soi, road: addr.road,
         subdistrict: cleanSubdistrict(get(r, 'sub')), district: cleanDistrict(get(r, 'dist')),
@@ -325,15 +374,16 @@
     for (let i = h.index + 1; i < rows.length; i++) {
       const r = rows[i] || [];
       const seq = parseInt(toArabicDigits(get(r, 'seq')), 10);
-      const bl = lines(thNorm(r[col.black]));
-      if (!seq || !bl.length) continue;
-      const isT = isTNo(bl[0]);
+      const nos = caseNos(r[col.black]);
+      if (!seq || !nos.length) continue;
+      const tNo = nos.find((n) => n.isT); const other = nos.find((n) => !n.isT);
+      const isT = !!tNo;
       const rin = get(r, 'inn') || get(r, 'out');
       items.push({
         seq,
         entry_date: toIso(parseThaiTextDate(get(r, 'date'))),
-        t_no: isT ? bl[0].replace(/\s/g, '') : '',
-        black_no: (isT ? (bl[1] || '') : bl[0]).replace(/\s+/g, ''),
+        t_no: isT ? tNo.text : '',
+        black_no: other ? other.text : '',
         red_no: lines(thNorm(r[col.red])).join(' '),
         summon_type: get(r, 'stype').replace(/\s+/g, ' '),
         recipient: get(r, 'recipient').replace(/\s+/g, ' '),
@@ -355,7 +405,7 @@
   }
 
   const normName = (s) => thNorm(s).replace(/\s+/g, '').replace(/(จำเลย|โจทก์|ผู้ร้อง|ผู้คัดค้าน|ผู้เสียหาย)(ที่\d+)?.*$/, '');
-  const normCase = (s) => toArabicDigits(String(s || '')).replace(/\s+/g, '').toUpperCase();
+  const normCase = caseKey;
 
   /** จับคู่ใบเสร็จ (accexpense) เข้ากับหมายในบัญชีจ่ายหมาย → คืนรายการ {issuedIndex, receipt} */
   function matchReceipts(issued, acc) {
@@ -367,8 +417,8 @@
       acc.forEach((a, j) => {
         if (used.has(j)) return;
         let score = 0;
-        if (keyT && normCase(a.t_no) === keyT) score += 5;
-        if (keyB && normCase(a.black_no) === keyB) score += 4;
+        if (keyT) { if (normCase(a.t_no) === keyT) score += 5; } // หมาย ต. จับคู่ด้วยเลข ต. เท่านั้น
+        else if (keyB && !a.t_no && normCase(a.black_no) === keyB) score += 4;
         if (!score) return;
         if (normName(a.recipient) && normName(a.recipient) === normName(it.recipient)) score += 3;
         if (subKey(a.subdistrict) === subKey(it.subdistrict)) score += 1;
@@ -625,7 +675,7 @@
     toThaiDigits, toArabicDigits, ymd, toIso, todayIso, parseThaiTextDate, thaiDateLong, thaiDateParts, thaiDateText, thaiDateShort,
     bahtText, money2, moneyShort, parseMoney, resultText, resultCodeOf, isNoticeResult, cleanDistrict, cleanSubdistrict,
     districtKey, subKey, postcodeFor, caseKindOf, parseAddress, isTNo, receiptText,
-    parseIssuedSheet, parseAccExpenseSheet, parseCourtExcel, matchReceipts, normName, normCase,
+    parseIssuedSheet, parseAccExpenseSheet, parseCourtExcel, matchReceipts, normName, normCase, caseNos, caseKey,
     findRate, exceptionMoos, evaluateFreeSummonItems, parseRateRows, parseRatesWorkbook, parseRatePdfLines,
     templateFor, computeMoney, buildDocData, docFileName,
   };

@@ -136,8 +136,11 @@
   const sheetRows = () => { const s = appState(); return s && Array.isArray(s.allSheetRows) ? s.allSheetRows : []; };
   const caseMatch = (a, b) => {
     if (!a || !b) return false;
-    if (typeof window.matchCaseNumbers === 'function') return window.matchCaseNumbers(a, b);
-    return L.normCase(a) === L.normCase(b);
+    // เทียบถึงปี พ.ศ. หลัง "/" เท่านั้น (ข้อความหลังปีไม่นำมาพิจารณา)
+    const ka = L.caseKey(a); const kb = L.caseKey(b);
+    if (ka && kb && ka === kb) return true;
+    if (typeof window.matchCaseNumbers === 'function') return window.matchCaseNumbers(ka, kb);
+    return false;
   };
   const timeOf = (v) => (typeof window.parseDateToTime === 'function' ? window.parseDateToTime(v) : (Date.parse(v) || 0));
   function photoFromRow(row) {
@@ -161,14 +164,14 @@
   };
   function photosForIssued(it) {
     const list = sheetRows().map(photoFromRow).filter(Boolean)
-      .filter((p) => caseMatch(p.caseNo, it.t_no) || caseMatch(p.caseNo, it.black_no));
+      .filter((p) => (it.kind === 'T' && it.t_no ? caseMatch(p.caseNo, it.t_no) : caseMatch(p.caseNo, it.black_no)));
     const exact = list.filter((p) => houseIn(p.loc, it));
     const out = (exact.length ? exact : list).sort((a, b) => b.time - a.time);
     const seen = new Set();
     return out.filter((p) => (seen.has(p.id) ? false : seen.add(p.id)));
   }
   function issuedForPhoto(p) {
-    const list = R.issued.filter((it) => caseMatch(p.caseNo, it.t_no) || caseMatch(p.caseNo, it.black_no));
+    const list = R.issued.filter((it) => (it.kind === 'T' && it.t_no ? caseMatch(p.caseNo, it.t_no) : caseMatch(p.caseNo, it.black_no)));
     const exact = list.filter((it) => houseIn(p.loc, it));
     return exact.length ? exact : list;
   }
@@ -413,7 +416,14 @@
       for (const f of files) {
         const sheets = await readWorkbook(f);
         let got = null; let lastErr = null;
-        for (const sh of sheets) { try { got = L.parseCourtExcel(sh.rows); break; } catch (er) { lastErr = er; } }
+        // ไฟล์อาจมีหลายชีต (หลายหน้า) → รวมทุกชีตที่อ่านได้
+        for (const sh of sheets) {
+          try {
+            const g = L.parseCourtExcel(sh.rows);
+            if (!got) got = g;
+            else if (g.kind === got.kind) { const base = got.items.length; got.items = got.items.concat(g.items.map((x, k) => ({ ...x, seq: x.seq || base + k + 1 }))); }
+          } catch (er) { lastErr = er; }
+        }
         if (!got) throw new Error(`${f.name}: ${lastErr ? lastErr.message : 'อ่านไม่ได้'}`);
         got.file = f.name; parsed.push(got);
       }

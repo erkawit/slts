@@ -45,6 +45,14 @@ async function ensureReportSchema() {
         await db.query('INSERT INTO sr_court_orders (order_text, order_no, order_date, note, created_by) VALUES ($1,$2,$3,$4,$5)',
           [DEFAULT_ORDER.order_text, DEFAULT_ORDER.order_no, DEFAULT_ORDER.order_date, DEFAULT_ORDER.note, 'system']);
       }
+      // v2.4.3: คีย์ตรวจซ้ำแบบใหม่ (หมาย ต. ใช้เลข ต. อย่างเดียว / เลขคดีถึงปี พ.ศ.) → ปรับรายการเดิม
+      const { rows: old } = await db.query("SELECT id, owner, dedupe_key, t_no, black_no, recipient, house_no, moo FROM sr_issued WHERE dedupe_key LIKE '%|%|%|%|%'");
+      for (const r of old) {
+        const k = dedupeKey(r);
+        if (k !== r.dedupe_key) {
+          await db.query('UPDATE sr_issued SET dedupe_key = $1 WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM sr_issued WHERE owner = $3 AND dedupe_key = $1)', [k, r.id, r.owner]).catch(() => {});
+        }
+      }
       if (!c.rates) {
         const seed = require('../lib/report-rates-seed.json');
         await insertRates('paid', seed.paid.map((r, i) => ({ district: r[0], subdistrict: r[1], exception_note: r[2], rate_amount: r[3], sort_order: i + 1 })));
@@ -109,7 +117,16 @@ function cleanIssued(it) {
 }
 const norm = (v) => str(v).replace(/([\u0E48-\u0E4B])([\u0E31\u0E34-\u0E3A\u0E47])/g, '$2$1').replace(/[๐-๙]/g, (d) => '๐๑๒๓๔๕๖๗๘๙'.indexOf(d)).replace(/\s+/g, '').toUpperCase();
 /** หมายเดียวกัน = เลข ต./เลขคดี + ผู้รับ + บ้านเลขที่ (นำเข้าไฟล์ซ้ำจะอัปเดต ไม่สร้างซ้ำ และไม่ลบรายงานที่กรอกแล้ว) */
-const dedupeKey = (o) => [norm(o.t_no), norm(o.black_no), norm(o.recipient).replace(/(จำเลย|โจทก์|ผู้ร้อง|ผู้คัดค้าน|ผู้เสียหาย).*$/, ''), norm(o.house_no), norm(o.moo)].join('|');
+/** เลขคดีถึงปี พ.ศ. หลัง "/" เท่านั้น — ข้อความหลังปีไม่นำมาพิจารณา (เช่น "ต3086/2569 (ฟ.)" = "ต3086/2569") */
+const caseKey = (v) => {
+  const t = norm(v);
+  const m = t.match(/([ก-ฮA-Z][ก-ฮA-Z.]{0,7}?)\.?(\d{1,7})\/(\d{4}|\d{2})(?!\d)/);
+  if (!m) return t;
+  return `${m[1].replace(/\./g, '')}${parseInt(m[2], 10)}/${m[3].length === 2 ? '25' + m[3] : m[3]}`;
+};
+/** หมาย ต. ใช้เลข ต. เป็นเลขหลักเท่านั้น (ไม่ใช้เลขคดีศาลต้นทาง) */
+const mainCase = (o) => (o.t_no ? caseKey(o.t_no) : '') || caseKey(o.black_no);
+const dedupeKey = (o) => [mainCase(o), norm(o.recipient).replace(/(จำเลย|โจทก์|ผู้ร้อง|ผู้คัดค้าน|ผู้เสียหาย).*$/, ''), norm(o.house_no), norm(o.moo)].join('|');
 
 function issuedRow(r) {
   return {
@@ -302,8 +319,8 @@ actions.sr_receipts_import = async (d, u) => {
     for (const r of rows) {
       if (used.has(r.id)) continue;
       let sc = 0;
-      if (rc.t_no && norm(rc.t_no) === norm(r.t_no)) sc += 5;
-      if (rc.black_no && norm(rc.black_no) === norm(r.black_no)) sc += 4;
+      if (r.t_no) { if (rc.t_no && caseKey(rc.t_no) === caseKey(r.t_no)) sc += 5; } // หมาย ต. จับคู่ด้วยเลข ต. เท่านั้น
+      else if (!rc.t_no && rc.black_no && caseKey(rc.black_no) === caseKey(r.black_no)) sc += 4;
       if (!sc) continue;
       if (nameKey(rc.recipient) && nameKey(rc.recipient) === nameKey(r.recipient)) sc += 3;
       if (norm(rc.subdistrict) === norm(r.subdistrict)) sc += 1;
@@ -557,4 +574,4 @@ module.exports = async function handler(req, res) {
   res.end(JSON.stringify(out));
 };
 
-module.exports._internal = { actions, dedupeKey, cleanIssued, ensureReportSchema };
+module.exports._internal = { actions, dedupeKey, caseKey, cleanIssued, ensureReportSchema };
