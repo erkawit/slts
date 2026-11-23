@@ -139,14 +139,14 @@
           <i class="fa-solid fa-map-location-dot text-rose-500"></i>
           <span class="tab-label-text">แผนที่และหมุด</span>
         </button>
-        <button type="button" id="tabBtnRouteBatch" onclick="switchTab('route_batch')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="ดูรายการส่งหมายรอบนี้">
-          <i class="fa-solid fa-route text-indigo-600"></i>
-          <span class="tab-label-text">รายการส่งหมายรอบนี้</span>
+        <button type="button" id="tabBtnRouteBatch" onclick="switchTab('route_batch')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="รายงานหมาย — ทำทีละขั้นตอนตามโซนจ่ายหมาย">
+          <i class="fa-solid fa-list-ol text-indigo-600"></i>
+          <span class="tab-label-text">รายงานหมาย</span>
           <span id="routeBatchBadgeCount" class="hidden px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">0</span>
         </button>
-        <button type="button" id="tabBtnReport" onclick="switchTab('report')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="รายงานผลหมาย / บัญชีจ่ายหมาย / อัตราค่านำหมาย">
-          <i class="fa-solid fa-file-signature"></i>
-          <span class="tab-label-text">รายงานผลหมาย</span>
+        <button type="button" id="tabBtnReport" onclick="window.SltsReportUI ? SltsReportUI.openData() : switchTab('report')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="บัญชีจ่ายหมาย / บันทึกข้อความ / อัตราค่านำหมาย / ผู้ลงนาม">
+          <i class="fa-solid fa-folder-open"></i>
+          <span class="tab-label-text">ข้อมูลรายงานผลหมาย</span>
         </button>
         <button type="button" id="tabBtnUsers" onclick="switchTab('users')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="จัดการผู้ใช้งาน">
           <i class="fa-solid fa-users-gear text-purple-600"></i>
@@ -177,14 +177,14 @@
           </button>
           <button type="button" id="compactTabBtnRouteBatch" onclick="switchTabCompact('route_batch')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-indigo-50 text-xs font-bold text-gray-800 items-center justify-between gap-2 transition cursor-pointer">
             <div class="flex items-center gap-2">
-              <i class="fa-solid fa-route text-indigo-600 w-4 text-center"></i>
-              <span>รายการส่งหมายรอบนี้</span>
+              <i class="fa-solid fa-list-ol text-indigo-600 w-4 text-center"></i>
+              <span>รายงานหมาย</span>
             </div>
             <span id="compactRouteBatchBadgeCount" class="hidden px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">0</span>
           </button>
-          <button type="button" id="compactTabBtnReport" onclick="switchTabCompact('report')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-xs font-bold text-gray-800 items-center gap-2 transition cursor-pointer">
-            <i class="fa-solid fa-file-signature w-4 text-center"></i>
-            <span>รายงานผลหมาย</span>
+          <button type="button" id="compactTabBtnReport" onclick="window.SltsReportUI ? SltsReportUI.openData() : switchTabCompact('report')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-xs font-bold text-gray-800 items-center gap-2 transition cursor-pointer">
+            <i class="fa-solid fa-folder-open w-4 text-center"></i>
+            <span>ข้อมูลรายงานผลหมาย</span>
           </button>
           <button type="button" id="compactTabBtnUsers" onclick="switchTabCompact('users')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-purple-50 text-xs font-bold text-gray-800 items-center gap-2 transition cursor-pointer">
             <i class="fa-solid fa-users-gear text-purple-600 w-4 text-center"></i>

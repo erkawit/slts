@@ -19,7 +19,7 @@
   const LS = { get: (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (_) { return d; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} } };
 
   const R = {
-    boot: null, issued: [], batches: [], memos: [], loadedIssued: false, sub: 'issued', dash: null,
+    boot: null, issued: [], batches: [], memos: [], loadedIssued: false, sub: 'flow', dash: null,
     f: { q: '', status: '', kind: '', money: '', batch: '' }, sel: new Set(), rateQ: '', rateType: 'free',
   };
 
@@ -222,6 +222,10 @@
     if (typeof orig !== 'function' || orig.__srHooked) return;
     const wrapped = function (tabName) {
       const pane = document.getElementById('tabContentReport');
+      // โหมด PC: เมนู "รายงานหมาย" (เดิม "รายการส่งหมายรอบนี้") → หน้ารายงานหมายแบบทีละขั้นตอน
+      let viaRouteBtn = false;
+      if (tabName === 'route_batch' && !FL.legacy && isPc() && currentUser()) { tabName = 'report'; R.sub = 'flow'; viaRouteBtn = true; }
+      else if (tabName === 'report' && R.sub === 'flow') viaRouteBtn = true;
       if (tabName !== 'report') {
         if (pane) { pane.classList.add('hidden'); pane.classList.remove('active'); }
         const b = document.getElementById('tabBtnReport'); if (b) b.classList.remove('active');
@@ -236,8 +240,8 @@
       $$('.tab-pane').forEach((p) => { p.classList.add('hidden'); p.classList.remove('active'); });
       if (typeof window.closeCameraModal === 'function') { try { window.closeCameraModal(); } catch (_) {} }
       if (typeof window.stopRouteBatchRealtimePoller === 'function') { try { window.stopRouteBatchRealtimePoller(); } catch (_) {} }
-      const b = document.getElementById('tabBtnReport'); if (b) b.classList.add('active');
-      const lbl = document.getElementById('compactNavActiveLabel'); if (lbl) lbl.textContent = 'รายงานผลหมาย';
+      const b = document.getElementById(viaRouteBtn ? 'tabBtnRouteBatch' : 'tabBtnReport'); if (b) b.classList.add('active');
+      const lbl = document.getElementById('compactNavActiveLabel'); if (lbl) lbl.textContent = viaRouteBtn ? 'รายงานหมาย' : 'ข้อมูลรายงานผลหมาย';
       const ic = document.getElementById('compactNavActiveIcon'); if (ic) ic.innerHTML = '<i class="fa-solid fa-file-signature"></i>';
       if (pane) { pane.classList.remove('hidden'); pane.classList.add('active'); }
       openReportTab();
@@ -261,6 +265,7 @@
           <div class="sr-stats" id="srStats"></div>
         </div>
         <div class="sr-tabs" id="srTabs">
+          <button class="sr-tab" data-sub="flow"><i class="fa-solid fa-list-ol"></i> รายงานหมาย (ทีละขั้นตอน)</button>
           <button class="sr-tab" data-sub="issued"><i class="fa-solid fa-list-check"></i> บัญชีจ่ายหมาย / รายงานผลหมาย</button>
           <button class="sr-tab" data-sub="memos"><i class="fa-solid fa-file-invoice"></i> บันทึกข้อความ / ใบสำคัญรับเงิน</button>
           <button class="sr-tab" data-sub="rates"><i class="fa-solid fa-table"></i> อัตราค่านำหมาย</button>
@@ -273,7 +278,7 @@
     }
     try {
       await ensureBoot(true);
-      if (!R.loadedIssued || R.sub === 'issued') await loadIssued();
+      if (!R.loadedIssued || R.sub === 'issued' || R.sub === 'flow') await loadIssued();
       renderSub();
       refreshStats();
       if (!sheetRows().length) ensureSheetRows().then(() => { if (R.sub === 'issued' && $('#srRows')) fillIssuedRows(); });
@@ -293,8 +298,15 @@
   }
   function renderSub() {
     $$('#srTabs .sr-tab').forEach((t) => t.classList.toggle('active', t.dataset.sub === R.sub));
+    const pane = document.getElementById('tabContentReport');
+    if (pane) pane.classList.toggle('sr-flow-mode', R.sub === 'flow');
+    if (pane && !pane.classList.contains('hidden')) {
+      const rb = document.getElementById('tabBtnRouteBatch'); const rp = document.getElementById('tabBtnReport');
+      if (rb) rb.classList.toggle('active', R.sub === 'flow'); if (rp) rp.classList.toggle('active', R.sub !== 'flow');
+    }
     if (window.SltsSidebar) window.SltsSidebar.sync();
     const body = $('#srBody'); if (!body) return;
+    if (R.sub === 'flow') return renderFlow(body);
     if (R.sub === 'issued') return renderIssued(body);
     if (R.sub === 'memos') return renderMemos(body);
     if (R.sub === 'rates') return renderRates(body);
@@ -741,7 +753,7 @@
           const extra = $$('input[data-extra]', wrap).map((x) => x.files && x.files[0]).filter(Boolean);
           await generateWord(it, r, extra);
         }
-        if (act.dataset.act !== 'print') { close(); if (R.sub === 'issued' && $('#srRows')) fillIssuedRows(); refreshStats(); refreshUploadsCard(); }
+        if (act.dataset.act !== 'print') { close(); if (R.sub === 'issued' && $('#srRows')) fillIssuedRows(); if (R.sub === 'flow') renderFlow(); refreshStats(); refreshUploadsCard(); }
       } catch (er) { done(); fail(er); }
     });
     refresh();
@@ -808,6 +820,210 @@
       const out = await zip.generateAsync({ type: 'blob' });
       done(); downloadBlob(out, `รายงานผลหมาย_${L.todayIso()}.zip`);
     } catch (e) { done(); fail(e); }
+  }
+
+  // ==================================================================
+  // 0) รายงานหมาย — ทำทีละขั้นตอน
+  //    ① โซนจ่ายหมาย + ช่วงเวลา (จันทร์สัปดาห์ก่อน → ศุกร์สัปดาห์นี้)
+  //    ② ภาพส่งหมายในโซน (ถ่ายจากแอป/อัปโหลดจากมือถือ แท็บเล็ต PC) — ไม่มี → ไปหน้าอัปโหลด
+  //    ③ นำเข้าบัญชีจ่ายหมาย (Excel) → ตรวจความครบถ้วน
+  //    ④ สร้างแบบรายงานหมาย (Word) ทีละรายการ/ทั้งหมด
+  // ==================================================================
+  const FL = { weekOffset: 0, viewZone: '', all: false, checkedAt: 0 };
+  const zoneUnits = () => L.zonesFrom(settings().zone_list);
+  const zoneGroups = () => L.groupZones(zoneUnits());
+  const zoneState = () => (R.boot && R.boot.zone) || null;
+  const thDay = (d) => L.thaiDateShort ? L.thaiDateShort(L.dIso(d)) : L.dIso(d);
+  const WD = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+  const thDayLong = (d) => `${WD[d.getDay()]}ที่ ${d.getDate()} ${L.THAI_MONTHS[d.getMonth() + 1]} ${d.getFullYear() + 543}`;
+
+  function flowData() {
+    const groups = zoneGroups();
+    const cur = L.currentZone(zoneState(), groups, new Date());
+    const zone = (FL.viewZone && groups.find((z) => z.key === FL.viewZone)) || (cur && cur.zone) || null;
+    const win = L.reportWindow(new Date(), FL.weekOffset);
+    const me = myUser();
+    const seen = new Set();
+    const uploads = !zone ? [] : sheetRows().map(photoFromRow).filter(Boolean)
+      .filter((p) => (FL.all && isAdmin()) || !me || p.uploader === me)
+      .filter((p) => p.time >= win.from && p.time <= win.to)
+      .filter((p) => L.inZone(zone, p.district, p.subdistrict, p.loc))
+      .filter((p) => (seen.has(p.id) ? false : seen.add(p.id)))
+      .sort((a, b) => a.time - b.time);
+    // บัญชีจ่ายหมายที่ช่วงวันที่ทับกับช่วงรายงาน และอยู่ในโซน
+    const overlap = (it) => (!it.period_end || it.period_end >= win.startIso) && (!it.period_start || it.period_start <= win.endIso);
+    const issued = !zone ? [] : R.issued.filter((it) => overlap(it) && L.inZone(zone, it.district, it.subdistrict, it.address_raw))
+      .sort((a, b) => (a.period_end < b.period_end ? 1 : a.period_end > b.period_end ? -1 : (a.seq || 0) - (b.seq || 0)));
+    const recentBatch = (R.batches || []).find((b) => new Date(b.created_at).getTime() >= win.from);
+    // จับคู่ภาพ ↔ บัญชีจ่ายหมาย
+    const photoMap = new Map();
+    issued.forEach((it) => photoMap.set(it.id, photosForIssued(it).filter((p) => p.time >= win.from - 14 * 864e5)));
+    const orphan = uploads.filter((p) => !issued.some((it) => (photoMap.get(it.id) || []).some((x) => x.id === p.id)));
+    const withPhoto = issued.filter((it) => (photoMap.get(it.id) || []).length);
+    const noPhoto = issued.filter((it) => !(photoMap.get(it.id) || []).length);
+    const reported = issued.filter((it) => it.report_status && it.report_status !== 'none');
+    return { groups, cur, zone, win, uploads, issued, recentBatch, photoMap, orphan, withPhoto, noPhoto, reported };
+  }
+
+  function stepHead(n, title, state, sub) {
+    const ic = state === 'done' ? '<i class="fa-solid fa-check"></i>' : state === 'lock' ? '<i class="fa-solid fa-lock"></i>' : n;
+    return `<div class="sr-step-head"><span class="sr-step-no ${state}">${ic}</span><div><div class="sr-step-title">${title}</div>${sub ? `<div class="sr-muted">${sub}</div>` : ''}</div></div>`;
+  }
+
+  async function renderFlow(body) {
+    body = body || $('#srBody'); if (!body) return;
+    if (!sheetRows().length) { body.innerHTML = '<div class="sr-card"><div class="sr-empty"><i class="fa-solid fa-spinner fa-spin"></i> กำลังโหลดภาพส่งหมาย...</div></div>'; await ensureSheetRows(); }
+    if (!R.loadedIssued) await loadIssued().catch(() => {});
+    if (R.sub !== 'flow') return;
+    const D = flowData();
+    const { zone, cur, win } = D;
+    const blockNote = cur && !FL.viewZone ? `ใช้โซนนี้ตั้งแต่วันจันทร์ที่ ${thDay(cur.blockStart)} · เปลี่ยนเป็น <b>${esc(cur.nextZone.label)}</b> อัตโนมัติวันจันทร์ที่ ${thDay(cur.nextChange)}` : '';
+    const s1done = Boolean(zone);
+    const s2state = !s1done ? 'lock' : D.uploads.length ? 'done' : 'todo';
+    const s3state = s2state !== 'done' ? 'lock' : (D.issued.length && D.recentBatch) ? 'done' : 'todo';
+    const s4state = s3state === 'lock' || !D.issued.length ? 'lock' : D.reported.length >= D.issued.length ? 'done' : 'todo';
+    const stepper = [['โซนและช่วงเวลา', s1done ? 'done' : 'todo'], ['ภาพส่งหมายในโซน', s2state], ['ตรวจกับบัญชีจ่ายหมาย', s3state], ['สร้างแบบรายงานหมาย', s4state]]
+      .map(([t, st], i) => `<div class="sr-stepper-item ${st}"><span>${st === 'done' ? '<i class="fa-solid fa-check"></i>' : i + 1}</span>${t}</div>`).join('<i class="fa-solid fa-chevron-right sr-stepper-sep"></i>');
+
+    // ① โซน + ช่วงเวลา
+    const zoneOpts = D.groups.map((z) => `<option value="${esc(z.key)}" ${zone && z.key === zone.key ? 'selected' : ''}>${esc(z.label)}${cur && z.key === cur.zone.key ? ' (โซนปัจจุบัน)' : ''}</option>`).join('');
+    const prevHint = cur && !FL.viewZone && cur.blockStart.getTime() > win.from
+      ? `<div class="sr-note" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i> ช่วงรายงานนี้คาบเกี่ยวโซนก่อนหน้า — <a href="#" data-fl="viewprev">ดูรายการของ ${esc(cur.prevZone.label)}</a></div>` : '';
+    const s1 = `<div class="sr-card sr-step">${stepHead(1, 'โซนจ่ายหมายและช่วงเวลารายงาน', s1done ? 'done' : 'todo', 'โซนจ่ายหมาย = อำเภอ (อ.เมืองอุดรธานีแบ่งตามตำบล) เลื่อนไปโซนถัดไปทุก 2 สัปดาห์')}
+      ${zone ? `<div class="sr-flow-zone">
+          <div class="sr-flow-box"><div class="sr-kicker">${FL.viewZone ? 'กำลังดูโซน' : 'โซนจ่ายหมายปัจจุบัน'}</div><div class="sr-flow-big">${esc(zone.label)}</div><div class="sr-muted">${blockNote || (FL.viewZone ? '<a href="#" data-fl="backcur">กลับไปโซนปัจจุบัน</a>' : '')}</div></div>
+          <div class="sr-flow-box"><div class="sr-kicker">ช่วงเวลารายงาน (2 สัปดาห์)</div><div class="sr-flow-big">${thDay(win.start)} – ${thDay(win.end)}</div><div class="sr-muted">วัน${thDayLong(win.start)} ถึงวัน${thDayLong(win.end)}</div>
+            <div style="margin-top:6px;display:flex;gap:6px"><button class="sr-btn sm" data-fl="wkprev"><i class="fa-solid fa-chevron-left"></i> สัปดาห์ก่อน</button>${FL.weekOffset ? '<button class="sr-btn sm" data-fl="wknow">สัปดาห์นี้</button>' : ''}<button class="sr-btn sm" data-fl="wknext" ${FL.weekOffset >= 0 ? 'disabled' : ''}>สัปดาห์ถัดไป <i class="fa-solid fa-chevron-right"></i></button></div></div>
+        </div>
+        <div class="sr-toolbar" style="margin-top:12px">
+          <label class="sr-muted">ดูโซน</label><select class="sr-select" id="flZone" style="max-width:340px">${zoneOpts}</select>
+          ${!FL.viewZone ? `<button class="sr-btn" data-fl="zprev" title="ย้อนกลับไปโซนก่อนหน้า"><i class="fa-solid fa-backward-step"></i> โซนก่อนหน้า</button>
+          <button class="sr-btn primary" data-fl="znext" title="เลื่อนไปโซนถัดไปตอนนี้ (เริ่มนับ 2 สัปดาห์ใหม่)"><i class="fa-solid fa-forward-step"></i> เลื่อนไปโซนถัดไป</button>` : `<button class="sr-btn primary" data-fl="zsetview"><i class="fa-solid fa-thumbtack"></i> ตั้งเป็นโซนปัจจุบันของฉัน</button>`}
+          ${isAdmin() ? `<label class="sr-muted" style="margin-left:auto"><input type="checkbox" id="flAll" ${FL.all ? 'checked' : ''}> แสดงภาพของผู้ใช้ทุกคน</label>` : ''}
+        </div>${prevHint}`
+      : `<div class="sr-note warn"><i class="fa-solid fa-map-location-dot"></i> ยังไม่ได้กำหนดโซนจ่ายหมายของคุณ — เลือกโซนที่กำลังรับผิดชอบ และวันที่เริ่มโซนนี้ (ระบบจะเลื่อนไปโซนถัดไปให้ทุก 2 สัปดาห์)</div>
+        <div class="sr-toolbar" style="margin-top:10px"><select class="sr-select" id="flZoneInit" style="max-width:340px">${D.groups.map((z) => `<option value="${esc(z.key)}">${esc(z.label)}</option>`).join('')}</select>
+          <label class="sr-muted">เริ่มโซนนี้วันจันทร์ที่</label><input type="date" class="sr-input" id="flAnchor" value="${win.startIso}">
+          <button class="sr-btn primary" data-fl="zinit"><i class="fa-solid fa-check"></i> บันทึกโซนจ่ายหมาย</button></div>`}
+    </div>`;
+
+    // ② ภาพส่งหมาย
+    const upRows = D.uploads.map((p, i) => {
+      const m = D.issued.filter((it) => (D.photoMap.get(it.id) || []).some((x) => x.id === p.id));
+      return `<tr><td>${i + 1}</td><td><img class="sr-thumb" src="${esc(p.thumb)}" data-view="${esc(p.id)}" referrerpolicy="no-referrer" loading="lazy" alt=""></td>
+        <td><b>${esc(p.caseNo || '-')}</b></td><td>${esc(p.loc)}</td><td style="white-space:nowrap">${esc(p.at)}</td>
+        <td>${!D.issued.length ? '<span class="sr-muted">รอตรวจกับบัญชี</span>' : m.length ? m.map((it) => `<span class="sr-chip ok">${esc(it.kind === 'T' ? it.t_no : it.black_no)}</span>`).join(' ') : '<span class="sr-chip warn">ไม่พบในบัญชีจ่ายหมาย</span>'}</td>
+        <td class="ctr"><button class="sr-btn sm" data-fl-dl="${esc(p.id)}" title="ดาวน์โหลดภาพ"><i class="fa-solid fa-download"></i></button></td></tr>`;
+    }).join('');
+    const s2 = `<div class="sr-card sr-step ${s2state === 'lock' ? 'locked' : ''}">${stepHead(2, 'ภาพส่งหมายในโซนนี้', s2state, 'ภาพที่ถ่ายจากแอปบนมือถือ และภาพที่อัปโหลดเองจากมือถือ แท็บเล็ต หรือ PC ภายในช่วงเวลารายงาน')}
+      ${s2state === 'lock' ? '' : D.uploads.length ? `<div class="sr-toolbar"><span class="sr-chip ok">${D.uploads.length} ภาพ</span><span class="grow"></span>
+          <button class="sr-btn" data-fl="refresh"><i class="fa-solid fa-rotate-right"></i> รีเฟรช</button>
+          <button class="sr-btn" data-fl="upload"><i class="fa-solid fa-cloud-arrow-up"></i> อัปโหลดภาพเพิ่ม</button>
+          <button class="sr-btn" data-fl="zip"><i class="fa-solid fa-file-zipper"></i> ดาวน์โหลดภาพทั้งหมด (.zip)</button></div>
+        <div class="sr-scroll" style="margin-top:10px;max-height:380px"><table class="sr-table"><thead><tr><th>#</th><th>ภาพ</th><th>เลขคดี</th><th>สถานที่ส่งหมาย</th><th>วันที่/เวลา</th><th>บัญชีจ่ายหมาย</th><th class="ctr"></th></tr></thead><tbody>${upRows}</tbody></table></div>`
+      : `<div class="sr-empty" style="padding:26px 10px"><i class="fa-regular fa-images" style="font-size:30px;color:#94a3b8"></i>
+          <div style="font-size:16px;font-weight:700;color:var(--c-primary);margin-top:8px">ยังไม่มีภาพส่งหมายใน${esc(zone.label)} ช่วง ${thDay(win.start)} – ${thDay(win.end)}</div>
+          <div class="sr-muted" style="margin:4px 0 14px">ภาพที่ถ่ายด้วยแอปบนมือถือจะขึ้นที่นี่อัตโนมัติ หรืออัปโหลดภาพเองได้จากหน้าบันทึกส่งหมาย</div>
+          <button class="sr-btn primary lg" data-fl="upload"><i class="fa-solid fa-cloud-arrow-up"></i> ไปหน้าอัปโหลดภาพส่งหมาย</button>
+          <button class="sr-btn lg" data-fl="refresh"><i class="fa-solid fa-rotate-right"></i> ตรวจสอบอีกครั้ง</button></div>`}
+    </div>`;
+
+    // ③ นำเข้าบัญชีจ่ายหมาย + ตรวจความครบถ้วน
+    const chk = (label, n, cls, key) => `<div class="sr-flow-stat ${cls}" ${key ? `data-fl-show="${key}"` : ''}><b>${n}</b><span>${label}</span></div>`;
+    const gapRows = (list, kind) => list.map((x) => kind === 'nophoto'
+      ? `<tr><td><b>${esc(x.kind === 'T' ? x.t_no : x.black_no)}</b>${x.kind === 'T' ? ' <span class="sr-chip">หมาย ต.</span>' : ''}</td><td>${esc(x.summon_type)}</td><td>${esc(x.recipient)}</td><td>${esc(x.address_raw)} ต.${esc(x.subdistrict)} อ.${esc(x.district)}</td></tr>`
+      : `<tr><td><b>${esc(x.caseNo || '-')}</b></td><td colspan="2">${esc(x.loc)}</td><td>${esc(x.at)}</td></tr>`).join('');
+    const s3 = `<div class="sr-card sr-step ${s3state === 'lock' ? 'locked' : ''}">${stepHead(3, 'นำเข้าบัญชีจ่ายหมาย (Excel) เพื่อตรวจความถูกต้องครบถ้วน', s3state, 'ไฟล์ "บัญชีจ่ายหมาย พนักงานศาลนี้ส่ง" จากระบบงานศาล (เลือกบัญชีใบเสร็จมาพร้อมกันได้) — นำเข้าทุกครั้งก่อนรายงาน')}
+      ${s3state === 'lock' ? '<div class="sr-muted">ต้องมีภาพส่งหมายในโซนนี้ก่อน</div>' : `<div class="sr-toolbar">
+          <button class="sr-btn primary" data-fl="import"><i class="fa-solid fa-file-excel"></i> ${D.recentBatch ? 'นำเข้าบัญชีจ่ายหมายอีกครั้ง' : 'นำเข้าบัญชีจ่ายหมาย (Excel)'}</button>
+          <span class="sr-muted">${D.recentBatch ? `นำเข้าล่าสุด: ${esc(D.recentBatch.source_file || '-')} (${esc(new Date(D.recentBatch.created_at).toLocaleString('th-TH'))})` : 'ยังไม่ได้นำเข้าบัญชีจ่ายหมายในช่วงนี้'}</span></div>
+        ${D.issued.length ? `<div class="sr-flow-stats">${chk('หมายในบัญชี (โซนนี้)', D.issued.length, '')}${chk('มีภาพส่งหมายแล้ว', D.withPhoto.length, 'ok')}${chk('ยังไม่มีภาพ', D.noPhoto.length, D.noPhoto.length ? 'warn' : 'ok', 'nophoto')}${chk('ภาพที่ไม่พบในบัญชี', D.orphan.length, D.orphan.length ? 'bad' : 'ok', 'orphan')}</div>
+          ${D.noPhoto.length ? `<details class="sr-gap" ${FL.open === 'nophoto' ? 'open' : ''}><summary>หมายในบัญชีที่ยังไม่มีภาพส่งหมาย (${D.noPhoto.length})</summary><div class="sr-scroll" style="max-height:260px"><table class="sr-table"><thead><tr><th>เลขคดี</th><th>หมาย</th><th>ผู้รับ</th><th>ที่อยู่</th></tr></thead><tbody>${gapRows(D.noPhoto, 'nophoto')}</tbody></table></div>
+            <div class="sr-muted" style="margin-top:6px">ถ้าส่งแล้วแต่ยังไม่อัปโหลดภาพ <a href="#" data-fl="upload">ไปหน้าอัปโหลดภาพ</a> — หรือรายงานได้โดยไม่มีภาพ (เช่น ส่งไม่ได้)</div></details>` : ''}
+          ${D.orphan.length ? `<details class="sr-gap bad" ${FL.open === 'orphan' ? 'open' : ''}><summary>ภาพที่ไม่พบในบัญชีจ่ายหมาย (${D.orphan.length}) — ตรวจเลขคดีที่บันทึกตอนถ่ายภาพ</summary><div class="sr-scroll" style="max-height:220px"><table class="sr-table"><thead><tr><th>เลขคดี (จากภาพ)</th><th colspan="2">สถานที่</th><th>วันที่</th></tr></thead><tbody>${gapRows(D.orphan, 'orphan')}</tbody></table></div></details>` : ''}`
+        : (D.recentBatch ? `<div class="sr-note warn" style="margin-top:10px"><i class="fa-solid fa-triangle-exclamation"></i> บัญชีจ่ายหมายที่นำเข้าไม่มีหมายของ${esc(zone.label)} ในช่วงนี้ — ตรวจว่าเลือกไฟล์ถูกช่วงวันที่/ถูกโซน</div>` : '')}`}
+    </div>`;
+
+    // ④ สร้างแบบรายงานหมาย
+    const repRows = D.issued.map((it) => {
+      const ph = D.photoMap.get(it.id) || [];
+      const st = it.report_status === 'printed' ? '<span class="sr-chip ok">พิมพ์แล้ว</span>' : it.report_status === 'saved' ? '<span class="sr-chip ok">บันทึกแล้ว</span>' : '<span class="sr-chip">ยังไม่รายงาน</span>';
+      return `<tr><td>${esc(it.seq || '')}</td><td><b>${esc(it.kind === 'T' ? it.t_no : it.black_no)}</b>${it.kind === 'T' ? '<div class="sr-muted">หมาย ต.</div>' : ''}</td><td>${esc(it.summon_type)}</td><td>${esc(it.recipient)}<div class="sr-muted">ต.${esc(it.subdistrict)} อ.${esc(it.district)}</div></td>
+        <td>${it.money_type === 'paid' ? `หมายเงิน ${L.money2(it.price)}` : 'หมายฟรี'}</td>
+        <td>${ph.length ? `<img class="sr-thumb" src="${esc(ph[0].thumb)}" data-view="${esc(ph[0].id)}" referrerpolicy="no-referrer" loading="lazy" alt="">${ph.length > 1 ? ` <span class="sr-muted">+${ph.length - 1}</span>` : ''}` : '<span class="sr-muted">ไม่มีภาพ</span>'}</td>
+        <td>${st}</td>
+        <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm primary" data-fl-rep="${it.id}"><i class="fa-solid fa-file-pen"></i> รายงานหมาย</button>
+          ${it.report ? `<button class="sr-btn sm" data-fl-word="${it.id}" title="ดาวน์โหลด Word"><i class="fa-solid fa-file-word"></i></button>` : ''}</td></tr>`;
+    }).join('');
+    const pct = D.issued.length ? Math.round((D.reported.length / D.issued.length) * 100) : 0;
+    const s4 = `<div class="sr-card sr-step ${s4state === 'lock' ? 'locked' : ''}">${stepHead(4, 'สร้างแบบรายงานหมาย (Word)', s4state, 'กด "รายงานหมาย" เพื่อกรอกผลการส่ง ภาพส่งหมายจะแนบท้ายเอกสารให้อัตโนมัติ')}
+      ${s4state === 'lock' ? '<div class="sr-muted">นำเข้าบัญชีจ่ายหมายที่มีหมายของโซนนี้ก่อน</div>' : `<div class="sr-toolbar"><div class="sr-progress"><div style="width:${pct}%"></div></div><span><b>${D.reported.length}</b> / ${D.issued.length} รายการรายงานแล้ว</span><span class="grow"></span>
+          <button class="sr-btn" data-fl="wordall" ${D.reported.length ? '' : 'disabled'}><i class="fa-solid fa-file-zipper"></i> ดาวน์โหลด Word ที่รายงานแล้ว (.zip)</button>
+          <button class="sr-btn" data-fl="memo"><i class="fa-solid fa-file-invoice"></i> ทำบันทึกข้อความขออนุมัติเบิก</button></div>
+        <div class="sr-scroll" style="margin-top:10px;max-height:560px"><table class="sr-table"><thead><tr><th>ที่</th><th>เลขคดี</th><th>หมาย</th><th>ผู้รับหมาย</th><th>ประเภท</th><th>ภาพ</th><th>สถานะ</th><th class="ctr">จัดการ</th></tr></thead><tbody>${repRows}</tbody></table></div>`}
+    </div>`;
+
+    body.innerHTML = `<div class="sr-stepper">${stepper}</div>${s1}${s2}${s3}${s4}
+      <div class="sr-muted" style="text-align:right;margin-top:4px"><a href="#" data-fl="legacy"><i class="fa-solid fa-route"></i> ดูรายการเส้นทางส่งหมายจากมือถือ (หน้าเดิม)</a></div>`;
+    bindFlow(body, D);
+  }
+
+  async function setZone(zoneKey, anchorIso) {
+    const r = await api('sr_zone_set', { zone_key: zoneKey, anchor: anchorIso });
+    if (R.boot) R.boot.zone = r.zone;
+    FL.viewZone = '';
+  }
+  function bindFlow(body, D) {
+    const z = $('#flZone', body);
+    if (z) z.onchange = () => { FL.viewZone = (D.cur && z.value === D.cur.zone.key) ? '' : z.value; renderFlow(body); };
+    const all = $('#flAll', body); if (all) all.onchange = () => { FL.all = all.checked; renderFlow(body); };
+    body.onclick = async (e) => {
+      const a = e.target.closest('[data-fl],[data-fl-dl],[data-fl-rep],[data-fl-word],[data-view],[data-fl-show]');
+      if (!a) return;
+      if (a.tagName === 'A') e.preventDefault();
+      try {
+        if (a.dataset.view) return viewPhoto(a.dataset.view);
+        if (a.dataset.flShow) { FL.open = a.dataset.flShow; const d = body.querySelector(`details.sr-gap${a.dataset.flShow === 'orphan' ? '.bad' : ':not(.bad)'}`); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'center' }); } return; }
+        if (a.dataset.flDl) { const p = D.uploads.find((x) => x.id === a.dataset.flDl); if (p) downloadPhoto(p); return; }
+        if (a.dataset.flRep) { const id = Number(a.dataset.flRep); const ph = D.photoMap.get(id) || []; return openReportForm(id, { photoIds: ph.map((p) => p.id) }); }
+        if (a.dataset.flWord) return quickWord(Number(a.dataset.flWord));
+        const act = a.dataset.fl;
+        if (act === 'wkprev') { FL.weekOffset -= 1; return renderFlow(body); }
+        if (act === 'wknext') { FL.weekOffset = Math.min(0, FL.weekOffset + 1); return renderFlow(body); }
+        if (act === 'wknow') { FL.weekOffset = 0; return renderFlow(body); }
+        if (act === 'backcur') { FL.viewZone = ''; return renderFlow(body); }
+        if (act === 'viewprev') { FL.viewZone = D.cur.prevZone.key; return renderFlow(body); }
+        if (act === 'zinit') { await setZone($('#flZoneInit').value, $('#flAnchor').value || L.dIso(L.mondayOf(new Date()))); toast('success', 'บันทึกโซนจ่ายหมายแล้ว'); return renderFlow(body); }
+        if (act === 'znext' || act === 'zprev') {
+          const target = act === 'znext' ? D.cur.nextZone : D.cur.prevZone;
+          const ok = await Swal.fire({ icon: 'question', title: act === 'znext' ? 'เลื่อนไปโซนถัดไป?' : 'ย้อนกลับไปโซนก่อนหน้า?', html: `เปลี่ยนโซนจ่ายหมายเป็น <b>${esc(target.label)}</b><br><span class="sr-muted">เริ่มนับ 2 สัปดาห์ใหม่ตั้งแต่วันจันทร์ที่ ${thDay(L.mondayOf(new Date()))}</span>`, showCancelButton: true, confirmButtonText: 'เปลี่ยนโซน', cancelButtonText: 'ยกเลิก' });
+          if (!ok.isConfirmed) return;
+          await setZone(target.key, L.dIso(L.mondayOf(new Date()))); toast('success', 'เปลี่ยนโซนแล้ว'); return renderFlow(body);
+        }
+        if (act === 'zsetview') {
+          const g = D.zone;
+          const ok = await Swal.fire({ icon: 'question', title: 'ตั้งเป็นโซนปัจจุบัน?', html: `<b>${esc(g.label)}</b><br><span class="sr-muted">เริ่มนับ 2 สัปดาห์ตั้งแต่วันจันทร์ที่ ${thDay(L.mondayOf(new Date()))}</span>`, showCancelButton: true, confirmButtonText: 'ตั้งค่า', cancelButtonText: 'ยกเลิก' });
+          if (!ok.isConfirmed) return;
+          await setZone(g.key, L.dIso(L.mondayOf(new Date()))); return renderFlow(body);
+        }
+        if (act === 'upload') { window.switchTab('form'); return; }
+        if (act === 'refresh') {
+          busy('กำลังตรวจสอบภาพส่งหมาย...');
+          try { if (typeof window.loadGoogleSheetData === 'function') await window.loadGoogleSheetData(true, true); } catch (_) {}
+          await loadIssued().catch(() => {}); done(); return renderFlow(body);
+        }
+        if (act === 'zip') return zipPhotos(D.uploads, `ภาพส่งหมาย_${D.zone.label}_${D.win.startIso}`);
+        if (act === 'import') { await importExcelFlow(); return; }
+        if (act === 'wordall') return bulkWord(D.reported.map((it) => it.id));
+        if (act === 'memo') { R.sub = 'memos'; return renderSub(); }
+        if (act === 'legacy') { openLegacyRouteBatch(); }
+      } catch (er) { done(); fail(er); }
+    };
+  }
+  /** เปิดหน้า "รายการส่งหมายรอบนี้" แบบเดิม (เส้นทางจากมือถือ) */
+  function openLegacyRouteBatch() {
+    FL.legacy = true;
+    try { window.switchTab('route_batch'); } finally { FL.legacy = false; }
   }
 
   // ---------------- 2) บันทึกข้อความ / ใบสำคัญรับเงิน ----------------
@@ -1093,16 +1309,46 @@
       ${['inspector', 'payer', 'director', 'officer'].map(block).join('')}
       <div class="sr-card"><div class="sr-toolbar"><h3 style="margin:0">คำสั่งศาลแต่งตั้งเจ้าพนักงาน (ใช้ในบันทึกข้อความ)</h3><span class="grow"></span>${admin ? '<button class="sr-btn sm primary" id="srOrderAdd"><i class="fa-solid fa-plus"></i> เพิ่มคำสั่งฉบับใหม่</button>' : ''}</div>
         <table class="sr-table" style="margin-top:8px"><thead><tr><th>คำสั่ง</th><th>หมายเหตุ</th><th></th></tr></thead><tbody>${(R.boot.orders || []).map((o, i) => `<tr><td>${esc(o.order_text)} ${i === 0 ? '<span class="sr-chip ok">ฉบับล่าสุด</span>' : ''}</td><td class="sr-muted">${esc(o.note)}</td><td class="ctr">${admin ? `<button class="sr-btn sm danger" data-odel="${o.id}"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`).join('')}</tbody></table></div>
+      <div class="sr-card"><div class="sr-toolbar"><h3 style="margin:0">โซนจ่ายหมาย (หมุนเวียนทุก 2 สัปดาห์ตามลำดับ)</h3><span class="grow"></span>${admin ? '<button class="sr-btn sm" id="zn_reset"><i class="fa-solid fa-arrow-rotate-left"></i> ค่าเริ่มต้น</button> <button class="sr-btn sm primary" id="zn_save"><i class="fa-solid fa-floppy-disk"></i> บันทึกลำดับโซน</button>' : ''}</div>
+        <div class="sr-muted" style="margin:4px 0 8px">โซน = อำเภอ (อ.เมืองอุดรธานีแบ่งตามตำบล) · ติ๊ก "รวมกับโซนก่อนหน้า" เพื่อให้หลายพื้นที่เป็นโซนเดียวกัน · ปิดใช้พื้นที่ที่ไม่อยู่ในเขตจ่ายหมาย${admin ? '' : ' (แก้ไขได้เฉพาะผู้ดูแลระบบ)'}</div>
+        <div class="sr-scroll" style="max-height:360px"><table class="sr-table"><thead><tr><th>ลำดับ</th><th>พื้นที่</th><th class="ctr">ใช้งาน</th><th class="ctr">รวมกับโซนก่อนหน้า</th>${admin ? '<th class="ctr">เลื่อน</th>' : ''}</tr></thead><tbody id="zn_rows"></tbody></table></div></div>
       <div class="sr-card"><h3>การตั้งค่าเอกสาร</h3><div class="sr-grid sr-g3">
         <div class="sr-field"><label>ตัวเลขในไฟล์ Word</label><select class="sr-select" id="st_doc_digits" ${admin ? '' : 'disabled'}><option value="thai" ${s.doc_digits !== 'arabic' ? 'selected' : ''}>เลขไทย (๑๒๓) ตามแบบฟอร์มศาล</option><option value="arabic" ${s.doc_digits === 'arabic' ? 'selected' : ''}>เลขอารบิก (123)</option></select></div>
         <div class="sr-field"><label>ที่อยู่ผู้รับเงิน (ใบสำคัญรับเงิน)</label><input class="sr-input" id="st_reporter_address" value="${esc(s.reporter_address || '')}" ${admin ? '' : 'readonly'}></div>
         <div class="sr-field"><label>ตำแหน่ง ผอ. (ข้อความใต้ผู้ตรวจ)</label><input class="sr-input" id="st_director_title" value="${esc(s.director_title || '')}" ${admin ? '' : 'readonly'}></div>
         ${admin ? '<div class="sr-field"><button class="sr-btn primary" id="st_save"><i class="fa-solid fa-floppy-disk"></i> บันทึกการตั้งค่า</button></div>' : ''}</div></div>`;
     const reload = async () => { await ensureBoot(true); renderSettings(body); };
+    let units = zoneUnits();
+    const drawZones = () => {
+      let no = 0;
+      $('#zn_rows').innerHTML = units.map((z, i) => {
+        if (z.enabled !== false && !(z.merge && i > 0)) no += 1;
+        return `<tr><td>${z.enabled === false ? '-' : z.merge && i > 0 ? '↳' : no}</td><td>${esc(z.label)}</td>
+          <td class="ctr"><input type="checkbox" data-zn-en="${i}" ${z.enabled !== false ? 'checked' : ''} ${admin ? '' : 'disabled'}></td>
+          <td class="ctr"><input type="checkbox" data-zn-mg="${i}" ${z.merge ? 'checked' : ''} ${admin && i > 0 ? '' : 'disabled'}></td>
+          ${admin ? `<td class="ctr"><button class="sr-btn sm" data-zn-up="${i}" ${i ? '' : 'disabled'}><i class="fa-solid fa-arrow-up"></i></button><button class="sr-btn sm" data-zn-dn="${i}" ${i < units.length - 1 ? '' : 'disabled'}><i class="fa-solid fa-arrow-down"></i></button></td>` : ''}</tr>`;
+      }).join('');
+    };
+    drawZones();
+    $('#zn_rows').onchange = (e) => {
+      const t = e.target;
+      if (t.dataset.znEn) units[+t.dataset.znEn].enabled = t.checked;
+      if (t.dataset.znMg) units[+t.dataset.znMg].merge = t.checked;
+      drawZones();
+    };
     $('#pf_save').onclick = () => { LS.set(profileKey(), Object.assign(profile(), { name: $('#pf_name').value.trim(), position: $('#pf_position').value.trim() })); toast('success', 'บันทึกแล้ว'); };
     body.onclick = async (e) => {
       const b = e.target.closest('button'); if (!b) return;
       try {
+        if (b.dataset.znUp || b.dataset.znDn) {
+          const i = Number(b.dataset.znUp || b.dataset.znDn); const j = b.dataset.znUp ? i - 1 : i + 1;
+          [units[i], units[j]] = [units[j], units[i]]; return drawZones();
+        }
+        if (b.id === 'zn_reset') { units = L.defaultZones(); return drawZones(); }
+        if (b.id === 'zn_save') {
+          await api('sr_settings_save', { values: { zone_list: JSON.stringify(units.map((z) => ({ key: z.key, enabled: z.enabled !== false, merge: Boolean(z.merge) }))) } });
+          await reload(); toast('success', 'บันทึกลำดับโซนจ่ายหมายแล้ว'); return;
+        }
         if (b.dataset.sadd) { if (await signerDialog({ kind: b.dataset.sadd })) await reload(); }
         else if (b.dataset.sedit) { const sg = R.boot.signers.find((x) => String(x.id) === b.dataset.sedit); if (await signerDialog(sg)) await reload(); }
         else if (b.dataset.sdel) {
@@ -1220,8 +1466,9 @@
       if (typeof window.downloadSingleImageFile === 'function') window.downloadSingleImageFile(p.url, photoFileName(p)); else fail(e);
     }
   }
-  async function zipUploads() {
-    const list = roundUploads(); if (!list.length) return;
+  async function zipUploads() { return zipPhotos(roundUploads(), `ภาพส่งหมาย_${L.todayIso()}`); }
+  async function zipPhotos(list, baseName) {
+    if (!list.length) return;
     busy(`กำลังรวมภาพ ${list.length} ภาพ...`);
     try {
       const zip = new window.JSZip(); let n = 0;
@@ -1230,7 +1477,7 @@
         Swal.update({ title: `กำลังรวมภาพ (${i + 1}/${list.length})...` }); Swal.showLoading();
       }
       const out = await zip.generateAsync({ type: 'blob' });
-      done(); downloadBlob(out, `ภาพส่งหมาย_${L.todayIso()}.zip`);
+      done(); downloadBlob(out, `${String(baseName).replace(/[\\/:*?"<>|]+/g, '-')}.zip`);
       if (n < list.length) toast('warning', `ดาวน์โหลดได้ ${n}/${list.length} ภาพ`);
     } catch (e) { done(); fail(e); }
   }
@@ -1317,5 +1564,5 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
   // ให้ทดสอบ/เรียกจากที่อื่นได้
-  window.SltsReportUI = { open: () => window.switchTab('report'), openSub: (sub) => { R.sub = sub; window.switchTab('report'); }, openReportForm, refreshUploadsCard, R };
+  window.SltsReportUI = { open: () => window.switchTab('report'), openSub: (sub) => { R.sub = sub; window.switchTab('report'); }, openFlow: () => { R.sub = 'flow'; window.switchTab('report'); }, openData: () => { if (R.sub === 'flow') R.sub = 'issued'; window.switchTab('report'); }, FL, openReportForm, refreshUploadsCard, R };
 })();

@@ -10,15 +10,15 @@
   const MIN_WIDTH = 850;
   const KEY = 'slts_sidebar_collapsed';
   const GROUPS = [
-    { label: 'งานส่งหมาย', ids: ['tabBtnForm', 'tabBtnTable', 'tabBtnMap', 'tabBtnRouteBatch'] },
-    { label: 'งานรายงานผลหมาย', ids: ['tabBtnReport'], sub: true },
+    { label: 'งานส่งหมาย', ids: ['tabBtnForm', 'tabBtnTable', 'tabBtnMap'] },
+    { label: 'งานรายงานผลหมาย', ids: ['tabBtnRouteBatch', 'tabBtnReport'], sub: true },
     { label: 'ผู้ดูแลระบบ', ids: ['tabBtnUsers'] },
   ];
   const REPORT_SUBS = [
-    ['issued', 'fa-list-check', 'บัญชีจ่ายหมาย / รายงานหมาย'],
+    ['issued', 'fa-list-check', 'บัญชีจ่ายหมาย'],
     ['memos', 'fa-file-invoice', 'บันทึกข้อความ / ใบสำคัญ'],
     ['rates', 'fa-table', 'อัตราค่านำหมาย'],
-    ['settings', 'fa-user-pen', 'ผู้ลงนามและตั้งค่า'],
+    ['settings', 'fa-user-pen', 'ผู้ลงนาม / โซนจ่ายหมาย'],
   ];
 
   const html = document.documentElement;

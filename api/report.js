@@ -158,7 +158,20 @@ actions.sr_bootstrap = async (d, u) => {
     db.query('SELECT id, kind, full_name, position, acting, acting_title, is_default, created_by FROM sr_signers ORDER BY kind, is_default DESC, id'),
     db.query('SELECT id, order_text, order_no, order_date, note, is_active, created_by, created_at FROM sr_court_orders ORDER BY id DESC'),
   ]);
-  return { status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows };
+  const { rows: [zone] } = await db.query('SELECT zone_key, anchor, updated_by, updated_at FROM sr_zone_state WHERE username = $1', [u.username]);
+  return { status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows, zone: zone || null };
+};
+
+/** ตั้งโซนจ่ายหมายปัจจุบัน (ของตัวเอง; แอดมินตั้งให้ผู้อื่นได้) — anchor = วันจันทร์ที่เริ่มโซนนี้ */
+actions.sr_zone_set = async (d, u) => {
+  const who = ownerFor(u, d.username);
+  const key = s(d.zone_key, 120);
+  const anchor = s(d.anchor, 10);
+  if (!/^(d:|s:)/.test(key)) throw new HttpError(400, 'โซนจ่ายหมายไม่ถูกต้อง');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) throw new HttpError(400, 'วันที่เริ่มโซนไม่ถูกต้อง');
+  await db.query(`INSERT INTO sr_zone_state (username, zone_key, anchor, updated_by, updated_at) VALUES ($1,$2,$3,$4,NOW())
+    ON CONFLICT (username) DO UPDATE SET zone_key = EXCLUDED.zone_key, anchor = EXCLUDED.anchor, updated_by = EXCLUDED.updated_by, updated_at = NOW()`, [who, key, anchor, u.username]);
+  return { status: 'success', zone: { zone_key: key, anchor, updated_by: u.username } };
 };
 
 actions.sr_settings_save = async (d, u) => {
@@ -166,7 +179,7 @@ actions.sr_settings_save = async (d, u) => {
   const values = d.values && typeof d.values === 'object' ? d.values : {};
   const keys = Object.keys(values).filter((k) => /^[a-z0-9_]{1,60}$/.test(k));
   for (const k of keys) {
-    await db.query('INSERT INTO sr_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', [k, s(values[k], 5000)]);
+    await db.query('INSERT INTO sr_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', [k, s(values[k], k === 'zone_list' ? 20000 : 5000)]);
   }
   return { status: 'success', message: 'บันทึกการตั้งค่าเรียบร้อยแล้ว', settings: await settingsMap() };
 };
