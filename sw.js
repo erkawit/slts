@@ -38,7 +38,10 @@ const STATIC_ASSETS = [
   'js/map.js',
   'js/vendor/qrcode.js',
   'js/vendor/jsQR.js',
-  'img/logo.png'
+  'img/logo.png',
+  'img/favicon-32.png',
+  'img/icon-192.png',
+  'favicon.ico'
 ];
 
 const CDN_HOSTS = [

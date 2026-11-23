@@ -1185,7 +1185,7 @@
     const list = roundUploads();
     card.querySelector('#srUpCount').textContent = `${list.length} ภาพ`;
     card.querySelector('#srUpZip').disabled = !list.length;
-    card.querySelector('#srUpRows').innerHTML = list.map((p, i) => {
+    const rowsHtml = list.map((p, i) => {
       const m = R.loadedIssued ? issuedForPhoto(p) : [];
       const st = !R.loadedIssued ? '<span class="sr-muted">—</span>' : m.length
         ? m.map((it) => `<div><span class="sr-chip ${it.report_status !== 'none' ? 'ok' : ''}">${esc(it.kind === 'T' ? it.t_no : it.black_no)}</span> <span class="sr-muted">${esc(String(it.recipient).slice(0, 28))}</span>${it.report_status !== 'none' ? ' <span class="sr-muted">(รายงานแล้ว)</span>' : ''}</div>`).join('')
@@ -1195,6 +1195,9 @@
         <td class="ctr"><button class="sr-btn sm" data-up-dl="${esc(p.id)}"><i class="fa-solid fa-download"></i> ดาวน์โหลด</button></td>
         <td class="ctr"><button class="sr-btn sm primary" data-up-rep="${esc(p.id)}"><i class="fa-solid fa-file-pen"></i> รายงานหมาย</button></td></tr>`;
     }).join('') || `<tr><td colspan="8"><div class="sr-empty">ยังไม่มีภาพที่อัปโหลดจากมือถือในช่วงเวลานี้</div></td></tr>`;
+    // เขียน DOM ใหม่เฉพาะเมื่อข้อมูลเปลี่ยน (รีเฟรชทุก 15 วินาที ไม่ให้ภาพโหลดซ้ำ/กระพริบ)
+    const rowsEl = card.querySelector('#srUpRows');
+    if (rowsEl.__html !== rowsHtml) { rowsEl.innerHTML = rowsHtml; rowsEl.__html = rowsHtml; }
   }
   const photoFileName = (p, i) => `${i != null ? String(i + 1).padStart(2, '0') + '_' : ''}${(p.caseNo || 'summons').replace(/[\\/:*?"<>|]/g, '-')}_${(p.at || '').replace(/[^0-9]/g, '').slice(0, 14)}.jpg`;
   async function downloadPhoto(p) {

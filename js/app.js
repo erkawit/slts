@@ -1657,7 +1657,7 @@ function showCustomLoading(title = 'กำลังโหลดข้อมู�
     html: `
       <div class="logo-loading-box">
         <div class="logo-loading-wrapper">
-          <img src="img/logo.png" alt="ตราศาลจังหวัดอุดรธานี" class="logo-loading-img">
+          <img src="img/logo.png" alt="SLTS" class="logo-loading-img">
           <div class="logo-spinner-ring"></div>
         </div>
         <div class="logo-loading-text">

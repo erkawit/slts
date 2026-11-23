@@ -22,7 +22,7 @@ function copyDir(src, dest) {
 fs.rmSync(publicDir, { recursive: true, force: true });
 fs.mkdirSync(publicDir, { recursive: true });
 
-for (const file of ['manifest.json', 'version.json']) {
+for (const file of ['manifest.json', 'version.json', 'favicon.ico']) {
   fs.copyFileSync(path.join(root, file), path.join(publicDir, file));
 }
 for (const folder of ['css', 'js', 'img', 'fonts', 'templates']) copyDir(path.join(root, folder), path.join(publicDir, folder));
