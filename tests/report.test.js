@@ -1,0 +1,123 @@
+/**
+ * tests/report.test.js — ทดสอบตรรกะระบบรายงานผลหมาย (ไม่ต้องใช้ฐานข้อมูล)
+ *   node --test tests/report.test.js
+ * ข้อมูลทดสอบเป็นข้อมูลสมมติ (ไม่ใช่ข้อมูลคดีจริง)
+ */
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const path = require('path');
+const L = require('../js/report-logic.js');
+
+const ISSUED_ROWS = [
+  ['ศาลจังหวัดอุดรธานี'],
+  ['บัญชีจ่ายหมาย พนักงานศาลนี้ส่ง'],
+  ['ตั้งแต่วันที่ 9 พฤศจิกายน 2569 ถึงวันที่ 20 พฤศจิกายน 2569'],
+  ['', 'ที่', '', 'เลขดำที่', '', '', 'เลขแดงที่', 'โจทก์', '', '', 'จำเลย', '', '', 'หมายอะไร', 'หมายถึงใคร', '', 'ที่อยู่', 'ตำบล', 'อำเภอ', '', 'ราคา', 'ผู้ส่งหมาย', 'ผู้วางเงิน', 'ผลการส่งหมาย'],
+  ['', '1', '', 'ต1001/2569\nพ55/2569', '', '', ' ', 'บริษัท ทดสอบ จำกัด', '', '', 'นายสมมติ ทดลอง', '', '', 'คำบังคับ', 'นายสมมติ  ทดลอง  จำเลยที่ 1', '', '33 ม. 10 ซ. - ถ. -', 'เสอเพลอ', 'กุมภวาปี', '', '900.00', 'นายเจ้าหน้าที่ ทดสอบ', 'ศาลแพ่ง', ''],
+  // "ผู้" เก็บแบบวรรณยุกต์ก่อนสระ (พบในไฟล์จริงจากระบบงานศาล)
+  ['', '2', '', 'ผบ77/2569', '', '', 'ผบ88/2569', 'ธนาคารทดสอบ', '', '', 'นางทดสอบ', '', '', 'หมายนัด', 'นายสมมติ  ผู้คัดค้านที่ 2', '', '394/2  หมู่บ้านทดสอบ ม. 2 ซ. - ถ. -', 'ห้วยสามพาด', 'ประจักษ์ศิลปาคม', '', '0.00', 'นายเจ้าหน้าที่ ทดสอบ', ' ', 'ส่งได้โดยวิธีปิดประกาศ'],
+];
+const ACC_ROWS = [
+  ['ศาลจังหวัดอุดรธานี'], ['ตั้งแต่วันที่ 16 พฤศจิกายน 2569 ถึงวันที่ 20 พฤศจิกายน 2569'],
+  ['ที่', '', 'วันที่ลงข้อมูล', 'เลขดำที่', 'เลขแดงที่', '', 'หมายอะไร', 'ส่งหมายให้ใคร', '', 'ตำบล', 'อำเภอ', '', 'ราคาหมาย', '', 'ผู้ส่งหมาย', 'ใบเสร็จ จ่ายออก', '', '', 'ใบเสร็จ รับมา'],
+  ['1', '', '17-พ.ย. -69', 'ต1001/2569\nพ55/2569', ' ', '', 'คำบังคับ', 'นายสมมติ ทดลอง จำเลยที่ 1', '', 'เสอเพลอ', 'กุมภวาปี', '', '900.00', '', 'นายเจ้าหน้าที่', '97335/110(900)', '', '', '97335/110(900)'],
+];
+
+test('อ่านบัญชีจ่ายหมาย: หมาย ต. / หมายศาล, ที่อยู่, ราคา, ช่วงวันที่', () => {
+  const r = L.parseCourtExcel(ISSUED_ROWS);
+  assert.strictEqual(r.kind, 'issued');
+  assert.deepStrictEqual(r.period, { start: '2026-11-09', end: '2026-11-20' });
+  const [a, b] = r.items;
+  assert.strictEqual(a.kind, 'T'); assert.strictEqual(a.t_no, 'ต1001/2569'); assert.strictEqual(a.black_no, 'พ55/2569');
+  assert.strictEqual(a.money_type, 'paid'); assert.strictEqual(a.price, 900); assert.strictEqual(a.payer_court, 'ศาลแพ่ง');
+  assert.strictEqual(a.house_no, '33'); assert.strictEqual(a.moo, '10'); assert.strictEqual(a.soi, ''); assert.strictEqual(a.road, '');
+  assert.strictEqual(b.kind, 'LOCAL'); assert.strictEqual(b.money_type, 'free'); assert.strictEqual(b.red_no, 'ผบ88/2569');
+  assert.strictEqual(b.house_no, '394/2 หมู่บ้านทดสอบ'); assert.strictEqual(b.moo, '2');
+  assert.ok(b.recipient.includes('ผู้คัดค้าน'), 'จัดลำดับสระ/วรรณยุกต์ให้ค้นหาได้');
+  assert.strictEqual(L.resultCodeOf(b.result_text), '003');
+});
+
+test('อ่านบัญชีใบเสร็จ + จับคู่กับหมาย', () => {
+  const acc = L.parseCourtExcel(ACC_ROWS);
+  assert.strictEqual(acc.kind, 'accexpense');
+  assert.strictEqual(acc.items[0].entry_date, '2026-11-17');
+  assert.strictEqual(acc.items[0].receipt_ref, 'ใบเสร็จเล่มที่ 97335 เลขที่ 110');
+  const iss = L.parseCourtExcel(ISSUED_ROWS).items;
+  const m = L.matchReceipts(iss, acc.items);
+  assert.strictEqual(m.length, 1); assert.strictEqual(m[0].index, 0);
+});
+
+test('วันที่/ตัวเลขไทย และจำนวนเงินเป็นตัวหนังสือ', () => {
+  assert.strictEqual(L.bahtText(950), 'เก้าร้อยห้าสิบบาทถ้วน');
+  assert.strictEqual(L.bahtText(1021.5), 'หนึ่งพันยี่สิบเอ็ดบาทห้าสิบสตางค์');
+  assert.strictEqual(L.thaiDateLong('2026-11-22'), '๒๒  พฤศจิกายน  ๒๕๖๙');
+  assert.strictEqual(L.thaiDateLong('2026-11-22', { arabic: true }), '22  พฤศจิกายน  2569');
+  assert.strictEqual(L.toIso(L.parseThaiTextDate('17-พ.ย. -69')), '2026-11-17');
+});
+
+test('อัตราค่านำหมาย: ค้นหาตามอำเภอ/ตำบล + ข้อยกเว้นหมู่', () => {
+  const rates = [
+    { rate_type: 'free', district: 'น้ำโสม', subdistrict: 'น้ำโสม', exception_note: '', rate_amount: 1000 },
+    { rate_type: 'free', district: 'น้ำโสม', subdistrict: 'น้ำโสม', exception_note: 'ยกเว้นหมู่ 18', rate_amount: 1200 },
+    { rate_type: 'free', district: 'เมืองอุดรธานี', subdistrict: 'หมากแข้ง', exception_note: '', rate_amount: 300 },
+  ];
+  assert.strictEqual(L.findRate(rates, 'free', 'อำเภอน้ำโสม', 'ตำบลน้ำโสม', '3').rate_amount, 1000);
+  assert.strictEqual(L.findRate(rates, 'free', 'น้ำโสม', 'น้ำโสม', '18').rate_amount, 1200);
+  assert.strictEqual(L.findRate(rates, 'free', 'เมือง', 'หมากแข้ง', '').rate_amount, 300);
+  assert.strictEqual(L.findRate(rates, 'paid', 'เมือง', 'หมากแข้ง', ''), null);
+});
+
+test('เลือกแม่แบบ: หมาย ต./หมายศาล × ปิดประกาศ/ปกติ', () => {
+  assert.strictEqual(L.templateFor('T', '001'), 't_normal');
+  assert.strictEqual(L.templateFor('T', '003'), 't_notice');
+  assert.strictEqual(L.templateFor('LOCAL', '017'), 'local_normal');
+  assert.strictEqual(L.templateFor('LOCAL', '003'), 'local_notice');
+  for (const n of ['t_normal', 't_notice', 'local_normal', 'local_notice', 'memo_free', 'memo_paid']) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', 'templates', 'report', n + '.docx')), n);
+  }
+});
+
+test('เงินในแบบรายงาน: หมายเงิน / หมายฟรีเบิก (เงินงบประมาณ) / หมายฟรีไม่เบิก (เว้นว่าง)', () => {
+  const base = { kind: 'LOCAL', black_no: 'ผบ1/2569', result_code: '001', serve_date: '2026-11-22', record_date: '2026-11-23', receipt_date: '2026-11-23' };
+  let d = L.buildDocData({ ...base, money_type: 'paid', amount: 950, receipt_ref: 'ใบเสร็จเล่มที่ 1 เลขที่ 2' });
+  assert.strictEqual(d.amount, '๙๕๐.๐๐'); assert.strictEqual(d.amount_text, 'เก้าร้อยห้าสิบบาทถ้วน'); assert.strictEqual(d.pay_source, 'ใบเสร็จเล่มที่ ๑ เลขที่ ๒');
+  d = L.buildDocData({ ...base, money_type: 'free', claim: true, claim_amount: 800 });
+  assert.strictEqual(d.amount, '๘๐๐.๐๐'); assert.strictEqual(d.pay_source, 'เงินงบประมาณ'); assert.strictEqual(d.amount_text, 'แปดร้อยบาทถ้วน');
+  d = L.buildDocData({ ...base, money_type: 'free', claim: false, claim_amount: 800 });
+  assert.strictEqual(d.amount, ''); assert.strictEqual(d.pay_source, ''); assert.strictEqual(d.amount_text, '');
+  d = L.buildDocData({ ...base, kind: 'T', money_type: 'paid', amount: 900, payer_court: 'ศาลแพ่ง', receipt_ref: '' });
+  assert.strictEqual(d.pay_source2, 'ศาลแพ่ง');
+  assert.strictEqual(d.cb_file, '52'); assert.strictEqual(d.cb_post, 'a3'); assert.strictEqual(d.cb2_2, 'f0fe'); assert.strictEqual(d.cb2_1, 'f06f');
+});
+
+test('หมายฟรีหลายรายการ: ซ้ำบ้านเดียวกัน = ห้ามเบิก, หมู่เดียวกันคนละบ้าน = 50%', () => {
+  const r = L.evaluateFreeSummonItems([
+    { house_no: '1', moo: '2', subdistrict: 'ก', district: 'ข', base_rate: 800 },
+    { house_no: '3', moo: '2', subdistrict: 'ก', district: 'ข', base_rate: 800 },
+    { house_no: '9', moo: '5', subdistrict: 'ก', district: 'ข', base_rate: 800 },
+  ]);
+  assert.deepStrictEqual(r.items.map((x) => x.calc_rule), ['half', 'half', 'full']);
+  assert.strictEqual(r.total_amount, 1600);
+  const d = L.evaluateFreeSummonItems([{ house_no: '1', moo: '2', subdistrict: 'ก', district: 'ข', base_rate: 800 }, { house_no: '1', moo: '2', subdistrict: 'ก', district: 'ข', base_rate: 800 }]);
+  assert.strictEqual(d.has_duplicates, true);
+});
+
+// เติมแม่แบบ Word จริง (ต้องมี jszip — ข้ามถ้าไม่มีในเครื่อง)
+let JSZip = null;
+try { JSZip = require('jszip'); } catch (_) { /* optional */ }
+test('เติมแม่แบบ Word: ไม่เหลือ {{placeholder}} และแนบภาพได้', { skip: !JSZip && 'ไม่มี jszip' }, async () => {
+  const D = require('../js/report-docx.js');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEklEQVR4nGP4z8AARAwM/xkYAA0EAf+NuvZoAAAAAElFTkSuQmCC', 'base64');
+  for (const name of ['t_normal', 't_notice', 'local_normal', 'local_notice']) {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'templates', 'report', name + '.docx'));
+    const data = L.buildDocData({ kind: name[0] === 't' ? 'T' : 'LOCAL', t_no: 'ต1/2569', black_no: 'พ1/2569', money_type: 'free', claim: true, claim_amount: 800, result_code: name.includes('notice') ? '003' : '001', serve_date: '2026-11-22' });
+    const buf = await D.fillReportDocx(tpl, data, [{ bytes: png, width: 4, height: 3, ext: 'png' }], { JSZip, node: true });
+    const zip = await JSZip.loadAsync(buf);
+    const xml = await zip.file('word/document.xml').async('string');
+    assert.ok(!/\{\{[a-z0-9_]+\}\}/i.test(xml), name + ': placeholder เหลือ');
+    assert.ok(!xml.includes('5LT5F0T0'), name + ': marker เหลือ');
+    assert.ok(zip.file('word/media/slts_photo1.png'), name + ': ไม่มีภาพ');
+    assert.ok(xml.includes('เงินงบประมาณ'));
+  }
+});

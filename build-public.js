@@ -25,7 +25,7 @@ fs.mkdirSync(publicDir, { recursive: true });
 for (const file of ['manifest.json', 'version.json']) {
   fs.copyFileSync(path.join(root, file), path.join(publicDir, file));
 }
-for (const folder of ['css', 'js', 'img']) copyDir(path.join(root, folder), path.join(publicDir, folder));
+for (const folder of ['css', 'js', 'img', 'fonts', 'templates']) copyDir(path.join(root, folder), path.join(publicDir, folder));
 
 // แทนที่ __APP_VERSION__ เพื่อให้มือถือได้ไฟล์ใหม่ทุกครั้งที่อัปเดตเวอร์ชัน
 const stamp = (file) => {

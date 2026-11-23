@@ -98,6 +98,8 @@
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="css/style.css?v=20260911_02">
   <link rel="stylesheet" href="css/simple-view.css?v=__APP_VERSION__">
+  <!-- ธีมทางการ (โหมด PC) + โมดูลรายงานผลหมาย -->
+  <link rel="stylesheet" href="css/official.css?v=__APP_VERSION__">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -139,6 +141,10 @@
           <span class="tab-label-text">รายการส่งหมายรอบนี้</span>
           <span id="routeBatchBadgeCount" class="hidden px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">0</span>
         </button>
+        <button type="button" id="tabBtnReport" onclick="switchTab('report')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="รายงานผลหมาย / บัญชีจ่ายหมาย / อัตราค่านำหมาย">
+          <i class="fa-solid fa-file-signature"></i>
+          <span class="tab-label-text">รายงานผลหมาย</span>
+        </button>
         <button type="button" id="tabBtnUsers" onclick="switchTab('users')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="จัดการผู้ใช้งาน">
           <i class="fa-solid fa-users-gear text-purple-600"></i>
           <span class="tab-label-text">จัดการผู้ใช้งาน</span>
@@ -172,6 +178,10 @@
               <span>รายการส่งหมายรอบนี้</span>
             </div>
             <span id="compactRouteBatchBadgeCount" class="hidden px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">0</span>
+          </button>
+          <button type="button" id="compactTabBtnReport" onclick="switchTabCompact('report')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-xs font-bold text-gray-800 items-center gap-2 transition cursor-pointer">
+            <i class="fa-solid fa-file-signature w-4 text-center"></i>
+            <span>รายงานผลหมาย</span>
           </button>
           <button type="button" id="compactTabBtnUsers" onclick="switchTabCompact('users')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-purple-50 text-xs font-bold text-gray-800 items-center gap-2 transition cursor-pointer">
             <i class="fa-solid fa-users-gear text-purple-600 w-4 text-center"></i>
@@ -1061,19 +1071,19 @@
         <!-- Summary Statistics Cards -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           <div class="p-3 bg-blue-50/70 border border-blue-100 rounded-xl">
-            <p class="text-[11px] text-blue-700 font-medium">🏛️ จุดเริ่มต้น / เส้นทาง</p>
+            <p class="text-[11px] text-blue-700 font-medium"><i class="fa-solid fa-building-columns mr-1"></i>จุดเริ่มต้น / เส้นทาง</p>
             <p id="routeBatchStartText" class="text-xs font-bold text-gray-900 truncate mt-0.5">ศาลจังหวัดอุดรธานี</p>
           </div>
           <div class="p-3 bg-slate-50 border border-gray-200 rounded-xl">
-            <p class="text-[11px] text-gray-500 font-medium">📋 จำนวนหมายทั้งหมด</p>
+            <p class="text-[11px] text-gray-500 font-medium"><i class="fa-solid fa-list-ol mr-1"></i>จำนวนหมายทั้งหมด</p>
             <p id="routeBatchTotalCountText" class="text-sm font-extrabold text-gray-900 mt-0.5">0 จุด</p>
           </div>
           <div class="p-3 bg-amber-50/80 border border-amber-200 rounded-xl">
-            <p class="text-[11px] text-amber-800 font-medium">📸 ถ่ายรูปแล้ว (รอส่ง)</p>
+            <p class="text-[11px] text-amber-800 font-medium"><i class="fa-solid fa-camera mr-1"></i>ถ่ายรูปแล้ว (รอส่ง)</p>
             <p id="routeBatchCapturedCountText" class="text-sm font-extrabold text-amber-700 mt-0.5">0 จุด</p>
           </div>
           <div class="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl">
-            <p class="text-[11px] text-emerald-800 font-medium">☁️ นำส่ง Server แล้ว</p>
+            <p class="text-[11px] text-emerald-800 font-medium"><i class="fa-solid fa-cloud-arrow-up mr-1"></i>นำส่ง Server แล้ว</p>
             <p id="routeBatchUploadedCountText" class="text-sm font-extrabold text-emerald-700 mt-0.5">0 จุด</p>
           </div>
         </div>
@@ -1116,7 +1126,12 @@
 
     </div>
 
-  </main>
+      <!-- ========================================================= -->
+    <!-- TAB 6: รายงานผลหมาย (ผนวกรวมระบบ summon-report) — สร้างโดย js/slts-report.js -->
+    <!-- ========================================================= -->
+    <div id="tabContentReport" class="tab-pane hidden w-full"></div>
+
+</main>
  
   <!-- Floating Reset Province Button (แสดงที่มุมขวาล่าง) -->
   <div id="floatingProvinceContainer" class="fixed bottom-4 right-4 z-40">
@@ -1433,6 +1448,12 @@
   <!-- v2.0: ล็อกอินผ่านเซิร์ฟเวอร์, แชร์/สแกน QR, เมนูแบบง่าย, ศูนย์ผู้ดูแลระบบ -->
   <script src="js/vendor/qrcode.js?v=__APP_VERSION__"></script>
   <script src="js/slts-features.js?v=__APP_VERSION__"></script>
+  <!-- ระบบรายงานผลหมาย (ผนวกรวม summon-report): ตรรกะ, Word/Excel, หน้าจอ -->
+  <script src="js/report-logic.js?v=__APP_VERSION__"></script>
+  <script src="js/report-docx.js?v=__APP_VERSION__"></script>
+  <script src="js/report-xlsx.js?v=__APP_VERSION__"></script>
+  <script src="js/report-exports.js?v=__APP_VERSION__"></script>
+  <script src="js/slts-report.js?v=__APP_VERSION__"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>

@@ -22,13 +22,14 @@ const PORT = Number(process.env.PORT || 3000);
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
-  '.webmanifest': 'application/manifest+json', '.pdf': 'application/pdf', '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.ttf': 'font/ttf', '.pdf': 'application/pdf', '.ico': 'image/x-icon',
 };
 
 const apiHandlers = {
   '/api/slts': require('../api/slts'),
   '/api/health': require('../api/health'),
   '/api/photo': require('../api/photo'),
+  '/api/report': require('../api/report'),
 };
 
 http.createServer(async (req, res) => {

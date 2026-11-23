@@ -1,0 +1,193 @@
+/* =====================================================================
+   official.css — ธีมทางการสำหรับโหมด PC / แท็บเล็ตโหมด PC
+   โทนเดียวกับเว็บไซต์ศาลจังหวัดอุดรธานี (udtc-display): กรมท่า #1e3a5f + ทอง #b8862b
+   ฟอนต์ Sarabun, พื้นหลังเทาอ่อน, การ์ดขาวขอบบาง, ลดสีสัน/ไล่สี/มุมโค้งมาก
+   (มือถือคงหน้าตาเดิม เพราะใช้งานภาคสนาม)
+   ===================================================================== */
+:root {
+  --c-primary: #1e3a5f;
+  --c-primary-600: #24466f;
+  --c-primary-700: #172e4c;
+  --c-primary-50: #eef2f7;
+  --c-accent: #b8862b;
+  --c-accent-50: #fbf6ec;
+  --c-ink: #1e293b;
+  --c-muted: #64748b;
+  --c-line: #e2e8f0;
+  --c-bg: #f8fafc;
+}
+
+html[data-device-mode="pc"] body {
+  font-family: 'Sarabun', system-ui, sans-serif !important;
+  background: var(--c-bg) !important;
+  color: var(--c-ink);
+}
+html[data-device-mode="pc"] body * { font-family: inherit; }
+html[data-device-mode="pc"] .fa-solid, html[data-device-mode="pc"] .fa-regular, html[data-device-mode="pc"] .fa-brands, html[data-device-mode="pc"] .fas, html[data-device-mode="pc"] .far { font-family: 'Font Awesome 6 Free', 'Font Awesome 6 Brands' !important; }
+html[data-device-mode="pc"] .font-mono, html[data-device-mode="pc"] code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important; }
+
+/* ---------- แถบหัวเว็บ ---------- */
+html[data-device-mode="pc"] body > header {
+  background: #fff !important;
+  border-top: 6px solid var(--c-primary);
+  border-bottom: 1px solid var(--c-line) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+html[data-device-mode="pc"] body > header h1 { color: var(--c-primary) !important; font-weight: 700; letter-spacing: 0; }
+html[data-device-mode="pc"] body > header h1 + p, html[data-device-mode="pc"] body > header h1 + p span:first-child { color: var(--c-muted) !important; }
+
+/* แท็บเมนูหลัก: แบบเส้นใต้ (ไม่ใช่ปุ่มแคปซูล) */
+html[data-device-mode="pc"] #desktopNavTabs {
+  background: transparent !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; gap: 2px;
+}
+html[data-device-mode="pc"] .tab-nav-btn {
+  border-radius: 0 !important; color: #475569 !important; background: transparent !important;
+  border-bottom: 2px solid transparent; padding-top: .65rem !important; padding-bottom: .65rem !important; box-shadow: none !important;
+}
+html[data-device-mode="pc"] .tab-nav-btn:hover { color: var(--c-primary) !important; background: transparent !important; }
+html[data-device-mode="pc"] .tab-nav-btn.active { color: var(--c-primary) !important; border-bottom-color: var(--c-accent); font-weight: 700; }
+html[data-device-mode="pc"] .tab-nav-btn i { color: inherit !important; opacity: .85; }
+html[data-device-mode="pc"] #routeBatchBadgeCount { background: var(--c-primary-50) !important; color: var(--c-primary) !important; }
+
+/* ---------- การ์ด / มุมโค้ง / เงา ---------- */
+html[data-device-mode="pc"] main .rounded-3xl, html[data-device-mode="pc"] main .rounded-2xl,
+html[data-device-mode="pc"] .tab-pane .rounded-3xl, html[data-device-mode="pc"] .tab-pane .rounded-2xl { border-radius: 10px !important; }
+html[data-device-mode="pc"] .tab-pane .rounded-xl { border-radius: 8px !important; }
+html[data-device-mode="pc"] .tab-pane .shadow-md, html[data-device-mode="pc"] .tab-pane .shadow-lg,
+html[data-device-mode="pc"] .tab-pane .shadow-xl, html[data-device-mode="pc"] .tab-pane .shadow-sm { box-shadow: 0 1px 2px rgba(15, 23, 42, .05) !important; }
+html[data-device-mode="pc"] .tab-pane .bg-white { border-color: var(--c-line) !important; }
+
+/* ไล่สี → สีพื้นเรียบ (ปุ่มหลักใช้สีกรมท่า) */
+html[data-device-mode="pc"] .tab-pane [class*="bg-gradient-to"], html[data-device-mode="pc"] body > header [class*="bg-gradient-to"] {
+  background-image: none !important; background-color: var(--c-primary) !important; color: #fff !important;
+}
+html[data-device-mode="pc"] .tab-pane [class*="bg-gradient-to"]:hover { background-color: var(--c-primary-700) !important; }
+
+/* ปุ่มหลักสีน้ำเงิน/คราม/ม่วง → กรมท่า */
+html[data-device-mode="pc"] .bg-blue-600, html[data-device-mode="pc"] .bg-indigo-600, html[data-device-mode="pc"] .bg-violet-600,
+html[data-device-mode="pc"] .bg-purple-600, html[data-device-mode="pc"] .bg-sky-600, html[data-device-mode="pc"] .bg-blue-700, html[data-device-mode="pc"] .bg-indigo-700 {
+  background-color: var(--c-primary) !important;
+}
+html[data-device-mode="pc"] .hover\:bg-blue-700:hover, html[data-device-mode="pc"] .hover\:bg-indigo-700:hover, html[data-device-mode="pc"] .hover\:bg-purple-700:hover { background-color: var(--c-primary-700) !important; }
+/* แถบสีอ่อนหลากสี → เทาอมน้ำเงินแบบเดียวกัน */
+html[data-device-mode="pc"] .tab-pane .bg-indigo-50, html[data-device-mode="pc"] .tab-pane .bg-purple-50, html[data-device-mode="pc"] .tab-pane .bg-violet-50,
+html[data-device-mode="pc"] .tab-pane .bg-pink-50, html[data-device-mode="pc"] .tab-pane .bg-fuchsia-50, html[data-device-mode="pc"] .tab-pane .bg-sky-50,
+html[data-device-mode="pc"] .tab-pane .bg-blue-50, html[data-device-mode="pc"] .tab-pane .bg-blue-50\/70, html[data-device-mode="pc"] .tab-pane .bg-indigo-100 {
+  background-color: var(--c-primary-50) !important;
+}
+html[data-device-mode="pc"] .tab-pane .text-indigo-600, html[data-device-mode="pc"] .tab-pane .text-indigo-700, html[data-device-mode="pc"] .tab-pane .text-indigo-800,
+html[data-device-mode="pc"] .tab-pane .text-purple-600, html[data-device-mode="pc"] .tab-pane .text-purple-700, html[data-device-mode="pc"] .tab-pane .text-violet-700,
+html[data-device-mode="pc"] .tab-pane .text-blue-600, html[data-device-mode="pc"] .tab-pane .text-blue-700, html[data-device-mode="pc"] .tab-pane .text-blue-800 {
+  color: var(--c-primary) !important;
+}
+html[data-device-mode="pc"] .tab-pane .border-indigo-200, html[data-device-mode="pc"] .tab-pane .border-purple-200, html[data-device-mode="pc"] .tab-pane .border-blue-200,
+html[data-device-mode="pc"] .tab-pane .border-blue-100, html[data-device-mode="pc"] .tab-pane .border-indigo-100 { border-color: #cbd5e1 !important; }
+html[data-device-mode="pc"] .tab-pane .ring-emerald-200, html[data-device-mode="pc"] .tab-pane .ring-blue-200 { --tw-ring-color: #cbd5e1 !important; }
+
+/* ตาราง */
+html[data-device-mode="pc"] .tab-pane table thead tr { background: #f1f5f9 !important; }
+html[data-device-mode="pc"] .tab-pane table thead th { color: #334155 !important; letter-spacing: 0 !important; text-transform: none !important; font-size: 12.5px !important; }
+html[data-device-mode="pc"] .dataTables_wrapper .dataTables_paginate .paginate_button.current { background: var(--c-primary) !important; color: #fff !important; border-color: var(--c-primary) !important; }
+
+/* ป๊อปอัป SweetAlert2 */
+html[data-device-mode="pc"] .swal2-popup { border-radius: 10px !important; font-family: 'Sarabun', sans-serif !important; }
+html[data-device-mode="pc"] .swal2-styled.swal2-confirm { background-color: var(--c-primary) !important; border-radius: 6px !important; }
+html[data-device-mode="pc"] .swal2-styled.swal2-cancel { border-radius: 6px !important; }
+
+/* ส่วนท้าย */
+html[data-device-mode="pc"] body > footer { background: var(--c-primary) !important; color: #cbd5e1 !important; border-top: 0 !important; }
+html[data-device-mode="pc"] body > footer * { color: #cbd5e1 !important; }
+
+/* =====================================================================
+   ส่วนประกอบของโมดูล "รายงานผลหมาย" (sr-*)
+   ===================================================================== */
+.sr-wrap { font-family: 'Sarabun', system-ui, sans-serif; color: var(--c-ink); }
+.sr-hero { background: #fff; border: 1px solid var(--c-line); border-radius: 10px; padding: 18px 22px; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between; }
+.sr-kicker { color: var(--c-accent); font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+.sr-title { color: var(--c-primary); font-size: 22px; font-weight: 700; margin: 2px 0 0; }
+.sr-sub { color: var(--c-muted); font-size: 13.5px; margin-top: 2px; }
+.sr-stats { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: 10px; }
+.sr-stat { border: 1px solid var(--c-line); border-radius: 8px; padding: 8px 12px; background: #fff; }
+.sr-stat b { display: block; font-size: 19px; color: var(--c-primary); }
+.sr-stat span { font-size: 12px; color: var(--c-muted); }
+.sr-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--c-line); margin: 14px 0 0; overflow-x: auto; }
+.sr-tab { padding: 10px 16px; border: 0; background: none; color: #475569; font-weight: 500; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; font-size: 14.5px; }
+.sr-tab:hover { color: var(--c-primary); }
+.sr-tab.active { color: var(--c-primary); border-bottom-color: var(--c-accent); font-weight: 700; }
+.sr-card { background: #fff; border: 1px solid var(--c-line); border-radius: 10px; padding: 16px 18px; margin-top: 14px; }
+.sr-card h3 { color: var(--c-primary); font-size: 16px; font-weight: 700; margin: 0 0 8px; }
+.sr-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sr-toolbar .grow { flex: 1; }
+.sr-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; color: #334155; font-size: 13.5px; font-weight: 500; cursor: pointer; line-height: 1.3; white-space: nowrap; }
+.sr-btn:hover { border-color: var(--c-primary); color: var(--c-primary); }
+.sr-btn:disabled { opacity: .5; cursor: not-allowed; }
+.sr-btn.primary { background: var(--c-primary); border-color: var(--c-primary); color: #fff; }
+.sr-btn.primary:hover { background: var(--c-primary-700); color: #fff; }
+.sr-btn.accent { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.sr-btn.accent:hover { background: #9c7022; }
+.sr-btn.danger { color: #b91c1c; border-color: #fecaca; }
+.sr-btn.danger:hover { background: #fef2f2; }
+.sr-btn.sm { padding: 4px 9px; font-size: 12.5px; }
+.sr-input, .sr-select, .sr-textarea { border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; font-size: 14px; background: #fff; color: var(--c-ink); min-width: 0; }
+.sr-input:focus, .sr-select:focus, .sr-textarea:focus { outline: 2px solid rgba(30, 58, 95, .18); border-color: var(--c-primary); }
+.sr-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.sr-table th { background: #f1f5f9; color: #334155; font-weight: 600; text-align: left; padding: 8px 9px; border-bottom: 1px solid var(--c-line); position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+.sr-table td { padding: 7px 9px; border-bottom: 1px solid #eef2f6; vertical-align: top; }
+.sr-table tr:hover td { background: #fafbfd; }
+.sr-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sr-table .ctr { text-align: center; }
+.sr-scroll { max-height: calc(100vh - 330px); overflow: auto; border: 1px solid var(--c-line); border-radius: 8px; }
+.sr-chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--c-line); color: #475569; background: #f8fafc; white-space: nowrap; }
+.sr-chip.t { border-color: #c7d2e2; color: var(--c-primary); background: var(--c-primary-50); }
+.sr-chip.paid { border-color: #ecd9b4; color: #8a6420; background: var(--c-accent-50); }
+.sr-chip.ok { border-color: #bbe5cd; color: #166534; background: #f0fdf4; }
+.sr-chip.warn { border-color: #fde2b4; color: #92400e; background: #fffbeb; }
+.sr-chip.red { border-color: #fecaca; color: #b91c1c; background: #fef2f2; }
+.sr-muted { color: var(--c-muted); font-size: 12.5px; }
+.sr-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--c-line); cursor: zoom-in; background: #f1f5f9; }
+.sr-empty { padding: 36px; text-align: center; color: var(--c-muted); }
+.sr-grid { display: grid; gap: 10px 14px; }
+.sr-g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sr-g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sr-g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sr-field label { display: block; font-size: 12.5px; color: #475569; margin-bottom: 3px; font-weight: 500; }
+.sr-field .sr-input, .sr-field .sr-select, .sr-field .sr-textarea { width: 100%; }
+.sr-field .req { color: #b91c1c; }
+.sr-span2 { grid-column: span 2; } .sr-span3 { grid-column: span 3; } .sr-span4 { grid-column: 1 / -1; }
+.sr-inline { display: flex; gap: 6px; align-items: center; }
+.sr-inline > .sr-input, .sr-inline > .sr-select { flex: 1; }
+
+/* หน้าต่างแบบฟอร์มรายงานผลหมาย */
+.sr-modal { position: fixed; inset: 0; z-index: 1200; background: rgba(15, 23, 42, .45); display: flex; align-items: flex-start; justify-content: center; padding: 18px; overflow: auto; }
+.sr-dialog { background: #fff; width: min(1280px, 100%); border-radius: 10px; box-shadow: 0 20px 50px rgba(15, 23, 42, .25); overflow: hidden; }
+.sr-dialog-head { background: var(--c-primary); color: #fff; padding: 12px 18px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 2; }
+.sr-dialog-head h2 { font-size: 17px; font-weight: 700; margin: 0; flex: 1; }
+.sr-dialog-head .x { background: transparent; border: 0; color: #fff; font-size: 20px; cursor: pointer; }
+.sr-dialog-body { padding: 6px 20px 18px; }
+.sr-section { border-top: 1px solid var(--c-line); padding-top: 12px; margin-top: 14px; }
+.sr-section:first-child { border-top: 0; margin-top: 6px; }
+.sr-section > h4 { color: var(--c-primary); font-size: 15px; font-weight: 700; margin: 0 0 10px; display: flex; gap: 8px; align-items: center; }
+.sr-section > h4::before { content: ''; width: 4px; height: 16px; background: var(--c-accent); border-radius: 2px; }
+.sr-dialog-foot { position: sticky; bottom: 0; background: #f8fafc; border-top: 1px solid var(--c-line); padding: 10px 18px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sr-dialog-foot .grow { flex: 1; }
+.sr-note { background: var(--c-accent-50); border: 1px solid #ecd9b4; color: #6b4e17; border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.sr-info { background: var(--c-primary-50); border: 1px solid #c7d2e2; color: var(--c-primary); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.sr-photos { display: flex; flex-wrap: wrap; gap: 10px; }
+.sr-photo { width: 168px; border: 1px solid var(--c-line); border-radius: 8px; overflow: hidden; background: #fff; position: relative; }
+.sr-photo img { width: 100%; height: 118px; object-fit: cover; display: block; background: #f1f5f9; }
+.sr-photo .cap { font-size: 11.5px; padding: 4px 6px; color: #475569; line-height: 1.3; }
+.sr-photo input { position: absolute; top: 6px; left: 6px; width: 18px; height: 18px; accent-color: var(--c-primary); }
+.sr-radio { display: inline-flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+.sr-radio label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; margin: 0; color: var(--c-ink); font-size: 14px; }
+.sr-radio input { accent-color: var(--c-primary); }
+.sr-picker { max-height: 360px; overflow: auto; border: 1px solid var(--c-line); border-radius: 8px; text-align: left; }
+.sr-picker .row { padding: 7px 10px; border-bottom: 1px solid #eef2f6; cursor: pointer; font-size: 13.5px; }
+.sr-picker .row:hover { background: var(--c-primary-50); }
+@media (max-width: 1100px) { .sr-g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sr-stats { grid-template-columns: repeat(3, 1fr); } }
+
+/* เมนูหลักบนจอ PC: ไม่ตัดบรรทัด */
+html[data-device-mode="pc"] .tab-nav-btn { white-space: nowrap; padding-left: .7rem !important; padding-right: .7rem !important; }
+@media (max-width: 1560px) { html[data-device-mode="pc"] body > header h1 + p span:not(:first-child) { display: none !important; } }
+html[data-device-mode="pc"] body > header h1 { white-space: nowrap; }
+html[data-device-mode="pc"] #userProfileContainer * { white-space: nowrap; }
