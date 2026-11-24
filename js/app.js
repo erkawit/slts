@@ -6251,9 +6251,17 @@ function renderDataTable(rows, filterCriteria = null) {
   }
 
   // 1. ทำลายและล้าง DataTable เดิมอย่างหมดจดเพื่อป้องกันรายการซ้ำ
+  //    (จำคำค้น/หน้า/การเรียง/ตำแหน่งเลื่อน ไว้แสดงต่อหลังแก้ไขหรือซิงค์ข้อมูล ถ้าเงื่อนไขค้นหาเจาะจงเดิม)
+  const dtViewKey = JSON.stringify(filterCriteria || state.currentFilterCriteria || null) + '|' + (state.selectedProvince || '');
+  let dtPrev = null;
   if ($.fn.DataTable.isDataTable('#summonsDataTable')) {
+    try {
+      const dtOld = $('#summonsDataTable').DataTable();
+      dtPrev = { key: state.dtViewKey, search: dtOld.search(), order: dtOld.order(), page: dtOld.page(), len: dtOld.page.len(), scrollY: window.scrollY };
+    } catch (_) { dtPrev = null; }
     $('#summonsDataTable').DataTable().clear().destroy();
   }
+  state.dtViewKey = dtViewKey;
 
   const tableBody = document.getElementById('dataTableBody');
   tableBody.innerHTML = '';
@@ -6472,6 +6480,18 @@ function renderDataTable(rows, filterCriteria = null) {
       zeroRecords: `ไม่พบข้อมูลที่ตรงกับเงื่อนไขการค้นหา`
     }
   });
+  if (dtPrev && dtPrev.key === dtViewKey) {
+    try {
+      const dt = state.dataTableInstance;
+      if (dtPrev.len) dt.page.len(dtPrev.len);
+      if (dtPrev.order && dtPrev.order.length) dt.order(dtPrev.order);
+      dt.search(dtPrev.search || '').draw();
+      const pages = dt.page.info().pages;
+      if (dtPrev.page > 0 && pages > 0) dt.page(Math.min(dtPrev.page, pages - 1)).draw('page');
+      const tbl = document.getElementById('tabContentTable');
+      if (tbl && !tbl.classList.contains('hidden')) requestAnimationFrame(() => window.scrollTo(0, dtPrev.scrollY || 0));
+    } catch (e) { console.warn('[DataTable] restore view failed', e); }
+  }
 }
 
 /**
@@ -6679,8 +6699,17 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
               <span class="absolute top-1 right-1 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow">รูปใหม่</span>
             </div>
 
-            <p class="text-[10px] text-gray-400 leading-tight">
-              💡 หากเลือกรูปใหม่ ระบบจะทำการประทับลายน้ำและอัปโหลดทับไฟล์เดิมใน Google Drive ให้โดยอัตโนมัติ
+            <!-- ตัวเลือก: ภาพถ่ายมีพิกัดบนภาพแล้ว (เหมือนหน้าบันทึกส่งหมาย) -->
+            <div class="bg-amber-50/70 border border-amber-200/90 rounded-xl p-2.5 flex items-start gap-2 text-left">
+              <input type="checkbox" id="swalEditHasWatermark" class="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer" ${localStorage.getItem('slts_desktop_has_watermark') === 'true' ? 'checked' : ''}>
+              <label for="swalEditHasWatermark" class="text-[11px] text-gray-700 font-semibold cursor-pointer select-none leading-relaxed">
+                <span class="text-amber-900 font-bold flex items-center gap-1.5"><i class="fa-solid fa-location-crosshairs text-amber-600"></i><span>ภาพถ่ายมีพิกัดบนภาพ</span></span>
+                <span class="block text-[10px] font-normal text-gray-600 mt-0.5">(หากติ๊กเลือก ระบบจะไม่ทำลายน้ำซ้ำบนภาพ และจะจำการตั้งค่านี้ไว้สำหรับการใช้งานครั้งต่อไป)</span>
+              </label>
+            </div>
+
+            <p id="swalEditWatermarkHint" class="text-[10px] text-gray-400 leading-tight">
+              💡 หากเลือกรูปใหม่ ระบบจะ${localStorage.getItem('slts_desktop_has_watermark') === 'true' ? 'ใช้ภาพตามเดิม (ไม่ประทับลายน้ำซ้ำ)' : 'ทำการประทับลายน้ำ'}และอัปโหลดทับไฟล์เดิมให้โดยอัตโนมัติ
             </p>
           </div>
         </div>
@@ -6789,6 +6818,14 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
         };
       }
 
+      const wmChk = document.getElementById('swalEditHasWatermark');
+      if (wmChk) {
+        wmChk.onchange = () => {
+          const hint = document.getElementById('swalEditWatermarkHint');
+          if (hint) hint.textContent = `💡 หากเลือกรูปใหม่ ระบบจะ${wmChk.checked ? 'ใช้ภาพตามเดิม (ไม่ประทับลายน้ำซ้ำ)' : 'ทำการประทับลายน้ำ'}และอัปโหลดทับไฟล์เดิมให้โดยอัตโนมัติ`;
+        };
+      }
+
       if (fileInput) {
         fileInput.onchange = (e) => {
           const f = e.target.files[0];
@@ -6853,7 +6890,8 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
         newLocationType,
         newLocationText,
         parsedLat,
-        parsedLng
+        parsedLng,
+        hasWatermarkAlready: Boolean(document.getElementById('swalEditHasWatermark')?.checked)
       };
     }
   }).then(async (res) => {
@@ -6862,7 +6900,26 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
       let compressedImgBase64 = null;
       let finalFileName = fileName;
 
-      if (newImageBase64) {
+      // จำการตั้งค่า "ภาพถ่ายมีพิกัดบนภาพ" เหมือนหน้าบันทึกส่งหมาย
+      try {
+        localStorage.setItem('slts_desktop_has_watermark', val.hasWatermarkAlready ? 'true' : 'false');
+        localStorage.setItem('slts_has_watermark', val.hasWatermarkAlready ? 'true' : 'false');
+        if (elements.chkDesktopHasWatermark) elements.chkDesktopHasWatermark.checked = val.hasWatermarkAlready;
+        if (typeof updateDesktopWatermarkBadge === 'function') updateDesktopWatermarkBadge(val.hasWatermarkAlready);
+      } catch (_) {}
+
+      if (newImageBase64 && val.hasWatermarkAlready) {
+        // ภาพมีพิกัด/ลายน้ำอยู่แล้ว → ไม่ประทับซ้ำ
+        showCustomLoading('กำลังประมวลผลรูปภาพใหม่...', 'กำลังเตรียมไฟล์รูปภาพเพื่ออัปโหลด');
+        try {
+          compressedImgBase64 = await compressImageToMax1MB(newImageBase64);
+          finalFileName = val.newCaseNumber.replace(/\//g, '-') + '.jpg';
+        } catch (imgErr) {
+          console.warn('Image compress error on edit:', imgErr);
+        } finally {
+          hideCustomLoading();
+        }
+      } else if (newImageBase64) {
         showCustomLoading('กำลังประมวลผลรูปภาพใหม่...', 'กำลังสร้างลายน้ำและเตรียมอัปโหลด');
         try {
           const img = new Image();
@@ -8418,8 +8475,16 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
             allowOutsideClick: false,
             confirmButtonColor: '#2563eb'
           });
-          // โหลดตารางสดใหม่ทันที
-          loadGoogleSheetData(true);
+          // ลบออกจากตารางในเครื่องทันที (คงเงื่อนไขค้นหา/หน้าเดิม) แล้วซิงค์จากเซิร์ฟเวอร์เบื้องหลัง
+          if (Array.isArray(state.allSheetRows)) {
+            const before = state.allSheetRows.length;
+            state.allSheetRows = state.allSheetRows.filter((r) => !(
+              (fileId && String(r['Drive File ID'] || '') === String(fileId)) ||
+              (!fileId && (r['เลขคดี'] || '').trim() === String(caseNumber || '').trim() && (r['วัน-เวลาบันทึก'] || r['Timestamp'] || '') === timestamp)
+            ));
+            if (state.allSheetRows.length !== before) renderDataTable(state.allSheetRows);
+          }
+          loadGoogleSheetData(true, true);
         } else {
           throw new Error(resJson.message || 'ไม่สามารถลบข้อมูลได้');
         }
