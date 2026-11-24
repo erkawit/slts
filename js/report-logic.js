@@ -860,12 +860,32 @@
     return (v.split(/\s+/)[0] || '').replace(/[^ก-๙A-Za-z]/g, '');
   }
   /** เทียบชื่อใน Excel กับผู้ใช้ในระบบ (ชื่อตัว) → { username, name } | { ambiguous:[...] } | null */
+  /** ระยะห่างการพิมพ์ (Levenshtein) สำหรับชื่อที่สะกดต่างเล็กน้อย */
+  function editDist(a, b) {
+    const m = a.length; const n = b.length; if (Math.abs(m - n) > 2) return 9;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[n];
+  }
+  /** ชื่อตัวของผู้ใช้: ช่อง "ชื่อ" (first_name) ก่อน แล้วจึงชื่อแสดง/ชื่อเต็ม และ username */
+  const staffFirstNames = (u) => (u.first_name ? [u.first_name] : [u.name, u.display]).map(firstName).filter(Boolean);
   function matchStaff(name, staff) {
     const fn = firstName(name); if (!fn) return null;
-    const hits = (staff || []).filter((u) => firstName(u.name) === fn);
-    if (hits.length === 1) return { username: hits[0].username, name: hits[0].name };
-    if (hits.length > 1) return { ambiguous: hits };
-    return null;
+    const list = staff || [];
+    const pick = (hits) => {
+      const uniq = hits.filter((u, i) => hits.findIndex((x) => x.username === u.username) === i);
+      if (uniq.length === 1) return { username: uniq[0].username, name: uniq[0].name };
+      if (uniq.length > 1) return { ambiguous: uniq };
+      return null;
+    };
+    // 1) ชื่อตัวตรงกัน  2) ชื่อสะกดต่างกันเล็กน้อย (≥4 ตัวอักษร ต่าง ≤1)  3) username ตรงกับชื่อ
+    return pick(list.filter((u) => staffFirstNames(u).includes(fn)))
+      || (fn.length >= 4 ? pick(list.filter((u) => staffFirstNames(u).some((x) => x.length >= 4 && editDist(x, fn) <= 1))) : null)
+      || pick(list.filter((u) => String(u.username || '').toLowerCase() === fn.toLowerCase()));
   }
   /** แปลงข้อความเขตพื้นที่ของโซน → พื้นที่ในระบบ */
   function parseZoneAreaText(text, province, data) {

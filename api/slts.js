@@ -77,6 +77,12 @@ function courtNameFor(cat, prov, name) {
   return 'ศาลจังหวัด' + prov;
 }
 
+/** ชื่อเต็มสำหรับเอกสาร: คำนำหน้า+ชื่อ นามสกุล (ไม่มี → ชื่อแสดง) */
+function fullNameOf(u) {
+  const f = String(u.first_name || '').trim();
+  if (!f) return u.name || u.username;
+  return `${String(u.title || '').trim()}${f} ${String(u.last_name || '').trim()}`.trim();
+}
 function publicUser(u) {
   const prov = u.assigned_province || 'อุดรธานี';
   const cat = u.court_category || 'ศาลจังหวัด';
@@ -85,6 +91,8 @@ function publicUser(u) {
     username: u.username,
     role: u.role,
     name: u.name || u.username,
+    title: u.title || '', firstName: u.first_name || '', lastName: u.last_name || '', position: u.position || '',
+    fullName: fullNameOf(u),
     createdAt: u.created_at_text || '',
     courtCategory: cat,
     assignedCourt: court,
@@ -383,7 +391,13 @@ async function saveUser(data, ctx) {
   const cat = str(data.courtCategory || data['ประเภทศาล']).trim() || null;
   const prov = str(data.assignedProvince || data['จังหวัดที่ส่งหมาย'] || data['จังหวัดรับผิดชอบ'] || data['จังหวัด']).trim() || null;
   const court = str(data.assignedCourt || data['ศาลที่สังกัด'] || data['ชื่อศาล']).trim() || null;
-  const name = str(data.name).trim() || null;
+  const title = data.title !== undefined ? str(data.title).trim().slice(0, 40) : undefined;
+  const firstName = data.firstName !== undefined ? str(data.firstName).trim().slice(0, 80) : undefined;
+  const lastName = data.lastName !== undefined ? str(data.lastName).trim().slice(0, 80) : undefined;
+  const position = data.position !== undefined ? str(data.position).trim().slice(0, 160) : undefined;
+  // ชื่อแสดง: ถ้าไม่ระบุแต่มีชื่อ-นามสกุล → ประกอบให้
+  const composed = firstName ? `${title || ''}${firstName} ${lastName || ''}`.trim() : '';
+  const name = str(data.name).trim() || composed || null;
   const newPassword = str(data.password || data.newPassword);
   const ROLES = ['admin', 'local_advisor', 'user'];
 
@@ -397,9 +411,9 @@ async function saveUser(data, ctx) {
     const p = isAdmin ? (prov || 'อุดรธานี') : (me.assigned_province || 'อุดรธานี');
     const c = isAdmin ? (cat || 'ศาลจังหวัด') : (me.court_category || 'ศาลจังหวัด');
     const ct = isAdmin ? courtNameFor(c, p, court) : myCourt;
-    await db.query(`INSERT INTO app_users (username, password_hash, role, name, court_category, assigned_court, assigned_province, must_change_password, created_at_text)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,$8)`,
-      [target, auth.hashPassword(newPassword), role, name || target, c, ct, p, str(data.createdAt) || thaiDateTimeNow().slice(0, 10)]);
+    await db.query(`INSERT INTO app_users (username, password_hash, role, name, court_category, assigned_court, assigned_province, must_change_password, created_at_text, title, first_name, last_name, position)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,$8,$9,$10,$11,$12)`,
+      [target, auth.hashPassword(newPassword), role, name || target, c, ct, p, str(data.createdAt) || thaiDateTimeNow().slice(0, 10), title || '', firstName || '', lastName || '', position || '']);
     await logActivity(me.username, me.role, 'USER_CREATED', `เพิ่มผู้ใช้ @${target} (${role}, ${ct})`);
     return { status: 'success', message: `เพิ่มผู้ใช้ @${target} สำเร็จ`, created: true };
   }
@@ -408,6 +422,10 @@ async function saveUser(data, ctx) {
   const params = [];
   const add = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`); };
   if (name) add('name', name);
+  if (title !== undefined) add('title', title);
+  if (firstName !== undefined) add('first_name', firstName);
+  if (lastName !== undefined) add('last_name', lastName);
+  if (position !== undefined) add('position', position);
   if (isAdmin || isSelf) {
     if (cat) add('court_category', cat);
     if (court) add('assigned_court', court);

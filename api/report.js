@@ -82,7 +82,7 @@ async function currentUser(req, data) {
   const token = (h.startsWith('Bearer ') ? h.slice(7) : '') || data._token || '';
   const claims = auth.readToken(token);
   if (!claims) return null;
-  const { rows } = await db.query('SELECT username, role, name, token_version FROM app_users WHERE username = $1 AND disabled = FALSE', [claims.u]);
+  const { rows } = await db.query('SELECT * FROM app_users WHERE username = $1 AND disabled = FALSE', [claims.u]);
   const u = rows[0];
   if (!u || u.token_version !== claims.v) return null;
   return u;
@@ -164,11 +164,12 @@ actions.sr_bootstrap = async (d, u) => {
   const [{ rows: [zone] }, { rows: presets }, { rows: staff }] = await Promise.all([
     db.query('SELECT preset_id, zone_key, anchor, updated_by, updated_at FROM sr_zone_state WHERE username = $1', [u.username]),
     db.query('SELECT id, owner, name, province, muang, zones, roster, source_file, updated_by, updated_at FROM sr_zone_presets ORDER BY id'),
-    db.query("SELECT username, name FROM app_users WHERE disabled IS NOT TRUE AND COALESCE(name, '') <> '' ORDER BY name"),
+    db.query("SELECT username, name, title, first_name, last_name, position FROM app_users WHERE disabled IS NOT TRUE ORDER BY first_name, name, username"),
   ]);
   return {
-    status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows,
-    zone: zone || null, zonePresets: presets.map(presetRow), rcptLast, activePresetId: Number(settings.zone_active_preset) || null, staff,
+    status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role, title: u.title || '', first_name: u.first_name || '', last_name: u.last_name || '', position: u.position || '', full_name: u.first_name ? `${u.title || ''}${u.first_name} ${u.last_name || ''}`.trim() : (u.name || u.username) }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows,
+    zone: zone || null, zonePresets: presets.map(presetRow), rcptLast, activePresetId: Number(settings.zone_active_preset) || null,
+    staff: staff.map((r) => ({ username: r.username, name: r.first_name ? `${r.title || ''}${r.first_name} ${r.last_name || ''}`.trim() : (r.name || r.username), display: r.name || '', first_name: r.first_name || '', last_name: r.last_name || '', position: r.position || '' })),
   };
 };
 

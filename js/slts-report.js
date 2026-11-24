@@ -34,6 +34,16 @@
   const isPc = () => (typeof window.isMobileView === 'function' ? !window.isMobileView() : window.innerWidth > 768);
   const settings = () => (R.boot && R.boot.settings) || {};
   const arabicDocs = () => settings().doc_digits === 'arabic';
+  /** ข้อมูลผู้ที่ล็อกอินอยู่ (ชื่อ-นามสกุล ตำแหน่ง จากบัญชีผู้ใช้) = ผู้ส่งหมาย/ผู้รายงาน */
+  const meInfo = () => {
+    const m = (R.boot && R.boot.me) || {}; const c = currentUser() || {};
+    const first = m.first_name || c.firstName || '';
+    return {
+      title: m.title || c.title || '', first, last: m.last_name || c.lastName || '',
+      full: first ? (m.full_name || `${c.title || ''}${first} ${c.lastName || ''}`.trim()) : '',
+      position: m.position || c.position || '',
+    };
+  };
   const profileKey = () => 'sr_profile_' + myUser();
   const profile = () => LS.get(profileKey(), {});
 
@@ -556,11 +566,11 @@
     const d = {
       issue_date: it.entry_date || it.period_start || L.todayIso(),
       send_method: 'ส่งโดยเจ้าพนักงาน',
-      server_name: it.server_name || myName(),
+      server_name: meInfo().full || it.server_name || myName(),
       serve_date: firstTime ? L.toIso(firstTime) : L.todayIso(),
       result_code: code, result_text: L.resultText(code), result_extra: '',
       file_type: 'file', resend_to: '', court_note: '', note: '',
-      reporter_name: prof.name || myName(), reporter_position: prof.position || '',
+      reporter_name: meInfo().full || prof.name || myName(), reporter_position: meInfo().position || prof.position || '',
       recipient: it.recipient,
       inspector_id: insp ? insp.id : '', inspector_name: insp ? insp.full_name : '', inspector_position: insp ? insp.position : '',
       inspector_acting: insp ? insp.acting : true, inspector_title: insp ? (insp.acting_title || settings().director_title) : settings().director_title,
@@ -1005,9 +1015,12 @@
   /** โซนของฉันตามตารางผู้ส่ง (ตามที่บันทึกไว้ — ไม่เลื่อนเองจนกว่าจะยืนยัน) → { zone, role: 'sender'|'backup' } */
   function myRosterZone(groups, preset) {
     const r = rosterOf(preset); const me = myUser(); if (!r || !me) return null;
-    let z = groups.find((g) => r.assign[g.key] && r.assign[g.key].sender_username === me);
+    // ยังไม่ได้จับคู่ username → เทียบชื่อในตารางกับชื่อของฉัน (จากบัญชีผู้ใช้)
+    const mi = meInfo(); const meStaff = [{ username: me, name: mi.full || myName(), first_name: mi.first }];
+    const isMe = (u, txt) => u === me || (!u && txt && (L.matchStaff(txt, meStaff) || {}).username === me);
+    let z = groups.find((g) => r.assign[g.key] && isMe(r.assign[g.key].sender_username, r.assign[g.key].sender));
     if (z) return { zone: z, role: 'sender' };
-    z = groups.find((g) => r.assign[g.key] && r.assign[g.key].backup_username === me);
+    z = groups.find((g) => r.assign[g.key] && isMe(r.assign[g.key].backup_username, r.assign[g.key].backup));
     return z ? { zone: z, role: 'backup' } : null;
   }
   const zoneInfoOf = (it) => ({ district: it.district, subdistrict: it.subdistrict, moo: it.moo, text: [it.address_raw, it.recipient, it.summon_type].filter(Boolean).join(' ') });
@@ -1410,7 +1423,7 @@
         ${parsed.length > 1 ? `<div class="sr-toolbar"><label class="sr-muted">แผ่นงาน</label><select class="sr-select" id="ziSheet">${parsed.map((x, i) => `<option value="${i}" ${i === pick ? 'selected' : ''}>${esc(x.name)} (${x.zones.length} โซน)</option>`).join('')}</select></div>` : ''}
         <div class="sr-toolbar" style="margin-top:6px"><label class="sr-muted">ชื่อ Pre-set</label><input class="sr-input" id="ziName" style="width:280px" value="${esc(FL.ziName || `ตารางโซน ${P.period_start ? thDay(L.parseIso(P.period_start)) + ' – ' + thDay(L.parseIso(P.period_end)) : ''}`)}">
           <label class="sr-muted">รอบผู้ส่ง</label><input type="date" class="sr-input" id="ziStart" value="${esc(P.period_start)}"> – <input type="date" class="sr-input" id="ziEnd" value="${esc(P.period_end)}"></div>
-        <div class="sr-muted" style="margin:6px 0">จังหวัด${esc(prov)} · อำเภอเมือง = ${esc(muang)} · ผู้ส่งเทียบกับชื่อผู้ใช้ในระบบ (ชื่อตัว)${unmatched ? ` · <b style="color:#b45309">ยังไม่พบผู้ใช้ ${unmatched} ชื่อ</b> — เลือกเองได้ หรือเว้นไว้แล้วกำหนดภายหลัง` : ''}</div>
+        <div class="sr-muted" style="margin:6px 0">จังหวัด${esc(prov)} · อำเภอเมือง = ${esc(muang)} · ผู้ส่งเทียบกับช่อง "ชื่อ" ในบัญชีผู้ใช้ (ชื่อสะกดต่าง 1 ตัวอักษรก็จับคู่ได้)${unmatched ? ` · <b style="color:#b45309">ยังไม่พบผู้ใช้ ${unmatched} ชื่อ</b> — บัญชีผู้ใช้ยังไม่มีชื่อ-นามสกุลตรงกัน: เลือกเอง หรือบันทึกไว้ก่อนแล้วกด "จับคู่ผู้ส่งอีกครั้ง" หลังกรอกชื่อผู้ใช้` : ''}</div>
         ${errs.length ? `<div class="sr-note warn">${errs.map(esc).join('<br>')}</div>` : ''}
         <div class="sr-scroll" style="max-height:52vh;margin-top:6px"><table class="sr-table"><thead><tr><th>โซน</th><th>เขตตำบล/อำเภอ (ในไฟล์ → ในระบบ)</th><th>ผู้ส่ง</th><th>ผู้ส่งสำรอง/แทน</th></tr></thead><tbody>
         ${P.zones.map((z, i) => `<tr><td><b>${z.no}</b></td><td>${esc(z.raw)}<div style="margin-top:3px">${chips(z)}</div></td>
@@ -1474,11 +1487,13 @@
     }).join('');
     return `<div class="sr-card"><div class="sr-toolbar"><h3 style="margin:0">ตารางโซนและผู้ส่ง — ${esc(p.name)}</h3><span class="sr-chip ok">ใช้งานอยู่</span><span class="grow"></span>
         ${r.period_start ? `<button class="sr-btn primary" data-zr="shift"><i class="fa-solid fa-arrow-down-short-wide"></i> เลื่อนผู้ส่งลง 1 โซน</button>` : ''}
+        ${edit ? '<button class="sr-btn" data-zr="rematch" title="จับคู่ชื่อผู้ส่ง/ผู้ส่งสำรองกับชื่อ-นามสกุลของผู้ใช้ในระบบอีกครั้ง"><i class="fa-solid fa-user-check"></i> จับคู่ผู้ส่งอีกครั้ง</button>' : ''}
         ${edit ? '<button class="sr-btn" data-zr="undo" title="ย้อนการเลื่อน/แก้ไขผู้ส่งครั้งล่าสุด"><i class="fa-solid fa-rotate-left"></i> ย้อนกลับ</button>' : ''}
         <button class="sr-btn" data-zr="log"><i class="fa-solid fa-clock-rotate-left"></i> ประวัติ</button></div>
       <div class="sr-toolbar" style="margin-top:8px"><label class="sr-muted">รอบผู้ส่ง</label>
         ${edit ? `<input type="date" class="sr-input" id="rsStart" value="${esc(r.period_start)}"> – <input type="date" class="sr-input" id="rsEnd" value="${esc(r.period_end)}">` : `<b>${r.period_start ? thDay(L.parseIso(r.period_start)) + ' – ' + thDay(L.parseIso(r.period_end)) : '-'}</b>`}
         ${st ? `<span class="sr-muted">${st.due ? `<b style="color:#b45309">ถึงรอบเลื่อนแล้ว</b> (รอบใหม่เริ่ม ${thDay(st.nextStart)}; รายงานผลรอบเดิมไม่เกินวันพุธที่ ${thDay(st.reportUntil)})` : `เลื่อนรอบถัดไปได้ตั้งแต่วันจันทร์ที่ ${thDay(st.nextStart)} (ระบบจะถามก่อนเลื่อน)`}</span>` : ''}</div>
+      ${(() => { const un = Object.values(r.assign || {}).filter((a) => a.sender && !a.sender_username).length; return un ? `<div class="sr-note warn" style="margin-top:8px"><i class="fa-solid fa-user-xmark"></i> ผู้ส่ง ${un} ชื่อยังจับคู่กับบัญชีผู้ใช้ไม่ได้ — ระบบเทียบ "ชื่อ" ในตารางกับช่อง <b>ชื่อ</b> ในบัญชีผู้ใช้ ให้ผู้ดูแลเพิ่มผู้ใช้/กรอกชื่อ-นามสกุลที่ จัดการผู้ใช้งาน (หรือผู้ใช้กรอกเองที่ ข้อมูลของฉัน) แล้วกด "จับคู่ผู้ส่งอีกครั้ง" · ผู้ใช้ที่ชื่อตรงจะเห็นโซนของตนได้ทันทีแม้ยังไม่ได้กดจับคู่</div>` : ''; })()}
       <div class="sr-muted" style="margin:6px 0">ผู้ส่งเลื่อนลงทีละ 1 โซนทุก 2 สัปดาห์ (โซนสุดท้าย → โซน 1) · เมื่อเข้าสัปดาห์ที่ 3 ระบบจะถามก่อนเลื่อน เพราะยังอยู่ในช่วงรายงานผลของรอบเดิม (ไม่เกินวันพุธ) · ผู้ส่งสำรอง/แทนใช้เฉพาะรอบนั้น</div>
       <div class="sr-scroll" style="max-height:520px"><table class="sr-table"><thead><tr><th style="width:56px">โซน</th><th>เขตตำบล/อำเภอ</th><th style="width:24%">ผู้ส่ง</th><th style="width:22%">ผู้ส่งสำรอง/แทน</th></tr></thead><tbody>${rows}</tbody></table></div>
       ${edit ? '<div class="sr-toolbar" style="margin-top:10px"><span class="grow"></span><button class="sr-btn primary" data-zr="save"><i class="fa-solid fa-floppy-disk"></i> บันทึกตารางผู้ส่ง</button></div>' : '<div class="sr-muted" style="margin-top:8px">แก้ไขชื่อผู้ส่งได้เฉพาะผู้สร้าง Pre-set หรือผู้ดูแลระบบ</div>'}</div>`;
@@ -1509,6 +1524,20 @@
         if (b.dataset.zr) {
           const p = activePreset(); if (!p) return;
           if (b.dataset.zr === 'shift') { if (await shiftRosterFlow(p)) renderZones(body); return; }
+          if (b.dataset.zr === 'rematch') {
+            const r0 = rosterOf(p) || { assign: {} }; const staff = staffList();
+            let n = 0; const assign = {};
+            Object.keys(r0.assign || {}).forEach((k) => {
+              const a = { ...r0.assign[k] };
+              if (a.sender && !a.sender_username) { const m = L.matchStaff(a.sender, staff); if (m && m.username) { a.sender_username = m.username; n += 1; } }
+              if (a.backup && !a.backup_username) { const m = L.matchStaff(a.backup, staff); if (m && m.username) { a.backup_username = m.username; n += 1; } }
+              assign[k] = a;
+            });
+            if (!n) { toast('info', 'ไม่พบชื่อที่จับคู่เพิ่มได้ — ตรวจว่าผู้ใช้กรอกชื่อ-นามสกุลในบัญชีแล้ว'); return; }
+            busy('กำลังบันทึก...');
+            await api('sr_zone_roster_save', { preset_id: p.id, mode: 'edit', roster: { ...r0, assign } }); await ensureBoot(true); done();
+            toast('success', `จับคู่เพิ่ม ${n} ชื่อ`); return renderZones(body);
+          }
           if (b.dataset.zr === 'undo') {
             const ok = await Swal.fire({ icon: 'question', title: 'ย้อนการเปลี่ยนผู้ส่งครั้งล่าสุด?', showCancelButton: true, confirmButtonText: 'ย้อนกลับ', cancelButtonText: 'ยกเลิก' });
             if (!ok.isConfirmed) return;
@@ -1945,10 +1974,14 @@
         <td class="ctr">${(admin || sg.created_by === myUser()) ? `<button class="sr-btn sm" data-sedit="${sg.id}"><i class="fa-solid fa-pen"></i></button><button class="sr-btn sm danger" data-sdel="${sg.id}"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="sr-muted">ยังไม่มีรายชื่อ</td></tr>'}
       </tbody></table></div>`;
     body.innerHTML = `
-      <div class="sr-card"><h3>ข้อมูลของฉัน (ใช้ในแบบรายงาน)</h3><div class="sr-grid sr-g3">
-        <div class="sr-field"><label>ชื่อ-สกุล ผู้รายงาน</label><input class="sr-input" id="pf_name" value="${esc(prof.name || myName())}"></div>
-        <div class="sr-field"><label>ตำแหน่ง</label><input class="sr-input" id="pf_position" value="${esc(prof.position || '')}" placeholder="เช่น นักวิชาการคอมพิวเตอร์ปฏิบัติการ"></div>
-        <div class="sr-field"><label>&nbsp;</label><button class="sr-btn primary" id="pf_save"><i class="fa-solid fa-floppy-disk"></i> บันทึก (เครื่องนี้)</button></div></div></div>
+      <div class="sr-card"><h3>ข้อมูลของฉัน (ผู้ส่งหมาย / ผู้รายงานในแบบรายงาน)</h3>
+        <div class="sr-muted" style="margin-bottom:8px">บันทึกลงบัญชีผู้ใช้ @${esc(myUser())} — ใช้ทุกเครื่อง และใช้จับคู่ชื่อผู้ส่งในตารางโซนจ่ายหมาย</div>
+        <div class="sr-grid sr-g4">
+        <div class="sr-field"><label>คำนำหน้า</label><input class="sr-input" id="pf_title" list="pf_titles" value="${esc(meInfo().title)}"><datalist id="pf_titles"><option value="นาย"><option value="นาง"><option value="นางสาว"><option value="ว่าที่ร้อยตรี"></datalist></div>
+        <div class="sr-field"><label>ชื่อ <span class="req">*</span></label><input class="sr-input" id="pf_first" value="${esc(meInfo().first || '')}"></div>
+        <div class="sr-field"><label>นามสกุล <span class="req">*</span></label><input class="sr-input" id="pf_last" value="${esc(meInfo().last || '')}"></div>
+        <div class="sr-field"><label>ตำแหน่ง</label><input class="sr-input" id="pf_position" value="${esc(meInfo().position || prof.position || '')}" placeholder="เช่น เจ้าพนักงานศาลยุติธรรมปฏิบัติงาน"></div>
+        <div class="sr-field"><button class="sr-btn primary" id="pf_save"><i class="fa-solid fa-floppy-disk"></i> บันทึกข้อมูลของฉัน</button></div></div></div>
       ${['inspector', 'payer', 'director', 'officer'].map(block).join('')}
       <div class="sr-card"><div class="sr-toolbar"><h3 style="margin:0">คำสั่งศาลแต่งตั้งเจ้าพนักงาน (ใช้ในบันทึกข้อความ)</h3><span class="grow"></span>${admin ? '<button class="sr-btn sm primary" id="srOrderAdd"><i class="fa-solid fa-plus"></i> เพิ่มคำสั่งฉบับใหม่</button>' : ''}</div>
         <table class="sr-table" style="margin-top:8px"><thead><tr><th>คำสั่ง</th><th>หมายเหตุ</th><th></th></tr></thead><tbody>${(R.boot.orders || []).map((o, i) => `<tr><td>${esc(o.order_text)} ${i === 0 ? '<span class="sr-chip ok">ฉบับล่าสุด</span>' : ''}</td><td class="sr-muted">${esc(o.note)}</td><td class="ctr">${admin ? `<button class="sr-btn sm danger" data-odel="${o.id}"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`).join('')}</tbody></table></div>
@@ -1959,7 +1992,18 @@
         ${admin ? '<div class="sr-field"><button class="sr-btn primary" id="st_save"><i class="fa-solid fa-floppy-disk"></i> บันทึกการตั้งค่า</button></div>' : ''}</div></div>`;
     const reload = async () => { await ensureBoot(true); renderSettings(body); };
 
-    $('#pf_save').onclick = () => { LS.set(profileKey(), Object.assign(profile(), { name: $('#pf_name').value.trim(), position: $('#pf_position').value.trim() })); toast('success', 'บันทึกแล้ว'); };
+    $('#pf_save').onclick = async () => {
+      const v = { title: $('#pf_title').value.trim(), firstName: $('#pf_first').value.trim(), lastName: $('#pf_last').value.trim(), position: $('#pf_position').value.trim() };
+      if (!v.firstName || !v.lastName) return fail(new Error('กรุณากรอกชื่อและนามสกุล'));
+      try {
+        busy('กำลังบันทึก...');
+        const out = await SLTS.api('save_user', { username: myUser(), ...v });
+        const st = appState();
+        if (st && st.currentUser && out.user) { Object.assign(st.currentUser, out.user); try { localStorage.setItem('slts_current_user', JSON.stringify(st.currentUser)); } catch (_) {} }
+        LS.set(profileKey(), Object.assign(profile(), { position: v.position }));
+        await reload(); done(); toast('success', 'บันทึกข้อมูลของฉันแล้ว');
+      } catch (er) { done(); fail(er); }
+    };
     body.onclick = async (e) => {
       const b = e.target.closest('button'); if (!b) return;
       try {

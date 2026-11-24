@@ -2899,6 +2899,41 @@ window.closeAddUserModal = function() {
  * 3. บันทึกและอัปเดตตาราง "รายชื่อผู้ใช้งานทั้งหมด" ทันทีโดยไม่ต้องรีเฟรชหน้าเว็บ
  * 4. รองรับการรับค่า initialData เพื่อคงข้อมูลเดิมเมื่อกลับมาจากการเลือกจังหวัด
  */
+
+/** ช่องคำนำหน้า / ชื่อ / นามสกุล / ตำแหน่ง (ใช้ในรายงานผลหมายและจับคู่ผู้ส่งในตารางโซน) */
+function userNameFieldsHtml(prefix, v) {
+  v = v || {};
+  const e = (x) => escapeHtmlAttr(String(x || ''));
+  const cls = 'w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition';
+  return `
+    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 text-left">
+      <div class="sm:col-span-3">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">คำนำหน้า</label>
+        <input type="text" id="${prefix}Title" list="${prefix}TitleList" value="${e(v.title)}" class="${cls}" placeholder="นาย / นาง / นางสาว">
+        <datalist id="${prefix}TitleList"><option value="นาย"><option value="นาง"><option value="นางสาว"><option value="ว่าที่ร้อยตรี"><option value="ว่าที่ร้อยตรีหญิง"></datalist>
+      </div>
+      <div class="sm:col-span-4">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">ชื่อ <span class="text-rose-500">*</span></label>
+        <input type="text" id="${prefix}FirstName" value="${e(v.firstName)}" class="${cls}" placeholder="เช่น เอกวิทย์">
+      </div>
+      <div class="sm:col-span-5">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">นามสกุล <span class="text-rose-500">*</span></label>
+        <input type="text" id="${prefix}LastName" value="${e(v.lastName)}" class="${cls}" placeholder="เช่น ลาดล้าย">
+      </div>
+      <div class="sm:col-span-12">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">ตำแหน่ง</label>
+        <input type="text" id="${prefix}Position" list="${prefix}PositionList" value="${e(v.position)}" class="${cls}" placeholder="เช่น เจ้าพนักงานศาลยุติธรรมปฏิบัติงาน">
+        <datalist id="${prefix}PositionList"><option value="เจ้าพนักงานศาลยุติธรรมปฏิบัติงาน"><option value="เจ้าพนักงานศาลยุติธรรมชำนาญงาน"><option value="เจ้าพนักงานศาลยุติธรรมอาวุโส"><option value="เจ้าหน้าที่ศาลยุติธรรมปฏิบัติงาน"><option value="เจ้าหน้าที่ศาลยุติธรรมชำนาญงาน"><option value="นิติกร"></datalist>
+        <p class="text-[10px] text-gray-400 mt-1">ชื่อ-นามสกุลและตำแหน่งใช้เป็นผู้ส่งหมาย/ผู้รายงานในแบบรายงานผลหมาย และใช้จับคู่ชื่อผู้ส่งในตารางโซนจ่ายหมาย</p>
+      </div>
+    </div>`;
+}
+function readUserNameFields(prefix) {
+  const g = (k) => (document.getElementById(prefix + k)?.value || '').trim().replace(/\s+/g, ' ');
+  const title = g('Title'); const firstName = g('FirstName'); const lastName = g('LastName'); const position = g('Position');
+  return { title, firstName, lastName, position, fullName: firstName ? `${title}${firstName} ${lastName}`.trim() : '' };
+}
+
 window.openAddUserModal = function(initialData = {}) {
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
@@ -3045,16 +3080,8 @@ window.openAddUserModal = function(initialData = {}) {
               <input type="text" id="modalNewUsername" value="${escapeHtmlAttr(currentUsername)}" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น officer01" required autocomplete="off" />
             </div>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">ชื่อ-สกุล / ชื่อแสดง</label>
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                <i class="fa-solid fa-id-card text-xs"></i>
-              </div>
-              <input type="text" id="modalNewFullName" value="${escapeHtmlAttr(currentFullName)}" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น นายสมชาย ส่งหมาย" />
-            </div>
-          </div>
         </div>
+        ${userNameFieldsHtml('modalNew', initialData)}
 
         <div>
           <label class="block text-xs font-semibold text-gray-700 mb-1">รหัสผ่าน (Password) <span class="text-rose-500">*</span></label>
@@ -3128,7 +3155,7 @@ window.openProvincePickerForAddUser = function() {
   // บันทึกข้อมูลที่ผู้ใช้กรอกค้างไว้ในฟอร์มเพื่อไม่ให้สูญหาย
   window._addUserFormDataBuffer = {
     username: (document.getElementById('modalNewUsername')?.value || '').trim(),
-    fullName: (document.getElementById('modalNewFullName')?.value || '').trim(),
+    ...readUserNameFields('modalNew'),
     password: (document.getElementById('modalNewPassword')?.value || '').trim(),
     role: document.getElementById('modalNewRole')?.value || 'user',
     courtCategory: document.getElementById('modalNewCourtCategory')?.value || 'ศาลจังหวัด',
@@ -3284,11 +3311,16 @@ window.handleModalCreateUser = function(e) {
   }
 
   const username = (document.getElementById('modalNewUsername')?.value || '').trim();
-  const fullName = (document.getElementById('modalNewFullName')?.value || '').trim();
+  const nf = readUserNameFields('modalNew');
+  const fullName = nf.fullName;
   const password = (document.getElementById('modalNewPassword')?.value || '').trim();
 
   if (!username || !password) {
     Swal.fire('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน', 'warning');
+    return;
+  }
+  if (!nf.firstName || !nf.lastName) {
+    Swal.fire('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกชื่อและนามสกุล (ใช้ในการรายงานผลหมาย)', 'warning');
     return;
   }
 
@@ -3350,6 +3382,7 @@ window.handleModalCreateUser = function(e) {
     'ประเภทศาล': courtCategory,
     'ศาลที่สังกัด': assignedCourt,
     'จังหวัดที่ส่งหมาย': assignedProvince,
+    title: nf.title, firstName: nf.firstName, lastName: nf.lastName, position: nf.position,
     name: fullName || (role === 'admin' ? `Admin (${username})` : (role === 'local_advisor' ? `Local Advisor (${username})` : `เจ้าหน้าที่ (${username})`)),
     createdAt: dateNow
   };
@@ -3481,6 +3514,7 @@ function renderUserList() {
           </div>
           <div>
             <p class="font-bold text-gray-900 leading-tight">${u.name || u.username}</p>
+            ${u.firstName ? (u.position ? `<p class="text-[11px] text-gray-500 leading-tight">${escapeHtmlAttr(u.position)}</p>` : '') : '<p class="text-[11px] text-amber-600 leading-tight"><i class="fa-solid fa-triangle-exclamation"></i> ยังไม่ได้กรอกชื่อ-นามสกุล (ใช้ในรายงานหมาย)</p>'}
             <p class="text-xs text-gray-500 font-mono">@${u.username}</p>
           </div>
         </div>
@@ -3634,9 +3668,10 @@ window.editUserModal = function(username) {
     title: `แก้ไขข้อมูลผู้ใช้ (@${username})`,
     html: `
       <div class="text-left space-y-3 pt-2">
+        ${userNameFieldsHtml('swalEdit', user)}
         <div>
-          <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อ-นามสกุล / ชื่อแสดง *</label>
-          <input type="text" id="swalEditName" value="${user.name || user.username}" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
+          <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อแสดง (ว่างไว้ = ใช้ชื่อ-นามสกุล)</label>
+          <input type="text" id="swalEditName" value="${escapeHtmlAttr(user.firstName && user.name !== ((user.title || '') + user.firstName + ' ' + (user.lastName || '')).trim() ? (user.name || '') : '')}" placeholder="${escapeHtmlAttr(user.username)}" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
         </div>
         ${roleSectionHtml}
         ${courtSectionHtml}
@@ -3699,15 +3734,17 @@ window.editUserModal = function(username) {
     cancelButtonText: 'ยกเลิก',
     confirmButtonColor: '#2563eb',
     preConfirm: () => {
-      const name = document.getElementById('swalEditName').value.trim();
-      if (!name) {
-        Swal.showValidationMessage('กรุณาระบุชื่อ-นามสกุล');
+      const nf = readUserNameFields('swalEdit');
+      if (!nf.firstName || !nf.lastName) {
+        Swal.showValidationMessage('กรุณากรอกชื่อและนามสกุล (ใช้ในการรายงานผลหมาย)');
         return false;
       }
+      const name = document.getElementById('swalEditName').value.trim() || nf.fullName;
+      const nameFields = { title: nf.title, firstName: nf.firstName, lastName: nf.lastName, position: nf.position };
 
       if (isLocalAdvisor) {
         return {
-          name: name,
+          name: name, ...nameFields,
           role: 'user',
           courtCategory: user.courtCategory || 'ศาลจังหวัด',
           assignedCourt: currentAssignedCourt,
@@ -3729,11 +3766,13 @@ window.editUserModal = function(username) {
         assignedCourt = buildCourtNameFromCategoryAndProvince(courtCategory, assignedProvince);
       }
 
-      return { name, role, courtCategory, assignedCourt, assignedProvince };
+      return { name, ...nameFields, role, courtCategory, assignedCourt, assignedProvince };
     }
   }).then((res) => {
     if (res.isConfirmed && res.value) {
       user.name = res.value.name;
+      user.title = res.value.title; user.firstName = res.value.firstName; user.lastName = res.value.lastName; user.position = res.value.position;
+      user.fullName = res.value.firstName ? `${res.value.title}${res.value.firstName} ${res.value.lastName}`.trim() : user.name;
       if (!isPrimary && !isLocalAdvisor) user.role = res.value.role;
       if (!isLocalAdvisor) {
         user.courtCategory = res.value.courtCategory;
@@ -3745,6 +3784,7 @@ window.editUserModal = function(username) {
       // ถ้าแก้ไขบัญชีที่ล็อกอินอยู่ ให้ sync session ด้วย
       if (state.currentUser && state.currentUser.username === username) {
         state.currentUser.name = user.name;
+        Object.assign(state.currentUser, { title: user.title, firstName: user.firstName, lastName: user.lastName, position: user.position, fullName: user.fullName });
         state.currentUser.role = user.role;
         state.currentUser.courtCategory = user.courtCategory;
         state.currentUser.assignedCourt = user.assignedCourt;
