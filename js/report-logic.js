@@ -696,7 +696,10 @@
   /** ชื่อโซนอัตโนมัติจากพื้นที่ที่เลือก */
   function autoZoneName(z, muang) {
     const parts = [];
-    if ((z.subdistricts || []).length) parts.push(`อ.${muang || 'เมือง'} (ต.${z.subdistricts.join(', ต.')})`);
+    const mooTxt = (t) => (z.moo && z.moo[t] === 'with' ? ' มีหมู่' : z.moo && z.moo[t] === 'without' ? ' ไม่มีหมู่' : '');
+    if ((z.keywords || []).length) parts.push(z.keywords.join('-'));
+    if ((z.subdistricts || []).length) parts.push(`อ.${muang || 'เมือง'} (${z.subdistricts.map((t) => 'ต.' + t + mooTxt(t)).join(', ')})`);
+    if ((z.others || []).length) parts.push(z.others.map((o) => `ต.${o.subdistrict} อ.${o.district}`).join(', '));
     if ((z.districts || []).length) parts.push(z.districts.map((d) => 'อ.' + d).join(', '));
     return parts.join(' + ') || 'โซนว่าง';
   }
@@ -710,10 +713,13 @@
     const p = String(preset.province || '').replace(/^จ(\.|ังหวัด)\s*/, '').trim();
     const muang = preset.muang || muangOf(p, data) || ('เมือง' + p);
     return preset.zones.map((z, i) => {
-      const areas = (z.subdistricts || []).map((t) => ({ province: p, district: muang, subdistrict: t }))
-        .concat((z.districts || []).map((d) => ({ province: p, district: d, subdistrict: '' })));
-      return { key: String(z.id || 'z' + (i + 1)), label: String(z.name || '').trim() || autoZoneName(z, muang), areas, no: i + 1 };
-    }).filter((z) => z.areas.length);
+      const mooOf = (t) => (z.moo && z.moo[t]) || '';
+      const areas = (z.subdistricts || []).map((t) => ({ province: p, district: muang, subdistrict: t, moo: mooOf(t) }))
+        .concat((z.others || []).map((o) => ({ province: p, district: o.district, subdistrict: o.subdistrict, moo: '' })))
+        .concat((z.districts || []).map((d) => ({ province: p, district: d, subdistrict: '', moo: '' })));
+      const keywords = (z.keywords || []).map((k) => String(k).trim()).filter(Boolean);
+      return { key: String(z.id || 'z' + (i + 1)), label: String(z.name || '').trim() || autoZoneName(z, muang), areas, keywords, no: i + 1 };
+    }).filter((z) => z.areas.length || z.keywords.length);
   }
   /** ตรวจ Pre-set: พื้นที่ซ้ำกันระหว่างโซน / โซนว่าง */
   function validatePreset(preset) {
@@ -721,14 +727,172 @@
     const seen = new Map();
     (preset.zones || []).forEach((z, i) => {
       const nm = String(z.name || '').trim() || `โซนที่ ${i + 1}`;
-      if (!(z.subdistricts || []).length && !(z.districts || []).length) errs.push(`${nm}: ยังไม่ได้เลือกพื้นที่`);
-      (z.subdistricts || []).map((t) => 't:' + t).concat((z.districts || []).map((d) => 'd:' + d)).forEach((k) => {
-        if (seen.has(k)) errs.push(`${k.slice(0, 2) === 't:' ? 'ต.' : 'อ.'}${k.slice(2)} อยู่ทั้งใน ${seen.get(k)} และ ${nm}`);
-        else seen.set(k, nm);
+      if (!(z.subdistricts || []).length && !(z.districts || []).length && !(z.others || []).length && !(z.keywords || []).length) errs.push(`${nm}: ยังไม่ได้เลือกพื้นที่`);
+      const keys = (z.subdistricts || []).map((t) => ['t:' + t, (z.moo && z.moo[t]) || ''])
+        .concat((z.others || []).map((o) => ['o:' + o.district + '/' + o.subdistrict, '']))
+        .concat((z.districts || []).map((d) => ['d:' + d, '']));
+      keys.forEach(([k, cond]) => {
+        const prev = seen.get(k);
+        const label = k.startsWith('d:') ? 'อ.' + k.slice(2) : 'ต.' + k.slice(2).replace(/^.*\//, '');
+        // ตำบลเดียวกันแบ่งได้ 2 โซน: "มีหมู่" กับ "ไม่มีหมู่"
+        if (prev && !(prev.cond && cond && prev.cond !== cond)) errs.push(`${label} อยู่ทั้งใน ${prev.nm} และ ${nm}`);
+        else seen.set(k, { nm, cond });
       });
     });
     if (!(preset.zones || []).length) errs.push('ยังไม่มีโซน');
     return errs;
+  }
+
+  // ------------------------------------------------------------------
+  // จับคู่ข้อมูล → โซน (หน่วยงานตามคำค้นก่อน แล้วจึงพื้นที่; ตำบลแบ่ง มีหมู่/ไม่มีหมู่)
+  // info = { district, subdistrict, moo, text }
+  // ------------------------------------------------------------------
+  const kwNorm = (v) => thNorm(String(v || '')).replace(/[\s.\-]/g, '');
+  function zoneFor(groups, info) {
+    const text = kwNorm(info && info.text);
+    const kz = (groups || []).find((g) => (g.keywords || []).some((k) => { const n = kwNorm(k); return n && text.includes(n); }));
+    if (kz) return kz;
+    let moo = String((info && info.moo) || '').trim();
+    if (!moo && info && info.text) moo = parseAddress(info.text).moo || '';
+    const hasMoo = Boolean(moo && moo !== '-' && moo !== '0');
+    return (groups || []).find((g) => g.areas.some((a) => {
+      if (!inZone(a, info.district, info.subdistrict, info.text)) return false;
+      if (a.moo === 'with') return hasMoo;
+      if (a.moo === 'without') return !hasMoo;
+      return true;
+    })) || null;
+  }
+
+  // ------------------------------------------------------------------
+  // ตารางโซนจ่ายหมาย (Excel ของศาล): หัว "วันที่ ... ถึง วันที่ ..." + ตาราง โซน | เขตตำบล/อำเภอ | ผู้ส่ง | ผู้ส่งสำรอง
+  // ------------------------------------------------------------------
+  const TITLE_RE = /^(นางสาว|นาง|นาย|น\.ส\.|ว่าที่\s*ร\.?\s*ต\.?\s*(หญิง)?|ร\.ต\.ต\.|ด\.ต\.|จ\.ส\.ต\.)\s*/;
+  /** ชื่อตัว (ตัดคำนำหน้า/วงเล็บ/คำว่าแทน) สำหรับเทียบกับผู้ใช้ในระบบ */
+  function firstName(n) {
+    let v = thNorm(String(n || '')).replace(/\(.*?\)/g, ' ').replace(/แทน/g, ' ').trim();
+    for (let k = 0; k < 3; k++) v = v.replace(TITLE_RE, '').trim();
+    return (v.split(/\s+/)[0] || '').replace(/[^ก-๙A-Za-z]/g, '');
+  }
+  /** เทียบชื่อใน Excel กับผู้ใช้ในระบบ (ชื่อตัว) → { username, name } | { ambiguous:[...] } | null */
+  function matchStaff(name, staff) {
+    const fn = firstName(name); if (!fn) return null;
+    const hits = (staff || []).filter((u) => firstName(u.name) === fn);
+    if (hits.length === 1) return { username: hits[0].username, name: hits[0].name };
+    if (hits.length > 1) return { ambiguous: hits };
+    return null;
+  }
+  /** แปลงข้อความเขตพื้นที่ของโซน → พื้นที่ในระบบ */
+  function parseZoneAreaText(text, province, data) {
+    const A = provinceAreas(province, data);
+    const dmap = (data && data[A.province]) || {};
+    const out = { subdistricts: [], districts: [], others: [], moo: {}, keywords: [], unresolved: [] };
+    const src = thNorm(String(text || '')).replace(/\s+/g, ' ').trim();
+    if (!src) return out;
+    const toks = src.split(/\s*[,，、]\s*|\s+(?=ตำบล|อำเภอ|ต\.|อ\.)/).map((x) => x.trim()).filter(Boolean);
+    const findName = (name, list) => {
+      const n = name.replace(/ฯ$/, '').replace(/\s+/g, '');
+      const ex = list.find((x) => x.replace(/\s+/g, '') === n);
+      if (ex) return ex;
+      if (/ฯ$/.test(name) || n.length >= 3) { const pf = list.filter((x) => x.replace(/\s+/g, '').startsWith(n)); if (pf.length === 1) return pf[0]; }
+      return null;
+    };
+    const subsOf = (d) => (dmap[d] || []).map((t) => (typeof t === 'string' ? t : t && t.name)).filter(Boolean);
+    toks.forEach((tok) => {
+      let m = tok.match(/^(?:ตำบล|ต\.)\s*(.+?)\s*(ไม่มีหมู่|มีหมู่)?$/);
+      if (m) {
+        const cond = m[2] === 'มีหมู่' ? 'with' : m[2] === 'ไม่มีหมู่' ? 'without' : '';
+        const t = findName(m[1], A.muangSubdistricts);
+        if (t) { if (!out.subdistricts.includes(t)) out.subdistricts.push(t); if (cond) out.moo[t] = cond; return; }
+        const d = findName(m[1], A.districts); // พิมพ์ "ตำบล" แต่เป็นชื่ออำเภอ
+        if (d) { if (!out.districts.includes(d)) out.districts.push(d); return; }
+        for (const dn of A.districts) { const t2 = findName(m[1], subsOf(dn)); if (t2) { out.others.push({ district: dn, subdistrict: t2 }); return; } }
+        out.unresolved.push(tok); return;
+      }
+      m = tok.match(/^(?:อำเภอ|อ\.)\s*(.+)$/);
+      if (m) {
+        const d = findName(m[1], A.districts.concat(A.muang ? [A.muang] : []));
+        if (d && d === A.muang) { A.muangSubdistricts.forEach((t) => { if (!out.subdistricts.includes(t)) out.subdistricts.push(t); }); return; }
+        if (d) { if (!out.districts.includes(d)) out.districts.push(d); return; }
+        out.unresolved.push(tok); return;
+      }
+      // ไม่ใช่ตำบล/อำเภอ → หน่วยงาน/คำค้น (เช่น "อัยการ-เรือนจำ-จพค.-คุมประพฤติ")
+      tok.split(/\s*[-–\/]\s*/).map((k) => k.replace(/\.+$/, '').trim()).filter(Boolean).forEach((k) => { if (!out.keywords.includes(k)) out.keywords.push(k); });
+    });
+    return out;
+  }
+  /** อ่านแผ่นงานตารางโซน → { period_start, period_end, zones:[{ no, raw, ...พื้นที่, sender, backup }] } */
+  function parseZoneSheet(rows, province, data) {
+    rows = rows || [];
+    let period_start = ''; let period_end = ''; let h = -1; const col = {};
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const r = (rows[i] || []).map((x) => thNorm(String(x == null ? '' : x)).replace(/\s+/g, ' ').trim());
+      const line = r.join(' ');
+      if (!period_start && /ถึง/.test(line)) {
+        const [a, b] = line.split('ถึง');
+        const pa = parseThaiTextDate(a.replace(/วันที่/g, '')); const pb = parseThaiTextDate(String(b || '').replace(/วันที่/g, ''));
+        if (pa && pb) { period_start = toIso(pa); period_end = toIso(pb); }
+      }
+      const z = r.findIndex((x) => x.replace(/\s/g, '') === 'โซน');
+      if (z >= 0) {
+        h = i; col.zone = z;
+        col.area = r.findIndex((x) => /ตำบล|อำเภอ|เขต/.test(x));
+        col.sender = r.findIndex((x) => x.replace(/\s/g, '') === 'ผู้ส่ง');
+        col.backup = r.findIndex((x) => /สำรอง|แทน/.test(x));
+        break;
+      }
+    }
+    if (h < 0 || col.area < 0) throw new Error('ไม่พบหัวตาราง "โซน / เขตตำบล/อำเภอ / ผู้ส่ง" — ไม่ใช่ไฟล์ตารางโซนจ่ายหมาย');
+    const zones = [];
+    for (let i = h + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const cell = (k) => (col[k] >= 0 ? thNorm(String(r[col[k]] == null ? '' : r[col[k]])).replace(/\s+/g, ' ').trim() : '');
+      const zt = cell('zone'); const area = cell('area');
+      if (!zt && !area) continue;
+      const no = parseInt(toArabicDigits(zt).replace(/\D+/g, ''), 10) || zones.length + 1;
+      const a = parseZoneAreaText(area, province, data);
+      zones.push({ no, raw: area, name: area, ...a, sender: cell('sender').replace(/\(.*?\)/g, '').trim(), backup: cell('backup') });
+    }
+    if (!zones.length) throw new Error('ไม่พบรายการโซนในไฟล์');
+    return { period_start, period_end, zones };
+  }
+
+  // ------------------------------------------------------------------
+  // ผู้ส่งประจำโซน (roster): เลื่อนผู้ส่งลงทีละ 1 โซนทุก 2 สัปดาห์
+  // roster = { period_start, period_end, assign: { [zoneId]: { sender, sender_username, backup, backup_username } } }
+  // ------------------------------------------------------------------
+  function shiftRoster(zoneIds, roster, steps) {
+    const n = zoneIds.length; const k = Number(steps) || 1;
+    const assign = {};
+    zoneIds.forEach((id, i) => {
+      const from = zoneIds[(((i - k) % n) + n) % n];
+      const a = (roster.assign || {})[from] || {};
+      assign[id] = { sender: a.sender || '', sender_username: a.sender_username || '', backup: '', backup_username: '' }; // ผู้ส่งสำรอง/แทน เป็นการชั่วคราว → ล้าง
+    });
+    const add = (iso, d) => { const x = parseIso(iso); return x ? dIso(new Date(x.getTime() + d * DAY)) : ''; };
+    return { period_start: add(roster.period_start, 14 * k), period_end: add(roster.period_end, 14 * k), assign };
+  }
+  /**
+   * สถานะรอบ: เข้าสัปดาห์ที่ 3 (วันจันทร์หลังสิ้นรอบ) = ถึงเวลาเลื่อนโซน แต่ยังอยู่ในช่วงรายงานผลของรอบเดิมถึงวันพุธ
+   * คืน { due, steps, nextStart, reportUntil, afterReport }
+   */
+  function rosterStatus(roster, today) {
+    const st = parseIso(roster && roster.period_start);
+    if (!st) return { due: false, steps: 0 };
+    const t = atMidnight(today || new Date());
+    const steps = Math.floor((mondayOf(t).getTime() - mondayOf(st).getTime()) / (14 * DAY));
+    const nextStart = new Date(mondayOf(st).getTime() + 14 * DAY);
+    const reportUntil = new Date(nextStart.getTime() + 2 * DAY); // วันพุธของสัปดาห์ที่ 3
+    return { due: steps >= 1, steps: Math.max(0, steps), nextStart, nextStartIso: dIso(nextStart), reportUntil, afterReport: t.getTime() > reportUntil.getTime() };
+  }
+  /** โซนของผู้ใช้ในวันที่กำหนด (ตามรอบผู้ส่งปัจจุบัน + การเลื่อนทุก 2 สัปดาห์) */
+  function userZoneAt(groups, roster, username, dateIso) {
+    if (!roster || !roster.assign || !username) return null;
+    const ids = groups.map((g) => g.key);
+    const i = ids.findIndex((id) => roster.assign[id] && roster.assign[id].sender_username === username);
+    if (i < 0) return null;
+    const st = parseIso(roster.period_start); const d = parseIso(dateIso) || new Date();
+    const k = st ? Math.floor((mondayOf(d).getTime() - mondayOf(st).getTime()) / (14 * DAY)) : 0;
+    return groups[(((i + k) % ids.length) + ids.length) % ids.length];
   }
   const DAY = 864e5;
   const atMidnight = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
@@ -800,7 +964,7 @@
     parseIssuedSheet, parseAccExpenseSheet, parseCourtExcel, matchReceipts, normName, normCase, caseNos, caseKey,
     findRate, exceptionMoos, evaluateFreeSummonItems, parseRateRows, parseRatesWorkbook, parseRatePdfLines,
     templateFor, computeMoney, buildDocData, docFileName,
-    muangOf, provinceAreas, autoZoneName, presetZones, validatePreset, mondayOf, reportWindow, currentZone, inZone, dIso, parseIso,
+    muangOf, provinceAreas, autoZoneName, presetZones, validatePreset, zoneFor, firstName, matchStaff, parseZoneAreaText, parseZoneSheet, shiftRoster, rosterStatus, userZoneAt, mondayOf, reportWindow, currentZone, inZone, dIso, parseIso,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.SltsReportLogic = api;

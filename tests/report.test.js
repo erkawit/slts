@@ -161,3 +161,50 @@ test('โซนจ่ายหมาย: Pre-set ที่ผู้ใช้ต�
   assert.ok(L.inZone(g[1], 'ประจักษ์ศิลปาคม', 'นาม่วง'));
   assert.ok(L.inZone(g[2], '', '', '5 ม.2 ต.ปะโค อ.กุดจับ จ.อุดรธานี'));
 });
+
+test('ตารางโซนจาก Excel: เขตพื้นที่ / มีหมู่-ไม่มีหมู่ / หน่วยงาน / ผู้ส่งเลื่อนทุก 2 สัปดาห์', () => {
+  const data = { อุดรธานี: { เมืองอุดรธานี: ['หมากแข้ง', 'บ้านเลื่อม', 'หนองบัว'], กุมภวาปี: ['แชแล'], ประจักษ์ศิลปาคม: ['นาม่วง'], กู่แก้ว: ['ค้อใหญ่'], วังสามหมอ: ['ผาสุก'], ศรีธาตุ: ['จำปี'] } };
+  const rows = [
+    ['วันที่  16 พฤศจิกายน  2569  ถึง  วันที่  27  พฤศจิกายน  2569'],
+    ['โซน', 'เขตตำบล/อำเภอ', 'ผู้ส่ง', 'ผู้ส่งสำรอง'],
+    ['โซน 1', 'ตำบลหมากแข้งไม่มีหมู่', 'ประกายดาว', ''],
+    ['โซน 2', 'อัยการ-เรือนจำ-จพค.-คุมประพฤติ', 'ประภาพร', ''],
+    ['โซน 3', 'ตำบลหมากแข้ง มีหมู่', 'ขนิษฐา', ''],
+    ['โซน 4', 'อำเภอประจักษ์ฯ,    ตำบลกู่แก้ว', 'ณัฐรินันก์', ''],
+    ['โซน 5', 'อำเภอศรีธาตุ,   ตำบลวังสามหมอ ', 'อมรรัตน์', 'ณัฐรินันก์ (แทน)'],
+  ];
+  const P = L.parseZoneSheet(rows, 'อุดรธานี', data);
+  assert.equal(P.period_start, '2026-11-16'); assert.equal(P.period_end, '2026-11-27');
+  assert.deepEqual(P.zones[0].moo, { หมากแข้ง: 'without' });
+  assert.deepEqual(P.zones[1].keywords, ['อัยการ', 'เรือนจำ', 'จพค', 'คุมประพฤติ']);
+  assert.deepEqual(P.zones[3].districts, ['ประจักษ์ศิลปาคม', 'กู่แก้ว']); // "ตำบลกู่แก้ว" พิมพ์ผิด → อำเภอ
+  assert.deepEqual(P.zones[4].districts, ['ศรีธาตุ', 'วังสามหมอ']);
+  assert.equal(P.zones[4].backup, 'ณัฐรินันก์ (แทน)');
+  const zones = P.zones.map((z, i) => ({ ...z, id: 'z' + (i + 1), name: z.raw }));
+  assert.deepEqual(L.validatePreset({ zones }), []); // หมากแข้ง แบ่ง มีหมู่/ไม่มีหมู่ ได้
+  const g = L.presetZones({ province: 'อุดรธานี', zones }, data);
+  assert.equal(L.zoneFor(g, { district: 'เมืองอุดรธานี', subdistrict: 'หมากแข้ง', moo: '', text: '12 ถ.โพศรี ต.หมากแข้ง' }).key, 'z1');
+  assert.equal(L.zoneFor(g, { district: 'เมืองอุดรธานี', subdistrict: 'หมากแข้ง', moo: '5', text: '' }).key, 'z3');
+  assert.equal(L.zoneFor(g, { district: 'เมืองอุดรธานี', subdistrict: 'หมากแข้ง', text: 'เรือนจำกลางอุดรธานี ต.หมากแข้ง' }).key, 'z2');
+  assert.equal(L.zoneFor(g, { district: 'ประจักษ์ศิลปาคม', subdistrict: 'นาม่วง' }).key, 'z4');
+  // ผู้ส่ง ↔ ผู้ใช้ในระบบ (ชื่อตัว)
+  const staff = [{ username: 'ekk', name: 'นายเอกวิทย์  ลาดล้าย' }, { username: 'a1', name: 'นางสาวอมรรัตน์ ใจดี' }];
+  assert.equal(L.matchStaff('เอกวิทย์', staff).username, 'ekk');
+  assert.equal(L.matchStaff('อมรรัตน์', staff).username, 'a1');
+  assert.equal(L.matchStaff('ประภาพร', staff), null);
+  // เลื่อนผู้ส่งลง 1 โซน (โซนสุดท้าย → โซน 1) + ล้างผู้ส่งสำรอง
+  const ids = zones.map((z) => z.id);
+  const roster = { period_start: '2026-11-16', period_end: '2026-11-27', assign: Object.fromEntries(zones.map((z) => [z.id, { sender: z.sender, sender_username: z.sender === 'อมรรัตน์' ? 'a1' : '', backup: z.backup, backup_username: '' }])) };
+  const nx = L.shiftRoster(ids, roster, 1);
+  assert.equal(nx.period_start, '2026-11-30'); assert.equal(nx.period_end, '2026-12-11');
+  assert.equal(nx.assign.z1.sender, 'อมรรัตน์'); assert.equal(nx.assign.z2.sender, 'ประกายดาว'); assert.equal(nx.assign.z5.backup, '');
+  // รอบ: สัปดาห์ที่ 3 = ถึงรอบเลื่อน แต่ยังอยู่ช่วงรายงานผลถึงวันพุธ
+  assert.equal(L.rosterStatus(roster, new Date(2026, 10, 27)).due, false);
+  const w3 = L.rosterStatus(roster, new Date(2026, 11, 1)); // อังคาร สัปดาห์ที่ 3
+  assert.equal(w3.due, true); assert.equal(w3.afterReport, false); assert.equal(L.dIso(w3.reportUntil), '2026-12-02');
+  assert.equal(L.rosterStatus(roster, new Date(2026, 11, 3)).afterReport, true);
+  assert.equal(L.rosterStatus(roster, new Date(2026, 11, 15)).steps, 2);
+  // โซนของผู้ใช้ตามรอบ (บัญชีจ่ายหมายรอบถัดไป → โซนถัดไป)
+  assert.equal(L.userZoneAt(g, roster, 'a1', '2026-11-20').key, 'z5');
+  assert.equal(L.userZoneAt(g, roster, 'a1', '2026-12-04').key, 'z1');
+});

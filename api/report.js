@@ -158,34 +158,70 @@ actions.sr_bootstrap = async (d, u) => {
     db.query('SELECT id, kind, full_name, position, acting, acting_title, is_default, created_by FROM sr_signers ORDER BY kind, is_default DESC, id'),
     db.query('SELECT id, order_text, order_no, order_date, note, is_active, created_by, created_at FROM sr_court_orders ORDER BY id DESC'),
   ]);
-  const [{ rows: [zone] }, { rows: presets }] = await Promise.all([
+  const [{ rows: [zone] }, { rows: presets }, { rows: staff }] = await Promise.all([
     db.query('SELECT preset_id, zone_key, anchor, updated_by, updated_at FROM sr_zone_state WHERE username = $1', [u.username]),
-    db.query('SELECT id, name, province, muang, zones, updated_at FROM sr_zone_presets WHERE owner = $1 ORDER BY id', [u.username]),
+    db.query('SELECT id, owner, name, province, muang, zones, roster, source_file, updated_by, updated_at FROM sr_zone_presets ORDER BY id'),
+    db.query("SELECT username, name FROM app_users WHERE disabled IS NOT TRUE AND COALESCE(name, '') <> '' ORDER BY name"),
   ]);
-  return { status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows, zone: zone || null, zonePresets: presets.map(presetRow) };
+  return {
+    status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows,
+    zone: zone || null, zonePresets: presets.map(presetRow), activePresetId: Number(settings.zone_active_preset) || null, staff,
+  };
 };
 
-// ---------------- โซนจ่ายหมาย (Pre-set ที่ผู้ใช้ตั้งเอง) ----------------
-const presetRow = (r) => ({ id: Number(r.id), name: r.name, province: r.province, muang: r.muang, zones: Array.isArray(r.zones) ? r.zones : (typeof r.zones === 'string' ? JSON.parse(r.zones || '[]') : []), updated_at: r.updated_at });
+// ---------------- โซนจ่ายหมาย (Pre-set ของศาล ใช้ร่วมกัน) + ผู้ส่งประจำโซน (roster) ----------------
+const parseJson = (v, def) => (v && typeof v === 'object' ? v : (() => { try { return JSON.parse(v || ''); } catch (_) { return def; } })());
+const presetRow = (r) => ({
+  id: Number(r.id), owner: r.owner, name: r.name, province: r.province, muang: r.muang,
+  zones: Array.isArray(r.zones) ? r.zones : parseJson(r.zones, []), roster: parseJson(r.roster, {}) || {},
+  source_file: r.source_file || '', updated_by: r.updated_by || '', updated_at: r.updated_at,
+});
 const strList = (v, max) => (Array.isArray(v) ? v : []).map((x) => s(x, 120)).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).slice(0, max);
+const isoDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '');
 function cleanZones(zones) {
   if (!Array.isArray(zones)) throw new HttpError(400, 'รูปแบบโซนไม่ถูกต้อง');
   if (zones.length > 120) throw new HttpError(400, 'โซนมากเกินไป');
   const seen = new Map();
   return zones.map((z, i) => {
-    const out = { id: s(z && z.id, 40) || `z${Date.now().toString(36)}${i}`, name: s(z && z.name, 200), subdistricts: strList(z && z.subdistricts, 300), districts: strList(z && z.districts, 300) };
+    z = z || {};
+    const subdistricts = strList(z.subdistricts, 300);
+    const moo = {};
+    subdistricts.forEach((t) => { const c = z.moo && z.moo[t]; if (c === 'with' || c === 'without') moo[t] = c; });
+    const others = (Array.isArray(z.others) ? z.others : []).map((o) => ({ district: s(o && o.district, 120), subdistrict: s(o && o.subdistrict, 120) })).filter((o) => o.district && o.subdistrict).slice(0, 200);
+    const out = { id: s(z.id, 40) || `z${Date.now().toString(36)}${i}`, name: s(z.name, 200), subdistricts, moo, others, districts: strList(z.districts, 300), keywords: strList(z.keywords, 30) };
     const nm = out.name || `โซนที่ ${i + 1}`;
-    if (!out.subdistricts.length && !out.districts.length) throw new HttpError(400, `${nm}: ยังไม่ได้เลือกพื้นที่`);
-    out.subdistricts.map((t) => 'ต.' + t).concat(out.districts.map((d) => 'อ.' + d)).forEach((k) => {
-      if (seen.has(k)) throw new HttpError(400, `${k} อยู่ทั้งใน ${seen.get(k)} และ ${nm}`);
-      seen.set(k, nm);
+    if (!out.subdistricts.length && !out.districts.length && !out.others.length && !out.keywords.length) throw new HttpError(400, `${nm}: ยังไม่ได้เลือกพื้นที่`);
+    out.subdistricts.map((t) => ['ต.' + t, moo[t] || '']).concat(out.others.map((o) => [`ต.${o.subdistrict} อ.${o.district}`, ''])).concat(out.districts.map((d) => ['อ.' + d, ''])).forEach(([k, cond]) => {
+      const prev = seen.get(k);
+      if (prev && !(prev.cond && cond && prev.cond !== cond)) throw new HttpError(400, `${k} อยู่ทั้งใน ${prev.nm} และ ${nm}`);
+      seen.set(k, { nm, cond });
     });
     return out;
   });
 }
+/** roster = { period_start, period_end, assign: { zoneId: { sender, sender_username, backup, backup_username } } } */
+function cleanRoster(r, zones) {
+  if (!r || typeof r !== 'object') return {};
+  const ids = new Set(zones.map((z) => z.id));
+  const assign = {};
+  Object.keys(r.assign || {}).forEach((k) => {
+    if (!ids.has(k)) return;
+    const a = r.assign[k] || {};
+    assign[k] = { sender: s(a.sender, 120), sender_username: s(a.sender_username, 80), backup: s(a.backup, 120), backup_username: s(a.backup_username, 80) };
+  });
+  return { period_start: isoDate(r.period_start), period_end: isoDate(r.period_end), assign };
+}
 const mondayIso = () => { const d = new Date(Date.now() + 7 * 3600e3); const wd = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - wd); return d.toISOString().slice(0, 10); };
+const canEditPreset = (p, u) => isAdmin(u) || p.owner === u.username;
+async function zoneLog(presetId, action, before, after, u) {
+  await db.query('INSERT INTO sr_zone_log (preset_id, action, roster_before, roster_after, created_by) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5)',
+    [presetId, action, JSON.stringify(before || {}), JSON.stringify(after || {}), u.username]).catch(() => {});
+}
+async function setActivePreset(id) {
+  await db.query('INSERT INTO sr_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', ['zone_active_preset', id ? String(id) : '']);
+}
 
-/** บันทึก Pre-set (สร้างใหม่ถ้าไม่มี id) — ใช้ได้เฉพาะของตัวเอง */
+/** บันทึก Pre-set (สร้างใหม่ถ้าไม่มี id) — ผู้ใช้ทุกคนสร้าง/นำเข้าได้; แก้ไขได้เฉพาะผู้สร้างหรือผู้ดูแลระบบ */
 actions.sr_zone_preset_save = async (d, u) => {
   const name = s(d.name, 200);
   if (!name) throw new HttpError(400, 'กรุณาตั้งชื่อ Pre-set');
@@ -195,31 +231,81 @@ actions.sr_zone_preset_save = async (d, u) => {
   const muang = s(d.muang, 80);
   let row;
   if (d.id) {
-    const { rows } = await db.query('UPDATE sr_zone_presets SET name=$1, province=$2, muang=$3, zones=$4::jsonb, updated_at=NOW() WHERE id=$5 AND owner=$6 RETURNING *', [name, province, muang, JSON.stringify(zones), Number(d.id), u.username]);
-    if (!rows[0]) throw new HttpError(404, 'ไม่พบ Pre-set');
+    const { rows: [old] } = await db.query('SELECT * FROM sr_zone_presets WHERE id = $1', [Number(d.id)]);
+    if (!old) throw new HttpError(404, 'ไม่พบ Pre-set');
+    if (!canEditPreset(old, u)) throw new HttpError(403, 'แก้ไขได้เฉพาะผู้สร้าง Pre-set หรือผู้ดูแลระบบ');
+    const roster = d.roster ? cleanRoster(d.roster, zones) : cleanRoster(presetRow(old).roster, zones);
+    const { rows } = await db.query('UPDATE sr_zone_presets SET name=$1, province=$2, muang=$3, zones=$4::jsonb, roster=$5::jsonb, updated_by=$6, updated_at=NOW() WHERE id=$7 RETURNING *',
+      [name, province, muang, JSON.stringify(zones), JSON.stringify(roster), u.username, Number(d.id)]);
     row = rows[0];
   } else {
-    const { rows } = await db.query('INSERT INTO sr_zone_presets (owner, name, province, muang, zones) VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING *', [u.username, name, province, muang, JSON.stringify(zones)]);
+    const roster = cleanRoster(d.roster, zones);
+    const { rows } = await db.query('INSERT INTO sr_zone_presets (owner, name, province, muang, zones, roster, source_file, updated_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$1) RETURNING *',
+      [u.username, name, province, muang, JSON.stringify(zones), JSON.stringify(roster), s(d.source_file, 200)]);
     row = rows[0];
+    await zoneLog(row.id, d.source_file ? 'import' : 'create', {}, roster, u);
   }
-  // ยังไม่ได้เลือกใช้ Pre-set ใด → ใช้ชุดนี้ (เริ่มที่โซนแรก ตั้งแต่วันจันทร์นี้)
-  const { rows: [st] } = await db.query('SELECT preset_id FROM sr_zone_state WHERE username = $1', [u.username]);
-  if (!st || !st.preset_id) {
-    await db.query(`INSERT INTO sr_zone_state (username, preset_id, zone_key, anchor, updated_by) VALUES ($1,$2,$3,$4,$1)
-      ON CONFLICT (username) DO UPDATE SET preset_id = EXCLUDED.preset_id, zone_key = EXCLUDED.zone_key, anchor = EXCLUDED.anchor, updated_by = EXCLUDED.updated_by, updated_at = NOW()`, [u.username, row.id, zones[0].id, mondayIso()]);
-  }
+  const map = await settingsMap();
+  if (d.activate || !Number(map.zone_active_preset)) await setActivePreset(row.id);
   return { status: 'success', preset: presetRow(row) };
 };
 actions.sr_zone_preset_delete = async (d, u) => {
-  const { rowCount } = await db.query('DELETE FROM sr_zone_presets WHERE id = $1 AND owner = $2', [Number(d.id), u.username]);
-  if (!rowCount) throw new HttpError(404, 'ไม่พบ Pre-set');
-  await db.query('UPDATE sr_zone_state SET preset_id = NULL WHERE username = $1 AND preset_id = $2', [u.username, Number(d.id)]);
+  const { rows: [p] } = await db.query('SELECT * FROM sr_zone_presets WHERE id = $1', [Number(d.id)]);
+  if (!p) throw new HttpError(404, 'ไม่พบ Pre-set');
+  if (!canEditPreset(p, u)) throw new HttpError(403, 'ลบได้เฉพาะผู้สร้าง Pre-set หรือผู้ดูแลระบบ');
+  await db.query('DELETE FROM sr_zone_presets WHERE id = $1', [p.id]);
+  await db.query('UPDATE sr_zone_state SET preset_id = NULL WHERE preset_id = $1', [p.id]);
+  const map = await settingsMap();
+  if (Number(map.zone_active_preset) === Number(p.id)) await setActivePreset(null);
   return { status: 'success' };
 };
-/** เลือกใช้ Pre-set + โซนปัจจุบัน — anchor = วันจันทร์ที่เริ่มโซนนี้ (หมุนไปโซนถัดไปทุก 2 สัปดาห์) */
+/** เลือก Pre-set ที่ใช้งาน (ทั้งศาล) */
+actions.sr_zone_activate = async (d, u) => {
+  const { rows: [p] } = await db.query('SELECT id FROM sr_zone_presets WHERE id = $1', [Number(d.id)]);
+  if (!p) throw new HttpError(404, 'ไม่พบ Pre-set');
+  await setActivePreset(p.id);
+  await zoneLog(p.id, 'activate', {}, {}, u);
+  return { status: 'success', activePresetId: Number(p.id) };
+};
+/**
+ * บันทึกผู้ส่งประจำโซน (แก้ไข / เลื่อนรอบ)
+ * expect_period_start: กันเลื่อนซ้ำเมื่อมีผู้ใช้หลายคนกดพร้อมกัน
+ */
+actions.sr_zone_roster_save = async (d, u) => {
+  const { rows: [p] } = await db.query('SELECT * FROM sr_zone_presets WHERE id = $1', [Number(d.preset_id)]);
+  if (!p) throw new HttpError(404, 'ไม่พบ Pre-set');
+  const cur = presetRow(p);
+  const action = ['edit', 'shift'].includes(d.mode) ? d.mode : 'edit';
+  if (action === 'edit' && !canEditPreset(p, u)) throw new HttpError(403, 'แก้ไขผู้ส่งได้เฉพาะผู้สร้าง Pre-set หรือผู้ดูแลระบบ');
+  if (d.expect_period_start !== undefined && String(cur.roster.period_start || '') !== String(d.expect_period_start || '')) {
+    throw new HttpError(409, 'ตารางผู้ส่งถูกเปลี่ยนไปแล้ว (อาจมีผู้อื่นเลื่อนรอบไปก่อน) — โหลดข้อมูลใหม่แล้วตรวจสอบอีกครั้ง');
+  }
+  const roster = cleanRoster(d.roster, cur.zones);
+  if (!roster.period_start || !roster.period_end) throw new HttpError(400, 'กรุณาระบุช่วงวันที่ของรอบ');
+  const { rows } = await db.query('UPDATE sr_zone_presets SET roster=$1::jsonb, updated_by=$2, updated_at=NOW() WHERE id=$3 RETURNING *', [JSON.stringify(roster), u.username, p.id]);
+  await zoneLog(p.id, action, cur.roster, roster, u);
+  return { status: 'success', preset: presetRow(rows[0]) };
+};
+/** ย้อนการเปลี่ยนผู้ส่งครั้งล่าสุด */
+actions.sr_zone_roster_undo = async (d, u) => {
+  const { rows: [p] } = await db.query('SELECT * FROM sr_zone_presets WHERE id = $1', [Number(d.preset_id)]);
+  if (!p) throw new HttpError(404, 'ไม่พบ Pre-set');
+  const { rows: [lg] } = await db.query("SELECT * FROM sr_zone_log WHERE preset_id = $1 AND action IN ('shift','edit') AND undone IS NOT TRUE ORDER BY id DESC LIMIT 1", [p.id]);
+  if (!lg) throw new HttpError(400, 'ไม่มีการเปลี่ยนแปลงให้ย้อนกลับ');
+  const before = parseJson(lg.roster_before, {});
+  const { rows } = await db.query('UPDATE sr_zone_presets SET roster=$1::jsonb, updated_by=$2, updated_at=NOW() WHERE id=$3 RETURNING *', [JSON.stringify(before), u.username, p.id]);
+  await db.query('UPDATE sr_zone_log SET undone = TRUE WHERE id = $1', [lg.id]);
+  await zoneLog(p.id, 'undo', presetRow(p).roster, before, u);
+  return { status: 'success', preset: presetRow(rows[0]) };
+};
+actions.sr_zone_log = async (d) => {
+  const { rows } = await db.query('SELECT id, action, roster_before, roster_after, created_by, created_at, undone FROM sr_zone_log WHERE preset_id = $1 ORDER BY id DESC LIMIT 30', [Number(d.preset_id)]);
+  return { status: 'success', items: rows.map((r) => ({ ...r, roster_before: parseJson(r.roster_before, {}), roster_after: parseJson(r.roster_after, {}) })) };
+};
+/** โซนส่วนตัว (กรณีไม่ได้อยู่ในตารางผู้ส่ง) — anchor = วันจันทร์ที่เริ่มโซนนี้ */
 actions.sr_zone_set = async (d, u) => {
   const presetId = Number(d.preset_id);
-  const { rows: [p] } = await db.query('SELECT id, zones FROM sr_zone_presets WHERE id = $1 AND owner = $2', [presetId, u.username]);
+  const { rows: [p] } = await db.query('SELECT id, zones FROM sr_zone_presets WHERE id = $1', [presetId]);
   if (!p) throw new HttpError(404, 'ไม่พบ Pre-set');
   const zones = presetRow(p).zones;
   const key = s(d.zone_key, 40) || (zones[0] && zones[0].id) || '';
