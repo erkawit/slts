@@ -4409,8 +4409,10 @@ window.switchTab = function(tabName) {
     // โหลดข้อมูลแบบ Smart Cache 1 นาที (ดึงข้อมูลรอในเบื้องหลังทันที)
     loadGoogleSheetData(false);
 
-    // บนหน้าจอ Desktop หรือโหมด PC: แสดง Pop Up ค้นหาข้อมูลเจาะจงทันทีเมื่อเข้าหน้าตารางทุกครั้ง
-    if (!isMobileView()) {
+    // บนหน้าจอ Desktop หรือโหมด PC: แสดง Pop Up ค้นหาข้อมูลเจาะจงเฉพาะครั้งแรกหลังเข้าสู่ระบบ
+    // ครั้งต่อไปผู้ใช้เปลี่ยนเงื่อนไขเองด้วยปุ่ม "ค้นหาแบบเจาะจง"
+    if (!isMobileView() && !targetSearchPromptedThisLogin()) {
+      markTargetSearchPrompted();
       setTimeout(() => {
         openTargetSearchModal();
       }, 250);
@@ -5638,6 +5640,28 @@ window.clearTargetedFilter = function() {
     loadGoogleSheetData(true, true);
   }
 };
+
+/** ตัวระบุการเข้าสู่ระบบครั้งนี้ (เปลี่ยนเมื่อเข้าสู่ระบบใหม่) — ไม่ได้เข้าสู่ระบบ = ต่อแท็บเบราว์เซอร์ */
+function targetSearchLoginKey() {
+  let tok = '';
+  try { tok = localStorage.getItem('slts_auth_token') || ''; } catch (_) {}
+  const u = state.currentUser && state.currentUser.username;
+  return u ? `${u}:${tok.slice(-24)}` : 'guest';
+}
+function targetSearchPromptedThisLogin() {
+  try {
+    const k = targetSearchLoginKey();
+    if (k === 'guest') return sessionStorage.getItem('slts_target_prompted') === 'guest';
+    return localStorage.getItem('slts_target_prompted') === k;
+  } catch (_) { return false; }
+}
+function markTargetSearchPrompted() {
+  try {
+    const k = targetSearchLoginKey();
+    if (k === 'guest') sessionStorage.setItem('slts_target_prompted', 'guest');
+    else localStorage.setItem('slts_target_prompted', k);
+  } catch (_) {}
+}
 
 /**
  * เปิด Pop Up ค้นหาข้อมูลเจาะจงในหน้าตารางประวัติส่งหมาย (เฉพาะ Desktop > 768px)
