@@ -208,3 +208,20 @@ test('ตารางโซนจาก Excel: เขตพื้นที่ / 
   assert.equal(L.userZoneAt(g, roster, 'a1', '2026-11-20').key, 'z5');
   assert.equal(L.userZoneAt(g, roster, 'a1', '2026-12-04').key, 'z1');
 });
+
+test('เบิกหมายฟรี: บ้านเดียวกันเบิกได้หมายเดียว / หมู่บ้านเดียวกันตั้งแต่ 2 หมาย → ครึ่งหนึ่งทุกหมาย', () => {
+  const base = { moo: '3', subdistrict: 'ปะโค', district: 'กุดจับ', province: 'อุดรธานี' };
+  const its = [{ id: 1, seq: 1, house_no: '5', ...base }, { id: 2, seq: 2, house_no: '7', ...base }, { id: 3, seq: 3, house_no: '5', ...base, recipient: 'คนละชื่อ' }, { id: 4, seq: 4, house_no: '9', ...base, moo: '4' }];
+  const plan = () => L.freeClaimPlan(its, () => 950);
+  its[0].free_claim = { mode: 'full', at: '1' };
+  assert.deepEqual([plan().get(1).eff, plan().get(1).amount], ['full', 950]);
+  assert.equal(plan().get(3).blockedBy, 1); // บ้านเดียวกัน (คนละชื่อ) เลือกไม่ได้
+  its[1].free_claim = { mode: 'full', at: '2' };
+  assert.deepEqual([plan().get(1).amount, plan().get(2).amount], [475, 475]); // หมายแรกถูกปรับเป็นครึ่งด้วย
+  its[2].free_claim = { mode: 'full', at: '3' }; // พยายามเบิกบ้านเดียวกัน → ไม่นับ
+  assert.equal(plan().get(3).mode, 'none');
+  its[3].free_claim = { mode: 'half', at: '4' }; // เลือกครึ่งเอง (หมู่อื่น)
+  assert.deepEqual([plan().get(4).eff, plan().get(4).amount], ['half', 475]);
+  its[1].free_claim = { mode: 'none' };
+  assert.equal(plan().get(1).amount, 950); // เหลือหมายเดียวในหมู่บ้าน → กลับเป็นเต็ม
+});

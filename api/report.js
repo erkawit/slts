@@ -137,6 +137,7 @@ function issuedRow(r) {
     server_name: r.server_name, payer_court: r.payer_court, result_text: r.result_text, receipt_ref: r.receipt_ref,
     entry_date: r.entry_date, period_start: r.period_start, period_end: r.period_end, report: r.report || null,
     report_status: r.report_status, reported_at: r.reported_at, updated_at: r.updated_at,
+    free_claim: (r.free_claim && typeof r.free_claim === 'object' ? r.free_claim : (() => { try { return JSON.parse(r.free_claim || '{}'); } catch (_) { return {}; } })()) || {},
   };
 }
 
@@ -542,6 +543,34 @@ actions.sr_issued_delete = async (d, u) => {
 };
 
 /** บันทึกข้อมูลแบบฟอร์มรายงานผลหมาย (ภาพที่ 1-2) */
+/**
+ * บันทึกการเบิกหมายฟรี (หลายรายการพร้อมกัน — ปรับรายการในหมู่บ้านเดียวกันเป็นครึ่งหนึ่ง)
+ * items = [{ id, mode: 'none'|'full'|'half', eff, amount, base, at }]
+ */
+actions.sr_claims_save = async (d, u) => {
+  const items = Array.isArray(d.items) ? d.items.slice(0, 500) : [];
+  if (!items.length) return { status: 'success', saved: 0 };
+  const ids = items.map((x) => Number(x && x.id) || 0).filter(Boolean);
+  const { rows } = await db.query('SELECT id, owner FROM sr_issued WHERE id = ANY($1::bigint[])', [ids]);
+  const own = new Map(rows.map((r) => [Number(r.id), r.owner]));
+  let saved = 0;
+  for (const x of items) {
+    const id = Number(x && x.id) || 0;
+    if (!own.has(id)) continue;
+    if (own.get(id) !== u.username && !isAdmin(u)) throw new HttpError(403, 'ไม่มีสิทธิ์แก้ไขการเบิกหมายของผู้อื่น');
+    const mode = ['none', 'full', 'half'].includes(x.mode) ? x.mode : 'none';
+    const fc = {
+      mode, eff: mode === 'none' ? 'none' : (x.eff === 'half' ? 'half' : 'full'),
+      amount: mode === 'none' ? 0 : Math.max(0, Math.round((Number(x.amount) || 0) * 100) / 100),
+      base: Math.max(0, Math.round((Number(x.base) || 0) * 100) / 100),
+      at: s(x.at, 40), by: u.username,
+    };
+    await db.query('UPDATE sr_issued SET free_claim = $1::jsonb, updated_at = NOW() WHERE id = $2', [JSON.stringify(fc), id]);
+    saved += 1;
+  }
+  return { status: 'success', saved };
+};
+
 actions.sr_report_save = async (d, u) => {
   const id = Number(d.id) || 0;
   const { rows: [old] } = await db.query('SELECT owner, report_status FROM sr_issued WHERE id = $1', [id]);

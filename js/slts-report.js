@@ -130,6 +130,49 @@
   const freeRateFor = (it) => { const r = L.findRate((R.boot && R.boot.rates) || [], 'free', it.district, it.subdistrict, it.moo); return r ? Number(r.rate_amount) : 0; };
   const paidRateFor = (it) => { const r = L.findRate((R.boot && R.boot.rates) || [], 'paid', it.district, it.subdistrict, it.moo); return r ? Number(r.rate_amount) : 0; };
 
+  // ---------------- การเบิกหมายฟรี (ไม่เบิก / เบิกเต็ม / เบิกครึ่ง) ----------------
+  /** การเลือกที่บันทึกไว้ (รายงานเดิมที่ "เบิก" แต่ยังไม่มีข้อมูลการเลือก → ถือเป็นเบิกเต็ม) */
+  const claimChoice = (it) => {
+    const fc = it.free_claim || {};
+    if (fc.mode) return fc;
+    if (it.report && it.report_status && it.report_status !== 'none' && it.report.claim !== false) return { mode: 'full', at: it.reported_at || '' };
+    return {};
+  };
+  /** หมายฟรีในรอบเดียวกัน (ผู้ส่งคนเดียวกัน + ช่วงวันที่บัญชีจ่ายหมายเดียวกัน) */
+  const claimScope = (it) => R.issued.filter((x) => x.money_type !== 'paid' && x.owner === it.owner && (x.period_start || '') === (it.period_start || '') && (x.period_end || '') === (it.period_end || ''));
+  const claimPlan = (scope, override) => L.freeClaimPlan(scope.map((x) => ({ ...x, province: 'อุดรธานี', free_claim: override && override.id === x.id ? override.fc : claimChoice(x) })), freeRateFor);
+  const claimLabel = (x) => `ที่ ${x.seq || '-'} ${x.kind === 'T' ? x.t_no : x.black_no} (${x.recipient || ''})`;
+  /**
+   * เลือกการเบิกหมายฟรี แล้วปรับหมายอื่นในหมู่บ้านเดียวกันตามกฎ และบันทึก
+   * คืนผลของหมายนี้ { mode, eff, amount, base } หรือ null ถ้าเลือกไม่ได้ (บ้านเดียวกันเบิกไปแล้ว)
+   */
+  async function setFreeClaim(it, mode, opt) {
+    const scope = claimScope(it);
+    const before = claimPlan(scope);
+    const b = before.get(it.id);
+    if (mode !== 'none' && b && b.blockedBy) {
+      const h = R.issued.find((x) => x.id === b.blockedBy);
+      await Swal.fire({ icon: 'warning', title: 'เบิกได้หมายเดียวต่อบ้าน', html: `หมายนี้อยู่บ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัดเดียวกับ<br><b>${esc(h ? claimLabel(h) : '#' + b.blockedBy)}</b><br>ซึ่งเลือกเบิกไปแล้ว — ถ้าต้องการเบิกหมายนี้แทน ให้เปลี่ยนหมายนั้นเป็น "ไม่เบิก" ก่อน` });
+      return null;
+    }
+    const prev = claimChoice(it);
+    const fc = { mode, at: mode === 'none' ? '' : (prev.mode && prev.mode !== 'none' ? prev.at || new Date().toISOString() : new Date().toISOString()) };
+    const after = claimPlan(scope, { id: it.id, fc });
+    const changed = scope.filter((x) => {
+      const p = after.get(x.id); const f = x.free_claim || {};
+      return x.id === it.id || (f.mode || 'none') !== p.mode || (f.eff || 'none') !== p.eff || Number(f.amount || 0) !== p.amount;
+    });
+    const payload = changed.map((x) => { const p = after.get(x.id); return { id: x.id, mode: p.mode, eff: p.eff, amount: p.amount, base: p.base, at: p.at }; });
+    await api('sr_claims_save', { items: payload });
+    payload.forEach((p) => { const x = R.issued.find((y) => y.id === p.id); if (x) x.free_claim = { mode: p.mode, eff: p.eff, amount: p.amount, base: p.base, at: p.at }; });
+    const mine = after.get(it.id);
+    const others = changed.filter((x) => x.id !== it.id && x.free_claim && x.free_claim.mode !== 'none');
+    if (!(opt && opt.silent) && others.length) {
+      toast('info', mine.eff === 'half' ? `หมู่บ้านเดียวกัน ${mine.villageCount} หมาย — ปรับเป็นเบิกครึ่งหนึ่งทุกหมาย (${others.map((x) => 'ที่ ' + (x.seq || '-')).join(', ')})` : `ปรับการเบิกหมายในหมู่บ้านเดียวกันแล้ว (${others.map((x) => 'ที่ ' + (x.seq || '-')).join(', ')})`);
+    }
+    return mine;
+  }
+
   // ------------------------------------------------------------------
   // ภาพส่งหมาย (จากข้อมูลที่มือถืออัปโหลดเข้าระบบ)
   // ------------------------------------------------------------------
@@ -537,6 +580,18 @@
     // ค่าที่เคยบันทึกไว้ทับค่าเริ่มต้น (ยกเว้นกด "ล้าง")
     if (!(opt && opt.reset)) Object.keys(rep).forEach((k) => { if (rep[k] !== undefined && rep[k] !== null) d[k] = rep[k]; });
     if (opt && opt.photoIds && opt.photoIds.length) d.photo_ids = Array.from(new Set([...(opt.photoIds), ...((!opt.reset && rep.photo_ids) || [])]));
+    // หมายฟรี: การเบิกตามที่เลือกไว้ (กฎบ้าน/หมู่บ้านเดียวกัน) เป็นหลัก
+    if (it.money_type !== 'paid') {
+      const p = claimPlan(claimScope(it)).get(it.id);
+      if (p) {
+        const decided = Boolean(claimChoice(it).mode);
+        d.claim_mode = decided ? p.mode : (p.blockedBy ? 'none' : (d.claim === false ? 'none' : 'full'));
+        d.claim = d.claim_mode !== 'none';
+        d.claim_blocked = p.blockedBy || 0;
+        if (decided && d.claim) d.claim_amount = p.amount || d.claim_amount;
+        if (!decided && d.claim) d.claim_amount = claimPlan(claimScope(it), { id: it.id, fc: { mode: d.claim_mode, at: new Date().toISOString() } }).get(it.id).amount || d.claim_amount;
+      }
+    }
     return d;
   }
 
@@ -618,7 +673,8 @@
             ${inp('receipt_date', 'วันที่รับเงิน (ใบสำคัญรับเงิน)', { type: 'date' })}
             ${inp('money_type', 'หมายนำ / หมายศาล', { select: `<option value="paid" ${v.money_type === 'paid' ? 'selected' : ''}>หมายนำ (หมายเงิน)</option><option value="free" ${v.money_type !== 'paid' ? 'selected' : ''}>หมายศาล (หมายฟรี)</option>` })}
             <div class="sr-field sr-span2" id="rf_claim_box"><label>หมายฟรี: การเบิกค่าส่งหมาย</label>
-              <div class="sr-radio"><label><input type="radio" name="rf_claim" value="1" ${v.claim !== false ? 'checked' : ''}> เบิก (เงินงบประมาณ)</label><label><input type="radio" name="rf_claim" value="0" ${v.claim === false ? 'checked' : ''}> ไม่เบิก</label></div></div>
+              <div class="sr-radio"><label><input type="radio" name="rf_claim" value="none" ${v.claim_mode === 'none' ? 'checked' : ''}> ไม่เบิก</label><label><input type="radio" name="rf_claim" value="full" ${v.claim_mode === 'full' ? 'checked' : ''} ${v.claim_blocked ? 'disabled' : ''}> เบิกเต็มจำนวน</label><label><input type="radio" name="rf_claim" value="half" ${v.claim_mode === 'half' ? 'checked' : ''} ${v.claim_blocked ? 'disabled' : ''}> เบิกครึ่งหนึ่ง</label></div>
+              <div class="sr-muted" id="rf_claim_rule"></div></div>
             ${inp('claim_amount', 'อัตราหมายฟรี (บาท)', { type: 'number', cls: 'rf-free' })}
             ${inp('amount', 'ค่าบริการส่งครั้งนี้ (บาท)', { type: 'number', cls: 'rf-paid' })}
             ${inp('receipt_ref', 'โดยตัดจ่ายจากเงินของ (ใบเสร็จ)', { cls: 'rf-paid sr-span2' })}
@@ -675,7 +731,15 @@
       $$('.rf-paid', wrap).forEach((el) => { el.style.display = paid ? '' : 'none'; });
       $$('.rf-free', wrap).forEach((el) => { el.style.display = paid ? 'none' : ''; });
       g('claim_box').style.display = paid ? 'none' : '';
-      const claim = (wrap.querySelector('input[name="rf_claim"]:checked') || {}).value !== '0';
+      if (!paid && it.money_type !== 'paid') {
+        const mode = (wrap.querySelector('input[name="rf_claim"]:checked') || {}).value || 'none';
+        const p = claimPlan(claimScope(it), { id: it.id, fc: { mode, at: claimChoice(it).at || new Date().toISOString() } }).get(it.id);
+        const h = p && p.blockedBy ? R.issued.find((x) => x.id === p.blockedBy) : null;
+        g('claim_rule').innerHTML = h ? `<span style="color:#b45309">บ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัดเดียวกับ ${esc(claimLabel(h))} ซึ่งเบิกแล้ว — เบิกได้หมายเดียว</span>`
+          : p && p.eff === 'half' ? (p.villageCount >= 2 ? `หมู่บ้านเดียวกันเบิก ${p.villageCount} หมาย → เบิกครึ่งหนึ่งทุกหมาย (อัตราเต็ม ${L.money2(p.base)})` : `เลือกเบิกครึ่งหนึ่ง (อัตราเต็ม ${L.money2(p.base)})`)
+          : p && p.eff === 'full' ? `เบิกเต็มอัตรา ${L.money2(p.base)} บาท — ถ้าเลือกเบิกหมายอื่นในหมู่บ้านเดียวกันเพิ่ม จะปรับเป็นครึ่งหนึ่งทั้งหมด` : '';
+      }
+      const claim = ((wrap.querySelector('input[name="rf_claim"]:checked') || {}).value || 'none') !== 'none';
       const r = collect();
       const m = L.computeMoney(r);
       g('money_preview').innerHTML = paid
@@ -692,7 +756,8 @@
       });
       r.result_text = L.resultText(r.result_code);
       if (r.file_type === 'court') { r.court_note = r.resend_to; }
-      r.claim = (wrap.querySelector('input[name="rf_claim"]:checked') || {}).value !== '0';
+      r.claim_mode = (wrap.querySelector('input[name="rf_claim"]:checked') || {}).value || 'none';
+      r.claim = r.claim_mode !== 'none';
       r.posting_choice = (wrap.querySelector('input[name="rf_posting"]:checked') || {}).value || '2';
       r.claim_amount = Number(r.claim_amount) || 0; r.amount = Number(r.amount) || 0;
       const insp = signers('inspector').find((s) => String(s.id) === String(r.inspector_id));
@@ -714,6 +779,10 @@
         if (s) g('payer_position').value = s.position;
       }
       if (e.target.id === 'rf_district' && !g('postcode').value) g('postcode').value = L.postcodeFor(e.target.value);
+      if (e.target.name === 'rf_claim' && it.money_type !== 'paid') {
+        const p = claimPlan(claimScope(it), { id: it.id, fc: { mode: e.target.value, at: claimChoice(it).at || new Date().toISOString() } }).get(it.id);
+        if (p && p.base) g('claim_amount').value = p.amount;
+      }
       refresh();
     });
     wrap.addEventListener('click', async (e) => {
@@ -746,6 +815,12 @@
       LS.set(profileKey(), Object.assign(profile(), { name: r.reporter_name, position: r.reporter_position }));
       if (r.origin_court) LS.set('sr_origin_courts', Array.from(new Set([r.origin_court, ...LS.get('sr_origin_courts', [])])).slice(0, 40));
       try {
+        if ((act.dataset.act === 'save' || act.dataset.act === 'saveprint') && r.money_type !== 'paid') {
+          const res = await setFreeClaim(it, r.claim_mode || 'none');
+          if (!res) return;
+          if (res.base) r.claim_amount = res.amount; // ไม่พบอัตรา → ใช้จำนวนที่กรอกเอง
+          r.claim = res.mode !== 'none'; r.claim_mode = res.mode;
+        }
         if (act.dataset.act === 'save' || act.dataset.act === 'saveprint') {
           const out = await api('sr_report_save', { id: it.id, report: stripReport(r), status: act.dataset.act === 'saveprint' ? 'printed' : 'saved' });
           it.report = stripReport(r); it.report_status = out.report_status; it.reported_at = new Date().toISOString();
@@ -1052,11 +1127,32 @@
     </div>`;
 
     // ④ สร้างแบบรายงานหมาย
+    // แผนการเบิกหมายฟรี (คำนวณต่อรอบบัญชีจ่ายหมาย)
+    const planCache = new Map();
+    const planOf = (it) => { const k = `${it.owner}|${it.period_start}|${it.period_end}`; if (!planCache.has(k)) planCache.set(k, claimPlan(claimScope(it))); return planCache.get(k).get(it.id); };
+    let claimTotal = 0; let claimN = 0;
+    const claimCell = (it) => {
+      if (it.money_type === 'paid') return `หมายเงิน ${L.money2(it.price)}`;
+      const p = planOf(it); if (!p) return 'หมายฟรี';
+      const decided = Boolean(claimChoice(it).mode);
+      if (p.mode !== 'none') { claimTotal += p.amount; claimN += 1; }
+      const h = p.blockedBy ? R.issued.find((x) => x.id === p.blockedBy) : null;
+      const stale = it.report_status === 'printed' && it.report && it.report.claim !== false && p.mode !== 'none' && Number(it.report.claim_amount || 0) !== p.amount;
+      return `<div style="white-space:nowrap">หมายฟรี</div>
+        <select class="sr-select sr-claim-sel" data-fl-claim="${it.id}" ${h && p.mode === 'none' ? 'title="บ้านเดียวกันเบิกได้หมายเดียว"' : ''}>
+          <option value="" ${!decided ? 'selected' : ''} disabled>— เลือกการเบิก —</option>
+          <option value="none" ${decided && p.mode === 'none' ? 'selected' : ''}>ไม่เบิก</option>
+          <option value="full" ${p.mode === 'full' ? 'selected' : ''} ${h ? 'disabled' : ''}>${p.mode === 'full' && p.eff === 'half' ? 'เบิก (ปรับเป็นครึ่งตามกฎหมู่บ้าน)' : 'เบิกเต็ม'}</option>
+          <option value="half" ${p.mode === 'half' ? 'selected' : ''} ${h ? 'disabled' : ''}>เบิกครึ่งหนึ่ง</option></select>
+        ${p.mode !== 'none' ? `<div class="sr-muted"><b style="color:#166534">${L.money2(p.amount)}</b>${p.eff === 'half' ? ` <span class="sr-chip warn" title="อัตราเต็ม ${L.money2(p.base)}">ครึ่ง${p.villageCount >= 2 ? ` · หมู่บ้านเดียวกัน ${p.villageCount}` : ''}</span>` : ''}${!p.base ? ' <span class="sr-chip red">ไม่พบอัตรา</span>' : ''}</div>` : ''}
+        ${h ? `<div class="sr-muted" style="color:#b45309">บ้านเดียวกับที่ ${esc(h.seq || '-')} (เบิกแล้ว)</div>` : ''}
+        ${stale ? '<div class="sr-chip red">ยอดเบิกเปลี่ยน — พิมพ์ใหม่</div>' : ''}`;
+    };
     const repRows = D.issued.map((it) => {
       const ph = D.photoMap.get(it.id) || [];
       const st = it.report_status === 'printed' ? '<span class="sr-chip ok">พิมพ์แล้ว</span>' : it.report_status === 'saved' ? '<span class="sr-chip ok">บันทึกแล้ว</span>' : '<span class="sr-chip">ยังไม่รายงาน</span>';
       return `<tr><td>${esc(it.seq || '')}</td><td><b>${esc(it.kind === 'T' ? it.t_no : it.black_no)}</b>${it.kind === 'T' ? '<div class="sr-muted">หมาย ต.</div>' : ''}</td><td>${esc(it.summon_type)}</td><td>${esc(it.recipient)}<div class="sr-muted">ต.${esc(it.subdistrict)} อ.${esc(it.district)}</div></td>
-        <td>${it.money_type === 'paid' ? `หมายเงิน ${L.money2(it.price)}` : 'หมายฟรี'}</td>
+        <td>${claimCell(it)}</td>
         <td>${ph.length ? `<img class="sr-thumb" src="${esc(ph[0].thumb)}" data-view="${esc(ph[0].id)}" referrerpolicy="no-referrer" loading="lazy" alt="">${ph.length > 1 ? ` <span class="sr-muted">+${ph.length - 1}</span>` : ''}` : '<span class="sr-muted">ไม่มีภาพ</span>'}</td>
         <td>${st}</td>
         <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm primary" data-fl-rep="${it.id}"><i class="fa-solid fa-file-pen"></i> รายงานหมาย</button>
@@ -1064,10 +1160,10 @@
     }).join('');
     const pct = D.issued.length ? Math.round((D.reported.length / D.issued.length) * 100) : 0;
     const s4 = `<div class="sr-card sr-step ${s4state === 'lock' ? 'locked' : ''}">${stepHead(4, 'สร้างแบบรายงานหมาย (Word)', s4state, 'กด "รายงานหมาย" เพื่อกรอกผลการส่ง ภาพส่งหมายจะแนบท้ายเอกสารให้อัตโนมัติ')}
-      ${s4state === 'lock' ? '<div class="sr-muted">นำเข้าบัญชีจ่ายหมายที่มีหมายของโซนนี้ก่อน</div>' : `<div class="sr-toolbar"><div class="sr-progress"><div style="width:${pct}%"></div></div><span><b>${D.reported.length}</b> / ${D.issued.length} รายการรายงานแล้ว</span><span class="grow"></span>
+      ${s4state === 'lock' ? '<div class="sr-muted">นำเข้าบัญชีจ่ายหมายที่มีหมายของโซนนี้ก่อน</div>' : `<div class="sr-toolbar"><div class="sr-progress"><div style="width:${pct}%"></div></div><span><b>${D.reported.length}</b> / ${D.issued.length} รายการรายงานแล้ว</span><span class="sr-muted">· เบิกหมายฟรี <b>${claimN}</b> หมาย รวม <b>${L.money2(claimTotal)}</b> บาท</span><span class="grow"></span>
           <button class="sr-btn" data-fl="wordall" ${D.reported.length ? '' : 'disabled'}><i class="fa-solid fa-file-zipper"></i> ดาวน์โหลด Word ที่รายงานแล้ว (.zip)</button>
           <button class="sr-btn" data-fl="memo"><i class="fa-solid fa-file-invoice"></i> ทำบันทึกข้อความขออนุมัติเบิก</button></div>
-        <div class="sr-scroll" style="margin-top:10px;max-height:560px"><table class="sr-table"><thead><tr><th>ที่</th><th>เลขคดี</th><th>หมาย</th><th>ผู้รับหมาย</th><th>ประเภท</th><th>ภาพ</th><th>สถานะ</th><th class="ctr">จัดการ</th></tr></thead><tbody>${repRows}</tbody></table></div>`}
+        <div class="sr-scroll" style="margin-top:10px;max-height:560px"><table class="sr-table"><thead><tr><th>ที่</th><th>เลขคดี</th><th>หมาย</th><th>ผู้รับหมาย</th><th style="min-width:150px">ประเภท / การเบิก</th><th>ภาพ</th><th>สถานะ</th><th class="ctr">จัดการ</th></tr></thead><tbody>${repRows}</tbody></table></div>`}
     </div>`;
 
     body.innerHTML = `<div class="sr-stepper">${stepper}</div>${s1}${s2}${s3}${s4}
@@ -1085,6 +1181,13 @@
     if (z) z.onchange = () => { const base = D.detected || (D.cur && D.cur.zone); FL.viewZone = (base && z.value === base.key) ? '' : z.value; renderFlow(body); };
     const pr = $('#flPeriod', body); if (pr) pr.onchange = () => { FL.periodKey = pr.value; FL.weekOffset = 0; FL.viewZone = ''; renderFlow(body); };
     const all = $('#flAll', body); if (all) all.onchange = () => { FL.all = all.checked; renderFlow(body); };
+    $$('select[data-fl-claim]', body).forEach((sel) => {
+      sel.onchange = async () => {
+        const it = R.issued.find((x) => x.id === Number(sel.dataset.flClaim)); if (!it) return;
+        try { await setFreeClaim(it, sel.value); } catch (er) { fail(er); }
+        renderFlow(body);
+      };
+    });
     body.onclick = async (e) => {
       const a = e.target.closest('[data-fl],[data-fl-dl],[data-fl-rep],[data-fl-word],[data-view],[data-fl-show]');
       if (!a) return;
@@ -1585,13 +1688,14 @@
       if (e.target.closest('#mf_add_row')) { items.push({ case_prefix: 'คดีดำ', province: 'จ.อุดรธานี', base_rate: 0 }); return renderItems(); }
       if (e.target.closest('#mf_pull_free')) {
         const from = g('period_start').value; const to = g('period_end').value;
-        const list = R.issued.filter((it) => it.money_type === 'free' && it.report && it.report.claim !== false && it.report_status !== 'none')
+        const list = R.issued.filter((it) => it.money_type === 'free' && it.report && it.report_status !== 'none' && (claimChoice(it).mode || 'none') !== 'none')
           .filter((it) => { const sd = it.report.serve_date || ''; return (!from || sd >= from) && (!to || sd <= to); });
         const have = new Set(items.map((x) => x.issued_id).filter(Boolean));
         list.filter((it) => !have.has(it.id)).forEach((it) => items.push({
           issued_id: it.id, case_prefix: 'คดีดำ', case_no: it.kind === 'T' ? it.t_no : it.black_no, issue_date: it.report.issue_date || '', serve_date: it.report.serve_date || '',
           summon_type: it.summon_type, recipient_role: (String(it.recipient).match(/(จำเลย|โจทก์|ผู้ร้อง|ผู้คัดค้าน|ผู้เสียหาย|ผู้ประกัน|นายประกัน)[^\s]*/) || [''])[0] || 'ผู้รับ',
-          house_no: it.house_no, moo: it.moo, subdistrict: it.subdistrict, district: it.district, province: 'จ.อุดรธานี', base_rate: Number(it.report.claim_amount) || freeRateFor(it),
+          house_no: it.house_no, moo: it.moo, subdistrict: it.subdistrict, district: it.district, province: 'จ.อุดรธานี', base_rate: freeRateFor(it) || Number(it.report.claim_amount) || 0,
+          claim_mode: claimChoice(it).mode, claim_eff: (claimPlan(claimScope(it)).get(it.id) || {}).eff,
         }));
         renderItems();
         toast(list.length ? 'success' : 'info', list.length ? `ดึงมา ${list.length} รายการ` : 'ไม่พบหมายฟรีที่รายงาน "เบิก" ในช่วงวันที่นี้');

@@ -468,6 +468,7 @@
     const dup = new Set(); exact.forEach((l) => { if (l.length > 1) l.forEach((i) => dup.add(i)); });
     const half = new Set();
     mooMap.forEach((l) => { if (l.length > 1 && new Set(l.map((x) => x.house)).size > 1) l.forEach((x) => half.add(x.idx)); });
+    items.forEach((it, idx) => { if (it.claim_mode === 'half' || it.claim_eff === 'half') half.add(idx); }); // เลือกเบิกครึ่งไว้ที่หน้ารายงานหมาย
     let total = 0;
     const out = items.map((it, idx) => {
       const base = Math.round((Number(it.base_rate) || 0) * 100) / 100;
@@ -477,6 +478,51 @@
       return Object.assign({}, it, { base_rate: base, claim_rate: claim, calc_rule: rule });
     });
     return { items: out, has_duplicates: dup.size > 0, duplicate_indices: Array.from(dup), total_amount: Math.round(total * 100) / 100 };
+  }
+
+  // ------------------------------------------------------------------
+  // การเบิกหมายฟรีในรอบรายงาน (เลือกเองทีละหมาย)
+  // - บ้านเลขที่ + หมู่ + ตำบล + อำเภอ (+ จังหวัด) เดียวกัน → เบิกได้หมายเดียว (หมายแรกที่เลือก) ไม่ว่าผู้รับชื่อเดียวกันหรือไม่
+  // - หมู่บ้านเดียวกัน (หมู่ + ตำบล + อำเภอ) เบิกตั้งแต่ 2 หมายขึ้นไป → ทุกหมายในหมู่บ้านนั้นเบิกครึ่งหนึ่ง (รวมหมายแรก)
+  // - ผู้ใช้เลือก "เบิกครึ่ง" เองได้เสมอ
+  // items: [{ id, house_no, moo, subdistrict, district, province, free_claim: { mode, at } }], rateOf(it) → อัตราเต็ม
+  // คืน Map(id → { mode, eff, amount, base, at, houseKey, villageKey, blockedBy, villageCount })
+  // ------------------------------------------------------------------
+  const claimHouse = (v) => { const m = toArabicDigits(String(v || '')).replace(/\s+/g, '').match(/\d+(?:[\/\-]\d+)*/); return m ? m[0].replace(/-/g, '/') : ''; };
+  const claimMoo = (v) => { const m = toArabicDigits(String(v || '')).match(/\d+/); return m ? String(parseInt(m[0], 10)) : ''; };
+  function claimKeys(it) {
+    const prov = String(it.province || '').replace(/^(จ\.|จังหวัด)\s*/, '').replace(/\s+/g, '');
+    const place = [subKey(it.subdistrict || ''), districtKey(cleanDistrict(it.district || '')), prov].join('|');
+    const moo = claimMoo(it.moo); const house = claimHouse(it.house_no);
+    return { house: house ? `${house}|${moo}|${place}` : '', village: moo ? `${moo}|${place}` : '' };
+  }
+  function freeClaimPlan(items, rateOf) {
+    const list = (items || []).map((it) => ({ it, k: claimKeys(it), fc: it.free_claim || {} }));
+    const chosen = list.filter((x) => x.fc.mode === 'full' || x.fc.mode === 'half')
+      .sort((a, b) => String(a.fc.at || '').localeCompare(String(b.fc.at || '')) || (a.it.seq || 0) - (b.it.seq || 0));
+    const holder = new Map(); const valid = new Set();
+    chosen.forEach((x) => {
+      if (x.k.house && holder.has(x.k.house)) return; // บ้านเดียวกัน เบิกได้หมายแรกเท่านั้น
+      if (x.k.house) holder.set(x.k.house, x.it.id);
+      valid.add(x.it.id);
+    });
+    const vcount = new Map();
+    list.forEach((x) => { if (valid.has(x.it.id) && x.k.village) vcount.set(x.k.village, (vcount.get(x.k.village) || 0) + 1); });
+    const out = new Map();
+    list.forEach((x) => {
+      const base = Math.round((Number(rateOf ? rateOf(x.it) : 0) || 0) * 100) / 100;
+      const hid = x.k.house ? holder.get(x.k.house) : null;
+      const blockedBy = hid && hid !== x.it.id ? hid : null;
+      const vc = x.k.village ? (vcount.get(x.k.village) || 0) : 0;
+      let mode = valid.has(x.it.id) ? x.fc.mode : 'none';
+      let eff = 'none'; let amount = 0;
+      if (mode !== 'none') {
+        eff = mode === 'half' || vc >= 2 ? 'half' : 'full';
+        amount = eff === 'half' ? Math.round(base / 2 * 100) / 100 : base;
+      }
+      out.set(x.it.id, { mode, eff, amount, base, at: valid.has(x.it.id) ? (x.fc.at || '') : '', houseKey: x.k.house, villageKey: x.k.village, blockedBy, villageCount: vc });
+    });
+    return out;
   }
 
   /** อ่านตารางอัตราจาก Excel (แบบ 4 บล็อก "อำเภอ.. | ตำบล | ค่าหมาย" หรือแบบตารางธรรมดา) */
@@ -962,7 +1008,7 @@
     bahtText, money2, moneyShort, parseMoney, resultText, resultCodeOf, isNoticeResult, cleanDistrict, cleanSubdistrict,
     districtKey, subKey, postcodeFor, caseKindOf, parseAddress, isTNo, receiptText,
     parseIssuedSheet, parseAccExpenseSheet, parseCourtExcel, matchReceipts, normName, normCase, caseNos, caseKey,
-    findRate, exceptionMoos, evaluateFreeSummonItems, parseRateRows, parseRatesWorkbook, parseRatePdfLines,
+    findRate, exceptionMoos, evaluateFreeSummonItems, freeClaimPlan, claimKeys, parseRateRows, parseRatesWorkbook, parseRatePdfLines,
     templateFor, computeMoney, buildDocData, docFileName,
     muangOf, provinceAreas, autoZoneName, presetZones, validatePreset, zoneFor, firstName, matchStaff, parseZoneAreaText, parseZoneSheet, shiftRoster, rosterStatus, userZoneAt, mondayOf, reportWindow, currentZone, inZone, dIso, parseIso,
   };
