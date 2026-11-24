@@ -6266,6 +6266,80 @@ window.openTargetSearchModal = function() {
   });
 };
 
+/** ตัดช่องว่าง จุด ขีด เพื่อค้นหาเลขคดี/ที่อยู่โดยไม่สนรูปแบบการพิมพ์ เช่น "ล.1" = "ล1" */
+function dtSearchNorm(v) {
+  return String(v || '').toLowerCase().replace(/[\s\.\-\_\(\)]/g, '');
+}
+function dtRowSearchText(row) {
+  return dtSearchNorm([
+    row['เลขคดี'], row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'], row['อำเภอ'], row['ตำบล'], row['จังหวัด'], row['ประเภทศาล'],
+  ].filter(Boolean).join(' '));
+}
+function dtTermMatcher(term) {
+  const words = String(term || '').trim().split(/\s+/).map(dtSearchNorm).filter(Boolean);
+  const whole = dtSearchNorm(term);
+  if (!words.length) return null;
+  return (text) => text.includes(whole) || words.every(w => text.includes(w));
+}
+
+/**
+ * เมื่อค้นหาในตารางแล้วไม่พบ: บอกว่าข้อมูลอยู่ที่ไหน
+ * - อยู่ในฐานข้อมูลแต่ถูกกรองออก (จังหวัดอื่น / เงื่อนไขค้นหาเจาะจง) → ปุ่มค้นหาทุกจังหวัด
+ * - มีเฉพาะใน "ประวัติการกรอกข้อมูล" บนเครื่องนี้ → ยังไม่อยู่ในฐานข้อมูลที่ระบบเชื่อมต่ออยู่
+ */
+function bindDtSearchHint(dt, allRows, viewRows, criteria) {
+  if (!dt) return;
+  const wrap = document.getElementById('summonsDataTable_wrapper');
+  if (!wrap) return;
+  let hint = document.getElementById('dtSearchHint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'dtSearchHint';
+    hint.className = 'hidden my-2 p-3 rounded-xl border text-xs leading-relaxed';
+  }
+  wrap.parentNode.insertBefore(hint, wrap);
+  const hide = () => { hint.classList.add('hidden'); hint.innerHTML = ''; };
+  const update = () => {
+    const term = String(dt.search() || '').trim();
+    if (!term) return hide();
+    const match = dtTermMatcher(term);
+    if (!match) return hide();
+    const viewHits = viewRows.filter(r => match(dtRowSearchText(r)));
+    const tableHits = dt.page.info().recordsDisplay;
+    if (tableHits > 0) return hide();
+    const esc = (t) => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const jsArg = JSON.stringify(term).replace(/"/g, '&quot;');
+    if (viewHits.length) {
+      // ตรงเมื่อไม่สนช่องว่าง/จุด แต่ตัวค้นหาของตารางไม่เจอ → กรองตารางด้วยเลขคดีแบบยืดหยุ่น
+      hint.className = 'my-2 p-3 rounded-xl border text-xs leading-relaxed bg-blue-50 border-blue-200 text-blue-900';
+      hint.innerHTML = `พบ <b>${viewHits.length}</b> รายการเมื่อไม่นับช่องว่าง/จุด (เช่น ${esc(viewHits[0]['เลขคดี'] || '')}) <button type="button" class="ml-2 px-2 py-0.5 rounded-md bg-blue-600 text-white font-bold" onclick="dtSearchAllProvinces(${jsArg})">แสดงรายการ</button>`;
+      return;
+    }
+    const allHits = (allRows || []).filter(r => match(dtRowSearchText(r)));
+    if (allHits.length) {
+      const provs = {};
+      allHits.forEach(r => { const p = r._resolvedProvince || getRowProvince(r); provs[p] = (provs[p] || 0) + 1; });
+      const provTxt = Object.entries(provs).map(([p, n]) => `จ.${esc(p)} ${n} รายการ`).join(', ');
+      const why = (criteria && criteria.type && criteria.type !== 'all') ? 'เงื่อนไขค้นหาแบบเจาะจงที่ใช้อยู่' : `ตารางแสดงเฉพาะ จ.${esc((criteria && criteria.province) || state.selectedProvince || 'อุดรธานี')}`;
+      hint.className = 'my-2 p-3 rounded-xl border text-xs leading-relaxed bg-amber-50 border-amber-200 text-amber-900';
+      hint.innerHTML = `ไม่พบในตารางนี้เพราะ${why} แต่มีในฐานข้อมูล: <b>${provTxt}</b> <button type="button" class="ml-2 px-2 py-0.5 rounded-md bg-amber-600 text-white font-bold" onclick="dtSearchAllProvinces(${jsArg})">ค้นหาทุกจังหวัด</button>`;
+      return;
+    }
+    let local = [];
+    try { local = (typeof getDesktopFormHistory === 'function' ? getDesktopFormHistory() : []).filter(h => match(dtSearchNorm([h.caseNumber, h.locationText, h.district, h.subdistrict, h.province].filter(Boolean).join(' ')))); } catch (_) {}
+    hint.className = 'my-2 p-3 rounded-xl border text-xs leading-relaxed bg-red-50 border-red-200 text-red-900';
+    hint.innerHTML = local.length
+      ? `ไม่พบ "${esc(term)}" ในฐานข้อมูลที่ระบบเชื่อมต่ออยู่ (มีข้อมูลทั้งหมด ${(allRows || []).length} รายการ) แต่พบ <b>${local.length}</b> รายการใน <b>ประวัติการกรอกข้อมูลบนเครื่องนี้</b> — แปลว่ารายการนี้เคยกรอกจากเครื่องนี้ แต่ไม่อยู่ในฐานข้อมูลปัจจุบัน`
+      : `ไม่พบ "${esc(term)}" ในฐานข้อมูลที่ระบบเชื่อมต่ออยู่ (มีข้อมูลทั้งหมด ${(allRows || []).length} รายการ)`;
+  };
+  dt.off('draw.slhint').on('draw.slhint', update);
+  update();
+}
+window.dtSearchAllProvinces = function(term) {
+  if (typeof applyTargetedFilter === 'function') applyTargetedFilter({ type: 'case', caseNo: term });
+  try { if ($.fn.DataTable.isDataTable('#summonsDataTable')) $('#summonsDataTable').DataTable().search('').draw(); } catch (_) {}
+};
+
 function renderDataTable(rows, filterCriteria = null) {
   state.allSheetRows = rows;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
@@ -6322,10 +6396,11 @@ function renderDataTable(rows, filterCriteria = null) {
     filterBadgeHtml = `📍 แสดง: จ.${currentProv} (${filteredRows.length} รายการ)`;
   } else if (activeCriteria.type === 'case') {
     const searchCase = (activeCriteria.caseNo || '').trim().toLowerCase();
+    const termMatch = dtTermMatcher(searchCase);
     filteredRows = rows.filter(row => {
       const caseNo = (row['เลขคดี'] || '').trim().toLowerCase();
       row._resolvedProvince = getRowProvince(row);
-      return caseNo.includes(searchCase);
+      return caseNo.includes(searchCase) || (termMatch && termMatch(dtRowSearchText(row)));
     });
     filterBadgeHtml = `⚖️ กรองเลขคดี: <b class="text-blue-800 font-bold">"${activeCriteria.caseNo}"</b> (${filteredRows.length} รายการ)`;
   } else if (activeCriteria.type === 'province') {
@@ -6520,6 +6595,7 @@ function renderDataTable(rows, filterCriteria = null) {
       zeroRecords: `ไม่พบข้อมูลที่ตรงกับเงื่อนไขการค้นหา`
     }
   });
+  bindDtSearchHint(state.dataTableInstance, rows, filteredRows, activeCriteria);
   if (dtPrev && dtPrev.key === dtViewKey) {
     try {
       const dt = state.dataTableInstance;
@@ -12059,7 +12135,14 @@ function performDesktopSimilarSearch() {
   const historyList = (typeof getDesktopFormHistory === 'function') ? getDesktopFormHistory() : [];
   const combinedRows = [...allRows];
   historyList.forEach(h => {
+    // ประวัติการกรอกในเครื่อง: ถ้ามีรายการเดียวกันในฐานข้อมูลแล้วไม่ต้องซ้ำ / ถ้าไม่มีให้ติดป้าย "เฉพาะในเครื่องนี้"
+    const inDb = h.caseNumber && allRows.some(r => {
+      const rc = String(r['เลขคดี'] || '').trim();
+      return rc && dtSearchNorm(rc) === dtSearchNorm(h.caseNumber);
+    });
+    if (inDb) return;
     combinedRows.push({
+      _srcLocal: true,
       'เลขคดี': h.caseNumber,
       'ประเภทศาล': h.courtType,
       'จังหวัด': h.province,
@@ -12462,6 +12545,7 @@ function renderDesktopSimilarResults(results) {
             <span class="text-[11px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-md font-medium">
               ${court}
             </span>
+            ${r._srcLocal ? `<span class="text-[11px] text-red-700 bg-red-50 px-2 py-0.5 rounded-md font-bold border border-red-200" title="มาจากประวัติการกรอกข้อมูลบนเครื่องนี้ ไม่พบในฐานข้อมูลที่ระบบเชื่อมต่ออยู่"><i class="fa-solid fa-laptop mr-1"></i>เฉพาะในเครื่องนี้ • ไม่พบในฐานข้อมูล</span>` : ''}
           </div>
           <div class="text-xs text-gray-700 flex items-center gap-1.5 flex-wrap">
             <i class="fa-solid fa-location-dot text-rose-500 shrink-0"></i>
