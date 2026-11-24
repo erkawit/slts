@@ -674,43 +674,62 @@
   // โซนจ่ายหมาย + ช่วงเวลารายงาน (2 สัปดาห์)
   // โซน = อำเภอ ยกเว้น อ.เมืองอุดรธานี แบ่งตามตำบล — เลื่อนไปโซนถัดไปทุก 2 สัปดาห์
   // ------------------------------------------------------------------
-  const UDON_DISTRICTS = ['เมืองอุดรธานี', 'กุดจับ', 'หนองวัวซอ', 'กุมภวาปี', 'โนนสะอาด', 'หนองหาน', 'ทุ่งฝน', 'ไชยวาน', 'ศรีธาตุ', 'วังสามหมอ',
-    'บ้านดุง', 'บ้านผือ', 'น้ำโสม', 'เพ็ญ', 'สร้างคอม', 'หนองแสง', 'นายูง', 'พิบูลย์รักษ์', 'กู่แก้ว', 'ประจักษ์ศิลปาคม'];
-  const MUANG_SUBDISTRICTS = ['หมากแข้ง', 'นิคมสงเคราะห์', 'บ้านขาว', 'หนองบัว', 'บ้านตาด', 'โนนสูง', 'หมูม่น', 'เชียงยืน', 'หนองนาคำ', 'กุดสระ',
-    'นาดี', 'บ้านเลื่อม', 'เชียงพิณ', 'สามพร้าว', 'หนองไฮ', 'นาข่า', 'บ้านจั่น', 'หนองขอนกว้าง', 'โคกสะอาด', 'นากว้าง', 'หนองไผ่'];
   /**
-   * หน่วยพื้นที่เริ่มต้น: ต.ในอำเภอเมือง (21) ตามด้วยอำเภออื่น (19)
-   * merge:true = รวมกับโซนก่อนหน้าเป็นโซนเดียวกัน (ค่าเริ่มต้น: อ.ประจักษ์ศิลปาคม รวมกับ อ.กุมภวาปี)
+   * ชื่ออำเภอเมืองของจังหวัด (เช่น อุดรธานี → เมืองอุดรธานี; พระนครศรีอยุธยา → พระนครศรีอยุธยา; กรุงเทพฯ ไม่มี)
+   * data = THAILAND_ADDRESS_DATA ({ จังหวัด: { อำเภอ: [ตำบล...] } })
    */
-  function defaultZones() {
-    const others = UDON_DISTRICTS.slice(1).filter((d) => d !== 'ประจักษ์ศิลปาคม');
-    others.splice(others.indexOf('กุมภวาปี') + 1, 0, 'ประจักษ์ศิลปาคม');
-    return MUANG_SUBDISTRICTS.map((t) => ({ key: 's:เมืองอุดรธานี:' + t, district: 'เมืองอุดรธานี', subdistrict: t, label: `อ.เมืองอุดรธานี · ต.${t}`, enabled: true, merge: false }))
-      .concat(others.map((d) => ({ key: 'd:' + d, district: d, subdistrict: '', label: `อ.${d}`, enabled: true, merge: d === 'ประจักษ์ศิลปาคม' })));
+  function muangOf(province, data) {
+    const p = String(province || '').replace(/^จ(\.|ังหวัด)\s*/, '').trim();
+    const ds = data && data[p] ? Object.keys(data[p]) : [];
+    if (ds.includes('เมือง' + p)) return 'เมือง' + p;
+    if (ds.includes(p)) return p;
+    return ds.find((d) => d.startsWith('เมือง')) || '';
   }
-  /** อ่านลำดับ/การเปิดใช้/การรวมโซนจากการตั้งค่า (JSON) — ไม่มี/เสีย ใช้ค่าเริ่มต้น */
-  function zonesFrom(json) {
-    const def = defaultZones();
-    let arr = null;
-    try { arr = typeof json === 'string' ? JSON.parse(json || 'null') : json; } catch (_) { arr = null; }
-    if (!Array.isArray(arr) || !arr.length) return def;
-    const byKey = new Map(def.map((z) => [z.key, z]));
-    const out = [];
-    arr.forEach((z) => { const b = z && byKey.get(z.key); if (b && !out.some((o) => o.key === b.key)) out.push({ ...b, enabled: z.enabled !== false, merge: Boolean(z.merge) }); });
-    def.forEach((z) => { if (!out.some((o) => o.key === z.key)) out.push(z); });
-    return out;
+  /** อำเภอ (ยกเว้นอำเภอเมือง) และตำบลในอำเภอเมืองของจังหวัด */
+  function provinceAreas(province, data) {
+    const p = String(province || '').replace(/^จ(\.|ังหวัด)\s*/, '').trim();
+    const muang = muangOf(p, data);
+    const dmap = (data && data[p]) || {};
+    const subs = muang ? (dmap[muang] || []).map((t) => (typeof t === 'string' ? t : t && t.name)).filter(Boolean) : [];
+    return { province: p, muang, districts: Object.keys(dmap).filter((d) => d !== muang), muangSubdistricts: subs };
   }
-  /** รวมหน่วยพื้นที่เป็นโซนจ่ายหมาย (เฉพาะที่เปิดใช้) → [{ key, label, areas:[{district, subdistrict}] }] */
-  function groupZones(units) {
-    const out = [];
-    (units || []).filter((u) => u.enabled !== false).forEach((u) => {
-      const area = { key: u.key, district: u.district, subdistrict: u.subdistrict, label: u.label };
-      if (u.merge && out.length) { const g = out[out.length - 1]; g.areas.push(area); g.label = g.areas.map((a) => a.label).join(' + '); }
-      else out.push({ key: u.key, label: u.label, areas: [area] });
+  /** ชื่อโซนอัตโนมัติจากพื้นที่ที่เลือก */
+  function autoZoneName(z, muang) {
+    const parts = [];
+    if ((z.subdistricts || []).length) parts.push(`อ.${muang || 'เมือง'} (ต.${z.subdistricts.join(', ต.')})`);
+    if ((z.districts || []).length) parts.push(z.districts.map((d) => 'อ.' + d).join(', '));
+    return parts.join(' + ') || 'โซนว่าง';
+  }
+  /**
+   * Pre-set โซนจ่ายหมาย → รายการโซนตามลำดับหมุนเวียน
+   * preset = { province, zones: [{ id, name, subdistricts:[ต.ในอ.เมือง], districts:[อ.อื่น] }] }
+   * คืน [{ key, label, areas:[{ province, district, subdistrict }] }]
+   */
+  function presetZones(preset, data) {
+    if (!preset || !Array.isArray(preset.zones)) return [];
+    const p = String(preset.province || '').replace(/^จ(\.|ังหวัด)\s*/, '').trim();
+    const muang = preset.muang || muangOf(p, data) || ('เมือง' + p);
+    return preset.zones.map((z, i) => {
+      const areas = (z.subdistricts || []).map((t) => ({ province: p, district: muang, subdistrict: t }))
+        .concat((z.districts || []).map((d) => ({ province: p, district: d, subdistrict: '' })));
+      return { key: String(z.id || 'z' + (i + 1)), label: String(z.name || '').trim() || autoZoneName(z, muang), areas, no: i + 1 };
+    }).filter((z) => z.areas.length);
+  }
+  /** ตรวจ Pre-set: พื้นที่ซ้ำกันระหว่างโซน / โซนว่าง */
+  function validatePreset(preset) {
+    const errs = [];
+    const seen = new Map();
+    (preset.zones || []).forEach((z, i) => {
+      const nm = String(z.name || '').trim() || `โซนที่ ${i + 1}`;
+      if (!(z.subdistricts || []).length && !(z.districts || []).length) errs.push(`${nm}: ยังไม่ได้เลือกพื้นที่`);
+      (z.subdistricts || []).map((t) => 't:' + t).concat((z.districts || []).map((d) => 'd:' + d)).forEach((k) => {
+        if (seen.has(k)) errs.push(`${k.slice(0, 2) === 't:' ? 'ต.' : 'อ.'}${k.slice(2)} อยู่ทั้งใน ${seen.get(k)} และ ${nm}`);
+        else seen.set(k, nm);
+      });
     });
-    return out;
+    if (!(preset.zones || []).length) errs.push('ยังไม่มีโซน');
+    return errs;
   }
-  const zoneLabel = (z) => (z ? z.label : '');
   const DAY = 864e5;
   const atMidnight = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
   const dIso = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
@@ -747,20 +766,28 @@
     return { zone: list[idx], index: idx, total: list.length, blockStart, blockStartIso: dIso(blockStart), nextChange: new Date(blockStart.getTime() + 14 * DAY), nextZone: list[(idx + 1) % list.length], prevZone: list[(idx - 1 + list.length) % list.length] };
   }
   /** ที่อยู่/ข้อมูลอยู่ในโซนหรือไม่ (เทียบอำเภอ และตำบลกรณีอำเภอเมือง) */
+  /** อำเภอตรงกัน (รองรับ "อ.เมือง" แบบย่อ ↔ เมือง<จังหวัด>) */
+  function sameDistrict(zoneDistrict, d) {
+    const a = cleanDistrict(zoneDistrict).replace(/\s/g, '');
+    const b = cleanDistrict(d).replace(/\s/g, '');
+    if (!a || !b) return false;
+    if (a === b || districtKey(a) === districtKey(b)) return true;
+    return a.startsWith('เมือง') && (b === 'เมือง' || a === 'เมือง');
+  }
+  /** ข้อมูล (อำเภอ/ตำบล หรือข้อความที่อยู่) อยู่ในโซนหรือไม่ — โซน = { areas:[{ district, subdistrict }] } */
   function inZone(zone, district, subdistrict, text) {
     if (!zone) return false;
     if (zone.areas) return zone.areas.some((a) => inZone(a, district, subdistrict, text));
-    const dk = districtKey(zone.district);
-    let d = districtKey(district || '');
+    let d = cleanDistrict(district || '').replace(/\s/g, '');
     let t = subKey(subdistrict || '');
     const raw = thNorm(String(text || '')).replace(/\s+/g, '');
     if (!d && raw) {
       const m = raw.match(/(?:อำเภอ|อ\.)([^\s,]+?)(?=จ\.|จังหวัด|ต\.|ตำบล|$)/);
-      if (m) d = districtKey(m[1]);
-      else if (raw.includes(dk) || (dk === 'เมืองอุดรธานี' && raw.includes('อ.เมือง'))) d = dk;
+      if (m) d = m[1];
+      else if (raw.includes(cleanDistrict(zone.district).replace(/\s/g, ''))) d = zone.district;
     }
     if (!t && raw) { const m = raw.match(/(?:ตำบล|ต\.)([^\s,]+?)(?=อ\.|อำเภอ|จ\.|จังหวัด|$)/); if (m) t = subKey(m[1]); }
-    if (d !== dk) return false;
+    if (!sameDistrict(zone.district, d)) return false;
     if (!zone.subdistrict) return true;
     return t === subKey(zone.subdistrict);
   }
@@ -773,7 +800,7 @@
     parseIssuedSheet, parseAccExpenseSheet, parseCourtExcel, matchReceipts, normName, normCase, caseNos, caseKey,
     findRate, exceptionMoos, evaluateFreeSummonItems, parseRateRows, parseRatesWorkbook, parseRatePdfLines,
     templateFor, computeMoney, buildDocData, docFileName,
-    UDON_DISTRICTS, MUANG_SUBDISTRICTS, defaultZones, zonesFrom, groupZones, zoneLabel, mondayOf, reportWindow, currentZone, inZone, dIso, parseIso,
+    muangOf, provinceAreas, autoZoneName, presetZones, validatePreset, mondayOf, reportWindow, currentZone, inZone, dIso, parseIso,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.SltsReportLogic = api;

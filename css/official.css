@@ -315,3 +315,22 @@ html.pc-sidebar #srTabs { display: none; } /* เมนูย่อยอยู�
 .sr-progress { width: 180px; height: 8px; background: #e2e8f0; border-radius: 99px; overflow: hidden; }
 .sr-progress > div { height: 100%; background: #16a34a; }
 #tabContentReport.sr-flow-mode .sr-hero { display: none; } /* หน้ารายงานหมายแบบขั้นตอน: เน้นเฉพาะขั้นตอน */
+
+/* ตั้งค่าโซนจ่ายหมาย (Pre-set) */
+.sr-zone { border: 1px solid var(--c-line); border-radius: 8px; margin-top: 8px; background: #fff; }
+.sr-zone > summary { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; list-style: none; }
+.sr-zone > summary::-webkit-details-marker { display: none; }
+.sr-zone > summary::before { content: '▸'; color: var(--c-muted); }
+.sr-zone[open] > summary::before { content: '▾'; }
+.sr-zone > summary b { color: var(--c-primary); white-space: nowrap; }
+.sr-zone > summary .grow { flex: 1; }
+.sr-zone[open] > summary { border-bottom: 1px solid var(--c-line); background: var(--c-bg); border-radius: 8px 8px 0 0; }
+.sr-zone-body { padding: 10px 14px 14px; }
+.sr-zgroup { margin-top: 12px; }
+.sr-zgroup-h { font-weight: 600; color: var(--c-primary); margin-bottom: 6px; font-size: 14px; }
+.sr-zgroup-h a { font-weight: 400; font-size: 12.5px; color: var(--c-primary); text-decoration: underline; margin-left: 6px; }
+.sr-zgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 6px; }
+.sr-zcheck { display: flex; align-items: center; gap: 6px; border: 1px solid var(--c-line); border-radius: 6px; padding: 5px 8px; font-size: 13.5px; cursor: pointer; background: #fff; }
+.sr-zcheck.on { border-color: var(--c-primary); background: var(--c-primary-50); color: var(--c-primary); font-weight: 600; }
+.sr-zcheck.used { color: #94a3b8; background: #f8fafc; cursor: not-allowed; }
+.sr-zcheck small { font-size: 11px; }

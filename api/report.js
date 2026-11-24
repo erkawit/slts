@@ -158,20 +158,77 @@ actions.sr_bootstrap = async (d, u) => {
     db.query('SELECT id, kind, full_name, position, acting, acting_title, is_default, created_by FROM sr_signers ORDER BY kind, is_default DESC, id'),
     db.query('SELECT id, order_text, order_no, order_date, note, is_active, created_by, created_at FROM sr_court_orders ORDER BY id DESC'),
   ]);
-  const { rows: [zone] } = await db.query('SELECT zone_key, anchor, updated_by, updated_at FROM sr_zone_state WHERE username = $1', [u.username]);
-  return { status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows, zone: zone || null };
+  const [{ rows: [zone] }, { rows: presets }] = await Promise.all([
+    db.query('SELECT preset_id, zone_key, anchor, updated_by, updated_at FROM sr_zone_state WHERE username = $1', [u.username]),
+    db.query('SELECT id, name, province, muang, zones, updated_at FROM sr_zone_presets WHERE owner = $1 ORDER BY id', [u.username]),
+  ]);
+  return { status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows, zone: zone || null, zonePresets: presets.map(presetRow) };
 };
 
-/** ตั้งโซนจ่ายหมายปัจจุบัน (ของตัวเอง; แอดมินตั้งให้ผู้อื่นได้) — anchor = วันจันทร์ที่เริ่มโซนนี้ */
+// ---------------- โซนจ่ายหมาย (Pre-set ที่ผู้ใช้ตั้งเอง) ----------------
+const presetRow = (r) => ({ id: Number(r.id), name: r.name, province: r.province, muang: r.muang, zones: Array.isArray(r.zones) ? r.zones : (typeof r.zones === 'string' ? JSON.parse(r.zones || '[]') : []), updated_at: r.updated_at });
+const strList = (v, max) => (Array.isArray(v) ? v : []).map((x) => s(x, 120)).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).slice(0, max);
+function cleanZones(zones) {
+  if (!Array.isArray(zones)) throw new HttpError(400, 'รูปแบบโซนไม่ถูกต้อง');
+  if (zones.length > 120) throw new HttpError(400, 'โซนมากเกินไป');
+  const seen = new Map();
+  return zones.map((z, i) => {
+    const out = { id: s(z && z.id, 40) || `z${Date.now().toString(36)}${i}`, name: s(z && z.name, 200), subdistricts: strList(z && z.subdistricts, 300), districts: strList(z && z.districts, 300) };
+    const nm = out.name || `โซนที่ ${i + 1}`;
+    if (!out.subdistricts.length && !out.districts.length) throw new HttpError(400, `${nm}: ยังไม่ได้เลือกพื้นที่`);
+    out.subdistricts.map((t) => 'ต.' + t).concat(out.districts.map((d) => 'อ.' + d)).forEach((k) => {
+      if (seen.has(k)) throw new HttpError(400, `${k} อยู่ทั้งใน ${seen.get(k)} และ ${nm}`);
+      seen.set(k, nm);
+    });
+    return out;
+  });
+}
+const mondayIso = () => { const d = new Date(Date.now() + 7 * 3600e3); const wd = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - wd); return d.toISOString().slice(0, 10); };
+
+/** บันทึก Pre-set (สร้างใหม่ถ้าไม่มี id) — ใช้ได้เฉพาะของตัวเอง */
+actions.sr_zone_preset_save = async (d, u) => {
+  const name = s(d.name, 200);
+  if (!name) throw new HttpError(400, 'กรุณาตั้งชื่อ Pre-set');
+  const zones = cleanZones(d.zones);
+  if (!zones.length) throw new HttpError(400, 'ยังไม่มีโซนใน Pre-set');
+  const province = s(d.province, 80);
+  const muang = s(d.muang, 80);
+  let row;
+  if (d.id) {
+    const { rows } = await db.query('UPDATE sr_zone_presets SET name=$1, province=$2, muang=$3, zones=$4::jsonb, updated_at=NOW() WHERE id=$5 AND owner=$6 RETURNING *', [name, province, muang, JSON.stringify(zones), Number(d.id), u.username]);
+    if (!rows[0]) throw new HttpError(404, 'ไม่พบ Pre-set');
+    row = rows[0];
+  } else {
+    const { rows } = await db.query('INSERT INTO sr_zone_presets (owner, name, province, muang, zones) VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING *', [u.username, name, province, muang, JSON.stringify(zones)]);
+    row = rows[0];
+  }
+  // ยังไม่ได้เลือกใช้ Pre-set ใด → ใช้ชุดนี้ (เริ่มที่โซนแรก ตั้งแต่วันจันทร์นี้)
+  const { rows: [st] } = await db.query('SELECT preset_id FROM sr_zone_state WHERE username = $1', [u.username]);
+  if (!st || !st.preset_id) {
+    await db.query(`INSERT INTO sr_zone_state (username, preset_id, zone_key, anchor, updated_by) VALUES ($1,$2,$3,$4,$1)
+      ON CONFLICT (username) DO UPDATE SET preset_id = EXCLUDED.preset_id, zone_key = EXCLUDED.zone_key, anchor = EXCLUDED.anchor, updated_by = EXCLUDED.updated_by, updated_at = NOW()`, [u.username, row.id, zones[0].id, mondayIso()]);
+  }
+  return { status: 'success', preset: presetRow(row) };
+};
+actions.sr_zone_preset_delete = async (d, u) => {
+  const { rowCount } = await db.query('DELETE FROM sr_zone_presets WHERE id = $1 AND owner = $2', [Number(d.id), u.username]);
+  if (!rowCount) throw new HttpError(404, 'ไม่พบ Pre-set');
+  await db.query('UPDATE sr_zone_state SET preset_id = NULL WHERE username = $1 AND preset_id = $2', [u.username, Number(d.id)]);
+  return { status: 'success' };
+};
+/** เลือกใช้ Pre-set + โซนปัจจุบัน — anchor = วันจันทร์ที่เริ่มโซนนี้ (หมุนไปโซนถัดไปทุก 2 สัปดาห์) */
 actions.sr_zone_set = async (d, u) => {
-  const who = ownerFor(u, d.username);
-  const key = s(d.zone_key, 120);
-  const anchor = s(d.anchor, 10);
-  if (!/^(d:|s:)/.test(key)) throw new HttpError(400, 'โซนจ่ายหมายไม่ถูกต้อง');
+  const presetId = Number(d.preset_id);
+  const { rows: [p] } = await db.query('SELECT id, zones FROM sr_zone_presets WHERE id = $1 AND owner = $2', [presetId, u.username]);
+  if (!p) throw new HttpError(404, 'ไม่พบ Pre-set');
+  const zones = presetRow(p).zones;
+  const key = s(d.zone_key, 40) || (zones[0] && zones[0].id) || '';
+  if (!zones.some((z) => z.id === key)) throw new HttpError(400, 'ไม่พบโซนใน Pre-set');
+  const anchor = s(d.anchor, 10) || mondayIso();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) throw new HttpError(400, 'วันที่เริ่มโซนไม่ถูกต้อง');
-  await db.query(`INSERT INTO sr_zone_state (username, zone_key, anchor, updated_by, updated_at) VALUES ($1,$2,$3,$4,NOW())
-    ON CONFLICT (username) DO UPDATE SET zone_key = EXCLUDED.zone_key, anchor = EXCLUDED.anchor, updated_by = EXCLUDED.updated_by, updated_at = NOW()`, [who, key, anchor, u.username]);
-  return { status: 'success', zone: { zone_key: key, anchor, updated_by: u.username } };
+  await db.query(`INSERT INTO sr_zone_state (username, preset_id, zone_key, anchor, updated_by, updated_at) VALUES ($1,$2,$3,$4,$1,NOW())
+    ON CONFLICT (username) DO UPDATE SET preset_id = EXCLUDED.preset_id, zone_key = EXCLUDED.zone_key, anchor = EXCLUDED.anchor, updated_by = EXCLUDED.updated_by, updated_at = NOW()`, [u.username, presetId, key, anchor]);
+  return { status: 'success', zone: { preset_id: presetId, zone_key: key, anchor, updated_by: u.username } };
 };
 
 actions.sr_settings_save = async (d, u) => {

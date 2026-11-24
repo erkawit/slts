@@ -18,7 +18,8 @@
     ['issued', 'fa-list-check', 'บัญชีจ่ายหมาย'],
     ['memos', 'fa-file-invoice', 'บันทึกข้อความ / ใบสำคัญ'],
     ['rates', 'fa-table', 'อัตราค่านำหมาย'],
-    ['settings', 'fa-user-pen', 'ผู้ลงนาม / โซนจ่ายหมาย'],
+    ['zones', 'fa-map-location-dot', 'โซนจ่ายหมาย (Pre-set)'],
+    ['settings', 'fa-user-pen', 'ผู้ลงนามและตั้งค่า'],
   ];
 
   const html = document.documentElement;

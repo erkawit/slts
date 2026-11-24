@@ -136,17 +136,28 @@ test('เลขคดี: หมาย ต. ใช้เลขที่ขึ้
   assert.deepEqual(r.items.map((x) => [x.seq, x.kind, x.t_no, x.black_no]), [[1, 'T', 'ต2980/2569', 'ฟ41/2567'], [2, 'LOCAL', '', 'อ12/2569'], [3, 'LOCAL', '', 'อ12/2569']]);
 });
 
-test('โซนจ่ายหมาย: ช่วงรายงาน 2 สัปดาห์ + หมุนเวียนทุก 2 สัปดาห์', () => {
+test('โซนจ่ายหมาย: Pre-set ที่ผู้ใช้ตั้งเอง + หมุนเวียนทุก 2 สัปดาห์', () => {
   const w = L.reportWindow(new Date(2026, 10, 24));
   assert.equal(w.startIso, '2026-11-16'); assert.equal(w.endIso, '2026-11-27');
-  assert.equal(L.reportWindow(new Date(2026, 10, 29)).endIso, '2026-11-27'); // อาทิตย์ยังเป็นสัปดาห์เดียวกัน
-  const g = L.groupZones(L.zonesFrom(''));
-  assert.equal(g.filter((z) => z.key.startsWith('s:เมืองอุดรธานี')).length, 21);
-  const c1 = L.currentZone({ zone_key: 'd:กุดจับ', anchor: '2026-11-16' }, g, new Date(2026, 10, 27));
-  assert.equal(c1.zone.label, 'อ.กุดจับ');
-  const c2 = L.currentZone({ zone_key: 'd:กุดจับ', anchor: '2026-11-16' }, g, new Date(2026, 10, 30));
-  assert.equal(c2.zone.label, 'อ.หนองวัวซอ');
+  const data = { อุดรธานี: { เมืองอุดรธานี: ['หมากแข้ง', 'บ้านเลื่อม', 'หนองบัว'], กุดจับ: ['ปะโค'], กุมภวาปี: ['แชแล'], ประจักษ์ศิลปาคม: ['นาม่วง'] } };
+  const A = L.provinceAreas('จ.อุดรธานี', data);
+  assert.equal(A.muang, 'เมืองอุดรธานี');
+  assert.deepEqual(A.districts, ['กุดจับ', 'กุมภวาปี', 'ประจักษ์ศิลปาคม']);
+  const preset = { province: 'อุดรธานี', zones: [
+    { id: 'a', name: '', subdistricts: ['หมากแข้ง', 'หนองบัว'], districts: [] },
+    { id: 'b', name: 'กุมภวาปี-ประจักษ์', subdistricts: [], districts: ['กุมภวาปี', 'ประจักษ์ศิลปาคม'] },
+    { id: 'c', name: '', subdistricts: ['บ้านเลื่อม'], districts: ['กุดจับ'] },
+  ] };
+  assert.deepEqual(L.validatePreset(preset), []);
+  assert.ok(L.validatePreset({ zones: [{ subdistricts: ['หมากแข้ง'] }, { subdistricts: ['หมากแข้ง'] }] }).length);
+  const g = L.presetZones(preset, data);
+  assert.equal(g[0].label, 'อ.เมืองอุดรธานี (ต.หมากแข้ง, ต.หนองบัว)');
+  const c1 = L.currentZone({ zone_key: 'b', anchor: '2026-11-16' }, g, new Date(2026, 10, 27));
+  assert.equal(c1.zone.key, 'b');
+  assert.equal(L.currentZone({ zone_key: 'b', anchor: '2026-11-16' }, g, new Date(2026, 10, 30)).zone.key, 'c');
+  assert.equal(L.currentZone({ zone_key: 'c', anchor: '2026-11-16' }, g, new Date(2026, 10, 30)).zone.key, 'a'); // วนกลับโซนแรก
   assert.ok(L.inZone(g[0], 'อ.เมือง', 'ต.หมากแข้ง'));
   assert.ok(!L.inZone(g[0], 'เมืองอุดรธานี', 'บ้านเลื่อม'));
-  assert.ok(L.inZone(c1.zone, '', '', '5 ม.2 ต.ปะโค อ.กุดจับ จ.อุดรธานี'));
+  assert.ok(L.inZone(g[1], 'ประจักษ์ศิลปาคม', 'นาม่วง'));
+  assert.ok(L.inZone(g[2], '', '', '5 ม.2 ต.ปะโค อ.กุดจับ จ.อุดรธานี'));
 });

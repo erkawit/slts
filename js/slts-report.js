@@ -269,6 +269,7 @@
           <button class="sr-tab" data-sub="issued"><i class="fa-solid fa-list-check"></i> บัญชีจ่ายหมาย / รายงานผลหมาย</button>
           <button class="sr-tab" data-sub="memos"><i class="fa-solid fa-file-invoice"></i> บันทึกข้อความ / ใบสำคัญรับเงิน</button>
           <button class="sr-tab" data-sub="rates"><i class="fa-solid fa-table"></i> อัตราค่านำหมาย</button>
+          <button class="sr-tab" data-sub="zones"><i class="fa-solid fa-map-location-dot"></i> โซนจ่ายหมาย</button>
           <button class="sr-tab" data-sub="settings"><i class="fa-solid fa-user-pen"></i> ผู้ลงนามและตั้งค่า</button>
         </div>
         <div id="srBody"><div class="sr-empty"><i class="fa-solid fa-spinner fa-spin"></i> กำลังโหลดข้อมูล...</div></div>
@@ -307,6 +308,7 @@
     if (window.SltsSidebar) window.SltsSidebar.sync();
     const body = $('#srBody'); if (!body) return;
     if (R.sub === 'flow') return renderFlow(body);
+    if (R.sub === 'zones') return renderZones(body);
     if (R.sub === 'issued') return renderIssued(body);
     if (R.sub === 'memos') return renderMemos(body);
     if (R.sub === 'rates') return renderRates(body);
@@ -830,18 +832,61 @@
   //    ④ สร้างแบบรายงานหมาย (Word) ทีละรายการ/ทั้งหมด
   // ==================================================================
   const FL = { weekOffset: 0, viewZone: '', all: false, checkedAt: 0 };
-  const zoneUnits = () => L.zonesFrom(settings().zone_list);
-  const zoneGroups = () => L.groupZones(zoneUnits());
+  const ADDR = () => (typeof THAILAND_ADDRESS_DATA !== 'undefined' ? THAILAND_ADDRESS_DATA : (window.THAILAND_ADDRESS_DATA || {}));
+  const PROVINCES = () => (typeof THAILAND_PROVINCES !== 'undefined' ? THAILAND_PROVINCES.map((p) => p.name) : Object.keys(ADDR()));
+  /** จังหวัดที่ตั้งค่าไว้ (จังหวัดของผู้ใช้ → จังหวัดที่เลือกในระบบ → อุดรธานี) */
+  const defaultProvince = () => {
+    const u = currentUser(); const st = appState();
+    return String((u && (u.province || u.assignedProvince || u.assigned_province)) || (st && st.selectedProvince) || localStorage.getItem('slts_selected_province') || 'อุดรธานี').replace(/^จ(\.|ังหวัด)\s*/, '');
+  };
+  const zonePresets = () => (R.boot && R.boot.zonePresets) || [];
   const zoneState = () => (R.boot && R.boot.zone) || null;
+  const activePreset = () => { const st = zoneState(); return (st && st.preset_id && zonePresets().find((p) => p.id === Number(st.preset_id))) || null; };
+  const zoneGroups = (preset) => L.presetZones(preset || activePreset(), ADDR());
   const thDay = (d) => L.thaiDateShort ? L.thaiDateShort(L.dIso(d)) : L.dIso(d);
   const WD = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
   const thDayLong = (d) => `${WD[d.getDay()]}ที่ ${d.getDate()} ${L.THAI_MONTHS[d.getMonth() + 1]} ${d.getFullYear() + 543}`;
 
+  /** รอบจ่ายหมายตามบัญชีจ่ายหมาย (Excel) = ช่วงวันที่ในหัวรายงาน → [{ key, start, end, items }] ล่าสุดก่อน */
+  function issuedPeriods() {
+    const m = new Map();
+    R.issued.forEach((it) => {
+      if (!it.period_start && !it.period_end) return;
+      const k = `${it.period_start || it.period_end}|${it.period_end || it.period_start}`;
+      if (!m.has(k)) m.set(k, { key: k, start: it.period_start || it.period_end, end: it.period_end || it.period_start, items: [] });
+      m.get(k).items.push(it);
+    });
+    return [...m.values()].sort((a, b) => (a.end < b.end ? 1 : a.end > b.end ? -1 : 0));
+  }
   function flowData() {
     const groups = zoneGroups();
     const cur = L.currentZone(zoneState(), groups, new Date());
-    const zone = (FL.viewZone && groups.find((z) => z.key === FL.viewZone)) || (cur && cur.zone) || null;
-    const win = L.reportWindow(new Date(), FL.weekOffset);
+    const cal = L.reportWindow(new Date(), FL.weekOffset);
+    // ช่วงเวลา 2 สัปดาห์: ยึดช่วงวันที่จ่ายหมายในบัญชีจ่ายหมาย (Excel) เป็นหลัก — ยังไม่นำเข้า → ใช้ช่วงปฏิทินชั่วคราว
+    const periods = issuedPeriods();
+    const recentIso = L.dIso(new Date(Date.now() - 21 * 864e5));
+    let per = null;
+    if (FL.periodKey === 'cal') per = null;
+    else if (FL.periodKey) per = periods.find((p) => p.key === FL.periodKey) || null;
+    else per = periods.find((p) => p.end >= cal.startIso && p.start <= cal.endIso) || (FL.weekOffset === 0 ? periods.find((p) => p.end >= recentIso) : null) || null;
+    let win = cal;
+    if (per) {
+      const st = L.parseIso(per.start); const en = L.parseIso(per.end);
+      // ภาพส่งหมาย: ตั้งแต่วันแรกที่จ่ายหมาย ถึง 14 วันหลังวันสุดท้าย (เวลาออกส่งหมาย) แต่ไม่เกินวันนี้
+      const photoTo = Math.min(en.getTime() + 15 * 864e5 - 1, Date.now() + 864e5);
+      win = { start: st, end: en, startIso: per.start, endIso: per.end, from: st.getTime(), to: photoTo, fromExcel: true };
+    }
+    // โซนตามบัญชีจ่ายหมาย: นับว่ารายการในรอบนี้อยู่ในโซนใดมากที่สุด
+    let detected = null; let detectedCount = 0; let outside = [];
+    if (per && groups.length) {
+      const cnt = new Map();
+      per.items.forEach((it) => {
+        const z = groups.find((g) => L.inZone(g, it.district, it.subdistrict, it.address_raw));
+        if (z) cnt.set(z.key, (cnt.get(z.key) || 0) + 1); else outside.push(it);
+      });
+      cnt.forEach((n, k) => { if (n > detectedCount) { detectedCount = n; detected = groups.find((g) => g.key === k); } });
+    }
+    const zone = (FL.viewZone && groups.find((z) => z.key === FL.viewZone)) || detected || (cur && cur.zone) || null;
     const me = myUser();
     const seen = new Set();
     const uploads = !zone ? [] : sheetRows().map(photoFromRow).filter(Boolean)
@@ -850,11 +895,10 @@
       .filter((p) => L.inZone(zone, p.district, p.subdistrict, p.loc))
       .filter((p) => (seen.has(p.id) ? false : seen.add(p.id)))
       .sort((a, b) => a.time - b.time);
-    // บัญชีจ่ายหมายที่ช่วงวันที่ทับกับช่วงรายงาน และอยู่ในโซน
     const overlap = (it) => (!it.period_end || it.period_end >= win.startIso) && (!it.period_start || it.period_start <= win.endIso);
-    const issued = !zone ? [] : R.issued.filter((it) => overlap(it) && L.inZone(zone, it.district, it.subdistrict, it.address_raw))
-      .sort((a, b) => (a.period_end < b.period_end ? 1 : a.period_end > b.period_end ? -1 : (a.seq || 0) - (b.seq || 0)));
-    const recentBatch = (R.batches || []).find((b) => new Date(b.created_at).getTime() >= win.from);
+    const issued = !zone ? [] : (per ? per.items : R.issued.filter(overlap)).filter((it) => L.inZone(zone, it.district, it.subdistrict, it.address_raw))
+      .sort((a, b) => (a.seq || 0) - (b.seq || 0));
+    const recentBatch = per ? (R.batches || []).find((b) => b.period_start === per.start && b.period_end === per.end) || (R.batches || [])[0] : (R.batches || []).find((b) => new Date(b.created_at).getTime() >= cal.from);
     // จับคู่ภาพ ↔ บัญชีจ่ายหมาย
     const photoMap = new Map();
     issued.forEach((it) => photoMap.set(it.id, photosForIssued(it).filter((p) => p.time >= win.from - 14 * 864e5)));
@@ -862,7 +906,8 @@
     const withPhoto = issued.filter((it) => (photoMap.get(it.id) || []).length);
     const noPhoto = issued.filter((it) => !(photoMap.get(it.id) || []).length);
     const reported = issued.filter((it) => it.report_status && it.report_status !== 'none');
-    return { groups, cur, zone, win, uploads, issued, recentBatch, photoMap, orphan, withPhoto, noPhoto, reported };
+    const rotAtPeriod = per ? L.currentZone(zoneState(), groups, L.parseIso(per.start)) : null;
+    return { groups, cur, rotAtPeriod, zone, win, cal, per, periods, detected, detectedCount, outside, uploads, issued, recentBatch, photoMap, orphan, withPhoto, noPhoto, reported };
   }
 
   function stepHead(n, title, state, sub) {
@@ -880,32 +925,56 @@
     const blockNote = cur && !FL.viewZone ? `ใช้โซนนี้ตั้งแต่วันจันทร์ที่ ${thDay(cur.blockStart)} · เปลี่ยนเป็น <b>${esc(cur.nextZone.label)}</b> อัตโนมัติวันจันทร์ที่ ${thDay(cur.nextChange)}` : '';
     const s1done = Boolean(zone);
     const s2state = !s1done ? 'lock' : D.uploads.length ? 'done' : 'todo';
-    const s3state = s2state !== 'done' ? 'lock' : (D.issued.length && D.recentBatch) ? 'done' : 'todo';
+    const s3state = s2state !== 'done' ? 'lock' : (D.per && D.issued.length) ? 'done' : 'todo';
     const s4state = s3state === 'lock' || !D.issued.length ? 'lock' : D.reported.length >= D.issued.length ? 'done' : 'todo';
     const stepper = [['โซนและช่วงเวลา', s1done ? 'done' : 'todo'], ['ภาพส่งหมายในโซน', s2state], ['ตรวจกับบัญชีจ่ายหมาย', s3state], ['สร้างแบบรายงานหมาย', s4state]]
       .map(([t, st], i) => `<div class="sr-stepper-item ${st}"><span>${st === 'done' ? '<i class="fa-solid fa-check"></i>' : i + 1}</span>${t}</div>`).join('<i class="fa-solid fa-chevron-right sr-stepper-sep"></i>');
 
-    // ① โซน + ช่วงเวลา
-    const zoneOpts = D.groups.map((z) => `<option value="${esc(z.key)}" ${zone && z.key === zone.key ? 'selected' : ''}>${esc(z.label)}${cur && z.key === cur.zone.key ? ' (โซนปัจจุบัน)' : ''}</option>`).join('');
-    const prevHint = cur && !FL.viewZone && cur.blockStart.getTime() > win.from
-      ? `<div class="sr-note" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i> ช่วงรายงานนี้คาบเกี่ยวโซนก่อนหน้า — <a href="#" data-fl="viewprev">ดูรายการของ ${esc(cur.prevZone.label)}</a></div>` : '';
-    const s1 = `<div class="sr-card sr-step">${stepHead(1, 'โซนจ่ายหมายและช่วงเวลารายงาน', s1done ? 'done' : 'todo', 'โซนจ่ายหมาย = อำเภอ (อ.เมืองอุดรธานีแบ่งตามตำบล) เลื่อนไปโซนถัดไปทุก 2 สัปดาห์')}
-      ${zone ? `<div class="sr-flow-zone">
-          <div class="sr-flow-box"><div class="sr-kicker">${FL.viewZone ? 'กำลังดูโซน' : 'โซนจ่ายหมายปัจจุบัน'}</div><div class="sr-flow-big">${esc(zone.label)}</div><div class="sr-muted">${blockNote || (FL.viewZone ? '<a href="#" data-fl="backcur">กลับไปโซนปัจจุบัน</a>' : '')}</div></div>
-          <div class="sr-flow-box"><div class="sr-kicker">ช่วงเวลารายงาน (2 สัปดาห์)</div><div class="sr-flow-big">${thDay(win.start)} – ${thDay(win.end)}</div><div class="sr-muted">วัน${thDayLong(win.start)} ถึงวัน${thDayLong(win.end)}</div>
-            <div style="margin-top:6px;display:flex;gap:6px"><button class="sr-btn sm" data-fl="wkprev"><i class="fa-solid fa-chevron-left"></i> สัปดาห์ก่อน</button>${FL.weekOffset ? '<button class="sr-btn sm" data-fl="wknow">สัปดาห์นี้</button>' : ''}<button class="sr-btn sm" data-fl="wknext" ${FL.weekOffset >= 0 ? 'disabled' : ''}>สัปดาห์ถัดไป <i class="fa-solid fa-chevron-right"></i></button></div></div>
+    // ① โซน + ช่วงเวลา (โซนจาก Pre-set ที่ผู้ใช้ตั้งเอง)
+    const preset = activePreset();
+    const presets = zonePresets();
+    const zoneOpts = D.groups.map((z) => `<option value="${esc(z.key)}" ${zone && z.key === zone.key ? 'selected' : ''}>โซน ${z.no}: ${esc(z.label)}${cur && z.key === cur.zone.key ? ' (ปัจจุบัน)' : ''}</option>`).join('');
+    const prevHint = !D.per && cur && !FL.viewZone && cur.blockStart.getTime() > win.from && D.groups.length > 1
+      ? `<div class="sr-note" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i> ช่วงรายงานนี้คาบเกี่ยวโซนก่อนหน้า — <a href="#" data-fl="viewprev">ดูรายการของ${esc(cur.prevZone.label)}</a></div>` : '';
+    const areaText = (z) => z.areas.map((a) => (a.subdistrict ? `ต.${a.subdistrict}` : `อ.${a.district}`)).join(', ');
+    let s1body;
+    if (!presets.length) {
+      s1body = `<div class="sr-note warn"><i class="fa-solid fa-map-location-dot"></i> ยังไม่ได้ตั้งค่าโซนจ่ายหมาย — กำหนดเองว่าแต่ละโซนมีตำบลใดในอำเภอเมือง หรืออำเภอใดบ้าง และเรียงลำดับการหมุนเวียน (เลื่อนไปโซนถัดไปทุก 2 สัปดาห์)</div>
+        <div style="margin-top:10px"><button class="sr-btn primary lg" data-fl="zsettings"><i class="fa-solid fa-sliders"></i> ตั้งค่าโซนจ่ายหมาย</button></div>`;
+    } else if (!preset || !D.groups.length || !zone) {
+      const pid = Number(FL.initPreset) || presets[0].id;
+      const pz = zoneGroups(presets.find((p) => p.id === pid));
+      s1body = `<div class="sr-note warn"><i class="fa-solid fa-map-location-dot"></i> เลือก Pre-set โซนจ่ายหมายที่จะใช้ และโซนที่กำลังรับผิดชอบอยู่ตอนนี้</div>
+        <div class="sr-toolbar" style="margin-top:10px">
+          <label class="sr-muted">Pre-set</label><select class="sr-select" id="flPresetInit" style="max-width:260px">${presets.map((p) => `<option value="${p.id}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+          <label class="sr-muted">โซนปัจจุบัน</label><select class="sr-select" id="flZoneInit" style="max-width:340px">${pz.map((z) => `<option value="${esc(z.key)}">โซน ${z.no}: ${esc(z.label)}</option>`).join('')}</select>
+          <label class="sr-muted">เริ่มโซนนี้วันจันทร์ที่</label><input type="date" class="sr-input" id="flAnchor" value="${L.dIso(L.mondayOf(new Date()))}">
+          <button class="sr-btn primary" data-fl="zinit"><i class="fa-solid fa-check"></i> เริ่มใช้</button>
+          <button class="sr-btn" data-fl="zsettings"><i class="fa-solid fa-sliders"></i> ตั้งค่าโซน</button></div>`;
+    } else {
+      s1body = `<div class="sr-flow-zone">
+          <div class="sr-flow-box"><div class="sr-kicker">${FL.viewZone ? 'กำลังดูโซน' : D.detected ? 'โซนตามบัญชีจ่ายหมาย' : 'โซนจ่ายหมายปัจจุบัน'} · โซน ${zone.no}/${D.groups.length}</div><div class="sr-flow-big">${esc(zone.label)}</div>
+            ${areaText(zone) !== zone.label ? `<div class="sr-muted">${esc(areaText(zone))}</div>` : ''}
+            <div class="sr-muted" style="margin-top:4px">${FL.viewZone ? '<a href="#" data-fl="backcur">กลับไปโซนตามบัญชีจ่ายหมาย/โซนปัจจุบัน</a>' : D.detected ? `ตรวจจากบัญชีจ่ายหมาย: ${D.detectedCount} จาก ${D.per.items.length} รายการอยู่ในโซนนี้` : blockNote}</div></div>
+          <div class="sr-flow-box"><div class="sr-kicker">${win.fromExcel ? 'ช่วงวันที่จ่ายหมาย (ตามบัญชีจ่ายหมาย Excel)' : 'ช่วงเวลาเบื้องต้น (ยังไม่มีบัญชีจ่ายหมายของช่วงนี้)'}</div><div class="sr-flow-big">${thDay(win.start)} – ${thDay(win.end)}</div><div class="sr-muted">วัน${thDayLong(win.start)} ถึงวัน${thDayLong(win.end)}</div>
+            ${win.fromExcel ? '<div class="sr-muted">ภาพส่งหมาย: ตั้งแต่วันแรกที่จ่ายหมาย ถึง 14 วันหลังวันสุดท้าย</div>' : '<div class="sr-muted">จันทร์สัปดาห์ก่อน – ศุกร์สัปดาห์นี้ · เมื่อนำเข้าบัญชีจ่ายหมายแล้วจะใช้ช่วงวันที่ใน Excel แทน</div>'}
+            <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              ${D.periods.length ? `<select class="sr-select" id="flPeriod" style="max-width:300px">${D.periods.map((p) => `<option value="${esc(p.key)}" ${D.per && D.per.key === p.key ? 'selected' : ''}>รอบจ่ายหมาย ${thDay(L.parseIso(p.start))} – ${thDay(L.parseIso(p.end))} (${p.items.length})</option>`).join('')}<option value="cal" ${!D.per ? 'selected' : ''}>ช่วงปฏิทิน (จันทร์สัปดาห์ก่อน – ศุกร์)</option></select>` : ''}
+              ${!D.per ? `<button class="sr-btn sm" data-fl="wkprev"><i class="fa-solid fa-chevron-left"></i> สัปดาห์ก่อน</button>${FL.weekOffset ? '<button class="sr-btn sm" data-fl="wknow">สัปดาห์นี้</button>' : ''}<button class="sr-btn sm" data-fl="wknext" ${FL.weekOffset >= 0 ? 'disabled' : ''}>สัปดาห์ถัดไป <i class="fa-solid fa-chevron-right"></i></button>` : ''}</div></div>
         </div>
+        ${D.detected && D.rotAtPeriod && !FL.viewZone && D.detected.key !== D.rotAtPeriod.zone.key ? `<div class="sr-note warn" style="margin-top:10px"><i class="fa-solid fa-triangle-exclamation"></i> บัญชีจ่ายหมายรอบนี้เป็นของ <b>${esc(D.detected.label)}</b> แต่ตามรอบหมุนเวียน ช่วงวันที่นี้เป็นของ <b>${esc(D.rotAtPeriod.zone.label)}</b>
+          — <a href="#" data-fl="syncdetected">ตั้ง ${esc(D.detected.label)} เป็นโซนของรอบนี้ (เริ่มวันจันทร์ที่ ${thDay(L.mondayOf(L.parseIso(D.per.start)))})</a></div>` : ''}
+        ${D.per && D.outside.length ? `<div class="sr-note" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i> มี ${D.outside.length} รายการในบัญชีจ่ายหมายรอบนี้ที่ไม่อยู่ในโซนใดของ Pre-set (${esc([...new Set(D.outside.map((it) => 'อ.' + (it.district || '?')))].slice(0, 6).join(', '))}) — ตรวจการตั้งค่าโซน หรือเลือก "ดูโซน" อื่น</div>` : ''}
         <div class="sr-toolbar" style="margin-top:12px">
-          <label class="sr-muted">ดูโซน</label><select class="sr-select" id="flZone" style="max-width:340px">${zoneOpts}</select>
-          ${!FL.viewZone ? `<button class="sr-btn" data-fl="zprev" title="ย้อนกลับไปโซนก่อนหน้า"><i class="fa-solid fa-backward-step"></i> โซนก่อนหน้า</button>
-          <button class="sr-btn primary" data-fl="znext" title="เลื่อนไปโซนถัดไปตอนนี้ (เริ่มนับ 2 สัปดาห์ใหม่)"><i class="fa-solid fa-forward-step"></i> เลื่อนไปโซนถัดไป</button>` : `<button class="sr-btn primary" data-fl="zsetview"><i class="fa-solid fa-thumbtack"></i> ตั้งเป็นโซนปัจจุบันของฉัน</button>`}
+          <label class="sr-muted">Pre-set</label><select class="sr-select" id="flPreset" style="max-width:220px">${presets.map((p) => `<option value="${p.id}" ${p.id === preset.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+          <label class="sr-muted">ดูโซน</label><select class="sr-select" id="flZone" style="max-width:320px">${zoneOpts}</select>
+          ${!FL.viewZone ? `${D.groups.length > 1 ? `<button class="sr-btn" data-fl="zprev" title="ย้อนกลับไปโซนก่อนหน้า"><i class="fa-solid fa-backward-step"></i> โซนก่อนหน้า</button>
+          <button class="sr-btn primary" data-fl="znext" title="เลื่อนไปโซนถัดไปตอนนี้ (เริ่มนับ 2 สัปดาห์ใหม่)"><i class="fa-solid fa-forward-step"></i> เลื่อนไปโซนถัดไป</button>` : ''}` : `<button class="sr-btn primary" data-fl="zsetview"><i class="fa-solid fa-thumbtack"></i> ตั้งเป็นโซนปัจจุบัน</button>`}
+          <button class="sr-btn" data-fl="zsettings"><i class="fa-solid fa-sliders"></i> ตั้งค่าโซน</button>
           ${isAdmin() ? `<label class="sr-muted" style="margin-left:auto"><input type="checkbox" id="flAll" ${FL.all ? 'checked' : ''}> แสดงภาพของผู้ใช้ทุกคน</label>` : ''}
-        </div>${prevHint}`
-      : `<div class="sr-note warn"><i class="fa-solid fa-map-location-dot"></i> ยังไม่ได้กำหนดโซนจ่ายหมายของคุณ — เลือกโซนที่กำลังรับผิดชอบ และวันที่เริ่มโซนนี้ (ระบบจะเลื่อนไปโซนถัดไปให้ทุก 2 สัปดาห์)</div>
-        <div class="sr-toolbar" style="margin-top:10px"><select class="sr-select" id="flZoneInit" style="max-width:340px">${D.groups.map((z) => `<option value="${esc(z.key)}">${esc(z.label)}</option>`).join('')}</select>
-          <label class="sr-muted">เริ่มโซนนี้วันจันทร์ที่</label><input type="date" class="sr-input" id="flAnchor" value="${win.startIso}">
-          <button class="sr-btn primary" data-fl="zinit"><i class="fa-solid fa-check"></i> บันทึกโซนจ่ายหมาย</button></div>`}
-    </div>`;
+        </div>${prevHint}`;
+    }
+    const s1 = `<div class="sr-card sr-step">${stepHead(1, 'โซนจ่ายหมายและช่วงเวลารายงาน', s1done ? 'done' : 'todo', 'โซนตาม Pre-set ที่ตั้งค่าไว้ (เลื่อนไปโซนถัดไปทุก 2 สัปดาห์) · ช่วงวันที่และโซนยืนยันจากบัญชีจ่ายหมาย (Excel) เป็นหลัก')}${s1body}</div>`;
 
     // ② ภาพส่งหมาย
     const upRows = D.uploads.map((p, i) => {
@@ -968,14 +1037,18 @@
     bindFlow(body, D);
   }
 
-  async function setZone(zoneKey, anchorIso) {
-    const r = await api('sr_zone_set', { zone_key: zoneKey, anchor: anchorIso });
+  async function setZone(zoneKey, anchorIso, presetId) {
+    const r = await api('sr_zone_set', { preset_id: presetId || (activePreset() && activePreset().id), zone_key: zoneKey, anchor: anchorIso });
     if (R.boot) R.boot.zone = r.zone;
     FL.viewZone = '';
   }
   function bindFlow(body, D) {
+    const pi = $('#flPresetInit', body); if (pi) pi.onchange = () => { FL.initPreset = pi.value; renderFlow(body); };
+    const ps = $('#flPreset', body);
+    if (ps) ps.onchange = async () => { try { await usePreset(Number(ps.value)); } catch (er) { fail(er); } renderFlow(body); };
     const z = $('#flZone', body);
-    if (z) z.onchange = () => { FL.viewZone = (D.cur && z.value === D.cur.zone.key) ? '' : z.value; renderFlow(body); };
+    if (z) z.onchange = () => { const base = D.detected || (D.cur && D.cur.zone); FL.viewZone = (base && z.value === base.key) ? '' : z.value; renderFlow(body); };
+    const pr = $('#flPeriod', body); if (pr) pr.onchange = () => { FL.periodKey = pr.value; FL.weekOffset = 0; FL.viewZone = ''; renderFlow(body); };
     const all = $('#flAll', body); if (all) all.onchange = () => { FL.all = all.checked; renderFlow(body); };
     body.onclick = async (e) => {
       const a = e.target.closest('[data-fl],[data-fl-dl],[data-fl-rep],[data-fl-word],[data-view],[data-fl-show]');
@@ -988,12 +1061,17 @@
         if (a.dataset.flRep) { const id = Number(a.dataset.flRep); const ph = D.photoMap.get(id) || []; return openReportForm(id, { photoIds: ph.map((p) => p.id) }); }
         if (a.dataset.flWord) return quickWord(Number(a.dataset.flWord));
         const act = a.dataset.fl;
-        if (act === 'wkprev') { FL.weekOffset -= 1; return renderFlow(body); }
+        if (act === 'wkprev') { FL.weekOffset -= 1; FL.periodKey = FL.periodKey || ''; return renderFlow(body); }
         if (act === 'wknext') { FL.weekOffset = Math.min(0, FL.weekOffset + 1); return renderFlow(body); }
         if (act === 'wknow') { FL.weekOffset = 0; return renderFlow(body); }
         if (act === 'backcur') { FL.viewZone = ''; return renderFlow(body); }
         if (act === 'viewprev') { FL.viewZone = D.cur.prevZone.key; return renderFlow(body); }
-        if (act === 'zinit') { await setZone($('#flZoneInit').value, $('#flAnchor').value || L.dIso(L.mondayOf(new Date()))); toast('success', 'บันทึกโซนจ่ายหมายแล้ว'); return renderFlow(body); }
+        if (act === 'zinit') { await setZone($('#flZoneInit').value, $('#flAnchor').value || L.dIso(L.mondayOf(new Date())), Number($('#flPresetInit').value)); toast('success', 'เริ่มใช้โซนจ่ายหมายแล้ว'); return renderFlow(body); }
+        if (act === 'zsettings') { R.sub = 'zones'; return renderSub(); }
+        if (act === 'syncdetected') {
+          const anchor = L.dIso(L.mondayOf(L.parseIso(D.per.start)));
+          await setZone(D.detected.key, anchor); toast('success', `ตั้ง ${D.detected.label} เป็นโซนของรอบนี้แล้ว`); return renderFlow(body);
+        }
         if (act === 'znext' || act === 'zprev') {
           const target = act === 'znext' ? D.cur.nextZone : D.cur.prevZone;
           const ok = await Swal.fire({ icon: 'question', title: act === 'znext' ? 'เลื่อนไปโซนถัดไป?' : 'ย้อนกลับไปโซนก่อนหน้า?', html: `เปลี่ยนโซนจ่ายหมายเป็น <b>${esc(target.label)}</b><br><span class="sr-muted">เริ่มนับ 2 สัปดาห์ใหม่ตั้งแต่วันจันทร์ที่ ${thDay(L.mondayOf(new Date()))}</span>`, showCancelButton: true, confirmButtonText: 'เปลี่ยนโซน', cancelButtonText: 'ยกเลิก' });
@@ -1013,13 +1091,159 @@
           await loadIssued().catch(() => {}); done(); return renderFlow(body);
         }
         if (act === 'zip') return zipPhotos(D.uploads, `ภาพส่งหมาย_${D.zone.label}_${D.win.startIso}`);
-        if (act === 'import') { await importExcelFlow(); return; }
+        if (act === 'import') { FL.periodKey = ''; FL.viewZone = ''; await importExcelFlow(); return; }
         if (act === 'wordall') return bulkWord(D.reported.map((it) => it.id));
         if (act === 'memo') { R.sub = 'memos'; return renderSub(); }
         if (act === 'legacy') { openLegacyRouteBatch(); }
       } catch (er) { done(); fail(er); }
     };
   }
+  /** เลือกใช้ Pre-set: ถามโซนปัจจุบัน + วันจันทร์ที่เริ่มโซน */
+  async function usePreset(id) {
+    const p = zonePresets().find((x) => x.id === Number(id)); if (!p) return false;
+    const zs = zoneGroups(p);
+    if (!zs.length) throw new Error('Pre-set นี้ยังไม่มีโซน');
+    const st = zoneState();
+    const keep = st && Number(st.preset_id) === p.id ? st.zone_key : zs[0].key;
+    const r = await Swal.fire({
+      title: `ใช้ Pre-set "${esc(p.name)}"`,
+      html: `<div style="text-align:left;font-size:14px"><label>โซนที่กำลังรับผิดชอบตอนนี้</label>
+        <select id="upZone" class="swal2-select" style="width:100%;margin:6px 0 12px;display:block">${zs.map((z) => `<option value="${esc(z.key)}" ${z.key === keep ? 'selected' : ''}>โซน ${z.no}: ${esc(z.label)}</option>`).join('')}</select>
+        <label>เริ่มโซนนี้ตั้งแต่วันจันทร์ที่</label><input id="upAnchor" type="date" class="swal2-input" style="width:100%;margin:6px 0 0" value="${L.dIso(L.mondayOf(new Date()))}">
+        <div style="color:#64748b;font-size:12.5px;margin-top:8px">ระบบจะเลื่อนไปโซนถัดไปตามลำดับทุก 2 สัปดาห์นับจากวันนี้</div></div>`,
+      showCancelButton: true, confirmButtonText: 'ใช้ Pre-set นี้', cancelButtonText: 'ยกเลิก',
+      preConfirm: () => ({ zone: document.getElementById('upZone').value, anchor: document.getElementById('upAnchor').value }),
+    });
+    if (!r.isConfirmed) return false;
+    await setZone(r.value.zone, r.value.anchor || L.dIso(L.mondayOf(new Date())), p.id);
+    toast('success', `ใช้ Pre-set "${p.name}" แล้ว`);
+    return true;
+  }
+
+  // ---------------- โซนจ่ายหมาย: ตั้งค่า Pre-set เอง ----------------
+  const ZE = { draft: null, open: -1 };
+  const newZoneId = () => 'z' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  function blankPreset() {
+    const prov = defaultProvince();
+    return { id: null, name: zonePresets().length ? `Pre-set ${zonePresets().length + 1}` : 'โซนจ่ายหมาย', province: prov, muang: L.muangOf(prov, ADDR()), zones: [{ id: newZoneId(), name: '', subdistricts: [], districts: [] }] };
+  }
+  function renderZones(body) {
+    body = body || $('#srBody'); if (!body) return;
+    const presets = zonePresets(); const act = activePreset();
+    const list = presets.map((p) => {
+      const zs = zoneGroups(p);
+      return `<tr><td><b>${esc(p.name)}</b> ${act && act.id === p.id ? '<span class="sr-chip ok">กำลังใช้</span>' : ''}<div class="sr-muted">จ.${esc(p.province)} · ${zs.length} โซน</div></td>
+        <td>${zs.map((z) => `<div><b>โซน ${z.no}</b> ${esc(z.label)}</div>`).join('')}</td>
+        <td class="ctr" style="white-space:nowrap">${act && act.id === p.id ? '' : `<button class="sr-btn sm primary" data-zp-use="${p.id}"><i class="fa-solid fa-circle-check"></i> ใช้ Pre-set นี้</button>`}
+          <button class="sr-btn sm" data-zp-edit="${p.id}"><i class="fa-solid fa-pen"></i> แก้ไข</button>
+          <button class="sr-btn sm" data-zp-copy="${p.id}" title="คัดลอกเป็น Pre-set ใหม่"><i class="fa-regular fa-copy"></i></button>
+          <button class="sr-btn sm danger" data-zp-del="${p.id}" title="ลบ"><i class="fa-solid fa-trash"></i></button></td></tr>`;
+    }).join('');
+    body.innerHTML = `<div class="sr-card"><div class="sr-toolbar"><h3 style="margin:0">Pre-set โซนจ่ายหมายของฉัน</h3><span class="grow"></span>
+        <button class="sr-btn primary" data-zp-new="1"><i class="fa-solid fa-plus"></i> สร้าง Pre-set ใหม่</button></div>
+        <div class="sr-muted" style="margin:4px 0 10px">กำหนดเองว่าแต่ละโซนมี <b>ตำบลในอำเภอเมือง</b> หรือ <b>อำเภอ</b> ใดบ้าง (โซนหนึ่งมีได้หลายตำบล/หลายอำเภอ) เรียงตามลำดับการหมุนเวียน — ระบบใช้ Pre-set ที่เลือกตลอดเวลา และเลื่อนไปโซนถัดไปทุก 2 สัปดาห์ · ถ้าการแบ่งโซนเปลี่ยน ให้สร้าง Pre-set ใหม่แล้วเลือกใช้</div>
+        ${presets.length ? `<table class="sr-table"><thead><tr><th style="width:22%">Pre-set</th><th>โซน (ตามลำดับหมุนเวียน)</th><th class="ctr">จัดการ</th></tr></thead><tbody>${list}</tbody></table>` : '<div class="sr-empty">ยังไม่มี Pre-set — กด "สร้าง Pre-set ใหม่"</div>'}
+      </div><div id="zpEditor"></div>`;
+    if (ZE.draft) drawEditor();
+    body.onclick = async (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      try {
+        if (b.dataset.zpNew) { ZE.draft = blankPreset(); ZE.open = 0; return drawEditor(true); }
+        if (b.dataset.zpEdit || b.dataset.zpCopy) {
+          const p = presets.find((x) => x.id === Number(b.dataset.zpEdit || b.dataset.zpCopy));
+          ZE.draft = JSON.parse(JSON.stringify(p)); ZE.open = -1;
+          if (b.dataset.zpCopy) { ZE.draft.id = null; ZE.draft.name = `${p.name} (สำเนา)`; ZE.draft.zones.forEach((z) => { z.id = newZoneId(); }); }
+          ZE.draft.muang = ZE.draft.muang || L.muangOf(ZE.draft.province, ADDR());
+          return drawEditor(true);
+        }
+        if (b.dataset.zpUse) { if (await usePreset(Number(b.dataset.zpUse))) renderZones(body); return; }
+        if (b.dataset.zpDel) {
+          const p = presets.find((x) => x.id === Number(b.dataset.zpDel));
+          const ok = await Swal.fire({ icon: 'warning', title: `ลบ Pre-set "${esc(p.name)}"?`, showCancelButton: true, confirmButtonText: 'ลบ', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#b91c1c' });
+          if (!ok.isConfirmed) return;
+          await api('sr_zone_preset_delete', { id: p.id }); await ensureBoot(true); if (ZE.draft && ZE.draft.id === p.id) ZE.draft = null; return renderZones(body);
+        }
+      } catch (er) { fail(er); }
+    };
+  }
+  function drawEditor(scroll) {
+    const host = $('#zpEditor'); if (!host) return;
+    const d = ZE.draft; if (!d) { host.innerHTML = ''; return; }
+    const A = L.provinceAreas(d.province, ADDR());
+    d.muang = A.muang;
+    const owner = new Map(); // พื้นที่ → โซนที่เลือกไว้
+    d.zones.forEach((z, i) => { (z.subdistricts || []).forEach((t) => owner.set('t:' + t, i)); (z.districts || []).forEach((x) => owner.set('d:' + x, i)); });
+    const box = (zi, kind, name) => {
+      const k = (kind === 't' ? 't:' : 'd:') + name; const o = owner.get(k); const mine = o === zi; const other = o !== undefined && !mine;
+      return `<label class="sr-zcheck ${mine ? 'on' : ''} ${other ? 'used' : ''}" title="${other ? `อยู่ในโซน ${o + 1} แล้ว` : ''}"><input type="checkbox" data-za="${zi}|${kind}|${esc(name)}" ${mine ? 'checked' : ''} ${other ? 'disabled' : ''}> ${kind === 't' ? 'ต.' : 'อ.'}${esc(name)}${other ? ` <small>(โซน ${o + 1})</small>` : ''}</label>`;
+    };
+    const zonesHtml = d.zones.map((z, i) => {
+      const auto = L.autoZoneName(z, A.muang); const cnt = (z.subdistricts || []).length + (z.districts || []).length;
+      return `<details class="sr-zone" ${ZE.open === i ? 'open' : ''} data-zi="${i}"><summary><b>โซน ${i + 1}</b> <span>${esc(z.name || auto)}</span> <span class="sr-muted">${cnt} พื้นที่</span>
+          <span class="grow"></span><button class="sr-btn sm" data-zu="${i}" ${i ? '' : 'disabled'} title="เลื่อนขึ้น"><i class="fa-solid fa-arrow-up"></i></button><button class="sr-btn sm" data-zd="${i}" ${i < d.zones.length - 1 ? '' : 'disabled'} title="เลื่อนลง"><i class="fa-solid fa-arrow-down"></i></button><button class="sr-btn sm danger" data-zx="${i}" title="ลบโซน"><i class="fa-solid fa-xmark"></i></button></summary>
+        <div class="sr-zone-body"><label class="sr-muted">ชื่อโซน (เว้นว่าง = ตั้งชื่อจากพื้นที่)</label><input class="sr-input" data-zn="${i}" value="${esc(z.name || '')}" placeholder="${esc(auto)}" style="width:100%;max-width:520px">
+          ${A.muang ? `<div class="sr-zgroup"><div class="sr-zgroup-h">ตำบลในอำเภอ${esc(A.muang)} <a href="#" data-zall="${i}|t">เลือกที่เหลือทั้งหมด</a> · <a href="#" data-znone="${i}|t">ล้าง</a></div><div class="sr-zgrid">${A.muangSubdistricts.map((t) => box(i, 't', t)).join('')}</div></div>` : ''}
+          <div class="sr-zgroup"><div class="sr-zgroup-h">อำเภอ${A.muang ? ' (นอกจากอำเภอ' + esc(A.muang) + ')' : ''} <a href="#" data-znone="${i}|d">ล้าง</a></div><div class="sr-zgrid">${A.districts.map((x) => box(i, 'd', x)).join('')}</div></div>
+        </div></details>`;
+    }).join('');
+    const usedT = d.zones.reduce((n, z) => n + (z.subdistricts || []).length, 0); const usedD = d.zones.reduce((n, z) => n + (z.districts || []).length, 0);
+    host.innerHTML = `<div class="sr-card" id="zpEditCard"><h3 style="margin-top:0">${d.id ? 'แก้ไข Pre-set' : 'สร้าง Pre-set ใหม่'}</h3>
+      <div class="sr-toolbar"><label class="sr-muted">ชื่อ Pre-set</label><input class="sr-input" id="zpName" value="${esc(d.name)}" style="width:260px">
+        <label class="sr-muted">จังหวัด</label><select class="sr-select" id="zpProv" style="width:200px">${PROVINCES().map((p) => `<option ${p === d.province ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
+        <span class="sr-muted">อำเภอเมือง: <b>${esc(A.muang || '— (ไม่มี)')}</b> · เลือกแล้ว ต. ${usedT}/${A.muangSubdistricts.length} · อ. ${usedD}/${A.districts.length}</span></div>
+      <div style="margin-top:10px">${zonesHtml}</div>
+      <div class="sr-toolbar" style="margin-top:12px"><button class="sr-btn" data-zadd="1"><i class="fa-solid fa-plus"></i> เพิ่มโซน</button><span class="grow"></span>
+        <button class="sr-btn" data-zcancel="1">ยกเลิก</button><button class="sr-btn primary" data-zsave="1"><i class="fa-solid fa-floppy-disk"></i> บันทึก Pre-set</button></div></div>`;
+    if (scroll) host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    host.oninput = (e) => {
+      const t = e.target;
+      if (t.id === 'zpName') d.name = t.value;
+      if (t.dataset.zn !== undefined) { d.zones[+t.dataset.zn].name = t.value; const sm = t.closest('details').querySelector('summary > span'); if (sm) sm.textContent = t.value || L.autoZoneName(d.zones[+t.dataset.zn], A.muang); }
+    };
+    host.onchange = async (e) => {
+      const t = e.target;
+      if (t.id === 'zpProv') {
+        const has = d.zones.some((z) => (z.subdistricts || []).length || (z.districts || []).length);
+        if (has) { const ok = await Swal.fire({ icon: 'question', title: 'เปลี่ยนจังหวัด?', text: 'พื้นที่ที่เลือกไว้ในทุกโซนจะถูกล้าง', showCancelButton: true, confirmButtonText: 'เปลี่ยน', cancelButtonText: 'ยกเลิก' }); if (!ok.isConfirmed) { t.value = d.province; return; } }
+        d.province = t.value; d.zones.forEach((z) => { z.subdistricts = []; z.districts = []; }); return drawEditor();
+      }
+      if (t.dataset.za) {
+        const [zi, kind, name] = t.dataset.za.split('|'); const z = d.zones[+zi]; const key = kind === 't' ? 'subdistricts' : 'districts';
+        z[key] = z[key] || [];
+        if (t.checked) { if (!z[key].includes(name)) z[key].push(name); } else z[key] = z[key].filter((x) => x !== name);
+        ZE.open = +zi; drawEditor();
+      }
+    };
+    host.onclick = async (e) => {
+      const a = e.target.closest('a[data-zall],a[data-znone]');
+      if (a) {
+        e.preventDefault();
+        const [zi, kind] = (a.dataset.zall || a.dataset.znone).split('|'); const z = d.zones[+zi]; const key = kind === 't' ? 'subdistricts' : 'districts';
+        if (a.dataset.znone) z[key] = [];
+        else { const taken = new Set(d.zones.filter((_, j) => j !== +zi).flatMap((x) => x[key] || [])); z[key] = (kind === 't' ? A.muangSubdistricts : A.districts).filter((x) => !taken.has(x)); }
+        ZE.open = +zi; return drawEditor();
+      }
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.closest('summary')) e.preventDefault();
+      if (b.dataset.zu || b.dataset.zd) { const i = +(b.dataset.zu || b.dataset.zd); const j = b.dataset.zu ? i - 1 : i + 1; [d.zones[i], d.zones[j]] = [d.zones[j], d.zones[i]]; ZE.open = j; return drawEditor(); }
+      if (b.dataset.zx) { d.zones.splice(+b.dataset.zx, 1); ZE.open = -1; return drawEditor(); }
+      if (b.dataset.zadd) { d.zones.push({ id: newZoneId(), name: '', subdistricts: [], districts: [] }); ZE.open = d.zones.length - 1; return drawEditor(); }
+      if (b.dataset.zcancel) { ZE.draft = null; host.innerHTML = ''; return; }
+      if (b.dataset.zsave) {
+        d.name = ($('#zpName').value || '').trim();
+        const errs = (d.name ? [] : ['กรุณาตั้งชื่อ Pre-set']).concat(L.validatePreset(d));
+        if (errs.length) return Swal.fire({ icon: 'warning', title: 'ตรวจสอบการตั้งค่าโซน', html: errs.map(esc).join('<br>') });
+        const left = A.muangSubdistricts.length + A.districts.length - (usedT + usedD);
+        if (left > 0) { const ok = await Swal.fire({ icon: 'question', title: 'ยังมีพื้นที่ที่ไม่อยู่ในโซนใด', text: `${left} พื้นที่ยังไม่ถูกเลือก (เช่น อยู่นอกเขตจ่ายหมาย) — บันทึกต่อไหม?`, showCancelButton: true, confirmButtonText: 'บันทึก', cancelButtonText: 'กลับไปแก้ไข' }); if (!ok.isConfirmed) return; }
+        try {
+          busy('กำลังบันทึก...');
+          await api('sr_zone_preset_save', { id: d.id, name: d.name, province: d.province, muang: A.muang, zones: d.zones });
+          await ensureBoot(true); done(); ZE.draft = null; toast('success', 'บันทึก Pre-set แล้ว'); renderZones();
+        } catch (er) { done(); fail(er); }
+      }
+    };
+  }
+
   /** เปิดหน้า "รายการส่งหมายรอบนี้" แบบเดิม (เส้นทางจากมือถือ) */
   function openLegacyRouteBatch() {
     FL.legacy = true;
@@ -1309,46 +1533,17 @@
       ${['inspector', 'payer', 'director', 'officer'].map(block).join('')}
       <div class="sr-card"><div class="sr-toolbar"><h3 style="margin:0">คำสั่งศาลแต่งตั้งเจ้าพนักงาน (ใช้ในบันทึกข้อความ)</h3><span class="grow"></span>${admin ? '<button class="sr-btn sm primary" id="srOrderAdd"><i class="fa-solid fa-plus"></i> เพิ่มคำสั่งฉบับใหม่</button>' : ''}</div>
         <table class="sr-table" style="margin-top:8px"><thead><tr><th>คำสั่ง</th><th>หมายเหตุ</th><th></th></tr></thead><tbody>${(R.boot.orders || []).map((o, i) => `<tr><td>${esc(o.order_text)} ${i === 0 ? '<span class="sr-chip ok">ฉบับล่าสุด</span>' : ''}</td><td class="sr-muted">${esc(o.note)}</td><td class="ctr">${admin ? `<button class="sr-btn sm danger" data-odel="${o.id}"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`).join('')}</tbody></table></div>
-      <div class="sr-card"><div class="sr-toolbar"><h3 style="margin:0">โซนจ่ายหมาย (หมุนเวียนทุก 2 สัปดาห์ตามลำดับ)</h3><span class="grow"></span>${admin ? '<button class="sr-btn sm" id="zn_reset"><i class="fa-solid fa-arrow-rotate-left"></i> ค่าเริ่มต้น</button> <button class="sr-btn sm primary" id="zn_save"><i class="fa-solid fa-floppy-disk"></i> บันทึกลำดับโซน</button>' : ''}</div>
-        <div class="sr-muted" style="margin:4px 0 8px">โซน = อำเภอ (อ.เมืองอุดรธานีแบ่งตามตำบล) · ติ๊ก "รวมกับโซนก่อนหน้า" เพื่อให้หลายพื้นที่เป็นโซนเดียวกัน · ปิดใช้พื้นที่ที่ไม่อยู่ในเขตจ่ายหมาย${admin ? '' : ' (แก้ไขได้เฉพาะผู้ดูแลระบบ)'}</div>
-        <div class="sr-scroll" style="max-height:360px"><table class="sr-table"><thead><tr><th>ลำดับ</th><th>พื้นที่</th><th class="ctr">ใช้งาน</th><th class="ctr">รวมกับโซนก่อนหน้า</th>${admin ? '<th class="ctr">เลื่อน</th>' : ''}</tr></thead><tbody id="zn_rows"></tbody></table></div></div>
       <div class="sr-card"><h3>การตั้งค่าเอกสาร</h3><div class="sr-grid sr-g3">
         <div class="sr-field"><label>ตัวเลขในไฟล์ Word</label><select class="sr-select" id="st_doc_digits" ${admin ? '' : 'disabled'}><option value="thai" ${s.doc_digits !== 'arabic' ? 'selected' : ''}>เลขไทย (๑๒๓) ตามแบบฟอร์มศาล</option><option value="arabic" ${s.doc_digits === 'arabic' ? 'selected' : ''}>เลขอารบิก (123)</option></select></div>
         <div class="sr-field"><label>ที่อยู่ผู้รับเงิน (ใบสำคัญรับเงิน)</label><input class="sr-input" id="st_reporter_address" value="${esc(s.reporter_address || '')}" ${admin ? '' : 'readonly'}></div>
         <div class="sr-field"><label>ตำแหน่ง ผอ. (ข้อความใต้ผู้ตรวจ)</label><input class="sr-input" id="st_director_title" value="${esc(s.director_title || '')}" ${admin ? '' : 'readonly'}></div>
         ${admin ? '<div class="sr-field"><button class="sr-btn primary" id="st_save"><i class="fa-solid fa-floppy-disk"></i> บันทึกการตั้งค่า</button></div>' : ''}</div></div>`;
     const reload = async () => { await ensureBoot(true); renderSettings(body); };
-    let units = zoneUnits();
-    const drawZones = () => {
-      let no = 0;
-      $('#zn_rows').innerHTML = units.map((z, i) => {
-        if (z.enabled !== false && !(z.merge && i > 0)) no += 1;
-        return `<tr><td>${z.enabled === false ? '-' : z.merge && i > 0 ? '↳' : no}</td><td>${esc(z.label)}</td>
-          <td class="ctr"><input type="checkbox" data-zn-en="${i}" ${z.enabled !== false ? 'checked' : ''} ${admin ? '' : 'disabled'}></td>
-          <td class="ctr"><input type="checkbox" data-zn-mg="${i}" ${z.merge ? 'checked' : ''} ${admin && i > 0 ? '' : 'disabled'}></td>
-          ${admin ? `<td class="ctr"><button class="sr-btn sm" data-zn-up="${i}" ${i ? '' : 'disabled'}><i class="fa-solid fa-arrow-up"></i></button><button class="sr-btn sm" data-zn-dn="${i}" ${i < units.length - 1 ? '' : 'disabled'}><i class="fa-solid fa-arrow-down"></i></button></td>` : ''}</tr>`;
-      }).join('');
-    };
-    drawZones();
-    $('#zn_rows').onchange = (e) => {
-      const t = e.target;
-      if (t.dataset.znEn) units[+t.dataset.znEn].enabled = t.checked;
-      if (t.dataset.znMg) units[+t.dataset.znMg].merge = t.checked;
-      drawZones();
-    };
+
     $('#pf_save').onclick = () => { LS.set(profileKey(), Object.assign(profile(), { name: $('#pf_name').value.trim(), position: $('#pf_position').value.trim() })); toast('success', 'บันทึกแล้ว'); };
     body.onclick = async (e) => {
       const b = e.target.closest('button'); if (!b) return;
       try {
-        if (b.dataset.znUp || b.dataset.znDn) {
-          const i = Number(b.dataset.znUp || b.dataset.znDn); const j = b.dataset.znUp ? i - 1 : i + 1;
-          [units[i], units[j]] = [units[j], units[i]]; return drawZones();
-        }
-        if (b.id === 'zn_reset') { units = L.defaultZones(); return drawZones(); }
-        if (b.id === 'zn_save') {
-          await api('sr_settings_save', { values: { zone_list: JSON.stringify(units.map((z) => ({ key: z.key, enabled: z.enabled !== false, merge: Boolean(z.merge) }))) } });
-          await reload(); toast('success', 'บันทึกลำดับโซนจ่ายหมายแล้ว'); return;
-        }
         if (b.dataset.sadd) { if (await signerDialog({ kind: b.dataset.sadd })) await reload(); }
         else if (b.dataset.sedit) { const sg = R.boot.signers.find((x) => String(x.id) === b.dataset.sedit); if (await signerDialog(sg)) await reload(); }
         else if (b.dataset.sdel) {
