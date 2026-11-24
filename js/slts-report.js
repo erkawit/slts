@@ -580,6 +580,9 @@
     // ค่าที่เคยบันทึกไว้ทับค่าเริ่มต้น (ยกเว้นกด "ล้าง")
     if (!(opt && opt.reset)) Object.keys(rep).forEach((k) => { if (rep[k] !== undefined && rep[k] !== null) d[k] = rep[k]; });
     if (opt && opt.photoIds && opt.photoIds.length) d.photo_ids = Array.from(new Set([...(opt.photoIds), ...((!opt.reset && rep.photo_ids) || [])]));
+    // ใบเสร็จ (หมายเงิน): ที่บันทึกไว้ → จากบัญชีใบเสร็จ Excel → เลขล่าสุดของผู้ใช้ +1
+    if (!d.rcpt_book && !d.rcpt_no) Object.assign(d, receiptDefaults(it, d.receipt_ref || it.receipt_ref));
+    if (!d.rcpt_type) d.rcpt_type = L.isEfilingCase(it) ? 'efiling' : 'pink';
     // หมายฟรี: การเบิกตามที่เลือกไว้ (กฎบ้าน/หมู่บ้านเดียวกัน) เป็นหลัก
     if (it.money_type !== 'paid') {
       const p = claimPlan(claimScope(it)).get(it.id);
@@ -593,6 +596,21 @@
       }
     }
     return d;
+  }
+
+  /** ค่าเริ่มต้นของใบเสร็จ: ชมพู/e-Filing ตามเลขคดี (มี E และไม่ใช่หมาย ต. = e-Filing) */
+  function receiptDefaults(it, ref) {
+    const type = L.isEfilingCase(it) ? 'efiling' : 'pink';
+    const p = L.parseReceiptRef(ref);
+    if (p && p.book && p.no) return { rcpt_type: p.type, rcpt_book: p.book, rcpt_no: p.no, rcpt_hint: 'จากบัญชีใบเสร็จ (Excel)' };
+    const last = ((R.boot && R.boot.rcptLast) || {})[type];
+    if (type === 'efiling') {
+      const fy = 'D' + L.fiscalYearBE(new Date());
+      if (last && last.book === fy) return { rcpt_type: type, rcpt_book: fy, rcpt_no: L.nextReceiptNo(type, last.no), rcpt_hint: `ต่อจากเลขล่าสุด ${last.book} / ${last.no}` };
+      return { rcpt_type: type, rcpt_book: fy, rcpt_no: '', rcpt_hint: last ? `เลขล่าสุด ${last.book} / ${last.no} (ปีงบประมาณก่อน)` : '' };
+    }
+    if (last && last.book) return { rcpt_type: type, rcpt_book: last.book, rcpt_no: L.nextReceiptNo(type, last.no), rcpt_hint: `ต่อจากเลขล่าสุด เล่มที่ ${last.book} เลขที่ ${last.no}` };
+    return { rcpt_type: type, rcpt_book: '', rcpt_no: '', rcpt_hint: '' };
   }
 
   function signerOptions(kind, selId) {
@@ -677,7 +695,14 @@
               <div class="sr-muted" id="rf_claim_rule"></div></div>
             ${inp('claim_amount', 'อัตราหมายฟรี (บาท)', { type: 'number', cls: 'rf-free' })}
             ${inp('amount', 'ค่าบริการส่งครั้งนี้ (บาท)', { type: 'number', cls: 'rf-paid' })}
-            ${inp('receipt_ref', 'โดยตัดจ่ายจากเงินของ (ใบเสร็จ)', { cls: 'rf-paid sr-span2' })}
+            <div class="sr-field sr-span4 rf-paid sr-rcpt"><label>ใบเสร็จ (โดยตัดจ่ายจากเงินของ) <span class="req">*</span></label>
+              <div class="sr-inline" style="flex-wrap:wrap;gap:10px;align-items:center">
+                <div class="sr-radio"><label><input type="radio" name="rf_rcpt_type" value="pink" ${v.rcpt_type !== 'efiling' ? 'checked' : ''}> ใบเสร็จชมพู</label><label><input type="radio" name="rf_rcpt_type" value="efiling" ${v.rcpt_type === 'efiling' ? 'checked' : ''}> ใบเสร็จ e-Filing</label></div>
+                <label class="sr-muted">เล่มที่</label><span class="sr-prefix" id="rcBookPre">D</span><input class="sr-input" id="rf_rcpt_book_in" inputmode="numeric" style="width:110px" value="${esc(String(v.rcpt_book || '').replace(/\D+/g, ''))}">
+                <label class="sr-muted">เลขที่</label><span class="sr-prefix" id="rcNoPre">ค</span><input class="sr-input" id="rf_rcpt_no_in" inputmode="numeric" style="width:120px" value="${esc(v.rcpt_type === 'efiling' ? String(v.rcpt_no || '').replace(/\D+/g, '') : String(v.rcpt_no || '').replace(/\D+/g, ''))}">
+                <button class="sr-btn sm" type="button" id="rcNext" title="ใช้เลขถัดจากเลขล่าสุดที่บันทึก">เลขถัดไป</button>
+              </div>
+              <div class="sr-muted" id="rcHint" style="margin-top:4px"></div></div>
             ${isT ? inp('payer_court', 'ศาลผู้วางเงิน (ใบสำคัญรับเงิน)', { cls: 'rf-paid', list: 'rf_courts' }) : ''}
             <div class="sr-field sr-span4"><div class="sr-note" id="rf_money_preview"></div></div>
           </div></div>
@@ -722,6 +747,7 @@
     const close = () => { wrap.remove(); document.body.style.overflow = ''; };
     const g = (k) => wrap.querySelector('#rf_' + k);
 
+    let touchedRc = false;
     const refresh = () => {
       const code = g('result_code').value; const notice = L.isNoticeResult(code);
       wrap.querySelector('#rf_tpl').textContent = 'แบบ: ' + L.TEMPLATE_LABELS[L.templateFor(it.kind, code)];
@@ -731,6 +757,20 @@
       $$('.rf-paid', wrap).forEach((el) => { el.style.display = paid ? '' : 'none'; });
       $$('.rf-free', wrap).forEach((el) => { el.style.display = paid ? 'none' : ''; });
       g('claim_box').style.display = paid ? 'none' : '';
+      {
+        const ef = ((wrap.querySelector('input[name="rf_rcpt_type"]:checked') || {}).value) === 'efiling';
+        wrap.querySelector('#rcBookPre').style.display = ef ? '' : 'none';
+        wrap.querySelector('#rcNoPre').style.display = ef ? '' : 'none';
+        const bi = g('rcpt_book_in'); const ni = g('rcpt_no_in');
+        bi.maxLength = ef ? 4 : 7; ni.maxLength = ef ? 6 : 7;
+        bi.placeholder = ef ? String(L.fiscalYearBE(new Date())) : 'เช่น 97335'; ni.placeholder = ef ? '000912' : 'เช่น 310';
+        const n = L.normReceipt(ef ? 'efiling' : 'pink', bi.value, ni.value);
+        const doc = L.receiptDocText(n.type, n.book, n.no);
+        const last = ((R.boot && R.boot.rcptLast) || {})[n.type];
+        wrap.querySelector('#rcHint').innerHTML = `${n.book || n.no ? `บนใบเสร็จ: <b>${ef ? 'เล่มที่ ' + esc(n.book) + ' เลขที่ ' + esc(n.no) : 'เล่มที่ ' + esc(n.book) + ' เลขที่ ' + esc(n.no)}</b> · ในแบบรายงาน: <b>${esc(doc)}</b>` : 'กรอกเล่มที่และเลขที่ใบเสร็จ'}`
+          + `${v.rcpt_hint && !touchedRc ? ` · <span style="color:#b45309">${esc(v.rcpt_hint)} — ตรวจกับใบเสร็จจริง</span>` : ''}${last ? ` · ล่าสุดของคุณ (${ef ? 'e-Filing' : 'ชมพู'}): ${esc(last.book)} / ${esc(last.no)}` : ''}`
+          + `${L.isEfilingCase(it) !== ef ? ` <span class="sr-chip warn">เลขคดีนี้ปกติใช้ใบเสร็จ${L.isEfilingCase(it) ? ' e-Filing' : 'ชมพู'}</span>` : ''}`;
+      }
       if (!paid && it.money_type !== 'paid') {
         const mode = (wrap.querySelector('input[name="rf_claim"]:checked') || {}).value || 'none';
         const p = claimPlan(claimScope(it), { id: it.id, fc: { mode, at: claimChoice(it).at || new Date().toISOString() } }).get(it.id);
@@ -756,6 +796,13 @@
       });
       r.result_text = L.resultText(r.result_code);
       if (r.file_type === 'court') { r.court_note = r.resend_to; }
+      {
+        const t = ((wrap.querySelector('input[name="rf_rcpt_type"]:checked') || {}).value) === 'efiling' ? 'efiling' : 'pink';
+        const n = L.normReceipt(t, g('rcpt_book_in').value, g('rcpt_no_in').value);
+        r.rcpt_type = t; r.rcpt_book = n.book; r.rcpt_no = n.no;
+        r.receipt_ref = L.receiptDocText(t, n.book, n.no);
+        delete r.rcpt_hint;
+      }
       r.claim_mode = (wrap.querySelector('input[name="rf_claim"]:checked') || {}).value || 'none';
       r.claim = r.claim_mode !== 'none';
       r.posting_choice = (wrap.querySelector('input[name="rf_posting"]:checked') || {}).value || '2';
@@ -768,7 +815,27 @@
       r.kind = it.kind;
       return r;
     }
-    wrap.addEventListener('input', refresh);
+    wrap.addEventListener('input', (e) => {
+      if (e.target.id === 'rf_rcpt_book_in' || e.target.id === 'rf_rcpt_no_in') {
+        touchedRc = true;
+        const c = e.target.value.replace(/[๐-๙]/g, (x) => '๐๑๒๓๔๕๖๗๘๙'.indexOf(x)).replace(/\D+/g, '');
+        if (c !== e.target.value) e.target.value = c;
+      }
+      refresh();
+    });
+    wrap.addEventListener('focusout', (e) => {
+      const ef = ((wrap.querySelector('input[name="rf_rcpt_type"]:checked') || {}).value) === 'efiling';
+      if (ef && e.target.id === 'rf_rcpt_no_in' && e.target.value) { e.target.value = e.target.value.padStart(6, '0'); refresh(); }
+    });
+    wrap.addEventListener('click', (e) => {
+      if (!e.target.closest('#rcNext')) return;
+      const ef = ((wrap.querySelector('input[name="rf_rcpt_type"]:checked') || {}).value) === 'efiling';
+      const d0 = receiptDefaults(Object.assign({}, it, ef ? { kind: 'LOCAL', t_no: '', black_no: 'E' } : { kind: 'T' }), '');
+      if (d0.rcpt_book) g('rcpt_book_in').value = d0.rcpt_book.replace(/\D+/g, '');
+      g('rcpt_no_in').value = String(d0.rcpt_no || '').replace(/\D+/g, '');
+      if (!d0.rcpt_no) toast('info', 'ยังไม่มีเลขล่าสุดของใบเสร็จแบบนี้ — กรอกเลขที่เอง');
+      touchedRc = true; refresh();
+    });
     wrap.addEventListener('change', (e) => {
       if (e.target.id === 'rf_inspector_id') {
         const s = signers('inspector').find((x) => String(x.id) === e.target.value);
@@ -779,6 +846,19 @@
         if (s) g('payer_position').value = s.position;
       }
       if (e.target.id === 'rf_district' && !g('postcode').value) g('postcode').value = L.postcodeFor(e.target.value);
+      if (e.target.name === 'rf_rcpt_type') {
+        touchedRc = true;
+        const t = e.target.value;
+        const last = ((R.boot && R.boot.rcptLast) || {})[t];
+        if (t === 'efiling') {
+          const fy = String(L.fiscalYearBE(new Date()));
+          g('rcpt_book_in').value = fy;
+          g('rcpt_no_in').value = last && last.book === 'D' + fy ? L.nextReceiptNo(t, last.no).replace(/\D+/g, '') : '';
+        } else {
+          g('rcpt_book_in').value = last ? String(last.book).replace(/\D+/g, '') : '';
+          g('rcpt_no_in').value = last ? L.nextReceiptNo(t, last.no) : '';
+        }
+      }
       if (e.target.name === 'rf_claim' && it.money_type !== 'paid') {
         const p = claimPlan(claimScope(it), { id: it.id, fc: { mode: e.target.value, at: claimChoice(it).at || new Date().toISOString() } }).get(it.id);
         if (p && p.base) g('claim_amount').value = p.amount;
@@ -824,6 +904,7 @@
         if (act.dataset.act === 'save' || act.dataset.act === 'saveprint') {
           const out = await api('sr_report_save', { id: it.id, report: stripReport(r), status: act.dataset.act === 'saveprint' ? 'printed' : 'saved' });
           it.report = stripReport(r); it.report_status = out.report_status; it.reported_at = new Date().toISOString();
+          if (out.rcptLast && R.boot) R.boot.rcptLast = out.rcptLast;
           toast('success', 'บันทึกรายงานผลหมายแล้ว');
         }
         if (act.dataset.act === 'print' || act.dataset.act === 'saveprint') {
@@ -850,6 +931,7 @@
     if (!r.payer_name) p.push('• ยังไม่ได้เลือกผู้จ่ายเงิน');
     if (r.kind === 'T' && !r.origin_court) p.push('• ยังไม่ได้ระบุศาลต้นทาง (หมาย ต.)');
     if (r.money_type === 'paid' && !r.amount) p.push('• หมายเงินยังไม่มีค่าบริการ');
+    if (r.money_type === 'paid' && (!r.rcpt_book || !r.rcpt_no)) p.push('• หมายเงินยังไม่ได้กรอกเล่มที่/เลขที่ใบเสร็จ');
     if (r.money_type !== 'paid' && r.claim && !r.claim_amount) p.push('• หมายฟรีที่เบิกยังไม่มีอัตราเงิน');
     if (!(r.photo_ids || []).length) p.push('• ไม่มีภาพการส่งหมาย (เอกสารจะไม่มีภาพแนบท้าย)');
     return p;
@@ -1132,7 +1214,11 @@
     const planOf = (it) => { const k = `${it.owner}|${it.period_start}|${it.period_end}`; if (!planCache.has(k)) planCache.set(k, claimPlan(claimScope(it))); return planCache.get(k).get(it.id); };
     let claimTotal = 0; let claimN = 0;
     const claimCell = (it) => {
-      if (it.money_type === 'paid') return `หมายเงิน ${L.money2(it.price)}`;
+      if (it.money_type === 'paid') {
+        const rp = it.report || {};
+        const ref = rp.rcpt_book ? L.receiptDocText(rp.rcpt_type, rp.rcpt_book, rp.rcpt_no) : L.receiptText(it.receipt_ref || '');
+        return `หมายเงิน ${L.money2(it.price)}<div class="sr-muted">${ref ? esc(ref) + (rp.rcpt_type === 'efiling' ? ' <span class="sr-chip">e-Filing</span>' : '') : `<span class="sr-chip warn">ยังไม่มีใบเสร็จ${L.isEfilingCase(it) ? ' (e-Filing)' : ''}</span>`}</div>`;
+      }
       const p = planOf(it); if (!p) return 'หมายฟรี';
       const decided = Boolean(claimChoice(it).mode);
       if (p.mode !== 'none') { claimTotal += p.amount; claimN += 1; }

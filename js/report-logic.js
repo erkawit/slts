@@ -358,6 +358,44 @@
     const m = s.match(/^(\d+)\s*\/\s*(\d+)/);
     return m ? `ใบเสร็จเล่มที่ ${m[1]} เลขที่ ${m[2]}` : s.replace(/\(.*\)$/, '').trim();
   }
+  // ---------------------------------------------------------------
+  // ใบเสร็จ: ชมพู (เล่มที่ตัวเลข / เลขที่ตัวเลข) และ e-Filing (เล่มที่ D+ปีงบประมาณ / เลขที่ "ค 000912")
+  // ---------------------------------------------------------------
+  /** ปีงบประมาณ (พ.ศ.): ตั้งแต่ 1 ต.ค. นับเป็นปีถัดไป */
+  function fiscalYearBE(date) {
+    const d = date ? new Date(date) : new Date();
+    return d.getFullYear() + 543 + (d.getMonth() >= 9 ? 1 : 0);
+  }
+  /** หมายใช้ใบเสร็จ e-Filing: เลขคดีดำมี E และไม่ใช่หมาย ต. */
+  const isEfilingCase = (r) => r && r.kind !== 'T' && !r.t_no && /E/i.test(toArabicDigits(String(r.black_no || '')));
+  const digitsOnly = (v) => toArabicDigits(String(v == null ? '' : v)).replace(/\D+/g, '');
+  /** จัดรูปเลขใบเสร็จที่เก็บ: e-Filing เล่ม "D2570" เลขที่ "ค 000912" / ชมพู ตัวเลขล้วน */
+  function normReceipt(type, book, no) {
+    const b = digitsOnly(book); const n = digitsOnly(no);
+    if (type === 'efiling') return { type, book: b ? 'D' + b : '', no: n ? 'ค ' + n.padStart(6, '0') : '' };
+    return { type: 'pink', book: b, no: n ? String(parseInt(n, 10)) : '' };
+  }
+  /** ข้อความในแบบรายงานผลหมาย: "ใบเสร็จเล่มที่ 2570 เลขที่ 912" (ตัด D / ค / เลข 0 นำหน้า) */
+  function receiptDocText(type, book, no) {
+    const b = digitsOnly(book); const n = digitsOnly(no);
+    if (!b && !n) return '';
+    return `ใบเสร็จเล่มที่ ${b.replace(/^0+(?=\d)/, '')} เลขที่ ${n ? String(parseInt(n, 10)) : ''}`.trim();
+  }
+  /** แยกเลขใบเสร็จจากข้อความเดิม (บัญชีใบเสร็จ Excel / ที่กรอกไว้) */
+  function parseReceiptRef(v) {
+    const s = toArabicDigits(String(v || '')).trim();
+    let m = s.match(/D\s*(\d{4})\D+?(?:ค\s*)?(\d{1,7})/i);
+    if (m) return normReceipt('efiling', m[1], m[2]);
+    m = s.match(/เล่มที่\s*(\d+)\s*เลขที่\s*(\d+)/) || s.match(/^(\d+)\s*\/\s*(\d+)/);
+    if (m) return normReceipt('pink', m[1], m[2]);
+    return null;
+  }
+  /** เลขที่ถัดไปจากเลขล่าสุด (คงรูปแบบ e-Filing) */
+  function nextReceiptNo(type, last) {
+    const n = digitsOnly(last); if (!n) return '';
+    return normReceipt(type, '', String(parseInt(n, 10) + 1)).no;
+  }
+
   function parseAccExpenseSheet(rows) {
     const h = findHeader(rows, ['เลขดำที่', 'ราคาหมาย']);
     if (!h || !h.cells.some((c) => c.includes('ใบเสร็จ'))) {
@@ -635,6 +673,8 @@
     const paid = r.money_type === 'paid';
     if (paid) {
       const amt = Number(r.amount) || 0;
+      const rcpt = (r.rcpt_book || r.rcpt_no) ? receiptDocText(r.rcpt_type, r.rcpt_book, r.rcpt_no) : receiptText(r.receipt_ref || '');
+      r = Object.assign({}, r, { receipt_ref: rcpt });
       return { amount: amt, show: amt > 0, source1: r.receipt_ref || '', source2: r.kind === 'T' ? (r.payer_court || r.origin_court || '') : (r.receipt_ref || ''), receipt_ref: r.receipt_ref || '' };
     }
     if (r.claim) {
@@ -1006,7 +1046,7 @@
     thNorm, THAI_MONTHS, THAI_MONTHS_SHORT, RESULT_CODES, FILE_TYPES, POSTING_CHOICES, SEND_METHODS, UDON_POSTCODES, TEMPLATE_LABELS,
     toThaiDigits, toArabicDigits, ymd, toIso, todayIso, parseThaiTextDate, thaiDateLong, thaiDateParts, thaiDateText, thaiDateShort,
     bahtText, money2, moneyShort, parseMoney, resultText, resultCodeOf, isNoticeResult, cleanDistrict, cleanSubdistrict,
-    districtKey, subKey, postcodeFor, caseKindOf, parseAddress, isTNo, receiptText,
+    districtKey, subKey, postcodeFor, caseKindOf, parseAddress, isTNo, receiptText, fiscalYearBE, isEfilingCase, normReceipt, receiptDocText, parseReceiptRef, nextReceiptNo,
     parseIssuedSheet, parseAccExpenseSheet, parseCourtExcel, matchReceipts, normName, normCase, caseNos, caseKey,
     findRate, exceptionMoos, evaluateFreeSummonItems, freeClaimPlan, claimKeys, parseRateRows, parseRatesWorkbook, parseRatePdfLines,
     templateFor, computeMoney, buildDocData, docFileName,

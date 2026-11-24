@@ -225,3 +225,17 @@ test('เบิกหมายฟรี: บ้านเดียวกันเ
   its[1].free_claim = { mode: 'none' };
   assert.equal(plan().get(1).amount, 950); // เหลือหมายเดียวในหมู่บ้าน → กลับเป็นเต็ม
 });
+
+test('ใบเสร็จ: ชมพู / e-Filing (ปีงบประมาณ) และข้อความในแบบรายงาน', () => {
+  assert.equal(L.fiscalYearBE(new Date(2026, 8, 30)), 2569);
+  assert.equal(L.fiscalYearBE(new Date(2026, 9, 1)), 2570);
+  assert.ok(L.isEfilingCase({ kind: 'LOCAL', black_no: 'ผบE1880/2569' }));
+  assert.ok(!L.isEfilingCase({ kind: 'T', t_no: 'ต3123/2569', black_no: 'ผบE2577/2569' })); // หมาย ต. ใช้ใบเสร็จชมพู
+  assert.ok(!L.isEfilingCase({ kind: 'LOCAL', black_no: 'ผบ166/2569' }));
+  assert.deepEqual(L.normReceipt('efiling', '2570', '912'), { type: 'efiling', book: 'D2570', no: 'ค 000912' });
+  assert.equal(L.receiptDocText('efiling', 'D2570', 'ค 000912'), 'ใบเสร็จเล่มที่ 2570 เลขที่ 912');
+  assert.equal(L.receiptDocText('pink', '97335', '310'), 'ใบเสร็จเล่มที่ 97335 เลขที่ 310');
+  assert.equal(L.nextReceiptNo('efiling', 'ค 000999'), 'ค 001000');
+  assert.equal(L.computeMoney({ money_type: 'paid', amount: 1700, rcpt_type: 'efiling', rcpt_book: 'D2570', rcpt_no: 'ค 000912' }).source1, 'ใบเสร็จเล่มที่ 2570 เลขที่ 912');
+  assert.equal(L.computeMoney({ money_type: 'paid', amount: 900, receipt_ref: '97335/110(900)' }).source1, 'ใบเสร็จเล่มที่ 97335 เลขที่ 110');
+});

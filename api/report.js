@@ -142,7 +142,7 @@ function issuedRow(r) {
 }
 
 async function settingsMap() {
-  const { rows } = await db.query('SELECT key, value FROM sr_settings');
+  const { rows } = await db.query("SELECT key, value FROM sr_settings WHERE key NOT LIKE 'rcpt_last:%'");
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
@@ -159,6 +159,8 @@ actions.sr_bootstrap = async (d, u) => {
     db.query('SELECT id, kind, full_name, position, acting, acting_title, is_default, created_by FROM sr_signers ORDER BY kind, is_default DESC, id'),
     db.query('SELECT id, order_text, order_no, order_date, note, is_active, created_by, created_at FROM sr_court_orders ORDER BY id DESC'),
   ]);
+  const { rows: [rl] } = await db.query('SELECT value FROM sr_settings WHERE key = $1', ['rcpt_last:' + u.username]);
+  let rcptLast = {}; try { rcptLast = JSON.parse((rl && rl.value) || '{}') || {}; } catch (_) { rcptLast = {}; }
   const [{ rows: [zone] }, { rows: presets }, { rows: staff }] = await Promise.all([
     db.query('SELECT preset_id, zone_key, anchor, updated_by, updated_at FROM sr_zone_state WHERE username = $1', [u.username]),
     db.query('SELECT id, owner, name, province, muang, zones, roster, source_file, updated_by, updated_at FROM sr_zone_presets ORDER BY id'),
@@ -166,7 +168,7 @@ actions.sr_bootstrap = async (d, u) => {
   ]);
   return {
     status: 'success', me: { username: u.username, name: u.name || u.username, role: u.role }, settings, rates: rates.rows, signers: signers.rows, orders: orders.rows,
-    zone: zone || null, zonePresets: presets.map(presetRow), activePresetId: Number(settings.zone_active_preset) || null, staff,
+    zone: zone || null, zonePresets: presets.map(presetRow), rcptLast, activePresetId: Number(settings.zone_active_preset) || null, staff,
   };
 };
 
@@ -581,7 +583,21 @@ actions.sr_report_save = async (d, u) => {
   if (json.length > 60000) throw new HttpError(413, 'ข้อมูลรายงานใหญ่เกินไป');
   const status = d.status === 'printed' || old.report_status === 'printed' ? 'printed' : 'saved';
   await db.query('UPDATE sr_issued SET report = $1::jsonb, report_status = $2, reported_at = NOW(), updated_at = NOW() WHERE id = $3', [json, status, id]);
-  return { status: 'success', report_status: status, message: 'บันทึกรายงานผลหมายเรียบร้อยแล้ว' };
+  // จำเลขใบเสร็จล่าสุดของผู้ใช้ (แยก ชมพู / e-Filing) — เล่มเดิมเก็บเลขที่สูงสุด
+  let rcptLast;
+  const rt = report.rcpt_type === 'efiling' ? 'efiling' : 'pink';
+  if (report.money_type === 'paid' && report.rcpt_book && report.rcpt_no) {
+    const key = 'rcpt_last:' + u.username;
+    const { rows: [rl] } = await db.query('SELECT value FROM sr_settings WHERE key = $1', [key]);
+    try { rcptLast = JSON.parse((rl && rl.value) || '{}') || {}; } catch (_) { rcptLast = {}; }
+    const num = (v) => parseInt(String(v || '').replace(/\D+/g, ''), 10) || 0;
+    const prev = rcptLast[rt];
+    if (!prev || prev.book !== String(report.rcpt_book) || num(report.rcpt_no) >= num(prev.no)) {
+      rcptLast[rt] = { book: s(report.rcpt_book, 20), no: s(report.rcpt_no, 20), at: new Date().toISOString() };
+      await db.query('INSERT INTO sr_settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value', [key, JSON.stringify(rcptLast)]);
+    }
+  }
+  return { status: 'success', report_status: status, rcptLast, message: 'บันทึกรายงานผลหมายเรียบร้อยแล้ว' };
 };
 
 // ---------- บันทึกข้อความ / ใบสำคัญรับเงิน (summon-report) ----------

@@ -339,3 +339,6 @@ html.pc-sidebar #srTabs { display: none; } /* เมนูย่อยอยู�
 .sr-chip.bad { border-color: #fecaca; color: #b91c1c; background: #fef2f2; }
 .sr-chip a { color: inherit; text-decoration: none; margin-left: 4px; }
 .sr-row-me td { background: #fffbeb; }
+.sr-prefix { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 34px; padding: 0 6px; border: 1px solid var(--c-line); border-right: 0; border-radius: 6px 0 0 6px; background: #f1f5f9; font-weight: 700; color: var(--c-primary); margin-right: -10px; }
+.sr-rcpt .sr-prefix + .sr-input { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.sr-field.sr-rcpt .sr-input { width: 130px; flex: 0 0 auto; }
