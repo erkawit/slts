@@ -295,10 +295,18 @@ async function upsertError(e) {
 const actions = {};
 
 actions.health = async () => {
-  let dbOk = false;
-  try { await db.query('SELECT 1'); dbOk = true; } catch (_) {}
+  let dbOk = false; let dbError = '';
+  try { await db.query('SELECT 1'); dbOk = true; } catch (e) { dbError = String((e && e.message) || e).slice(0, 200); }
+  // ข้อมูลวินิจฉัย (ไม่มีรหัสผ่าน): ปลายทางฐานข้อมูลที่ deployment นี้ใช้ — ไว้ตรวจว่าตั้ง DATABASE_URL ถูก branch/environment
+  let dbTarget = null;
+  try {
+    const u = new URL(process.env.DATABASE_URL || '');
+    dbTarget = { user: decodeURIComponent(u.username), endpoint: u.hostname.split('.')[0], pooled: /-pooler/.test(u.hostname), database: u.pathname.replace(/^\//, ''), passwordLength: decodeURIComponent(u.password || '').length };
+  } catch (_) { dbTarget = process.env.DATABASE_URL ? 'invalid-url' : 'not-set'; }
   return {
-    status: 'success', ok: true, db: dbOk, version: getVersionInfo().version,
+    status: 'success', ok: true, db: dbOk, dbError, dbTarget,
+    deployment: { env: process.env.VERCEL_ENV || '', branch: process.env.VERCEL_GIT_COMMIT_REF || '', commit: String(process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) },
+    version: getVersionInfo().version,
     photoStorage: drive.storageMode(), driveBridge: drive.storageMode() === 'neon' || drive.bridgeConfigured(), aiGateway: ai.aiConfigured(), time: new Date().toISOString(),
   };
 };
