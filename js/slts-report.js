@@ -95,6 +95,17 @@
       }
       html = html.split(u).join(await _fontDataCache[u]);
     }
+    // ภาพในเอกสาร (เช่น ตราครุฑ) ต้องฝังเป็น data URL เช่นกัน
+    const imgs = [...new Set([...html.matchAll(/<img[^>]+src="([^"]+)"/g)].map((m) => m[1]).filter((u) => !/^data:/.test(u)))];
+    for (const u of imgs) {
+      const abs = new URL(u.replace(/&amp;/g, '&'), location.href).href;
+      if (!_fontDataCache[abs]) {
+        _fontDataCache[abs] = fetch(abs).then((r) => { if (!r.ok) throw new Error('img ' + r.status); return r.blob(); })
+          .then((b) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }))
+          .catch(() => u);
+      }
+      html = html.split(`src="${u}"`).join(`src="${await _fontDataCache[abs]}"`);
+    }
     return html;
   }
   /** เรนเดอร์ body ของเอกสารเป็น canvas ด้วยเครื่องมือแสดงผลของเบราว์เซอร์เอง (SVG foreignObject) — ตัวอักษรไทย/เส้นตารางตรงตำแหน่ง */
