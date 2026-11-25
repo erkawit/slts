@@ -20,10 +20,17 @@ const STATIC_ASSETS = [
   'version.json',
   'css/style.css',
   'css/simple-view.css',
+  'css/official.css',
   'js/config.js',
   'js/slts-core.js',
   'js/slts-geo.js',
   'js/slts-features.js',
+  'js/report-logic.js',
+  'js/report-docx.js',
+  'js/report-xlsx.js',
+  'js/report-exports.js',
+  'js/slts-report.js',
+  'js/pc-sidebar.js',
   'js/app.js',
   'js/data.js',
   'js/watermark.js',
@@ -31,12 +38,15 @@ const STATIC_ASSETS = [
   'js/map.js',
   'js/vendor/qrcode.js',
   'js/vendor/jsQR.js',
-  'img/logo.png'
+  'img/logo.png',
+  'img/favicon-32.png',
+  'img/icon-192.png',
+  'favicon.ico'
 ];
 
 const CDN_HOSTS = [
   'cdn.tailwindcss.com', 'code.jquery.com', 'cdn.datatables.net', 'cdnjs.cloudflare.com',
-  'cdn.jsdelivr.net', 'unpkg.com'
+  'cdn.jsdelivr.net', 'unpkg.com', 'cdn.sheetjs.com'
 ];
 
 self.addEventListener('install', (event) => {

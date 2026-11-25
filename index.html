@@ -7,16 +7,18 @@
   <title>ระบบจัดเก็บข้อมูลพิกัดส่งหมาย - ศาลจังหวัดอุดรธานี</title>
   
   <!-- PWA & Mobile Web App Meta -->
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#1d4ed8">
+  <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+  <meta name="theme-color" content="#1e3a5f">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="ส่งหมาย อุดร">
   
   <!-- Favicon -->
-  <link rel="icon" type="image/png" href="img/logo.png">
-  <link rel="apple-touch-icon" href="img/logo.png">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
   
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -98,6 +100,8 @@
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="css/style.css?v=20260911_02">
   <link rel="stylesheet" href="css/simple-view.css?v=__APP_VERSION__">
+  <!-- ธีมทางการ (โหมด PC) + โมดูลรายงานผลหมาย -->
+  <link rel="stylesheet" href="css/official.css?v=__APP_VERSION__">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -106,9 +110,10 @@
     <div class="w-full max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between">
       
       <!-- Brand Logo & Court Name -->
-      <div class="flex items-center space-x-3.5 cursor-pointer select-none" onclick="switchTab('form')">
+      <div id="pcPageTitle" class="pc-page-title" aria-live="polite"></div>
+      <div id="headerBrand" class="flex items-center space-x-3.5 cursor-pointer select-none" onclick="switchTab('form')">
         <div class="w-11 h-11 sm:w-12 sm:h-12 flex items-center justify-center flex-shrink-0">
-          <img src="img/logo.png" alt="ตราศาลจังหวัดอุดรธานี" class="w-full h-full object-contain drop-shadow-sm transition-transform hover:scale-105">
+          <img src="img/logo.png" alt="SLTS ระบบจัดเก็บข้อมูลพิกัดส่งหมาย" class="w-full h-full object-contain drop-shadow-sm transition-transform hover:scale-105">
         </div>
         <div>
           <h1 class="text-base sm:text-lg font-bold text-gray-900 leading-tight">ระบบจัดเก็บข้อมูลพิกัดส่งหมาย</h1>
@@ -134,10 +139,14 @@
           <i class="fa-solid fa-map-location-dot text-rose-500"></i>
           <span class="tab-label-text">แผนที่และหมุด</span>
         </button>
-        <button type="button" id="tabBtnRouteBatch" onclick="switchTab('route_batch')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="ดูรายการส่งหมายรอบนี้">
-          <i class="fa-solid fa-route text-indigo-600"></i>
-          <span class="tab-label-text">รายการส่งหมายรอบนี้</span>
+        <button type="button" id="tabBtnRouteBatch" onclick="switchTab('route_batch')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="รายงานหมาย — ทำทีละขั้นตอนตามโซนจ่ายหมาย">
+          <i class="fa-solid fa-list-ol text-indigo-600"></i>
+          <span class="tab-label-text">รายงานหมาย</span>
           <span id="routeBatchBadgeCount" class="hidden px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">0</span>
+        </button>
+        <button type="button" id="tabBtnReport" onclick="window.SltsReportUI ? SltsReportUI.openData() : switchTab('report')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="บัญชีจ่ายหมาย / บันทึกข้อความ / อัตราค่านำหมาย / ผู้ลงนาม">
+          <i class="fa-solid fa-folder-open"></i>
+          <span class="tab-label-text">ข้อมูลรายงานผลหมาย</span>
         </button>
         <button type="button" id="tabBtnUsers" onclick="switchTab('users')" class="tab-nav-btn hidden px-4 py-2 rounded-xl transition-all flex items-center gap-2" title="จัดการผู้ใช้งาน">
           <i class="fa-solid fa-users-gear text-purple-600"></i>
@@ -168,10 +177,14 @@
           </button>
           <button type="button" id="compactTabBtnRouteBatch" onclick="switchTabCompact('route_batch')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-indigo-50 text-xs font-bold text-gray-800 items-center justify-between gap-2 transition cursor-pointer">
             <div class="flex items-center gap-2">
-              <i class="fa-solid fa-route text-indigo-600 w-4 text-center"></i>
-              <span>รายการส่งหมายรอบนี้</span>
+              <i class="fa-solid fa-list-ol text-indigo-600 w-4 text-center"></i>
+              <span>รายงานหมาย</span>
             </div>
             <span id="compactRouteBatchBadgeCount" class="hidden px-1.5 py-0.2 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">0</span>
+          </button>
+          <button type="button" id="compactTabBtnReport" onclick="window.SltsReportUI ? SltsReportUI.openData() : switchTabCompact('report')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-xs font-bold text-gray-800 items-center gap-2 transition cursor-pointer">
+            <i class="fa-solid fa-folder-open w-4 text-center"></i>
+            <span>ข้อมูลรายงานผลหมาย</span>
           </button>
           <button type="button" id="compactTabBtnUsers" onclick="switchTabCompact('users')" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-purple-50 text-xs font-bold text-gray-800 items-center gap-2 transition cursor-pointer">
             <i class="fa-solid fa-users-gear text-purple-600 w-4 text-center"></i>
@@ -617,6 +630,13 @@
                     <input type="file" id="desktopImageFileInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border border-gray-300 rounded-xl p-1 bg-white">
                   </div>
 
+                  <!-- วันที่-เวลาส่งหมาย (อ่านจากภาพ: EXIF / ตัวอักษรวันที่บนภาพ) -->
+                  <div id="desktopServeDateRow" class="hidden bg-sky-50 border border-sky-200 rounded-xl p-2.5 text-xs">
+                    <label for="desktopServeDateTime" class="block font-bold text-sky-900 mb-1"><i class="fa-solid fa-calendar-day text-sky-600 mr-1"></i> วันที่-เวลาส่งหมาย <span id="desktopServeDateSrc" class="font-normal text-sky-700"></span></label>
+                    <input type="datetime-local" id="desktopServeDateTime" class="w-full border border-sky-200 rounded-lg px-2 py-1.5 bg-white text-sm font-mono">
+                    <p class="text-[11px] text-sky-700 mt-1">ใช้เป็นวันเวลาบนลายน้ำ ในตารางประวัติ และวันที่ส่งหมายในแบบรายงานหมาย — แก้ไขได้</p>
+                  </div>
+
                   <!-- Dynamic Notice: GPS Extraction Status (Desktop only) -->
                   <div id="desktopGpsScanningNotice" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-xs text-blue-700 flex items-center gap-2">
                     <i class="fa-solid fa-circle-notch fa-spin text-blue-600"></i>
@@ -655,6 +675,22 @@
                       <span class="block text-[11px] font-normal text-gray-600 mt-0.5">
                         (หากติ๊กเลือก ระบบจะไม่ทำลายน้ำซ้ำบนภาพ และจะจำการตั้งค่านี้ไว้สำหรับการใช้งานครั้งต่อไป)
                       </span>
+                    </label>
+                  </div>
+
+                  <!-- ตัวเลือก: หมายที่ไม่มีภาพถ่าย (ผู้รับเซ็นรับหมายเอง) -->
+                  <div class="bg-violet-50/70 border border-violet-200 rounded-xl p-3 flex items-start gap-2.5 transition">
+                    <input type="checkbox" id="chkDesktopNoPhoto" class="mt-0.5 w-4 h-4 text-violet-600 border-gray-300 rounded focus:ring-violet-500 cursor-pointer">
+                    <label for="chkDesktopNoPhoto" class="text-xs text-gray-700 font-semibold cursor-pointer select-none leading-relaxed flex-1">
+                      <span class="text-violet-900 font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-signature text-violet-600"></i>
+                        <span>ไม่มีภาพถ่าย (ผู้รับเซ็นรับหมายเอง)</span>
+                      </span>
+                      <span class="block text-[11px] font-normal text-gray-600 mt-0.5">บันทึกรายการส่งหมายได้โดยไม่ต้องแนบภาพ เพื่อให้รายงานหมายได้ครบ</span>
+                      <select id="desktopNoPhotoReason" class="hidden mt-1.5 w-full text-xs border border-violet-200 rounded-lg px-2 py-1.5 bg-white">
+                        <option>ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)</option>
+                        <option>มารับหมายที่ศาล (ไม่มีภาพถ่าย)</option>
+                      </select>
                     </label>
                   </div>
 
@@ -1061,19 +1097,19 @@
         <!-- Summary Statistics Cards -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           <div class="p-3 bg-blue-50/70 border border-blue-100 rounded-xl">
-            <p class="text-[11px] text-blue-700 font-medium">🏛️ จุดเริ่มต้น / เส้นทาง</p>
+            <p class="text-[11px] text-blue-700 font-medium"><i class="fa-solid fa-building-columns mr-1"></i>จุดเริ่มต้น / เส้นทาง</p>
             <p id="routeBatchStartText" class="text-xs font-bold text-gray-900 truncate mt-0.5">ศาลจังหวัดอุดรธานี</p>
           </div>
           <div class="p-3 bg-slate-50 border border-gray-200 rounded-xl">
-            <p class="text-[11px] text-gray-500 font-medium">📋 จำนวนหมายทั้งหมด</p>
+            <p class="text-[11px] text-gray-500 font-medium"><i class="fa-solid fa-list-ol mr-1"></i>จำนวนหมายทั้งหมด</p>
             <p id="routeBatchTotalCountText" class="text-sm font-extrabold text-gray-900 mt-0.5">0 จุด</p>
           </div>
           <div class="p-3 bg-amber-50/80 border border-amber-200 rounded-xl">
-            <p class="text-[11px] text-amber-800 font-medium">📸 ถ่ายรูปแล้ว (รอส่ง)</p>
+            <p class="text-[11px] text-amber-800 font-medium"><i class="fa-solid fa-camera mr-1"></i>ถ่ายรูปแล้ว (รอส่ง)</p>
             <p id="routeBatchCapturedCountText" class="text-sm font-extrabold text-amber-700 mt-0.5">0 จุด</p>
           </div>
           <div class="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl">
-            <p class="text-[11px] text-emerald-800 font-medium">☁️ นำส่ง Server แล้ว</p>
+            <p class="text-[11px] text-emerald-800 font-medium"><i class="fa-solid fa-cloud-arrow-up mr-1"></i>นำส่ง Server แล้ว</p>
             <p id="routeBatchUploadedCountText" class="text-sm font-extrabold text-emerald-700 mt-0.5">0 จุด</p>
           </div>
         </div>
@@ -1116,7 +1152,12 @@
 
     </div>
 
-  </main>
+      <!-- ========================================================= -->
+    <!-- TAB 6: รายงานผลหมาย (ผนวกรวมระบบ summon-report) — สร้างโดย js/slts-report.js -->
+    <!-- ========================================================= -->
+    <div id="tabContentReport" class="tab-pane hidden w-full"></div>
+
+</main>
  
   <!-- Floating Reset Province Button (แสดงที่มุมขวาล่าง) -->
   <div id="floatingProvinceContainer" class="fixed bottom-4 right-4 z-40">
@@ -1143,7 +1184,7 @@
 
       <div class="text-center mb-5">
         <div class="w-14 h-14 mx-auto mb-2 flex items-center justify-center">
-          <img src="img/logo.png" alt="ตราศาล" class="w-full h-full object-contain">
+          <img src="img/logo.png" alt="SLTS" class="w-full h-full object-contain">
         </div>
         <h3 class="text-base font-bold text-gray-900">เข้าสู่ระบบ (Login)</h3>
         <p class="text-xs text-gray-500">ศาลจังหวัดอุดรธานี</p>
@@ -1433,6 +1474,13 @@
   <!-- v2.0: ล็อกอินผ่านเซิร์ฟเวอร์, แชร์/สแกน QR, เมนูแบบง่าย, ศูนย์ผู้ดูแลระบบ -->
   <script src="js/vendor/qrcode.js?v=__APP_VERSION__"></script>
   <script src="js/slts-features.js?v=__APP_VERSION__"></script>
+  <!-- ระบบรายงานผลหมาย (ผนวกรวม summon-report): ตรรกะ, Word/Excel, หน้าจอ -->
+  <script src="js/report-logic.js?v=__APP_VERSION__"></script>
+  <script src="js/report-docx.js?v=__APP_VERSION__"></script>
+  <script src="js/report-xlsx.js?v=__APP_VERSION__"></script>
+  <script src="js/report-exports.js?v=__APP_VERSION__"></script>
+  <script src="js/slts-report.js?v=__APP_VERSION__"></script>
+  <script src="js/pc-sidebar.js?v=__APP_VERSION__"></script>
 
   <!-- PWA Service Worker Registration & Force Update -->
   <script>

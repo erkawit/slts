@@ -8,6 +8,7 @@
 | ติดตั้ง/ย้ายข้อมูลไป Neon และขึ้น Vercel | [docs/SETUP-NEON.md](docs/SETUP-NEON.md) |
 | รายงานจุดบกพร่องที่พบและแก้ไข + ขั้นตอนต่อไป | [docs/AUDIT-v2.md](docs/AUDIT-v2.md) |
 | ทำแอป Android (APK) / iOS | [docs/MOBILE-APP.md](docs/MOBILE-APP.md) |
+| ระบบรายงานผลหมาย (ผนวกรวม summon-report) | [docs/REPORT-SYSTEM.md](docs/REPORT-SYSTEM.md) |
 | ประวัติการอัปเดต | [CHANGELOG.md](CHANGELOG.md) |
 
 **โครงสร้างใหม่ที่สำคัญ**
@@ -15,6 +16,8 @@
 ```
 api/slts.js            API หลัก (แทน Apps Script) — action เดิมทั้งหมด + login, QR share, error log, AI
 api/health.js          ตรวจสัญญาณ/สถานะระบบ
+api/report.js          ระบบรายงานผลหมาย (บัญชีจ่ายหมาย, อัตรา, บันทึกข้อความ, ผู้ลงนาม)
+js/slts-report.js      หน้าจอรายงานผลหมาย (Word/Excel สร้างในเบราว์เซอร์จากแม่แบบ templates/report)
 lib/                   db (Neon/pg), schema, auth (scrypt + token), drive (สะพาน Google Drive), ai (Neon AI Gateway)
 js/config.js           ตั้งค่า API_BASE (จำเป็นสำหรับแอปมือถือ)
 js/slts-core.js        token, ตัวดัก fetch, ตรวจเน็ตจริง, คลังภาพในเครื่อง, บันทึกจุดบกพร่อง

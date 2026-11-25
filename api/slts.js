@@ -77,6 +77,12 @@ function courtNameFor(cat, prov, name) {
   return 'ศาลจังหวัด' + prov;
 }
 
+/** ชื่อเต็มสำหรับเอกสาร: คำนำหน้า+ชื่อ นามสกุล (ไม่มี → ชื่อแสดง) */
+function fullNameOf(u) {
+  const f = String(u.first_name || '').trim();
+  if (!f) return u.name || u.username;
+  return `${String(u.title || '').trim()}${f} ${String(u.last_name || '').trim()}`.trim();
+}
 function publicUser(u) {
   const prov = u.assigned_province || 'อุดรธานี';
   const cat = u.court_category || 'ศาลจังหวัด';
@@ -85,6 +91,8 @@ function publicUser(u) {
     username: u.username,
     role: u.role,
     name: u.name || u.username,
+    title: u.title || '', firstName: u.first_name || '', lastName: u.last_name || '', position: u.position || '',
+    fullName: fullNameOf(u),
     createdAt: u.created_at_text || '',
     courtCategory: cat,
     assignedCourt: court,
@@ -95,6 +103,11 @@ function publicUser(u) {
     'ศาลที่สังกัด': court,
     'จังหวัดที่ส่งหมาย': prov,
   };
+}
+
+/** ลิงก์ภาพ Neon รูปแบบเดิมเคยแคชถาวรในเบราว์เซอร์ (เลขซ้ำได้เมื่อสลับฐานข้อมูล) → เติม v=2 ให้โหลดใหม่ */
+function freshPhotoUrl(u) {
+  return /\/api\/photo\?f=db-\d+-[A-Za-z0-9]{16}$/.test(u) ? u + '&v=2' : u;
 }
 
 function summonsRowToSheet(r) {
@@ -112,11 +125,12 @@ function summonsRowToSheet(r) {
     'ลองจิจูด (Lng)': r.lng === null ? '' : String(r.lng),
     'ทิศองศา': str(r.heading),
     'ชื่อไฟล์รูปภาพ': str(r.file_name),
-    'ลิงก์รูปภาพใน Google Drive': str(r.drive_url),
+    'ลิงก์รูปภาพใน Google Drive': freshPhotoUrl(str(r.drive_url)),
     'ลิงก์ Text File ใน Google Drive': str(r.text_url),
     'Drive File ID': str(r.drive_file_id),
     'ผู้บันทึก': str(r.uploader),
     'จังหวัด': str(r.province),
+    'ไม่มีภาพ (เหตุผล)': str(r.no_photo_reason),
   };
 }
 
@@ -295,10 +309,18 @@ async function upsertError(e) {
 const actions = {};
 
 actions.health = async () => {
-  let dbOk = false;
-  try { await db.query('SELECT 1'); dbOk = true; } catch (_) {}
+  let dbOk = false; let dbError = '';
+  try { await db.query('SELECT 1'); dbOk = true; } catch (e) { dbError = String((e && e.message) || e).slice(0, 200); }
+  // ข้อมูลวินิจฉัย (ไม่มีรหัสผ่าน): ปลายทางฐานข้อมูลที่ deployment นี้ใช้ — ไว้ตรวจว่าตั้ง DATABASE_URL ถูก branch/environment
+  let dbTarget = null;
+  try {
+    const u = new URL(process.env.DATABASE_URL || '');
+    dbTarget = { user: decodeURIComponent(u.username), endpoint: u.hostname.split('.')[0], pooled: /-pooler/.test(u.hostname), database: u.pathname.replace(/^\//, ''), passwordLength: decodeURIComponent(u.password || '').length };
+  } catch (_) { dbTarget = process.env.DATABASE_URL ? 'invalid-url' : 'not-set'; }
   return {
-    status: 'success', ok: true, db: dbOk, version: getVersionInfo().version,
+    status: 'success', ok: true, db: dbOk, dbError, dbTarget,
+    deployment: { env: process.env.VERCEL_ENV || '', branch: process.env.VERCEL_GIT_COMMIT_REF || '', commit: String(process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) },
+    version: getVersionInfo().version,
     photoStorage: drive.storageMode(), driveBridge: drive.storageMode() === 'neon' || drive.bridgeConfigured(), aiGateway: ai.aiConfigured(), time: new Date().toISOString(),
   };
 };
@@ -375,7 +397,13 @@ async function saveUser(data, ctx) {
   const cat = str(data.courtCategory || data['ประเภทศาล']).trim() || null;
   const prov = str(data.assignedProvince || data['จังหวัดที่ส่งหมาย'] || data['จังหวัดรับผิดชอบ'] || data['จังหวัด']).trim() || null;
   const court = str(data.assignedCourt || data['ศาลที่สังกัด'] || data['ชื่อศาล']).trim() || null;
-  const name = str(data.name).trim() || null;
+  const title = data.title !== undefined ? str(data.title).trim().slice(0, 40) : undefined;
+  const firstName = data.firstName !== undefined ? str(data.firstName).trim().slice(0, 80) : undefined;
+  const lastName = data.lastName !== undefined ? str(data.lastName).trim().slice(0, 80) : undefined;
+  const position = data.position !== undefined ? str(data.position).trim().slice(0, 160) : undefined;
+  // ชื่อแสดง: ถ้าไม่ระบุแต่มีชื่อ-นามสกุล → ประกอบให้
+  const composed = firstName ? `${title || ''}${firstName} ${lastName || ''}`.trim() : '';
+  const name = str(data.name).trim() || composed || null;
   const newPassword = str(data.password || data.newPassword);
   const ROLES = ['admin', 'local_advisor', 'user'];
 
@@ -389,9 +417,9 @@ async function saveUser(data, ctx) {
     const p = isAdmin ? (prov || 'อุดรธานี') : (me.assigned_province || 'อุดรธานี');
     const c = isAdmin ? (cat || 'ศาลจังหวัด') : (me.court_category || 'ศาลจังหวัด');
     const ct = isAdmin ? courtNameFor(c, p, court) : myCourt;
-    await db.query(`INSERT INTO app_users (username, password_hash, role, name, court_category, assigned_court, assigned_province, must_change_password, created_at_text)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,$8)`,
-      [target, auth.hashPassword(newPassword), role, name || target, c, ct, p, str(data.createdAt) || thaiDateTimeNow().slice(0, 10)]);
+    await db.query(`INSERT INTO app_users (username, password_hash, role, name, court_category, assigned_court, assigned_province, must_change_password, created_at_text, title, first_name, last_name, position)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,$8,$9,$10,$11,$12)`,
+      [target, auth.hashPassword(newPassword), role, name || target, c, ct, p, str(data.createdAt) || thaiDateTimeNow().slice(0, 10), title || '', firstName || '', lastName || '', position || '']);
     await logActivity(me.username, me.role, 'USER_CREATED', `เพิ่มผู้ใช้ @${target} (${role}, ${ct})`);
     return { status: 'success', message: `เพิ่มผู้ใช้ @${target} สำเร็จ`, created: true };
   }
@@ -400,6 +428,10 @@ async function saveUser(data, ctx) {
   const params = [];
   const add = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`); };
   if (name) add('name', name);
+  if (title !== undefined) add('title', title);
+  if (firstName !== undefined) add('first_name', firstName);
+  if (lastName !== undefined) add('last_name', lastName);
+  if (position !== undefined) add('position', position);
   if (isAdmin || isSelf) {
     if (cat) add('court_category', cat);
     if (court) add('assigned_court', court);
@@ -514,7 +546,10 @@ async function findTargetRow(data, { allowCaseOnly = false } = {}) {
   }
   const fileId = str(data.oldFileId || data.fileId).trim();
   if (fileId) {
-    const { rows } = await db.query('SELECT * FROM summons WHERE drive_file_id = $1 AND deleted_at IS NULL ORDER BY id DESC LIMIT 1', [fileId]);
+    // ภาพเดียวกันอาจถูกใช้หลายรายการ → เลือกรายการที่เวลาบันทึกตรงกันก่อน
+    const { rows } = await db.query(
+      'SELECT * FROM summons WHERE drive_file_id = $1 AND deleted_at IS NULL ORDER BY (recorded_at_text = $2) DESC, id DESC LIMIT 1',
+      [fileId, str(data.timestamp).trim()]);
     if (rows[0]) return rows[0];
   }
   const caseNo = str(data.caseNumber).trim();
@@ -536,6 +571,15 @@ async function findTargetRow(data, { allowCaseOnly = false } = {}) {
     if (rows[0]) return rows[0];
   }
   return null;
+}
+
+/** ทิ้งไฟล์ภาพเดิมเฉพาะเมื่อไม่มีรายการอื่นใช้ภาพเดียวกันอยู่ (กันภาพของคดีอื่นหาย) */
+async function trashIfUnused(fileId, exceptId) {
+  const f = str(fileId).trim();
+  if (!f) return false;
+  const { rows } = await db.query('SELECT 1 FROM summons WHERE drive_file_id = $1 AND deleted_at IS NULL AND id <> $2 LIMIT 1', [f, exceptId || 0]);
+  if (rows[0]) return false;
+  return drive.trashFile(f);
 }
 
 function canEdit(user, row) {
@@ -601,6 +645,8 @@ actions.upload_image = async (data, ctx) => {
     lng: num(data.lng),
     heading: data.heading === undefined ? null : str(data.heading),
     file_name: str(data.fileName),
+    // ไม่มีภาพถ่าย (เช่น ผู้รับเซ็นรับหมายเอง) — ใช้ได้เฉพาะเมื่อไม่ได้แนบภาพ
+    no_photo_reason: (!data.imageBase64 && data.noPhoto) ? (str(data.noPhotoReason).trim() || 'ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)').slice(0, 200) : '',
   };
 
   let row;
@@ -613,22 +659,23 @@ actions.upload_image = async (data, ctx) => {
         lat = COALESCE($8, lat), lng = COALESCE($9, lng), heading = COALESCE($10, heading),
         file_name = $11, drive_url = COALESCE(NULLIF($12,''), drive_url), drive_file_id = COALESCE(NULLIF($13,''), drive_file_id),
         province = COALESCE(NULLIF($14,''), province), uploader = COALESCE(uploader, $15),
-        client_upload_id = COALESCE(client_upload_id, $16), updated_at = NOW()
+        client_upload_id = COALESCE(client_upload_id, $16),
+        no_photo_reason = CASE WHEN $13 <> '' THEN '' WHEN $18 <> '' THEN $18 ELSE no_photo_reason END, updated_at = NOW()
       WHERE id = $17 RETURNING *`,
       [values.recorded_at_text, values.recorded_at, values.court_type, values.district, values.subdistrict, values.location_type,
         values.location_text, values.lat, values.lng, values.heading, values.file_name, fileUrl, fileId, values.province,
-        uploader, clientId, target.id]);
+        uploader, clientId, target.id, values.no_photo_reason]);
     row = rows[0];
-    if (fileId && oldFileId && oldFileId !== fileId && data.overwrite) await drive.trashFile(oldFileId);
+    if (fileId && oldFileId && oldFileId !== fileId && data.overwrite) await trashIfUnused(oldFileId, target.id);
   } else {
     try {
       const { rows } = await db.query(`INSERT INTO summons
         (client_upload_id, recorded_at_text, recorded_at, case_number, court_type, province, district, subdistrict, location_type,
-         location_text, lat, lng, heading, file_name, drive_url, drive_file_id, uploader)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+         location_text, lat, lng, heading, file_name, drive_url, drive_file_id, uploader, no_photo_reason)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
         [clientId, values.recorded_at_text, values.recorded_at, values.case_number, values.court_type, values.province, values.district,
           values.subdistrict, values.location_type, values.location_text, values.lat, values.lng, values.heading, values.file_name,
-          fileUrl, fileId, uploader]);
+          fileUrl, fileId, uploader, values.no_photo_reason]);
       row = rows[0];
     } catch (e) {
       if (e.code === '23505' && clientId) { // อีกคำขอที่ส่งพร้อมกันบันทึกไปก่อนแล้ว
@@ -659,8 +706,9 @@ actions.edit_record = async (data, ctx) => {
   }
   if (data.imageBase64 && data.fileName) {
     const up = await drive.uploadImage({ fileName: str(data.fileName), imageBase64: str(data.imageBase64), origin: ctx.origin });
-    if (data.oldFileId) await drive.trashFile(str(data.oldFileId));
+    const oldId = target ? target.drive_file_id : str(data.oldFileId);
     fileId = up.fileId; fileUrl = up.fileUrl;
+    if (oldId && oldId !== fileId) await trashIfUnused(oldId, target ? target.id : 0);
   }
 
   if (target) {
@@ -673,6 +721,7 @@ actions.edit_record = async (data, ctx) => {
         file_name = CASE WHEN $11 <> '' AND $12 <> '' THEN $13 ELSE file_name END,
         drive_url = CASE WHEN $11 <> '' AND $12 <> '' THEN $11 ELSE drive_url END,
         drive_file_id = CASE WHEN $11 <> '' AND $12 <> '' THEN $12 ELSE drive_file_id END,
+        no_photo_reason = CASE WHEN $11 <> '' AND $12 <> '' THEN '' ELSE no_photo_reason END,
         updated_at = NOW()
       WHERE id = $14 RETURNING *`,
       [str(data.caseNumber), str(data.courtType), str(data.district), str(data.subdistrict), str(data.locationType), str(data.locationText),

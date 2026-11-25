@@ -128,6 +128,95 @@
     return workerPromise;
   }
 
+  // ------------------------------------------------------------------
+  // วันที่ส่งหมายจากภาพ: EXIF (วันที่ถ่าย) → ตัวอักษรวันที่บนภาพ (OCR) → วันที่ของไฟล์
+  // ------------------------------------------------------------------
+  const MONTHS_EN = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  function mkDate(y, mo, d, hh, mi, ss, ampm) {
+    y = Number(y); mo = Number(mo); d = Number(d);
+    if (y < 100) y += 2000;
+    if (y > 2400) y -= 543; // พ.ศ.
+    let h = Number(hh || 0); const m = Number(mi || 0); const sec = Number(ss || 0);
+    if (ampm) { const pm = /p/i.test(ampm); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; }
+    if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && h <= 23 && m <= 59)) return null;
+    const dt = new Date(y, mo - 1, d, h, m, sec);
+    if (dt.getMonth() !== mo - 1) return null;
+    const now = Date.now();
+    if (dt.getTime() > now + 864e5 || dt.getTime() < now - 2 * 365 * 864e5) return null; // ไม่อยู่ในอนาคต / ไม่เกิน 2 ปีย้อนหลัง
+    return dt;
+  }
+  /** แปลงข้อความ (OCR) เป็นวันที่-เวลา เช่น 25/11/2025 10:30, 2025-11-25 10:30:12, Nov 25, 2025 10:30 AM, 25/11/2568 */
+  function parseDateText(text) {
+    if (!text) return null;
+    const t = String(text).replace(/[\n\r]+/g, ' ').replace(/[Oo](?=\d)|(?<=\d)[Oo]/g, '0').replace(/(?<=\d)[lI|](?=\d)/g, '1');
+    const TIME = '(?:[^\\d]{0,4}(\\d{1,2})[:.](\\d{2})(?:[:.](\\d{2}))?\\s*([AaPp]\\.?[Mm]\\.?)?)?';
+    let m;
+    const reYmd = new RegExp('(20\\d{2}|25\\d{2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{1,2})' + TIME);
+    if ((m = t.match(reYmd))) { const d = mkDate(m[1], m[2], m[3], m[4], m[5], m[6], m[7]); if (d) return d; }
+    const reDmy = new RegExp('(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{4}|\\d{2})(?!\\d)' + TIME);
+    if ((m = t.match(reDmy))) {
+      let dd = Number(m[1]); let mm = Number(m[2]);
+      if (mm > 12 && dd <= 12) { const x = dd; dd = mm; mm = x; } // รูปแบบ เดือน/วัน/ปี
+      const d = mkDate(m[3], mm, dd, m[4], m[5], m[6], m[7]); if (d) return d;
+    }
+    const reDMonY = new RegExp('(\\d{1,2})\\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?,?\\s*(\\d{4})' + TIME, 'i');
+    if ((m = t.match(reDMonY))) { const d = mkDate(m[3], MONTHS_EN[m[2].toLowerCase()], m[1], m[4], m[5], m[6], m[7]); if (d) return d; }
+    const reMonDY = new RegExp('(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?\\s*(\\d{1,2}),?\\s*(\\d{4})' + TIME, 'i');
+    if ((m = t.match(reMonDY))) { const d = mkDate(m[3], MONTHS_EN[m[1].toLowerCase()], m[2], m[4], m[5], m[6], m[7]); if (d) return d; }
+    return null;
+  }
+  async function readExifDate(file) {
+    if (!file || typeof window.exifr === 'undefined') return null;
+    try {
+      const x = await window.exifr.parse(file, ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized']);
+      const v = x && (x.DateTimeOriginal || x.CreateDate || x.DateTimeDigitized);
+      const d = v instanceof Date ? v : (v ? new Date(v) : null);
+      if (d && !isNaN(d) && d.getTime() <= Date.now() + 864e5 && d.getFullYear() > 2000) return d;
+    } catch (_) { /* no exif */ }
+    return null;
+  }
+  const ocrCache = new Map(); // dataUrl (ย่อ) → ข้อความ OCR ที่อ่านแล้ว
+  const ocrKey = (u) => (u ? u.length + ':' + u.slice(-80) : '');
+  /** อ่านข้อความทั้งภาพแบบเร็ว (ครึ่งล่าง → ครึ่งบน) เพื่อหาวันที่ */
+  async function ocrTexts(dataUrl) {
+    const key = ocrKey(dataUrl);
+    const prev = ocrCache.get(key) || [];
+    if (prev.length >= 2) return prev;
+    if (typeof window.Tesseract === 'undefined' || !dataUrl) return prev;
+    if (!navigator.onLine && !localStorage.getItem('slts_ocr_ready')) return prev;
+    const img = await loadImage(dataUrl);
+    const worker = await getWorker();
+    const out = prev.slice();
+    for (const [fx, fy, fw, fh] of [[0, 0.5, 1, 0.5], [0, 0, 1, 0.45]]) {
+      const { data } = await worker.recognize(prepareCrop(img, fx, fy, fw, fh, 1600));
+      out.push((data && data.text) || '');
+      if (parseDateText(out.join(' '))) break;
+    }
+    ocrCache.set(key, out);
+    return out;
+  }
+  /**
+   * วันที่ส่งหมายจากภาพ → { date: Date, source: 'exif'|'ocr'|'file' } | null
+   * @param {File|Blob} file  @param {string} dataUrl
+   */
+  async function readPhotoDate(file, dataUrl, opts = {}) {
+    const ex = await readExifDate(file);
+    if (ex) return { date: ex, source: 'exif' };
+    if (opts.ocr !== false) {
+      try {
+        if (!dataUrl && file) dataUrl = await fileToDataUrl(file);
+        const texts = await ocrTexts(dataUrl);
+        const d = parseDateText(texts.join(' '));
+        if (d) return { date: d, source: 'ocr' };
+      } catch (e) { console.warn('[geo] date OCR failed', e); }
+    }
+    if (file && file.lastModified) {
+      const d = new Date(file.lastModified);
+      if (d.getTime() <= Date.now() + 60e3 && d.getTime() > Date.now() - 365 * 864e5) return { date: d, source: 'file' };
+    }
+    return null;
+  }
+
   async function readWatermark(dataUrl, onProgress) {
     if (typeof window.Tesseract === 'undefined' || !dataUrl) return null;
     if (!navigator.onLine && !localStorage.getItem('slts_ocr_ready')) return null; // ครั้งแรกต้องดาวน์โหลดตัวอ่านภาษา
@@ -146,6 +235,7 @@
       const canvas = prepareCrop(img, fx, fy, fw, fh, 1600);
       const { data } = await worker.recognize(canvas);
       try { localStorage.setItem('slts_ocr_ready', '1'); } catch (_) {}
+      if (i > 0) { const k = ocrKey(dataUrl); ocrCache.set(k, (ocrCache.get(k) || []).concat((data && data.text) || '')); }
       const found = parseWatermarkText(data && data.text);
       if (found) return { ...found, source: 'watermark', raw: (data.text || '').slice(0, 300) };
     }
@@ -154,6 +244,9 @@
 
   SLTS.geo = {
     parseWatermarkText,
+    parseDateText,
+    readExifDate,
+    readPhotoDate,
     readExif,
     _prepareCrop: prepareCrop,
     _loadImage: loadImage,

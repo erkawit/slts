@@ -1657,7 +1657,7 @@ function showCustomLoading(title = 'กำลังโหลดข้อมู�
     html: `
       <div class="logo-loading-box">
         <div class="logo-loading-wrapper">
-          <img src="img/logo.png" alt="ตราศาลจังหวัดอุดรธานี" class="logo-loading-img">
+          <img src="img/logo.png" alt="SLTS" class="logo-loading-img">
           <div class="logo-spinner-ring"></div>
         </div>
         <div class="logo-loading-text">
@@ -2899,6 +2899,41 @@ window.closeAddUserModal = function() {
  * 3. บันทึกและอัปเดตตาราง "รายชื่อผู้ใช้งานทั้งหมด" ทันทีโดยไม่ต้องรีเฟรชหน้าเว็บ
  * 4. รองรับการรับค่า initialData เพื่อคงข้อมูลเดิมเมื่อกลับมาจากการเลือกจังหวัด
  */
+
+/** ช่องคำนำหน้า / ชื่อ / นามสกุล / ตำแหน่ง (ใช้ในรายงานผลหมายและจับคู่ผู้ส่งในตารางโซน) */
+function userNameFieldsHtml(prefix, v) {
+  v = v || {};
+  const e = (x) => escapeHtmlAttr(String(x || ''));
+  const cls = 'w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition';
+  return `
+    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 text-left">
+      <div class="sm:col-span-3">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">คำนำหน้า</label>
+        <input type="text" id="${prefix}Title" list="${prefix}TitleList" value="${e(v.title)}" class="${cls}" placeholder="นาย / นาง / นางสาว">
+        <datalist id="${prefix}TitleList"><option value="นาย"><option value="นาง"><option value="นางสาว"><option value="ว่าที่ร้อยตรี"><option value="ว่าที่ร้อยตรีหญิง"></datalist>
+      </div>
+      <div class="sm:col-span-4">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">ชื่อ <span class="text-rose-500">*</span></label>
+        <input type="text" id="${prefix}FirstName" value="${e(v.firstName)}" class="${cls}" placeholder="เช่น เอกวิทย์">
+      </div>
+      <div class="sm:col-span-5">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">นามสกุล <span class="text-rose-500">*</span></label>
+        <input type="text" id="${prefix}LastName" value="${e(v.lastName)}" class="${cls}" placeholder="เช่น ลาดล้าย">
+      </div>
+      <div class="sm:col-span-12">
+        <label class="block text-xs font-semibold text-gray-700 mb-1">ตำแหน่ง</label>
+        <input type="text" id="${prefix}Position" list="${prefix}PositionList" value="${e(v.position)}" class="${cls}" placeholder="เช่น เจ้าพนักงานศาลยุติธรรมปฏิบัติงาน">
+        <datalist id="${prefix}PositionList"><option value="เจ้าพนักงานศาลยุติธรรมปฏิบัติงาน"><option value="เจ้าพนักงานศาลยุติธรรมชำนาญงาน"><option value="เจ้าพนักงานศาลยุติธรรมอาวุโส"><option value="เจ้าหน้าที่ศาลยุติธรรมปฏิบัติงาน"><option value="เจ้าหน้าที่ศาลยุติธรรมชำนาญงาน"><option value="นิติกร"></datalist>
+        <p class="text-[10px] text-gray-400 mt-1">ชื่อ-นามสกุลและตำแหน่งใช้เป็นผู้ส่งหมาย/ผู้รายงานในแบบรายงานผลหมาย และใช้จับคู่ชื่อผู้ส่งในตารางโซนจ่ายหมาย</p>
+      </div>
+    </div>`;
+}
+function readUserNameFields(prefix) {
+  const g = (k) => (document.getElementById(prefix + k)?.value || '').trim().replace(/\s+/g, ' ');
+  const title = g('Title'); const firstName = g('FirstName'); const lastName = g('LastName'); const position = g('Position');
+  return { title, firstName, lastName, position, fullName: firstName ? `${title}${firstName} ${lastName}`.trim() : '' };
+}
+
 window.openAddUserModal = function(initialData = {}) {
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isLocalAdvisor = state.currentUser && state.currentUser.role === 'local_advisor';
@@ -3045,16 +3080,8 @@ window.openAddUserModal = function(initialData = {}) {
               <input type="text" id="modalNewUsername" value="${escapeHtmlAttr(currentUsername)}" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น officer01" required autocomplete="off" />
             </div>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-700 mb-1">ชื่อ-สกุล / ชื่อแสดง</label>
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                <i class="fa-solid fa-id-card text-xs"></i>
-              </div>
-              <input type="text" id="modalNewFullName" value="${escapeHtmlAttr(currentFullName)}" class="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition" placeholder="เช่น นายสมชาย ส่งหมาย" />
-            </div>
-          </div>
         </div>
+        ${userNameFieldsHtml('modalNew', initialData)}
 
         <div>
           <label class="block text-xs font-semibold text-gray-700 mb-1">รหัสผ่าน (Password) <span class="text-rose-500">*</span></label>
@@ -3128,7 +3155,7 @@ window.openProvincePickerForAddUser = function() {
   // บันทึกข้อมูลที่ผู้ใช้กรอกค้างไว้ในฟอร์มเพื่อไม่ให้สูญหาย
   window._addUserFormDataBuffer = {
     username: (document.getElementById('modalNewUsername')?.value || '').trim(),
-    fullName: (document.getElementById('modalNewFullName')?.value || '').trim(),
+    ...readUserNameFields('modalNew'),
     password: (document.getElementById('modalNewPassword')?.value || '').trim(),
     role: document.getElementById('modalNewRole')?.value || 'user',
     courtCategory: document.getElementById('modalNewCourtCategory')?.value || 'ศาลจังหวัด',
@@ -3284,11 +3311,16 @@ window.handleModalCreateUser = function(e) {
   }
 
   const username = (document.getElementById('modalNewUsername')?.value || '').trim();
-  const fullName = (document.getElementById('modalNewFullName')?.value || '').trim();
+  const nf = readUserNameFields('modalNew');
+  const fullName = nf.fullName;
   const password = (document.getElementById('modalNewPassword')?.value || '').trim();
 
   if (!username || !password) {
     Swal.fire('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน', 'warning');
+    return;
+  }
+  if (!nf.firstName || !nf.lastName) {
+    Swal.fire('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกชื่อและนามสกุล (ใช้ในการรายงานผลหมาย)', 'warning');
     return;
   }
 
@@ -3350,6 +3382,7 @@ window.handleModalCreateUser = function(e) {
     'ประเภทศาล': courtCategory,
     'ศาลที่สังกัด': assignedCourt,
     'จังหวัดที่ส่งหมาย': assignedProvince,
+    title: nf.title, firstName: nf.firstName, lastName: nf.lastName, position: nf.position,
     name: fullName || (role === 'admin' ? `Admin (${username})` : (role === 'local_advisor' ? `Local Advisor (${username})` : `เจ้าหน้าที่ (${username})`)),
     createdAt: dateNow
   };
@@ -3481,6 +3514,7 @@ function renderUserList() {
           </div>
           <div>
             <p class="font-bold text-gray-900 leading-tight">${u.name || u.username}</p>
+            ${u.firstName ? (u.position ? `<p class="text-[11px] text-gray-500 leading-tight">${escapeHtmlAttr(u.position)}</p>` : '') : '<p class="text-[11px] text-amber-600 leading-tight"><i class="fa-solid fa-triangle-exclamation"></i> ยังไม่ได้กรอกชื่อ-นามสกุล (ใช้ในรายงานหมาย)</p>'}
             <p class="text-xs text-gray-500 font-mono">@${u.username}</p>
           </div>
         </div>
@@ -3634,9 +3668,10 @@ window.editUserModal = function(username) {
     title: `แก้ไขข้อมูลผู้ใช้ (@${username})`,
     html: `
       <div class="text-left space-y-3 pt-2">
+        ${userNameFieldsHtml('swalEdit', user)}
         <div>
-          <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อ-นามสกุล / ชื่อแสดง *</label>
-          <input type="text" id="swalEditName" value="${user.name || user.username}" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
+          <label class="block text-xs font-bold text-gray-700 mb-1">ชื่อแสดง (ว่างไว้ = ใช้ชื่อ-นามสกุล)</label>
+          <input type="text" id="swalEditName" value="${escapeHtmlAttr(user.firstName && user.name !== ((user.title || '') + user.firstName + ' ' + (user.lastName || '')).trim() ? (user.name || '') : '')}" placeholder="${escapeHtmlAttr(user.username)}" class="w-full bg-white border border-gray-300 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500">
         </div>
         ${roleSectionHtml}
         ${courtSectionHtml}
@@ -3699,15 +3734,17 @@ window.editUserModal = function(username) {
     cancelButtonText: 'ยกเลิก',
     confirmButtonColor: '#2563eb',
     preConfirm: () => {
-      const name = document.getElementById('swalEditName').value.trim();
-      if (!name) {
-        Swal.showValidationMessage('กรุณาระบุชื่อ-นามสกุล');
+      const nf = readUserNameFields('swalEdit');
+      if (!nf.firstName || !nf.lastName) {
+        Swal.showValidationMessage('กรุณากรอกชื่อและนามสกุล (ใช้ในการรายงานผลหมาย)');
         return false;
       }
+      const name = document.getElementById('swalEditName').value.trim() || nf.fullName;
+      const nameFields = { title: nf.title, firstName: nf.firstName, lastName: nf.lastName, position: nf.position };
 
       if (isLocalAdvisor) {
         return {
-          name: name,
+          name: name, ...nameFields,
           role: 'user',
           courtCategory: user.courtCategory || 'ศาลจังหวัด',
           assignedCourt: currentAssignedCourt,
@@ -3729,11 +3766,13 @@ window.editUserModal = function(username) {
         assignedCourt = buildCourtNameFromCategoryAndProvince(courtCategory, assignedProvince);
       }
 
-      return { name, role, courtCategory, assignedCourt, assignedProvince };
+      return { name, ...nameFields, role, courtCategory, assignedCourt, assignedProvince };
     }
   }).then((res) => {
     if (res.isConfirmed && res.value) {
       user.name = res.value.name;
+      user.title = res.value.title; user.firstName = res.value.firstName; user.lastName = res.value.lastName; user.position = res.value.position;
+      user.fullName = res.value.firstName ? `${res.value.title}${res.value.firstName} ${res.value.lastName}`.trim() : user.name;
       if (!isPrimary && !isLocalAdvisor) user.role = res.value.role;
       if (!isLocalAdvisor) {
         user.courtCategory = res.value.courtCategory;
@@ -3745,6 +3784,7 @@ window.editUserModal = function(username) {
       // ถ้าแก้ไขบัญชีที่ล็อกอินอยู่ ให้ sync session ด้วย
       if (state.currentUser && state.currentUser.username === username) {
         state.currentUser.name = user.name;
+        Object.assign(state.currentUser, { title: user.title, firstName: user.firstName, lastName: user.lastName, position: user.position, fullName: user.fullName });
         state.currentUser.role = user.role;
         state.currentUser.courtCategory = user.courtCategory;
         state.currentUser.assignedCourt = user.assignedCourt;
@@ -4409,8 +4449,10 @@ window.switchTab = function(tabName) {
     // โหลดข้อมูลแบบ Smart Cache 1 นาที (ดึงข้อมูลรอในเบื้องหลังทันที)
     loadGoogleSheetData(false);
 
-    // บนหน้าจอ Desktop หรือโหมด PC: แสดง Pop Up ค้นหาข้อมูลเจาะจงทันทีเมื่อเข้าหน้าตารางทุกครั้ง
-    if (!isMobileView()) {
+    // บนหน้าจอ Desktop หรือโหมด PC: แสดง Pop Up ค้นหาข้อมูลเจาะจงเฉพาะครั้งแรกหลังเข้าสู่ระบบ
+    // ครั้งต่อไปผู้ใช้เปลี่ยนเงื่อนไขเองด้วยปุ่ม "ค้นหาแบบเจาะจง"
+    if (!isMobileView() && !targetSearchPromptedThisLogin()) {
+      markTargetSearchPrompted();
       setTimeout(() => {
         openTargetSearchModal();
       }, 250);
@@ -5639,6 +5681,28 @@ window.clearTargetedFilter = function() {
   }
 };
 
+/** ตัวระบุการเข้าสู่ระบบครั้งนี้ (เปลี่ยนเมื่อเข้าสู่ระบบใหม่) — ไม่ได้เข้าสู่ระบบ = ต่อแท็บเบราว์เซอร์ */
+function targetSearchLoginKey() {
+  let tok = '';
+  try { tok = localStorage.getItem('slts_auth_token') || ''; } catch (_) {}
+  const u = state.currentUser && state.currentUser.username;
+  return u ? `${u}:${tok.slice(-24)}` : 'guest';
+}
+function targetSearchPromptedThisLogin() {
+  try {
+    const k = targetSearchLoginKey();
+    if (k === 'guest') return sessionStorage.getItem('slts_target_prompted') === 'guest';
+    return localStorage.getItem('slts_target_prompted') === k;
+  } catch (_) { return false; }
+}
+function markTargetSearchPrompted() {
+  try {
+    const k = targetSearchLoginKey();
+    if (k === 'guest') sessionStorage.setItem('slts_target_prompted', 'guest');
+    else localStorage.setItem('slts_target_prompted', k);
+  } catch (_) {}
+}
+
 /**
  * เปิด Pop Up ค้นหาข้อมูลเจาะจงในหน้าตารางประวัติส่งหมาย (เฉพาะ Desktop > 768px)
  * จดจำและดึงค่าล่าสุดที่มีการเลือกเพื่อค้นหาไว้เสมอ
@@ -6202,7 +6266,97 @@ window.openTargetSearchModal = function() {
   });
 };
 
+/** ตัดช่องว่าง จุด ขีด เพื่อค้นหาเลขคดี/ที่อยู่โดยไม่สนรูปแบบการพิมพ์ เช่น "ล.1" = "ล1" */
+function dtSearchNorm(v) {
+  return String(v || '').toLowerCase().replace(/[\s\.\-\_\(\)]/g, '');
+}
+function dtRowSearchText(row) {
+  return dtSearchNorm([
+    row['เลขคดี'], row['ที่ตั้งส่งหมาย (เต็ม)'] || row['ที่ตั้งส่งหมาย'], row['อำเภอ'], row['ตำบล'], row['จังหวัด'], row['ประเภทศาล'],
+  ].filter(Boolean).join(' '));
+}
+function dtTermMatcher(term) {
+  const words = String(term || '').trim().split(/\s+/).map(dtSearchNorm).filter(Boolean);
+  const whole = dtSearchNorm(term);
+  if (!words.length) return null;
+  return (text) => text.includes(whole) || words.every(w => text.includes(w));
+}
+
+/**
+ * เมื่อค้นหาในตารางแล้วไม่พบ: บอกว่าข้อมูลอยู่ที่ไหน
+ * - อยู่ในฐานข้อมูลแต่ถูกกรองออก (จังหวัดอื่น / เงื่อนไขค้นหาเจาะจง) → ปุ่มค้นหาทุกจังหวัด
+ * - มีเฉพาะใน "ประวัติการกรอกข้อมูล" บนเครื่องนี้ → ยังไม่อยู่ในฐานข้อมูลที่ระบบเชื่อมต่ออยู่
+ */
+function bindDtSearchHint(dt, allRows, viewRows, criteria) {
+  if (!dt) return;
+  const wrap = document.getElementById('summonsDataTable_wrapper');
+  if (!wrap) return;
+  let hint = document.getElementById('dtSearchHint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'dtSearchHint';
+    hint.className = 'hidden my-2 p-3 rounded-xl border text-xs leading-relaxed';
+  }
+  wrap.parentNode.insertBefore(hint, wrap);
+  const hide = () => { hint.classList.add('hidden'); hint.innerHTML = ''; };
+  const update = () => {
+    const term = String(dt.search() || '').trim();
+    if (!term) return hide();
+    const match = dtTermMatcher(term);
+    if (!match) return hide();
+    const viewHits = viewRows.filter(r => match(dtRowSearchText(r)));
+    const tableHits = dt.page.info().recordsDisplay;
+    if (tableHits > 0) return hide();
+    const esc = (t) => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const jsArg = JSON.stringify(term).replace(/"/g, '&quot;');
+    if (viewHits.length) {
+      // ตรงเมื่อไม่สนช่องว่าง/จุด แต่ตัวค้นหาของตารางไม่เจอ → กรองตารางด้วยเลขคดีแบบยืดหยุ่น
+      hint.className = 'my-2 p-3 rounded-xl border text-xs leading-relaxed bg-blue-50 border-blue-200 text-blue-900';
+      hint.innerHTML = `พบ <b>${viewHits.length}</b> รายการเมื่อไม่นับช่องว่าง/จุด (เช่น ${esc(viewHits[0]['เลขคดี'] || '')}) <button type="button" class="ml-2 px-2 py-0.5 rounded-md bg-blue-600 text-white font-bold" onclick="dtSearchAllProvinces(${jsArg})">แสดงรายการ</button>`;
+      return;
+    }
+    const allHits = (allRows || []).filter(r => match(dtRowSearchText(r)));
+    if (allHits.length) {
+      const provs = {};
+      allHits.forEach(r => { const p = r._resolvedProvince || getRowProvince(r); provs[p] = (provs[p] || 0) + 1; });
+      const provTxt = Object.entries(provs).map(([p, n]) => `จ.${esc(p)} ${n} รายการ`).join(', ');
+      const why = (criteria && criteria.type && criteria.type !== 'all') ? 'เงื่อนไขค้นหาแบบเจาะจงที่ใช้อยู่' : `ตารางแสดงเฉพาะ จ.${esc((criteria && criteria.province) || state.selectedProvince || 'อุดรธานี')}`;
+      hint.className = 'my-2 p-3 rounded-xl border text-xs leading-relaxed bg-amber-50 border-amber-200 text-amber-900';
+      hint.innerHTML = `ไม่พบในตารางนี้เพราะ${why} แต่มีในฐานข้อมูล: <b>${provTxt}</b> <button type="button" class="ml-2 px-2 py-0.5 rounded-md bg-amber-600 text-white font-bold" onclick="dtSearchAllProvinces(${jsArg})">ค้นหาทุกจังหวัด</button>`;
+      return;
+    }
+    let local = [];
+    try { local = (typeof getDesktopFormHistory === 'function' ? getDesktopFormHistory() : []).filter(h => match(dtSearchNorm([h.caseNumber, h.locationText, h.district, h.subdistrict, h.province].filter(Boolean).join(' ')))); } catch (_) {}
+    hint.className = 'my-2 p-3 rounded-xl border text-xs leading-relaxed bg-red-50 border-red-200 text-red-900';
+    hint.innerHTML = local.length
+      ? `ไม่พบ "${esc(term)}" ในฐานข้อมูลที่ระบบเชื่อมต่ออยู่ (มีข้อมูลทั้งหมด ${(allRows || []).length} รายการ) แต่พบ <b>${local.length}</b> รายการใน <b>ประวัติการกรอกข้อมูลบนเครื่องนี้</b> — แปลว่ารายการนี้เคยกรอกจากเครื่องนี้ แต่ไม่อยู่ในฐานข้อมูลปัจจุบัน`
+      : `ไม่พบ "${esc(term)}" ในฐานข้อมูลที่ระบบเชื่อมต่ออยู่ (มีข้อมูลทั้งหมด ${(allRows || []).length} รายการ)`;
+  };
+  dt.off('draw.slhint').on('draw.slhint', update);
+  update();
+}
+window.dtSearchAllProvinces = function(term) {
+  if (typeof applyTargetedFilter === 'function') applyTargetedFilter({ type: 'case', caseNo: term });
+  try { if ($.fn.DataTable.isDataTable('#summonsDataTable')) $('#summonsDataTable').DataTable().search('').draw(); } catch (_) {}
+};
+
+/** ลิงก์ภาพในแถวข้อมูล → สร้างจาก Drive File ID กับเซิร์ฟเวอร์ปัจจุบัน (ลิงก์ที่บันทึกไว้อาจชี้โดเมนอื่น) */
+function sltsNormalizeRowPhotoLinks(rows) {
+  if (!Array.isArray(rows) || typeof window.sltsFixPhotoUrl !== 'function') return;
+  rows.forEach(r => {
+    if (!r) return;
+    const cur = r['ลิงก์รูปภาพใน Google Drive'] || r['ลิงก์รูปภาพ'] || '';
+    const fixed = window.sltsFixPhotoUrl(cur, r['Drive File ID']);
+    if (fixed && fixed !== cur) {
+      r['ลิงก์รูปภาพใน Google Drive'] = fixed;
+      if (r['ลิงก์รูปภาพ'] !== undefined) r['ลิงก์รูปภาพ'] = fixed;
+    }
+  });
+}
+window.sltsNormalizeRowPhotoLinks = sltsNormalizeRowPhotoLinks;
+
 function renderDataTable(rows, filterCriteria = null) {
+  sltsNormalizeRowPhotoLinks(rows);
   state.allSheetRows = rows;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isDesktop = !sltsMobileLogic();
@@ -6227,9 +6381,17 @@ function renderDataTable(rows, filterCriteria = null) {
   }
 
   // 1. ทำลายและล้าง DataTable เดิมอย่างหมดจดเพื่อป้องกันรายการซ้ำ
+  //    (จำคำค้น/หน้า/การเรียง/ตำแหน่งเลื่อน ไว้แสดงต่อหลังแก้ไขหรือซิงค์ข้อมูล ถ้าเงื่อนไขค้นหาเจาะจงเดิม)
+  const dtViewKey = JSON.stringify(filterCriteria || state.currentFilterCriteria || null) + '|' + (state.selectedProvince || '');
+  let dtPrev = null;
   if ($.fn.DataTable.isDataTable('#summonsDataTable')) {
+    try {
+      const dtOld = $('#summonsDataTable').DataTable();
+      dtPrev = { key: state.dtViewKey, search: dtOld.search(), order: dtOld.order(), page: dtOld.page(), len: dtOld.page.len(), scrollY: window.scrollY };
+    } catch (_) { dtPrev = null; }
     $('#summonsDataTable').DataTable().clear().destroy();
   }
+  state.dtViewKey = dtViewKey;
 
   const tableBody = document.getElementById('dataTableBody');
   tableBody.innerHTML = '';
@@ -6250,10 +6412,11 @@ function renderDataTable(rows, filterCriteria = null) {
     filterBadgeHtml = `📍 แสดง: จ.${currentProv} (${filteredRows.length} รายการ)`;
   } else if (activeCriteria.type === 'case') {
     const searchCase = (activeCriteria.caseNo || '').trim().toLowerCase();
+    const termMatch = dtTermMatcher(searchCase);
     filteredRows = rows.filter(row => {
       const caseNo = (row['เลขคดี'] || '').trim().toLowerCase();
       row._resolvedProvince = getRowProvince(row);
-      return caseNo.includes(searchCase);
+      return caseNo.includes(searchCase) || (termMatch && termMatch(dtRowSearchText(row)));
     });
     filterBadgeHtml = `⚖️ กรองเลขคดี: <b class="text-blue-800 font-bold">"${activeCriteria.caseNo}"</b> (${filteredRows.length} รายการ)`;
   } else if (activeCriteria.type === 'province') {
@@ -6387,7 +6550,7 @@ function renderDataTable(rows, filterCriteria = null) {
     let editBtn = '';
     if (canEdit) {
       editBtn = `
-        <button type="button" onclick="openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1 cursor-pointer" title="แก้ไขข้อมูลส่งหมาย">
+        <button type="button" onclick="openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', sltsSheetRowById('${String(latest._id || '').replace(/[^0-9A-Za-z_-]/g, '')}', '${String(rawTimestamp).replace(/'/g, "\\'")}', '${caseNumber.replace(/'/g, "\\'")}'))" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1 cursor-pointer" title="แก้ไขข้อมูลส่งหมาย">
           <i class="fa-solid fa-pen-to-square"></i>
           <span>แก้ไข</span>
         </button>
@@ -6448,12 +6611,32 @@ function renderDataTable(rows, filterCriteria = null) {
       zeroRecords: `ไม่พบข้อมูลที่ตรงกับเงื่อนไขการค้นหา`
     }
   });
+  bindDtSearchHint(state.dataTableInstance, rows, filteredRows, activeCriteria);
+  if (dtPrev && dtPrev.key === dtViewKey) {
+    try {
+      const dt = state.dataTableInstance;
+      if (dtPrev.len) dt.page.len(dtPrev.len);
+      if (dtPrev.order && dtPrev.order.length) dt.order(dtPrev.order);
+      dt.search(dtPrev.search || '').draw();
+      const pages = dt.page.info().pages;
+      if (dtPrev.page > 0 && pages > 0) dt.page(Math.min(dtPrev.page, pages - 1)).draw('page');
+      const tbl = document.getElementById('tabContentTable');
+      if (tbl && !tbl.classList.contains('hidden')) requestAnimationFrame(() => window.scrollTo(0, dtPrev.scrollY || 0));
+    } catch (e) { console.warn('[DataTable] restore view failed', e); }
+  }
 }
 
 /**
  * แสดง SweetAlert แบบฟอร์ม "บันทึกการส่งหมาย" สำหรับแก้ไขข้อมูล
  * พร้อมดึงข้อมูลเดิมขึ้นมาให้แก้ไข และแสดงผลรูปส่งหมาย พร้อมตัวเลือกอัปโหลดรูปภาพใหม่ทับไฟล์เดิม
  */
+/** หาแถวในตารางจาก id ฐานข้อมูล (สำรอง: เลขคดี + เวลาบันทึก) */
+window.sltsSheetRowById = function(id, ts, caseNo) {
+  const rows = state.allSheetRows || [];
+  if (id) { const r = rows.find(x => String(x._id || '') === String(id)); if (r) return r; }
+  return rows.find(x => (x['เลขคดี'] || '').trim() === String(caseNo || '').trim() && (x['วัน-เวลาบันทึก'] || x['Timestamp'] || '') === ts) || null;
+};
+
 window.openEditSummonsModal = async function(caseNumber, specificRecord = null) {
   const records = (state.allSheetRows || []).filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim());
   const rec = specificRecord || records[0] || {};
@@ -6655,8 +6838,17 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
               <span class="absolute top-1 right-1 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow">รูปใหม่</span>
             </div>
 
-            <p class="text-[10px] text-gray-400 leading-tight">
-              💡 หากเลือกรูปใหม่ ระบบจะทำการประทับลายน้ำและอัปโหลดทับไฟล์เดิมใน Google Drive ให้โดยอัตโนมัติ
+            <!-- ตัวเลือก: ภาพถ่ายมีพิกัดบนภาพแล้ว (เหมือนหน้าบันทึกส่งหมาย) -->
+            <div class="bg-amber-50/70 border border-amber-200/90 rounded-xl p-2.5 flex items-start gap-2 text-left">
+              <input type="checkbox" id="swalEditHasWatermark" class="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer" ${localStorage.getItem('slts_desktop_has_watermark') === 'true' ? 'checked' : ''}>
+              <label for="swalEditHasWatermark" class="text-[11px] text-gray-700 font-semibold cursor-pointer select-none leading-relaxed">
+                <span class="text-amber-900 font-bold flex items-center gap-1.5"><i class="fa-solid fa-location-crosshairs text-amber-600"></i><span>ภาพถ่ายมีพิกัดบนภาพ</span></span>
+                <span class="block text-[10px] font-normal text-gray-600 mt-0.5">(หากติ๊กเลือก ระบบจะไม่ทำลายน้ำซ้ำบนภาพ และจะจำการตั้งค่านี้ไว้สำหรับการใช้งานครั้งต่อไป)</span>
+              </label>
+            </div>
+
+            <p id="swalEditWatermarkHint" class="text-[10px] text-gray-400 leading-tight">
+              💡 หากเลือกรูปใหม่ ระบบจะ${localStorage.getItem('slts_desktop_has_watermark') === 'true' ? 'ใช้ภาพตามเดิม (ไม่ประทับลายน้ำซ้ำ)' : 'ทำการประทับลายน้ำ'}และอัปโหลดทับไฟล์เดิมให้โดยอัตโนมัติ
             </p>
           </div>
         </div>
@@ -6765,6 +6957,14 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
         };
       }
 
+      const wmChk = document.getElementById('swalEditHasWatermark');
+      if (wmChk) {
+        wmChk.onchange = () => {
+          const hint = document.getElementById('swalEditWatermarkHint');
+          if (hint) hint.textContent = `💡 หากเลือกรูปใหม่ ระบบจะ${wmChk.checked ? 'ใช้ภาพตามเดิม (ไม่ประทับลายน้ำซ้ำ)' : 'ทำการประทับลายน้ำ'}และอัปโหลดทับไฟล์เดิมให้โดยอัตโนมัติ`;
+        };
+      }
+
       if (fileInput) {
         fileInput.onchange = (e) => {
           const f = e.target.files[0];
@@ -6829,7 +7029,8 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
         newLocationType,
         newLocationText,
         parsedLat,
-        parsedLng
+        parsedLng,
+        hasWatermarkAlready: Boolean(document.getElementById('swalEditHasWatermark')?.checked)
       };
     }
   }).then(async (res) => {
@@ -6838,7 +7039,26 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
       let compressedImgBase64 = null;
       let finalFileName = fileName;
 
-      if (newImageBase64) {
+      // จำการตั้งค่า "ภาพถ่ายมีพิกัดบนภาพ" เหมือนหน้าบันทึกส่งหมาย
+      try {
+        localStorage.setItem('slts_desktop_has_watermark', val.hasWatermarkAlready ? 'true' : 'false');
+        localStorage.setItem('slts_has_watermark', val.hasWatermarkAlready ? 'true' : 'false');
+        if (elements.chkDesktopHasWatermark) elements.chkDesktopHasWatermark.checked = val.hasWatermarkAlready;
+        if (typeof updateDesktopWatermarkBadge === 'function') updateDesktopWatermarkBadge(val.hasWatermarkAlready);
+      } catch (_) {}
+
+      if (newImageBase64 && val.hasWatermarkAlready) {
+        // ภาพมีพิกัด/ลายน้ำอยู่แล้ว → ไม่ประทับซ้ำ
+        showCustomLoading('กำลังประมวลผลรูปภาพใหม่...', 'กำลังเตรียมไฟล์รูปภาพเพื่ออัปโหลด');
+        try {
+          compressedImgBase64 = await compressImageToMax1MB(newImageBase64);
+          finalFileName = val.newCaseNumber.replace(/\//g, '-') + '.jpg';
+        } catch (imgErr) {
+          console.warn('Image compress error on edit:', imgErr);
+        } finally {
+          hideCustomLoading();
+        }
+      } else if (newImageBase64) {
         showCustomLoading('กำลังประมวลผลรูปภาพใหม่...', 'กำลังสร้างลายน้ำและเตรียมอัปโหลด');
         try {
           const img = new Image();
@@ -6874,6 +7094,7 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
 
       const updatePayload = {
         action: 'edit_record',
+        recordId: rec._id || '',
         rowIndex: rowIndex,
         oldFileId: fileId,
         timestamp: rawTimestamp,
@@ -6899,7 +7120,8 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
         const resJson = await uploadWithProgressBar(updatePayload, `กำลังบันทึกการแก้ไขเลขคดี ${val.newCaseNumber}...`);
 
         if (state.allSheetRows) {
-          const target = state.allSheetRows.find(r => {
+          const target = (rec._id && state.allSheetRows.find(r => String(r._id || '') === String(rec._id))) ||
+            state.allSheetRows.find(r => {
             return (r['เลขคดี'] || '').trim() === caseNumber.trim() &&
                    (!rawTimestamp || (r['วัน-เวลาบันทึก'] || r['Timestamp'] || '') === rawTimestamp);
           });
@@ -6990,6 +7212,9 @@ window.openCaseHistoryModal = function(caseNumber) {
         <span>ไม่มีข้อมูลภาพในระบบ</span>
       </button>
     `;
+    if (!imgUrl && rec['ไม่มีภาพ (เหตุผล)']) {
+      imgBtn = `<span class="px-2.5 py-1 bg-violet-50 text-violet-800 rounded-lg text-xs font-semibold border border-violet-200 inline-flex items-center gap-1.5" title="${String(rec['ไม่มีภาพ (เหตุผล)']).replace(/"/g, '&quot;')}"><i class="fa-solid fa-signature"></i> ไม่มีภาพ · เซ็นรับ</span>`;
+    }
     if (imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http')) {
       imgBtn = `
         <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${formattedTimestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1 cursor-pointer">
@@ -7002,7 +7227,7 @@ window.openCaseHistoryModal = function(caseNumber) {
     let editBtn = '';
     if (canEditItem) {
       editBtn = `
-        <button type="button" onclick="Swal.close(); openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', state.allSheetRows ? state.allSheetRows[${rec.originalIndex}] : null)" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition inline-flex items-center gap-1 cursor-pointer" title="แก้ไขรายการนี้">
+        <button type="button" onclick="Swal.close(); openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', sltsSheetRowById('${String(rec._id || '').replace(/[^0-9A-Za-z_-]/g, '')}', '${String(rawTimestamp).replace(/'/g, "\\'")}', '${caseNumber.replace(/'/g, "\\'")}'))" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition inline-flex items-center gap-1 cursor-pointer" title="แก้ไขรายการนี้">
           <i class="fa-solid fa-pen-to-square"></i>
           <span>แก้ไข</span>
         </button>
@@ -7643,7 +7868,7 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
     try {
       const cachedStr = localStorage.getItem('slts_cached_sheet_data');
       if (cachedStr) {
-        state.allSheetRows = JSON.parse(cachedStr);
+        state.allSheetRows = JSON.parse(cachedStr); sltsNormalizeRowPhotoLinks(state.allSheetRows);
       }
     } catch (e) {}
   }
@@ -7942,7 +8167,7 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
           });
 
           if (freshRows && freshRows.length > 0) {
-            state.allSheetRows = freshRows;
+            state.allSheetRows = freshRows; sltsNormalizeRowPhotoLinks(state.allSheetRows);
             // บันทึกลงหน่วยความจำเครื่องไว้ให้ใช้งานในโหมดออฟไลน์ได้
             try {
               localStorage.setItem('slts_cached_sheet_data', JSON.stringify(freshRows));
@@ -8159,6 +8384,7 @@ window.copyCoordinates = function(lat, lng) {
  * แสดงภาพถ่ายเต็มด้วย SweetAlert พร้อมปุ่มดาวน์โหลด และคลิกดูเต็มหน้าจอได้ (สเกลไม่เกิน 80vh)
  */
 window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, lat, lng) {
+  if (typeof window.sltsFixPhotoUrl === 'function') imgUrl = window.sltsFixPhotoUrl(imgUrl);
   let directImgUrl = imgUrl;
   const match = (imgUrl || '').match(/id=([a-zA-Z0-9_-]+)/) || (imgUrl || '').match(/\/d\/([a-zA-Z0-9_-]+)/);
   if (match && match[1]) {
@@ -8394,8 +8620,16 @@ window.deleteRecord = function(fileId, fileName, timestamp, caseNumber, rowIndex
             allowOutsideClick: false,
             confirmButtonColor: '#2563eb'
           });
-          // โหลดตารางสดใหม่ทันที
-          loadGoogleSheetData(true);
+          // ลบออกจากตารางในเครื่องทันที (คงเงื่อนไขค้นหา/หน้าเดิม) แล้วซิงค์จากเซิร์ฟเวอร์เบื้องหลัง
+          if (Array.isArray(state.allSheetRows)) {
+            const before = state.allSheetRows.length;
+            state.allSheetRows = state.allSheetRows.filter((r) => !(
+              (fileId && String(r['Drive File ID'] || '') === String(fileId)) ||
+              (!fileId && (r['เลขคดี'] || '').trim() === String(caseNumber || '').trim() && (r['วัน-เวลาบันทึก'] || r['Timestamp'] || '') === timestamp)
+            ));
+            if (state.allSheetRows.length !== before) renderDataTable(state.allSheetRows);
+          }
+          loadGoogleSheetData(true, true);
         } else {
           throw new Error(resJson.message || 'ไม่สามารถลบข้อมูลได้');
         }
@@ -9886,7 +10120,7 @@ window.showMobileHistorySearchModal = async function() {
     const cachedStr = localStorage.getItem(CACHE_KEY_SHEET_DATA);
     if (cachedStr) {
       try {
-        state.allSheetRows = JSON.parse(cachedStr);
+        state.allSheetRows = JSON.parse(cachedStr); sltsNormalizeRowPhotoLinks(state.allSheetRows);
       } catch (e) {}
     }
   }
@@ -10354,6 +10588,8 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
           return;
         }
 
+        window._mobileManualPhotoDate = null;
+        if (window.SLTS && SLTS.geo && SLTS.geo.readExifDate) SLTS.geo.readExifDate(file).then((d) => { window._mobileManualPhotoDate = d; }).catch(() => {});
         const reader = new FileReader();
         reader.onload = async (ev) => {
           selectedDataUrl = ev.target.result;
@@ -10542,7 +10778,7 @@ window.submitMobileManualUploadForm = async function() {
       lat: formatFullCoordinateString(coordsLat, 6),
       lng: formatFullCoordinateString(coordsLng, 6),
       heading: currentHeading,
-      dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+      dateTime: WatermarkEngine.formatThaiDateTime(window._mobileManualPhotoDate || new Date()), // วันที่ถ่ายภาพ (EXIF) = วันที่ส่งหมาย
       uploader: state.currentUser?.username || '',
       uploadedBy: state.currentUser?.username || '',
       user_id: state.currentUser?.username || '',
@@ -11930,7 +12166,14 @@ function performDesktopSimilarSearch() {
   const historyList = (typeof getDesktopFormHistory === 'function') ? getDesktopFormHistory() : [];
   const combinedRows = [...allRows];
   historyList.forEach(h => {
+    // ประวัติการกรอกในเครื่อง: ถ้ามีรายการเดียวกันในฐานข้อมูลแล้วไม่ต้องซ้ำ / ถ้าไม่มีให้ติดป้าย "เฉพาะในเครื่องนี้"
+    const inDb = h.caseNumber && allRows.some(r => {
+      const rc = String(r['เลขคดี'] || '').trim();
+      return rc && dtSearchNorm(rc) === dtSearchNorm(h.caseNumber);
+    });
+    if (inDb) return;
     combinedRows.push({
+      _srcLocal: true,
       'เลขคดี': h.caseNumber,
       'ประเภทศาล': h.courtType,
       'จังหวัด': h.province,
@@ -12333,6 +12576,7 @@ function renderDesktopSimilarResults(results) {
             <span class="text-[11px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-md font-medium">
               ${court}
             </span>
+            ${r._srcLocal ? `<span class="text-[11px] text-red-700 bg-red-50 px-2 py-0.5 rounded-md font-bold border border-red-200" title="มาจากประวัติการกรอกข้อมูลบนเครื่องนี้ ไม่พบในฐานข้อมูลที่ระบบเชื่อมต่ออยู่"><i class="fa-solid fa-laptop mr-1"></i>เฉพาะในเครื่องนี้ • ไม่พบในฐานข้อมูล</span>` : ''}
           </div>
           <div class="text-xs text-gray-700 flex items-center gap-1.5 flex-wrap">
             <i class="fa-solid fa-location-dot text-rose-500 shrink-0"></i>
@@ -13467,6 +13711,9 @@ function initDesktopUploadEvents() {
           elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB → บีบอัดก่อนส่ง < 500 KB)`;
         }
 
+        // วันที่ส่งหมายจากภาพ (EXIF → วันที่บนภาพ) — ทำงานคู่ขนานกับการอ่านพิกัด
+        if (!sltsMobileLogic()) fillDesktopServeDateFromPhoto(file, state.selectedDesktopImageDataUrl);
+
         // ตรวจสอบและดึงพิกัด GPS จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
         if (!sltsMobileLogic()) {
           const gpsResult = await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
@@ -13546,6 +13793,10 @@ function initDesktopUploadEvents() {
   if (elements.btnConfirmDesktopUpload) {
     elements.btnConfirmDesktopUpload.addEventListener('click', handleDesktopUpload);
   }
+  const chkNoPhoto = document.getElementById('chkDesktopNoPhoto');
+  if (chkNoPhoto) chkNoPhoto.addEventListener('change', syncDesktopNoPhotoUi);
+  const serveInp = document.getElementById('desktopServeDateTime');
+  if (serveInp) serveInp.addEventListener('input', () => { serveInp.dataset.touched = '1'; const src = document.getElementById('desktopServeDateSrc'); if (src) src.textContent = '(แก้ไขเอง)'; });
 }
 
 function updateDesktopWatermarkBadge(hasWatermark) {
@@ -13577,7 +13828,107 @@ window.viewDesktopFullPreview = function() {
 
 window.isDesktopUploadInProgress = false;
 
+/** Date → ค่าสำหรับ <input type="datetime-local"> */
+function toLocalDateTimeInput(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+/** อ่านวันที่ส่งหมายจากภาพที่เลือกในหน้าบันทึกส่งหมาย (PC) แล้วกรอกให้ */
+async function fillDesktopServeDateFromPhoto(file, dataUrl) {
+  const row = document.getElementById('desktopServeDateRow');
+  const inp = document.getElementById('desktopServeDateTime');
+  const src = document.getElementById('desktopServeDateSrc');
+  if (!row || !inp) return;
+  row.classList.remove('hidden');
+  inp.dataset.touched = '';
+  inp.value = toLocalDateTimeInput(new Date());
+  if (src) src.textContent = '(กำลังอ่านวันที่จากภาพ…)';
+  const token = (state._serveDateToken = (state._serveDateToken || 0) + 1);
+  let r = null;
+  try { r = (window.SLTS && SLTS.geo && SLTS.geo.readPhotoDate) ? await SLTS.geo.readPhotoDate(file, dataUrl) : null; } catch (_) {}
+  if (token !== state._serveDateToken || inp.dataset.touched) return;
+  if (r && r.date) {
+    inp.value = toLocalDateTimeInput(r.date);
+    if (src) src.textContent = r.source === 'exif' ? '(จากข้อมูลภาพถ่าย)' : r.source === 'ocr' ? '(อ่านจากวันที่บนภาพ — โปรดตรวจสอบ)' : '(จากวันที่ของไฟล์ — โปรดตรวจสอบ)';
+  } else if (src) {
+    src.textContent = '(ไม่พบวันที่ในภาพ — ใช้เวลาปัจจุบัน แก้ไขได้)';
+  }
+}
+/** วันเวลาส่งหมายที่ใช้บันทึก (ภาพ/ที่แก้ไข) หรือเวลาปัจจุบัน */
+function desktopServeDateValue() {
+  const inp = document.getElementById('desktopServeDateTime');
+  const row = document.getElementById('desktopServeDateRow');
+  if (inp && row && !row.classList.contains('hidden') && inp.value) {
+    const d = new Date(inp.value);
+    if (!isNaN(d) && d.getTime() <= Date.now() + 864e5) return d;
+  }
+  return new Date();
+}
+window.fillDesktopServeDateFromPhoto = fillDesktopServeDateFromPhoto;
+
+/** สลับหน้าฟอร์มเมื่อเลือก "ไม่มีภาพถ่าย (ผู้รับเซ็นรับหมายเอง)" */
+function syncDesktopNoPhotoUi() {
+  const on = Boolean(document.getElementById('chkDesktopNoPhoto')?.checked);
+  const sel = document.getElementById('desktopNoPhotoReason');
+  if (sel) sel.classList.toggle('hidden', !on);
+  const fileWrap = elements.desktopImageFileInput ? elements.desktopImageFileInput.closest('div') : null;
+  if (fileWrap) { fileWrap.style.opacity = on ? '0.45' : ''; fileWrap.style.pointerEvents = on ? 'none' : ''; }
+  const btn = elements.btnConfirmDesktopUpload;
+  const span = btn && btn.querySelector('span');
+  if (span) span.textContent = on ? 'บันทึกรายการส่งหมาย (ไม่มีภาพถ่าย)' : 'ยืนยันอัปโหลดภาพส่งหมาย';
+  if (btn) btn.classList.toggle('!bg-violet-600', on);
+}
+window.syncDesktopNoPhotoUi = syncDesktopNoPhotoUi;
+
+/** บันทึกรายการส่งหมายโดยไม่มีภาพถ่าย (ส่งตรงเข้าระบบ ไม่ผ่านคิวรูปภาพ) */
+async function handleDesktopNoPhotoUpload() {
+  if (!validateForm({ skipGps: true })) return;
+  const caseNumber = getFormattedCaseNumber();
+  const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || 'ศาลจังหวัดอุดรธานี';
+  const province = (elements.provinceSelect ? elements.provinceSelect.value : '') || state.selectedProvince || 'อุดรธานี';
+  const district = (elements.districtSelect ? elements.districtSelect.value : '') || state.selectedDistrict || '';
+  const subdistrict = (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || state.selectedSubdistrict || '';
+  const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
+  const locationText = getFullLocationText();
+  const reason = document.getElementById('desktopNoPhotoReason')?.value || 'ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)';
+  const esc = (t) => String(t || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ok = await Swal.fire({
+    icon: 'question',
+    title: 'บันทึกรายการส่งหมาย (ไม่มีภาพถ่าย)?',
+    html: `<div class="text-left text-sm space-y-1"><div><b>${esc(caseNumber)}</b> · ${esc(courtType)}</div><div class="text-gray-600 text-xs">${esc(locationText)}</div><div class="mt-2 p-2 rounded-lg bg-violet-50 border border-violet-200 text-violet-900 text-xs font-semibold"><i class="fa-solid fa-signature mr-1"></i>${esc(reason)}</div></div>`,
+    showCancelButton: true, confirmButtonText: 'บันทึก', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#7c3aed'
+  });
+  if (!ok.isConfirmed) return;
+  const payload = {
+    action: 'upload_image', caseNumber, courtType, province, district, subdistrict, locationType, locationText,
+    lat: null, lng: null, // ไม่มีภาพถ่าย = ไม่มีพิกัดจุดส่งหมายจริง (ไม่ปักหมุดผิดที่)
+    dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+    noPhoto: true, noPhotoReason: reason, clientUploadId: 'nophoto-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+  };
+  try {
+    await uploadWithProgressBar(payload, `กำลังบันทึกเลขคดี ${caseNumber} (ไม่มีภาพถ่าย)...`);
+    saveDesktopFormHistory({ caseNumber, courtType, province, district, subdistrict, locationType, locationText,
+      houseNo: elements.houseNoInput ? elements.houseNoInput.value.trim() : '', moo: elements.mooInput ? elements.mooInput.value.trim() : '' });
+    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+    if (typeof loadGoogleSheetData === 'function') loadGoogleSheetData(true, true);
+    const chk = document.getElementById('chkDesktopNoPhoto');
+    if (chk) { chk.checked = false; syncDesktopNoPhotoUi(); }
+    resetDesktopForm(true);
+    Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', text: `${caseNumber} — ${reason}`, timer: 1800, showConfirmButton: false });
+  } catch (err) {
+    console.error('No-photo record error:', err);
+    Swal.fire({ icon: 'error', title: 'บันทึกไม่สำเร็จ', text: err && err.message ? err.message : String(err) });
+  }
+}
+
 async function handleDesktopUpload() {
+  if (document.getElementById('chkDesktopNoPhoto')?.checked) {
+    if (window.isDesktopUploadInProgress) return;
+    window.isDesktopUploadInProgress = true;
+    try { await handleDesktopNoPhotoUpload(); } finally { window.isDesktopUploadInProgress = false; }
+    return;
+  }
   if (window.isDesktopUploadInProgress) {
     console.warn('[Desktop Upload] Upload already in progress, ignoring duplicate submit.');
     return;
@@ -13698,7 +14049,7 @@ async function handleDesktopUpload() {
       lat: state.lat,
       lng: state.lng,
       heading: heading,
-      dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+      dateTime: WatermarkEngine.formatThaiDateTime(desktopServeDateValue()),
       uploader: state.currentUser?.username || '',
       uploadedBy: state.currentUser?.username || '',
       user_id: state.currentUser?.username || '',
@@ -13925,6 +14276,7 @@ async function handleDesktopUpload() {
 }
 
 function resetDesktopForm(keepValues = true) {
+  { const row = document.getElementById('desktopServeDateRow'); if (row) row.classList.add('hidden'); const inp = document.getElementById('desktopServeDateTime'); if (inp) { inp.value = ''; inp.dataset.touched = ''; } }
   state.selectedDesktopImageDataUrl = null;
   if (elements.desktopImageFileInput) elements.desktopImageFileInput.value = '';
   if (elements.desktopImagePreviewContainer) elements.desktopImagePreviewContainer.classList.add('hidden');
@@ -14210,7 +14562,7 @@ function setCaptureOrientation(mode) {
   }
 }
 
-function validateForm() {
+function validateForm(opts = {}) {
   const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || (document.getElementById('courtType') ? document.getElementById('courtType').value : '');
 
   // 1. ตรวจสอบชื่อศาลกรณีเลือกศาลที่ไม่สังกัดภาค
@@ -14337,6 +14689,9 @@ function validateForm() {
       return false;
     }
   }
+
+  // หมายที่ไม่มีภาพถ่าย (เซ็นรับเอง): ไม่ต้องมีพิกัด
+  if (opts.skipGps) return true;
 
   // 6. ตรวจสอบและดึงพิกัดจากช่องกรอกพิกัด (ตรวจสอบรูปแบบและขอบเขตพิกัดอย่างละเอียด)
   const coordsRaw = (elements.coordinatesInput ? elements.coordinatesInput.value : '').trim();
@@ -15931,13 +16286,9 @@ async function optimizeRouteSequenceRealRoad(options = {}) {
         if (ordered.length === stopsWithCoords.length) {
           // เก็บข้อมูล Polyline ถนนจริง และระยะทางรวม เพื่อให้แผนที่แสดงผลได้ทันที
           if (trip) {
-            if (trip.geometry && trip.geometry.coordinates) {
-              state.routeRoadPolylineCoords = trip.geometry.coordinates.map(pt => [pt[1], pt[0]]);
-              state.mapRoutePolylineCoords = state.routeRoadPolylineCoords;
-              try {
-                localStorage.setItem('slts_shared_route_polyline', JSON.stringify(state.routeRoadPolylineCoords));
-              } catch (e) {}
-            }
+            // ใช้ OSRM เฉพาะจัดลำดับจุด — เส้นทางที่แสดงคำนวณใหม่บนถนนสายหลัก (ไม่เก็บเส้นที่ลัดซอย)
+            state.routeRoadPolylineCoords = [];
+            state.mapRoutePolylineCoords = null;
             if (trip.distance) {
               state.calculatedRoadDistanceKm = trip.distance / 1000;
             }
@@ -21346,43 +21697,112 @@ let routeFetchSeq = 0;
  */
 async function fetchRealRoadRoute(coords) {
   if (!coords || coords.length < 2) return null;
+  // 1) ถนนสัญจรหลัก (Valhalla): เกาะหมุดเข้าถนนสายหลัก ไม่ใช้ซอย ทางในหมู่บ้าน ทางบริการ ทางเกวียน
+  try {
+    const main = await fetchMainRoadRoute(coords);
+    if (main) return main;
+  } catch (e) { console.warn('[route] main-road routing failed', e); }
+  // 2) สำรอง: OSRM (ถนนจริงทุกประเภท)
+  return fetchOsrmRoadRoute(coords);
+}
+
+// ------------------------------------------------------------------
+// เส้นทางถนนสัญจรหลัก (Valhalla — valhalla1.openstreetmap.de, จำกัด 10 จุด/คำขอ, ~1 คำขอ/วินาที)
+// ------------------------------------------------------------------
+const MAIN_ROAD_MIN_CLASS = 'unclassified'; // ถนนเชื่อมหมู่บ้านขึ้นไป (ไม่รวม residential/service/track)
+const _mainRoadCache = new Map();
+let _valhallaLastCall = 0;
+
+function decodePolyline6(str) {
+  const out = []; let idx = 0, lat = 0, lng = 0;
+  while (idx < str.length) {
+    let b, shift = 0, res = 0;
+    do { b = str.charCodeAt(idx++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (res & 1) ? ~(res >> 1) : (res >> 1);
+    shift = 0; res = 0;
+    do { b = str.charCodeAt(idx++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (res & 1) ? ~(res >> 1) : (res >> 1);
+    out.push([lat / 1e6, lng / 1e6]);
+  }
+  return out;
+}
+
+async function valhallaRouteChunk(pts, minClass) {
+  const wait = 1100 - (Date.now() - _valhallaLastCall);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  _valhallaLastCall = Date.now();
+  const body = {
+    locations: pts.map(c => {
+      const loc = { lat: Number(c[0]), lon: Number(c[1]), type: 'break', radius: 0 };
+      if (minClass) loc.search_filter = { min_road_class: minClass, exclude_ramp: false };
+      return loc;
+    }),
+    costing: 'auto',
+    costing_options: { auto: { use_living_streets: 0, use_tracks: 0, service_penalty: 600, service_factor: 8, use_highways: 1, use_ferry: 0, exclude_unpaved: false } },
+    directions_type: 'none',
+    units: 'kilometers'
+  };
+  const res = await fetch('https://valhalla1.openstreetmap.de/route?json=' + encodeURIComponent(JSON.stringify(body)), { signal: AbortSignal.timeout(12000) });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || !json.trip) {
+    const err = new Error((json && json.error) || ('Valhalla HTTP ' + res.status));
+    err.code = json && json.error_code;
+    throw err;
+  }
+  const latLngs = [];
+  (json.trip.legs || []).forEach(leg => {
+    const seg = decodePolyline6(leg.shape || '');
+    if (latLngs.length && seg.length) seg.shift();
+    latLngs.push(...seg);
+  });
+  return { latLngs, distanceKm: Number(json.trip.summary?.length || 0), durationMin: Number(json.trip.summary?.time || 0) / 60 };
+}
+
+async function fetchMainRoadRoute(coords) {
+  const pts = coords.filter(c => c && isFinite(c[0]) && isFinite(c[1]) && Number(c[0]) !== 0);
+  if (pts.length < 2) return null;
+  const key = pts.map(c => Number(c[0]).toFixed(5) + ',' + Number(c[1]).toFixed(5)).join(';');
+  if (_mainRoadCache.has(key)) return _mainRoadCache.get(key);
+  const all = []; let km = 0, min = 0;
+  for (let i = 0; i < pts.length - 1; i += 9) {
+    const chunk = pts.slice(i, i + 10);
+    if (chunk.length < 2) break;
+    let part = null;
+    // ถ้าหมุดอยู่ไกลจากถนนสายหลักจนหาไม่พบ ค่อยผ่อนเป็นถนนในชุมชน (ยังไม่ใช้ทางบริการ/ทางเกวียน)
+    for (const cls of [MAIN_ROAD_MIN_CLASS, 'residential']) {
+      try { part = await valhallaRouteChunk(chunk, cls); break; }
+      catch (e) { if (e.code !== 171 && e.code !== 442 && e.code !== 443) throw e; }
+    }
+    if (!part || !part.latLngs.length) return null;
+    if (all.length) part.latLngs.shift();
+    all.push(...part.latLngs);
+    km += part.distanceKm; min += part.durationMin;
+  }
+  const result = { latLngs: all, distanceKm: km, durationMin: min, source: 'main-road' };
+  if (_mainRoadCache.size > 50) _mainRoadCache.clear();
+  _mainRoadCache.set(key, result);
+  return result;
+}
+window.fetchMainRoadRoute = fetchMainRoadRoute;
+
+async function fetchOsrmRoadRoute(coords) {
+  if (!coords || coords.length < 2) return null;
 
   // แปลงพิกัดเป็น lng,lat ตามข้อกำหนดของ OSRM
   const coordQuery = coords.map(c => `${c[1]},${c[0]}`).join(';');
   const osrmUrl1 = `https://router.project-osrm.org/route/v1/driving/${coordQuery}?overview=full&geometries=geojson&steps=false&continue_straight=true`;
   const osrmUrl2 = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coordQuery}?overview=full&geometries=geojson&steps=false&continue_straight=true`;
 
-  try {
-    let res = await fetch(osrmUrl1, { signal: AbortSignal.timeout(6000) });
-    if (!res.ok) throw new Error('OSRM mirror 1 error');
-    let data = await res.json();
-    if (data.code === 'Ok' && data.routes && data.routes[0]) {
-      const route = data.routes[0];
-      const roadLatLngs = route.geometry.coordinates.map(pt => [pt[1], pt[0]]);
-      return {
-        latLngs: roadLatLngs,
-        distanceKm: route.distance / 1000,
-        durationMin: route.duration / 60
-      };
-    }
-  } catch (err1) {
+  for (const u of [osrmUrl1, osrmUrl2]) {
     try {
-      let res2 = await fetch(osrmUrl2, { signal: AbortSignal.timeout(6000) });
-      if (res2.ok) {
-        let data2 = await res2.json();
-        if (data2.code === 'Ok' && data2.routes && data2.routes[0]) {
-          const route = data2.routes[0];
-          const roadLatLngs = route.geometry.coordinates.map(pt => [pt[1], pt[0]]);
-          return {
-            latLngs: roadLatLngs,
-            distanceKm: route.distance / 1000,
-            durationMin: route.duration / 60
-          };
-        }
+      const res = await fetch(u, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.code === 'Ok' && data.routes && data.routes[0]) {
+        const route = data.routes[0];
+        return { latLngs: route.geometry.coordinates.map(pt => [pt[1], pt[0]]), distanceKm: route.distance / 1000, durationMin: route.duration / 60, source: 'osrm' };
       }
-    } catch (err2) {
-      console.warn('OSRM routing failed:', err2);
-    }
+    } catch (e) { console.warn('OSRM routing failed:', e.message); }
   }
   return null;
 }
@@ -21602,14 +22022,13 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
   if (polylineCoords.length > 1 && state.showRouteLayer) {
     const currentSeq = ++routeFetchSeq;
 
-    // สร้างเส้นพื้นฐานไว้ก่อนระหว่างรอ API โครงข่ายถนนจริง
-    state.mapRoutePolyline = L.polyline(polylineCoords, {
-      color: '#2563eb',
-      weight: 4,
-      opacity: 0.6,
-      lineJoin: 'round',
-      lineCap: 'round'
-    }).addTo(state.interactiveLeafletMap);
+    // ไม่ลากเส้นตรงระหว่างหมุด (ไม่ใช่เส้นทางจริง) — รอเส้นทางถนนสัญจรหลักจากระบบนำทาง
+    state.mapRoutePolyline = null;
+    state.mapRoutePolylineCoords = null;
+    setTimeout(() => {
+      const el = document.getElementById('mapTotalDistanceText');
+      if (el && currentSeq === routeFetchSeq) el.textContent = 'กำลังคำนวณเส้นทางถนนหลัก…';
+    }, 0);
 
     // ดึงเส้นทางโครงข่ายถนนสัญจรหลักจริง (OSRM Driving Engine)
     fetchRealRoadRoute(polylineCoords).then(roadResult => {
@@ -21629,13 +22048,17 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
           lineCap: 'round'
         }).addTo(state.interactiveLeafletMap);
 
+        state.routeRoadPolylineCoords = roadResult.latLngs;
         // อัปเดตระยะทางรวมบนถนนจริง
         if (roadResult.distanceKm > 0) {
           const totalDistEl = document.getElementById('mapTotalDistanceText');
           if (totalDistEl) {
-            totalDistEl.textContent = `${roadResult.distanceKm.toFixed(1)} กม. (ถนนจริง)`;
+            totalDistEl.textContent = `${roadResult.distanceKm.toFixed(1)} กม. (${roadResult.source === 'main-road' ? 'ถนนสายหลัก' : 'ถนนจริง'})`;
           }
         }
+      } else {
+        const totalDistEl = document.getElementById('mapTotalDistanceText');
+        if (totalDistEl) totalDistEl.textContent = 'ดึงเส้นทางถนนไม่สำเร็จ (แสดงเฉพาะหมุด)';
       }
     }).catch(e => console.warn('Real road route render error:', e));
   }
@@ -26379,12 +26802,7 @@ window.initMobileModalMapInstance = function() {
     const bounds = L.latLngBounds(state.routeRoadPolylineCoords);
     window.mobileModalMap.fitBounds(bounds, { padding: [25, 25] });
   } else if (waypoints.length > 1) {
-    window.mobileModalPolyline = L.polyline(waypoints, {
-      color: '#2563eb',
-      weight: 3,
-      opacity: 0.5,
-      dashArray: '4, 4'
-    }).addTo(window.mobileModalMap);
+    window.mobileModalPolyline = null; // ไม่ลากเส้นตรงระหว่างหมุด รอเส้นทางถนนสายหลัก
 
     window.mobileModalMap.fitBounds(L.latLngBounds(waypoints), { padding: [25, 25] });
 
