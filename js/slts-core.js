@@ -49,7 +49,8 @@
     const id = String(fileId || '').trim();
     if (!id) return '';
     // ลิงก์รูปแบบเดิม (sig 16 ตัว) เคยแคชถาวรในเบราว์เซอร์ และเลขซ้ำกันได้เมื่อสลับฐานข้อมูล → เติม v=2 เพื่อไม่ใช้แคชเก่า
-    if (isNeonPhoto(id)) return SLTS.apiBase() + '/api/photo?f=' + encodeURIComponent(id) + (/^db-\d+-[A-Za-z0-9]{16}$/.test(id) ? '&v=2' : '');
+    // ต้องเป็นลิงก์เต็ม (https://…) เสมอ — หลายจุดในแอปตรวจว่าลิงก์ขึ้นต้นด้วย http ก่อนแสดงปุ่มดูภาพ
+    if (isNeonPhoto(id)) return (SLTS.apiBase() || location.origin) + '/api/photo?f=' + encodeURIComponent(id) + (/^db-\d+-[A-Za-z0-9]{16}$/.test(id) ? '&v=2' : '');
     return `https://lh3.googleusercontent.com/d/${id}=w${size || 1600}`;
   };
   /**

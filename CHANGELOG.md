@@ -2,6 +2,12 @@
 
 สร้างอัตโนมัติจาก `version.json` ด้วย `npm run version:bump`
 
+## [2.6.10] - 2026-11-25
+### แก้ไข
+- ปุ่ม "ดูภาพ" หายไป (เกิดจาก v2.6.8): `sltsImgUrl` บนเว็บคืนลิงก์แบบย่อ `/api/photo?f=…` เพราะ `API_BASE` ว่าง
+  แต่ตารางแสดงปุ่มเฉพาะลิงก์ที่ขึ้นต้นด้วย `http` → ใช้ `location.origin` เมื่อไม่มี `API_BASE`
+  · รายการที่ `drive_url` ว่างแต่มี `Drive File ID` แสดงปุ่มดูภาพได้
+
 ## [2.6.9] - 2026-11-25
 ### แก้ไข
 - แผนที่และหมุด: เส้นทางบน **ถนนสัญจรหลัก** ผ่าน Valhalla (`valhalla1.openstreetmap.de`) — `search_filter.min_road_class = unclassified`,
