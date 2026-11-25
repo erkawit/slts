@@ -671,6 +671,22 @@
                     </label>
                   </div>
 
+                  <!-- ตัวเลือก: หมายที่ไม่มีภาพถ่าย (ผู้รับเซ็นรับหมายเอง) -->
+                  <div class="bg-violet-50/70 border border-violet-200 rounded-xl p-3 flex items-start gap-2.5 transition">
+                    <input type="checkbox" id="chkDesktopNoPhoto" class="mt-0.5 w-4 h-4 text-violet-600 border-gray-300 rounded focus:ring-violet-500 cursor-pointer">
+                    <label for="chkDesktopNoPhoto" class="text-xs text-gray-700 font-semibold cursor-pointer select-none leading-relaxed flex-1">
+                      <span class="text-violet-900 font-bold flex items-center gap-1.5">
+                        <i class="fa-solid fa-signature text-violet-600"></i>
+                        <span>ไม่มีภาพถ่าย (ผู้รับเซ็นรับหมายเอง)</span>
+                      </span>
+                      <span class="block text-[11px] font-normal text-gray-600 mt-0.5">บันทึกรายการส่งหมายได้โดยไม่ต้องแนบภาพ เพื่อให้รายงานหมายได้ครบ</span>
+                      <select id="desktopNoPhotoReason" class="hidden mt-1.5 w-full text-xs border border-violet-200 rounded-lg px-2 py-1.5 bg-white">
+                        <option>ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)</option>
+                        <option>มารับหมายที่ศาล (ไม่มีภาพถ่าย)</option>
+                      </select>
+                    </label>
+                  </div>
+
                   <!-- Thumbnail Preview Container -->
                   <div id="desktopImagePreviewContainer" class="hidden space-y-2 mt-2">
                     <p class="text-xs font-bold text-gray-700 flex items-center justify-between">

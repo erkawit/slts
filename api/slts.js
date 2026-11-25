@@ -130,6 +130,7 @@ function summonsRowToSheet(r) {
     'Drive File ID': str(r.drive_file_id),
     'ผู้บันทึก': str(r.uploader),
     'จังหวัด': str(r.province),
+    'ไม่มีภาพ (เหตุผล)': str(r.no_photo_reason),
   };
 }
 
@@ -644,6 +645,8 @@ actions.upload_image = async (data, ctx) => {
     lng: num(data.lng),
     heading: data.heading === undefined ? null : str(data.heading),
     file_name: str(data.fileName),
+    // ไม่มีภาพถ่าย (เช่น ผู้รับเซ็นรับหมายเอง) — ใช้ได้เฉพาะเมื่อไม่ได้แนบภาพ
+    no_photo_reason: (!data.imageBase64 && data.noPhoto) ? (str(data.noPhotoReason).trim() || 'ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)').slice(0, 200) : '',
   };
 
   let row;
@@ -656,22 +659,23 @@ actions.upload_image = async (data, ctx) => {
         lat = COALESCE($8, lat), lng = COALESCE($9, lng), heading = COALESCE($10, heading),
         file_name = $11, drive_url = COALESCE(NULLIF($12,''), drive_url), drive_file_id = COALESCE(NULLIF($13,''), drive_file_id),
         province = COALESCE(NULLIF($14,''), province), uploader = COALESCE(uploader, $15),
-        client_upload_id = COALESCE(client_upload_id, $16), updated_at = NOW()
+        client_upload_id = COALESCE(client_upload_id, $16),
+        no_photo_reason = CASE WHEN $13 <> '' THEN '' WHEN $18 <> '' THEN $18 ELSE no_photo_reason END, updated_at = NOW()
       WHERE id = $17 RETURNING *`,
       [values.recorded_at_text, values.recorded_at, values.court_type, values.district, values.subdistrict, values.location_type,
         values.location_text, values.lat, values.lng, values.heading, values.file_name, fileUrl, fileId, values.province,
-        uploader, clientId, target.id]);
+        uploader, clientId, target.id, values.no_photo_reason]);
     row = rows[0];
     if (fileId && oldFileId && oldFileId !== fileId && data.overwrite) await trashIfUnused(oldFileId, target.id);
   } else {
     try {
       const { rows } = await db.query(`INSERT INTO summons
         (client_upload_id, recorded_at_text, recorded_at, case_number, court_type, province, district, subdistrict, location_type,
-         location_text, lat, lng, heading, file_name, drive_url, drive_file_id, uploader)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+         location_text, lat, lng, heading, file_name, drive_url, drive_file_id, uploader, no_photo_reason)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
         [clientId, values.recorded_at_text, values.recorded_at, values.case_number, values.court_type, values.province, values.district,
           values.subdistrict, values.location_type, values.location_text, values.lat, values.lng, values.heading, values.file_name,
-          fileUrl, fileId, uploader]);
+          fileUrl, fileId, uploader, values.no_photo_reason]);
       row = rows[0];
     } catch (e) {
       if (e.code === '23505' && clientId) { // อีกคำขอที่ส่งพร้อมกันบันทึกไปก่อนแล้ว
@@ -717,6 +721,7 @@ actions.edit_record = async (data, ctx) => {
         file_name = CASE WHEN $11 <> '' AND $12 <> '' THEN $13 ELSE file_name END,
         drive_url = CASE WHEN $11 <> '' AND $12 <> '' THEN $11 ELSE drive_url END,
         drive_file_id = CASE WHEN $11 <> '' AND $12 <> '' THEN $12 ELSE drive_file_id END,
+        no_photo_reason = CASE WHEN $11 <> '' AND $12 <> '' THEN '' ELSE no_photo_reason END,
         updated_at = NOW()
       WHERE id = $14 RETURNING *`,
       [str(data.caseNumber), str(data.courtType), str(data.district), str(data.subdistrict), str(data.locationType), str(data.locationText),

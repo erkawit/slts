@@ -196,11 +196,24 @@
     return false;
   };
   const timeOf = (v) => (typeof window.parseDateToTime === 'function' ? window.parseDateToTime(v) : (Date.parse(v) || 0));
+  // ภาพแทนสำหรับหมายที่ไม่มีภาพถ่าย (เช่น ผู้รับเซ็นรับหมายเอง)
+  const NOPHOTO_THUMB = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="160" height="120" rx="10" fill="#fef3c7"/><text x="80" y="52" font-size="30" text-anchor="middle">✍️</text><text x="80" y="84" font-size="13" font-family="sans-serif" text-anchor="middle" fill="#92400e">ไม่มีภาพ</text><text x="80" y="102" font-size="11" font-family="sans-serif" text-anchor="middle" fill="#92400e">เซ็นรับหมาย</text></svg>');
+  const isNoPhotoId = (id) => /^nophoto-/.test(String(id || ''));
   function photoFromRow(row) {
     let id = String(row['Drive File ID'] || '').trim();
     const link = String(row['ลิงก์รูปภาพใน Google Drive'] || '');
     if (!id) { const m = link.match(/id=([a-zA-Z0-9_-]+)/) || link.match(/\/d\/([a-zA-Z0-9_-]+)/) || link.match(/[?&]f=(db-[^&]+)/); if (m) id = decodeURIComponent(m[1]); }
+    const noPhoto = !id && String(row['ไม่มีภาพ (เหตุผล)'] || '').trim();
+    if (!id && noPhoto && row._id) id = 'nophoto-' + row._id;
     if (!id) return null;
+    if (noPhoto) {
+      return {
+        id, rowId: row._id || '', noPhoto: true, reason: noPhoto, caseNo: String(row['เลขคดี'] || '').trim(), loc: String(row['ที่ตั้งส่งหมาย (เต็ม)'] || ''),
+        at: String(row['วัน-เวลาบันทึก'] || ''), time: timeOf(row['วัน-เวลาบันทึก']), uploader: String(row['ผู้บันทึก'] || '').toLowerCase(),
+        lat: row['ละติจูด (Lat)'] || '', lng: row['ลองจิจูด (Lng)'] || '', district: row['อำเภอ'] || '', subdistrict: row['ตำบล'] || '',
+        fileName: '', url: '', thumb: NOPHOTO_THUMB,
+      };
+    }
     return {
       id, rowId: row._id || '', caseNo: String(row['เลขคดี'] || '').trim(), loc: String(row['ที่ตั้งส่งหมาย (เต็ม)'] || ''),
       at: String(row['วัน-เวลาบันทึก'] || ''), time: timeOf(row['วัน-เวลาบันทึก']), uploader: String(row['ผู้บันทึก'] || '').toLowerCase(),
@@ -231,6 +244,7 @@
 
   /** ดึงไฟล์ภาพเป็น bytes + ขนาด (ลองโหลดตรงก่อน ไม่ได้ค่อยผ่านเซิร์ฟเวอร์) */
   async function photoBytes(id) {
+    if (isNoPhotoId(id)) return null; // หมายที่ไม่มีภาพถ่าย — ไม่มีไฟล์แนบ
     let blob = null;
     try {
       const r = await (SLTS.nativeFetch || fetch)(window.sltsImgUrl(id, 1600), { mode: 'cors', cache: 'force-cache' });
@@ -470,6 +484,7 @@
   }
   function viewPhoto(id) {
     const p = sheetRows().map(photoFromRow).find((x) => x && x.id === id);
+    if (p && p.noPhoto) return Swal.fire({ icon: 'info', title: 'ไม่มีภาพถ่าย', html: `<b>${esc(p.caseNo)}</b><br>${esc(p.reason)}<br><span class="sr-muted">${esc(p.loc)} · ${esc(p.at)}</span>` });
     if (p && typeof window.viewPhotoModal === 'function') window.viewPhotoModal(p.url, p.caseNo, p.loc, p.at, p.lat, p.lng);
     else window.open(window.sltsImgUrl(id, 1600), '_blank');
   }
@@ -952,7 +967,7 @@
     const name = L.templateFor(it.kind, r.result_code);
     const tpl = await template(name);
     const imgs = [];
-    for (const pid of r.photo_ids || []) imgs.push(await photoBytes(pid));
+    for (const pid of r.photo_ids || []) { const im = await photoBytes(pid); if (im) imgs.push(im); }
     for (const f of extraFiles || []) imgs.push(await normalizeImage(f));
     const data = L.buildDocData(Object.assign({}, it, r, { kind: it.kind }), { arabic: arabicDocs() });
     return { blob: await DOCX.fillReportDocx(tpl, data, imgs), fileName: L.docFileName(Object.assign({}, it, r)) };
@@ -1208,15 +1223,16 @@
     // ③ นำเข้าบัญชีจ่ายหมาย + ตรวจความครบถ้วน
     const chk = (label, n, cls, key) => `<div class="sr-flow-stat ${cls}" ${key ? `data-fl-show="${key}"` : ''}><b>${n}</b><span>${label}</span></div>`;
     const gapRows = (list, kind) => list.map((x) => kind === 'nophoto'
-      ? `<tr><td><b>${esc(x.kind === 'T' ? x.t_no : x.black_no)}</b>${x.kind === 'T' ? ' <span class="sr-chip">หมาย ต.</span>' : ''}</td><td>${esc(x.summon_type)}</td><td>${esc(x.recipient)}</td><td>${esc(x.address_raw)} ต.${esc(x.subdistrict)} อ.${esc(x.district)}</td></tr>`
+      ? `<tr><td><b>${esc(x.kind === 'T' ? x.t_no : x.black_no)}</b>${x.kind === 'T' ? ' <span class="sr-chip">หมาย ต.</span>' : ''}</td><td>${esc(x.summon_type)}</td><td>${esc(x.recipient)}</td><td>${esc(x.address_raw)} ต.${esc(x.subdistrict)} อ.${esc(x.district)}</td>
+        <td class="ctr"><button class="sr-btn sm" data-fl-nophoto="${x.id}" title="บันทึกรายการส่งหมายโดยไม่มีภาพถ่าย เพื่อให้รายงานหมายได้"><i class="fa-solid fa-signature"></i> บันทึกโดยไม่มีภาพ</button></td></tr>`
       : `<tr><td><b>${esc(x.caseNo || '-')}</b></td><td colspan="2">${esc(x.loc)}</td><td>${esc(x.at)}</td></tr>`).join('');
     const s3 = `<div class="sr-card sr-step ${s3state === 'lock' ? 'locked' : ''}">${stepHead(3, 'นำเข้าบัญชีจ่ายหมาย (Excel) เพื่อตรวจความถูกต้องครบถ้วน', s3state, 'ไฟล์ "บัญชีจ่ายหมาย พนักงานศาลนี้ส่ง" จากระบบงานศาล (เลือกบัญชีใบเสร็จมาพร้อมกันได้) — นำเข้าทุกครั้งก่อนรายงาน')}
       ${s3state === 'lock' ? '<div class="sr-muted">ต้องมีภาพส่งหมายในโซนนี้ก่อน</div>' : `<div class="sr-toolbar">
           <button class="sr-btn primary" data-fl="import"><i class="fa-solid fa-file-excel"></i> ${D.recentBatch ? 'นำเข้าบัญชีจ่ายหมายอีกครั้ง' : 'นำเข้าบัญชีจ่ายหมาย (Excel)'}</button>
           <span class="sr-muted">${D.recentBatch ? `นำเข้าล่าสุด: ${esc(D.recentBatch.source_file || '-')} (${esc(new Date(D.recentBatch.created_at).toLocaleString('th-TH'))})` : 'ยังไม่ได้นำเข้าบัญชีจ่ายหมายในช่วงนี้'}</span></div>
         ${D.issued.length ? `<div class="sr-flow-stats">${chk('หมายในบัญชี (โซนนี้)', D.issued.length, '')}${chk('มีภาพส่งหมายแล้ว', D.withPhoto.length, 'ok')}${chk('ยังไม่มีภาพ', D.noPhoto.length, D.noPhoto.length ? 'warn' : 'ok', 'nophoto')}${chk('ภาพที่ไม่พบในบัญชี', D.orphan.length, D.orphan.length ? 'bad' : 'ok', 'orphan')}</div>
-          ${D.noPhoto.length ? `<details class="sr-gap" ${FL.open === 'nophoto' ? 'open' : ''}><summary>หมายในบัญชีที่ยังไม่มีภาพส่งหมาย (${D.noPhoto.length})</summary><div class="sr-scroll" style="max-height:260px"><table class="sr-table"><thead><tr><th>เลขคดี</th><th>หมาย</th><th>ผู้รับ</th><th>ที่อยู่</th></tr></thead><tbody>${gapRows(D.noPhoto, 'nophoto')}</tbody></table></div>
-            <div class="sr-muted" style="margin-top:6px">ถ้าส่งแล้วแต่ยังไม่อัปโหลดภาพ <a href="#" data-fl="upload">ไปหน้าอัปโหลดภาพ</a> — หรือรายงานได้โดยไม่มีภาพ (เช่น ส่งไม่ได้)</div></details>` : ''}
+          ${D.noPhoto.length ? `<details class="sr-gap" ${FL.open === 'nophoto' ? 'open' : ''}><summary>หมายในบัญชีที่ยังไม่มีภาพส่งหมาย (${D.noPhoto.length})</summary><div class="sr-scroll" style="max-height:260px"><table class="sr-table"><thead><tr><th>เลขคดี</th><th>หมาย</th><th>ผู้รับ</th><th>ที่อยู่</th><th class="ctr"></th></tr></thead><tbody>${gapRows(D.noPhoto, 'nophoto')}</tbody></table></div>
+            <div class="sr-muted" style="margin-top:6px">ถ้าส่งแล้วแต่ยังไม่อัปโหลดภาพ <a href="#" data-fl="upload">ไปหน้าอัปโหลดภาพ</a> — ถ้าไม่มีภาพถ่าย (เช่น ผู้รับเซ็นรับหมายเอง) กด <b>บันทึกโดยไม่มีภาพ</b></div></details>` : ''}
           ${D.orphan.length ? `<details class="sr-gap bad" ${FL.open === 'orphan' ? 'open' : ''}><summary>ภาพที่ไม่พบในบัญชีจ่ายหมาย (${D.orphan.length}) — ตรวจเลขคดีที่บันทึกตอนถ่ายภาพ</summary><div class="sr-scroll" style="max-height:220px"><table class="sr-table"><thead><tr><th>เลขคดี (จากภาพ)</th><th colspan="2">สถานที่</th><th>วันที่</th></tr></thead><tbody>${gapRows(D.orphan, 'orphan')}</tbody></table></div></details>` : ''}`
         : (D.recentBatch ? `<div class="sr-note warn" style="margin-top:10px"><i class="fa-solid fa-triangle-exclamation"></i> บัญชีจ่ายหมายที่นำเข้าไม่มีหมายของ${esc(zone.label)} ในช่วงนี้ — ตรวจว่าเลือกไฟล์ถูกช่วงวันที่/ถูกโซน</div>` : '')}`}
     </div>`;
@@ -1275,6 +1291,57 @@
     if (R.boot) R.boot.zone = r.zone;
     FL.viewZone = '';
   }
+  /**
+   * บันทึกรายการส่งหมายโดยไม่มีภาพถ่าย (เช่น ผู้รับเซ็นรับหมายเอง) จากรายการในบัญชีจ่ายหมาย
+   * → เข้าตารางประวัติส่งหมายเหมือนรายการที่มีภาพ เพื่อให้รายงานหมายได้ครบ
+   */
+  async function recordNoPhoto(it) {
+    if (!it) return false;
+    const caseNo = it.kind === 'T' && it.t_no ? it.t_no : it.black_no;
+    const prov = String(it.province || defaultProvince()).replace(/^จ(\.|ังหวัด)\s*/, '');
+    const loc = [it.address_raw, it.subdistrict && !String(it.address_raw || '').includes('ต.' + it.subdistrict) ? 'ต.' + it.subdistrict : '', it.district && !String(it.address_raw || '').includes('อ.' + it.district) ? 'อ.' + it.district : '', 'จ.' + prov].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    const today = L.dIso(new Date());
+    const res = await Swal.fire({
+      title: 'บันทึกส่งหมายโดยไม่มีภาพถ่าย',
+      html: `<div style="text-align:left;font-size:14px;line-height:1.7">
+          <div><b>${esc(caseNo)}</b> · ${esc(it.summon_type || '')} · ${esc(it.recipient || '')}</div>
+          <div class="sr-muted">${esc(loc)}</div>
+          <label style="display:block;margin-top:10px;font-weight:700">เหตุที่ไม่มีภาพ</label>
+          <select id="npReason" class="swal2-select" style="width:100%;margin:4px 0;display:block">
+            <option>ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)</option>
+            <option>มารับหมายที่ศาล (ไม่มีภาพถ่าย)</option>
+            <option value="__other">อื่น ๆ (ระบุ)</option>
+          </select>
+          <input id="npOther" class="swal2-input" placeholder="ระบุเหตุผล" style="display:none;width:100%;margin:4px 0">
+          <label style="display:block;margin-top:8px;font-weight:700">วันที่ส่งหมาย</label>
+          <input id="npDate" type="date" class="swal2-input" value="${today}" max="${today}" style="width:100%;margin:4px 0">
+        </div>`,
+      showCancelButton: true, confirmButtonText: '<i class="fa-solid fa-floppy-disk"></i> บันทึก', cancelButtonText: 'ยกเลิก',
+      didOpen: () => { const r = document.getElementById('npReason'); const o = document.getElementById('npOther'); r.onchange = () => { o.style.display = r.value === '__other' ? 'block' : 'none'; }; },
+      preConfirm: () => {
+        const r = document.getElementById('npReason').value; const o = document.getElementById('npOther').value.trim();
+        if (r === '__other' && !o) { Swal.showValidationMessage('กรุณาระบุเหตุผล'); return false; }
+        return { reason: r === '__other' ? o : r, date: document.getElementById('npDate').value || today };
+      },
+    });
+    if (!res.isConfirmed) return false;
+    const d = L.parseIso(res.value.date); const now = new Date();
+    if (res.value.date !== today) d.setHours(12, 0, 0, 0); else d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), 0);
+    const dateTime = (window.WatermarkEngine && window.WatermarkEngine.formatThaiDateTime) ? window.WatermarkEngine.formatThaiDateTime(d) : d.toLocaleString('th-TH');
+    const u = currentUser() || {};
+    busy('กำลังบันทึกรายการ...');
+    try {
+      await SLTS.api('upload_image', {
+        caseNumber: caseNo, courtType: u.assignedCourt || u['ศาลที่สังกัด'] || '', province: prov, district: it.district || '', subdistrict: it.subdistrict || '',
+        locationType: 'หมายบ้าน', locationText: loc, dateTime, noPhoto: true, noPhotoReason: res.value.reason,
+        clientUploadId: 'nophoto-' + it.id + '-' + Date.now(),
+      });
+      try { if (typeof window.loadGoogleSheetData === 'function') await window.loadGoogleSheetData(true, true); } catch (_) {}
+      done(); toast('success', `บันทึก ${caseNo} (ไม่มีภาพถ่าย) แล้ว`);
+      return true;
+    } catch (e) { done(); fail(e); return false; }
+  }
+
   function bindFlow(body, D) {
     const z = $('#flZone', body);
     if (z) z.onchange = () => { const base = D.detected || (D.cur && D.cur.zone); FL.viewZone = (base && z.value === base.key) ? '' : z.value; renderFlow(body); };
@@ -1288,7 +1355,7 @@
       };
     });
     body.onclick = async (e) => {
-      const a = e.target.closest('[data-fl],[data-fl-dl],[data-fl-rep],[data-fl-word],[data-view],[data-fl-show]');
+      const a = e.target.closest('[data-fl],[data-fl-dl],[data-fl-rep],[data-fl-word],[data-view],[data-fl-show],[data-fl-nophoto]');
       if (!a) return;
       if (a.tagName === 'A') e.preventDefault();
       try {
@@ -1297,6 +1364,7 @@
         if (a.dataset.flDl) { const p = D.uploads.find((x) => x.id === a.dataset.flDl); if (p) downloadPhoto(p); return; }
         if (a.dataset.flRep) { const id = Number(a.dataset.flRep); const ph = D.photoMap.get(id) || []; return openReportForm(id, { photoIds: ph.map((p) => p.id) }); }
         if (a.dataset.flWord) return quickWord(Number(a.dataset.flWord));
+        if (a.dataset.flNophoto) { if (await recordNoPhoto(R.issued.find((x) => x.id === Number(a.dataset.flNophoto)))) renderFlow(body); return; }
         const act = a.dataset.fl;
         if (act === 'wkprev') { FL.weekOffset -= 1; FL.periodKey = FL.periodKey || ''; return renderFlow(body); }
         if (act === 'wknext') { FL.weekOffset = Math.min(0, FL.weekOffset + 1); return renderFlow(body); }
@@ -2115,6 +2183,7 @@
   }
   const photoFileName = (p, i) => `${i != null ? String(i + 1).padStart(2, '0') + '_' : ''}${(p.caseNo || 'summons').replace(/[\\/:*?"<>|]/g, '-')}_${(p.at || '').replace(/[^0-9]/g, '').slice(0, 14)}.jpg`;
   async function downloadPhoto(p) {
+    if (p && p.noPhoto) return toast('info', 'รายการนี้ไม่มีภาพถ่าย (เซ็นรับหมาย)');
     try {
       busy('กำลังดาวน์โหลดภาพ...');
       const img = await photoBytes(p.id);
@@ -2131,6 +2200,7 @@
     try {
       const zip = new window.JSZip(); let n = 0;
       for (let i = 0; i < list.length; i++) {
+        if (list[i].noPhoto) continue;
         try { const img = await photoBytes(list[i].id); zip.file(photoFileName(list[i], i), img.bytes); n++; } catch (er) { console.warn('[report] photo skip', er); }
         Swal.update({ title: `กำลังรวมภาพ (${i + 1}/${list.length})...` }); Swal.showLoading();
       }

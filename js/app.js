@@ -7212,6 +7212,9 @@ window.openCaseHistoryModal = function(caseNumber) {
         <span>ไม่มีข้อมูลภาพในระบบ</span>
       </button>
     `;
+    if (!imgUrl && rec['ไม่มีภาพ (เหตุผล)']) {
+      imgBtn = `<span class="px-2.5 py-1 bg-violet-50 text-violet-800 rounded-lg text-xs font-semibold border border-violet-200 inline-flex items-center gap-1.5" title="${String(rec['ไม่มีภาพ (เหตุผล)']).replace(/"/g, '&quot;')}"><i class="fa-solid fa-signature"></i> ไม่มีภาพ · เซ็นรับ</span>`;
+    }
     if (imgUrl && String(imgUrl).trim() !== '' && String(imgUrl).startsWith('http')) {
       imgBtn = `
         <button type="button" onclick="viewPhotoModal('${imgUrl}', '${caseNumber}', '${locationFull}', '${formattedTimestamp}', '${lat}', '${lng}')" class="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-1 cursor-pointer">
@@ -13785,6 +13788,8 @@ function initDesktopUploadEvents() {
   if (elements.btnConfirmDesktopUpload) {
     elements.btnConfirmDesktopUpload.addEventListener('click', handleDesktopUpload);
   }
+  const chkNoPhoto = document.getElementById('chkDesktopNoPhoto');
+  if (chkNoPhoto) chkNoPhoto.addEventListener('change', syncDesktopNoPhotoUi);
 }
 
 function updateDesktopWatermarkBadge(hasWatermark) {
@@ -13816,7 +13821,69 @@ window.viewDesktopFullPreview = function() {
 
 window.isDesktopUploadInProgress = false;
 
+/** สลับหน้าฟอร์มเมื่อเลือก "ไม่มีภาพถ่าย (ผู้รับเซ็นรับหมายเอง)" */
+function syncDesktopNoPhotoUi() {
+  const on = Boolean(document.getElementById('chkDesktopNoPhoto')?.checked);
+  const sel = document.getElementById('desktopNoPhotoReason');
+  if (sel) sel.classList.toggle('hidden', !on);
+  const fileWrap = elements.desktopImageFileInput ? elements.desktopImageFileInput.closest('div') : null;
+  if (fileWrap) { fileWrap.style.opacity = on ? '0.45' : ''; fileWrap.style.pointerEvents = on ? 'none' : ''; }
+  const btn = elements.btnConfirmDesktopUpload;
+  const span = btn && btn.querySelector('span');
+  if (span) span.textContent = on ? 'บันทึกรายการส่งหมาย (ไม่มีภาพถ่าย)' : 'ยืนยันอัปโหลดภาพส่งหมาย';
+  if (btn) btn.classList.toggle('!bg-violet-600', on);
+}
+window.syncDesktopNoPhotoUi = syncDesktopNoPhotoUi;
+
+/** บันทึกรายการส่งหมายโดยไม่มีภาพถ่าย (ส่งตรงเข้าระบบ ไม่ผ่านคิวรูปภาพ) */
+async function handleDesktopNoPhotoUpload() {
+  if (!validateForm({ skipGps: true })) return;
+  const caseNumber = getFormattedCaseNumber();
+  const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || 'ศาลจังหวัดอุดรธานี';
+  const province = (elements.provinceSelect ? elements.provinceSelect.value : '') || state.selectedProvince || 'อุดรธานี';
+  const district = (elements.districtSelect ? elements.districtSelect.value : '') || state.selectedDistrict || '';
+  const subdistrict = (elements.subdistrictSelect ? elements.subdistrictSelect.value : '') || state.selectedSubdistrict || '';
+  const locationType = elements.locationTypeSelect ? elements.locationTypeSelect.value : 'หมายบ้าน';
+  const locationText = getFullLocationText();
+  const reason = document.getElementById('desktopNoPhotoReason')?.value || 'ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)';
+  const esc = (t) => String(t || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ok = await Swal.fire({
+    icon: 'question',
+    title: 'บันทึกรายการส่งหมาย (ไม่มีภาพถ่าย)?',
+    html: `<div class="text-left text-sm space-y-1"><div><b>${esc(caseNumber)}</b> · ${esc(courtType)}</div><div class="text-gray-600 text-xs">${esc(locationText)}</div><div class="mt-2 p-2 rounded-lg bg-violet-50 border border-violet-200 text-violet-900 text-xs font-semibold"><i class="fa-solid fa-signature mr-1"></i>${esc(reason)}</div></div>`,
+    showCancelButton: true, confirmButtonText: 'บันทึก', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#7c3aed'
+  });
+  if (!ok.isConfirmed) return;
+  const payload = {
+    action: 'upload_image', caseNumber, courtType, province, district, subdistrict, locationType, locationText,
+    lat: null, lng: null, // ไม่มีภาพถ่าย = ไม่มีพิกัดจุดส่งหมายจริง (ไม่ปักหมุดผิดที่)
+    dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+    noPhoto: true, noPhotoReason: reason, clientUploadId: 'nophoto-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+  };
+  try {
+    await uploadWithProgressBar(payload, `กำลังบันทึกเลขคดี ${caseNumber} (ไม่มีภาพถ่าย)...`);
+    saveDesktopFormHistory({ caseNumber, courtType, province, district, subdistrict, locationType, locationText,
+      houseNo: elements.houseNoInput ? elements.houseNoInput.value.trim() : '', moo: elements.mooInput ? elements.mooInput.value.trim() : '' });
+    localStorage.removeItem(CACHE_KEY_SHEET_DATA);
+    localStorage.removeItem(CACHE_KEY_SHEET_TIME);
+    if (typeof loadGoogleSheetData === 'function') loadGoogleSheetData(true, true);
+    const chk = document.getElementById('chkDesktopNoPhoto');
+    if (chk) { chk.checked = false; syncDesktopNoPhotoUi(); }
+    resetDesktopForm(true);
+    Swal.fire({ icon: 'success', title: 'บันทึกแล้ว', text: `${caseNumber} — ${reason}`, timer: 1800, showConfirmButton: false });
+  } catch (err) {
+    console.error('No-photo record error:', err);
+    Swal.fire({ icon: 'error', title: 'บันทึกไม่สำเร็จ', text: err && err.message ? err.message : String(err) });
+  }
+}
+
 async function handleDesktopUpload() {
+  if (document.getElementById('chkDesktopNoPhoto')?.checked) {
+    if (window.isDesktopUploadInProgress) return;
+    window.isDesktopUploadInProgress = true;
+    try { await handleDesktopNoPhotoUpload(); } finally { window.isDesktopUploadInProgress = false; }
+    return;
+  }
   if (window.isDesktopUploadInProgress) {
     console.warn('[Desktop Upload] Upload already in progress, ignoring duplicate submit.');
     return;
@@ -14449,7 +14516,7 @@ function setCaptureOrientation(mode) {
   }
 }
 
-function validateForm() {
+function validateForm(opts = {}) {
   const courtType = (elements.courtTypeSelect ? elements.courtTypeSelect.value : '') || (document.getElementById('courtType') ? document.getElementById('courtType').value : '');
 
   // 1. ตรวจสอบชื่อศาลกรณีเลือกศาลที่ไม่สังกัดภาค
@@ -14576,6 +14643,9 @@ function validateForm() {
       return false;
     }
   }
+
+  // หมายที่ไม่มีภาพถ่าย (เซ็นรับเอง): ไม่ต้องมีพิกัด
+  if (opts.skipGps) return true;
 
   // 6. ตรวจสอบและดึงพิกัดจากช่องกรอกพิกัด (ตรวจสอบรูปแบบและขอบเขตพิกัดอย่างละเอียด)
   const coordsRaw = (elements.coordinatesInput ? elements.coordinatesInput.value : '').trim();
