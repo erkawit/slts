@@ -1657,7 +1657,8 @@ body.swal2-toast-shown .swal2-popup,
     max-width: 680px !important;
     width: 90% !important;
     overflow-y: auto !important;
-}
+  }
+} /* end @media (min-width: 769px) — v2.7.1: เดิมปิดไม่ครบ ทำให้กฎด้านล่างไม่มีผลบนมือถือ */
 
 /* ========================================================= */
 /* Styling for Image Preview Popup & High-Visibility Close Button */
@@ -1979,10 +1980,13 @@ body.swal2-toast-shown .swal2-popup,
 }
 
 /* ซ่อน Floating Mobile Route Widget ถาวรเพื่อไม่ให้บดบังปุ่มกดกล้องที่มุมซ้ายล่าง */
+/* v2.7.1: คงพฤติกรรมเดิม — ซ่อนเฉพาะจอ ≥769px */
+@media (min-width: 769px) {
 #floatingMobileRouteWidget {
   display: none !important;
   pointer-events: none !important;
   opacity: 0 !important;
+}
 }
 
 /* ================================================================
@@ -1990,6 +1994,8 @@ body.swal2-toast-shown .swal2-popup,
    ล็อกเลย์เอาต์หน้าจอกล้องให้อยู่ในตำแหน่งมาตรฐาน ชัตเตอร์อยู่ล่าง ท็อปบาร์อยู่บน
    และการหมุนองค์ประกอบทั้งหมดถูกควบคุมผ่าน Gyroscope (.gyro-landscape-90 / 270)
    ================================================================ */
+/* v2.7.1: คงพฤติกรรมเดิม — ใช้เฉพาะจอ ≥769px (บนมือถือแนวตั้งจะทำให้แถบปุ่มลอยทับภาพ) */
+@media (min-width: 769px) {
 #cameraControlsContainer {
   position: absolute !important;
   bottom: 0 !important;
@@ -2003,6 +2009,7 @@ body.swal2-toast-shown .swal2-popup,
   padding: 1rem 1.5rem !important;
   padding-bottom: max(1.25rem, calc(env(safe-area-inset-bottom, 0px) + 16px)) !important;
   z-index: 25 !important;
+}
 }
 
 /* ================================================================

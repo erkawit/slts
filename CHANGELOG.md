@@ -2,6 +2,11 @@
 
 สร้างอัตโนมัติจาก `version.json` ด้วย `npm run version:bump`
 
+## [2.7.1] - 2026-11-25
+### แก้ไข
+- `css/style.css`: ปิดบล็อก `@media (min-width: 769px)` ที่ค้างอยู่ (บรรทัด ~1621) — กฎหลังจากนั้น (popup ค้นหา/ดูภาพ, safe-area iOS, หมุดแผนที่, hardware-landscape) มีผลบนมือถือแล้ว
+- คงพฤติกรรมเดิมบนมือถือ: `#cameraControlsContainer` (absolute) และการซ่อน `#floatingMobileRouteWidget` จำกัดไว้ที่จอ ≥ 769px
+
 ## [2.7.0] - 2026-11-25
 ### เพิ่ม
 - **เข้าสู่ระบบด้วย Google**: `public_config`, `google_login`, `link_google` (ตรวจ ID token กับ Google tokeninfo, aud = `GOOGLE_CLIENT_ID`)
