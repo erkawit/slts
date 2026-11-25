@@ -48,7 +48,8 @@
   window.sltsImgUrl = function (fileId, size) {
     const id = String(fileId || '').trim();
     if (!id) return '';
-    if (isNeonPhoto(id)) return SLTS.apiBase() + '/api/photo?f=' + encodeURIComponent(id);
+    // ลิงก์รูปแบบเดิม (sig 16 ตัว) เคยแคชถาวรในเบราว์เซอร์ และเลขซ้ำกันได้เมื่อสลับฐานข้อมูล → เติม v=2 เพื่อไม่ใช้แคชเก่า
+    if (isNeonPhoto(id)) return SLTS.apiBase() + '/api/photo?f=' + encodeURIComponent(id) + (/^db-\d+-[A-Za-z0-9]{16}$/.test(id) ? '&v=2' : '');
     return `https://lh3.googleusercontent.com/d/${id}=w${size || 1600}`;
   };
   window.sltsThumbUrl = function (fileId, size) {

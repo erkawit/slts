@@ -105,6 +105,11 @@ function publicUser(u) {
   };
 }
 
+/** ลิงก์ภาพ Neon รูปแบบเดิมเคยแคชถาวรในเบราว์เซอร์ (เลขซ้ำได้เมื่อสลับฐานข้อมูล) → เติม v=2 ให้โหลดใหม่ */
+function freshPhotoUrl(u) {
+  return /\/api\/photo\?f=db-\d+-[A-Za-z0-9]{16}$/.test(u) ? u + '&v=2' : u;
+}
+
 function summonsRowToSheet(r) {
   // คืนค่าตามหัวคอลัมน์ชีตเดิม เพื่อให้ตาราง/แผนที่ฝั่งหน้าเว็บทำงานได้เหมือนเดิม
   return {
@@ -120,7 +125,7 @@ function summonsRowToSheet(r) {
     'ลองจิจูด (Lng)': r.lng === null ? '' : String(r.lng),
     'ทิศองศา': str(r.heading),
     'ชื่อไฟล์รูปภาพ': str(r.file_name),
-    'ลิงก์รูปภาพใน Google Drive': str(r.drive_url),
+    'ลิงก์รูปภาพใน Google Drive': freshPhotoUrl(str(r.drive_url)),
     'ลิงก์ Text File ใน Google Drive': str(r.text_url),
     'Drive File ID': str(r.drive_file_id),
     'ผู้บันทึก': str(r.uploader),
@@ -540,7 +545,10 @@ async function findTargetRow(data, { allowCaseOnly = false } = {}) {
   }
   const fileId = str(data.oldFileId || data.fileId).trim();
   if (fileId) {
-    const { rows } = await db.query('SELECT * FROM summons WHERE drive_file_id = $1 AND deleted_at IS NULL ORDER BY id DESC LIMIT 1', [fileId]);
+    // ภาพเดียวกันอาจถูกใช้หลายรายการ → เลือกรายการที่เวลาบันทึกตรงกันก่อน
+    const { rows } = await db.query(
+      'SELECT * FROM summons WHERE drive_file_id = $1 AND deleted_at IS NULL ORDER BY (recorded_at_text = $2) DESC, id DESC LIMIT 1',
+      [fileId, str(data.timestamp).trim()]);
     if (rows[0]) return rows[0];
   }
   const caseNo = str(data.caseNumber).trim();
@@ -562,6 +570,15 @@ async function findTargetRow(data, { allowCaseOnly = false } = {}) {
     if (rows[0]) return rows[0];
   }
   return null;
+}
+
+/** ทิ้งไฟล์ภาพเดิมเฉพาะเมื่อไม่มีรายการอื่นใช้ภาพเดียวกันอยู่ (กันภาพของคดีอื่นหาย) */
+async function trashIfUnused(fileId, exceptId) {
+  const f = str(fileId).trim();
+  if (!f) return false;
+  const { rows } = await db.query('SELECT 1 FROM summons WHERE drive_file_id = $1 AND deleted_at IS NULL AND id <> $2 LIMIT 1', [f, exceptId || 0]);
+  if (rows[0]) return false;
+  return drive.trashFile(f);
 }
 
 function canEdit(user, row) {
@@ -645,7 +662,7 @@ actions.upload_image = async (data, ctx) => {
         values.location_text, values.lat, values.lng, values.heading, values.file_name, fileUrl, fileId, values.province,
         uploader, clientId, target.id]);
     row = rows[0];
-    if (fileId && oldFileId && oldFileId !== fileId && data.overwrite) await drive.trashFile(oldFileId);
+    if (fileId && oldFileId && oldFileId !== fileId && data.overwrite) await trashIfUnused(oldFileId, target.id);
   } else {
     try {
       const { rows } = await db.query(`INSERT INTO summons
@@ -685,8 +702,9 @@ actions.edit_record = async (data, ctx) => {
   }
   if (data.imageBase64 && data.fileName) {
     const up = await drive.uploadImage({ fileName: str(data.fileName), imageBase64: str(data.imageBase64), origin: ctx.origin });
-    if (data.oldFileId) await drive.trashFile(str(data.oldFileId));
+    const oldId = target ? target.drive_file_id : str(data.oldFileId);
     fileId = up.fileId; fileUrl = up.fileUrl;
+    if (oldId && oldId !== fileId) await trashIfUnused(oldId, target ? target.id : 0);
   }
 
   if (target) {

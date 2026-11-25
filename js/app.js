@@ -6534,7 +6534,7 @@ function renderDataTable(rows, filterCriteria = null) {
     let editBtn = '';
     if (canEdit) {
       editBtn = `
-        <button type="button" onclick="openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1 cursor-pointer" title="แก้ไขข้อมูลส่งหมาย">
+        <button type="button" onclick="openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', sltsSheetRowById('${String(latest._id || '').replace(/[^0-9A-Za-z_-]/g, '')}', '${String(rawTimestamp).replace(/'/g, "\\'")}', '${caseNumber.replace(/'/g, "\\'")}'))" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1 cursor-pointer" title="แก้ไขข้อมูลส่งหมาย">
           <i class="fa-solid fa-pen-to-square"></i>
           <span>แก้ไข</span>
         </button>
@@ -6614,6 +6614,13 @@ function renderDataTable(rows, filterCriteria = null) {
  * แสดง SweetAlert แบบฟอร์ม "บันทึกการส่งหมาย" สำหรับแก้ไขข้อมูล
  * พร้อมดึงข้อมูลเดิมขึ้นมาให้แก้ไข และแสดงผลรูปส่งหมาย พร้อมตัวเลือกอัปโหลดรูปภาพใหม่ทับไฟล์เดิม
  */
+/** หาแถวในตารางจาก id ฐานข้อมูล (สำรอง: เลขคดี + เวลาบันทึก) */
+window.sltsSheetRowById = function(id, ts, caseNo) {
+  const rows = state.allSheetRows || [];
+  if (id) { const r = rows.find(x => String(x._id || '') === String(id)); if (r) return r; }
+  return rows.find(x => (x['เลขคดี'] || '').trim() === String(caseNo || '').trim() && (x['วัน-เวลาบันทึก'] || x['Timestamp'] || '') === ts) || null;
+};
+
 window.openEditSummonsModal = async function(caseNumber, specificRecord = null) {
   const records = (state.allSheetRows || []).filter(r => (r['เลขคดี'] || '').trim() === caseNumber.trim());
   const rec = specificRecord || records[0] || {};
@@ -7071,6 +7078,7 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
 
       const updatePayload = {
         action: 'edit_record',
+        recordId: rec._id || '',
         rowIndex: rowIndex,
         oldFileId: fileId,
         timestamp: rawTimestamp,
@@ -7096,7 +7104,8 @@ window.openEditSummonsModal = async function(caseNumber, specificRecord = null) 
         const resJson = await uploadWithProgressBar(updatePayload, `กำลังบันทึกการแก้ไขเลขคดี ${val.newCaseNumber}...`);
 
         if (state.allSheetRows) {
-          const target = state.allSheetRows.find(r => {
+          const target = (rec._id && state.allSheetRows.find(r => String(r._id || '') === String(rec._id))) ||
+            state.allSheetRows.find(r => {
             return (r['เลขคดี'] || '').trim() === caseNumber.trim() &&
                    (!rawTimestamp || (r['วัน-เวลาบันทึก'] || r['Timestamp'] || '') === rawTimestamp);
           });
@@ -7199,7 +7208,7 @@ window.openCaseHistoryModal = function(caseNumber) {
     let editBtn = '';
     if (canEditItem) {
       editBtn = `
-        <button type="button" onclick="Swal.close(); openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', state.allSheetRows ? state.allSheetRows[${rec.originalIndex}] : null)" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition inline-flex items-center gap-1 cursor-pointer" title="แก้ไขรายการนี้">
+        <button type="button" onclick="Swal.close(); openEditSummonsModal('${caseNumber.replace(/'/g, "\\'")}', sltsSheetRowById('${String(rec._id || '').replace(/[^0-9A-Za-z_-]/g, '')}', '${String(rawTimestamp).replace(/'/g, "\\'")}', '${caseNumber.replace(/'/g, "\\'")}'))" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold shadow-sm transition inline-flex items-center gap-1 cursor-pointer" title="แก้ไขรายการนี้">
           <i class="fa-solid fa-pen-to-square"></i>
           <span>แก้ไข</span>
         </button>

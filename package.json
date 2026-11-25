@@ -1,6 +1,6 @@
 {
   "name": "slts",
-  "version": "2.6.6",
+  "version": "2.6.7",
   "description": "ระบบจัดเก็บข้อมูลพิกัดส่งหมาย (SLTS) — ศาลจังหวัดอุดรธานี",
   "private": true,
   "scripts": {
