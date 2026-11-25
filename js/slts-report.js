@@ -593,7 +593,7 @@
       inspector_id: insp ? insp.id : '', inspector_name: insp ? insp.full_name : '', inspector_position: insp ? insp.position : '',
       inspector_acting: insp ? insp.acting : true, inspector_title: insp ? (insp.acting_title || settings().director_title) : settings().director_title,
       payer_id: payer ? payer.id : '', payer_name: payer ? payer.full_name : '', payer_position: payer ? payer.position : '',
-      receipt_date: L.todayIso(), money_type: it.money_type,
+      receipt_date: it.money_type === 'paid' ? L.todayIso() : '', money_type: it.money_type, // หมายฟรี: ไม่ใช้วันที่รับเงิน
       claim: true, claim_amount: fr, amount: Number(it.price) || 0, receipt_ref: it.receipt_ref || '',
       court_order: '', judge: '', record_date: L.todayIso(),
       house_no: it.house_no, moo: it.moo, soi: it.soi, road: it.road, province: 'อุดรธานี', district: it.district, subdistrict: it.subdistrict,
@@ -807,6 +807,14 @@
       $$('.rf-notice', wrap).forEach((el) => { el.style.display = notice ? '' : 'none'; });
       const paid = g('money_type').value === 'paid';
       $$('.rf-paid', wrap).forEach((el) => { el.style.display = paid ? '' : 'none'; });
+      { // วันที่รับเงิน (ใบสำคัญรับเงิน): ใช้เฉพาะหมายเงิน — หมายฟรีปิดไว้และไม่กรอกวันที่
+        const rd = g('receipt_date');
+        if (rd) {
+          rd.disabled = !paid;
+          rd.title = paid ? '' : 'หมายฟรีไม่ต้องระบุวันที่รับเงิน';
+          if (!paid) rd.value = ''; else if (!rd.value) rd.value = L.todayIso();
+        }
+      }
       $$('.rf-free', wrap).forEach((el) => { el.style.display = paid ? 'none' : ''; });
       g('claim_box').style.display = paid ? 'none' : '';
       {

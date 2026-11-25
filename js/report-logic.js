@@ -699,7 +699,7 @@
     const A = !!opt.arabic;
     const T = (s) => (A ? toArabicDigits(String(s == null ? '' : s)) : toThaiDigits(String(s == null ? '' : s)));
     const doc = thaiDateParts(r.record_date || todayIso(), { arabic: A });
-    const rc = thaiDateParts(r.receipt_date, { arabic: A });
+    const rc = thaiDateParts(r.money_type === 'free' ? '' : r.receipt_date, { arabic: A }); // หมายฟรีไม่มีวันที่รับเงิน
     const money = computeMoney(r);
     const fileType = r.file_type || 'file';
     const posting = String(r.posting_choice || '2');
