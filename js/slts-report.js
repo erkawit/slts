@@ -121,9 +121,26 @@
     c.getContext('2d').getImageData(0, 0, 1, 1); // ตรวจว่า canvas ใช้งานได้ (ไม่ถูก taint)
     return c;
   }
-  async function htmlToPdfBlob(html) {
+  /** ภาพข้อความ "หน้าที่ N" (ฟอนต์ไทยจากเอกสาร) สำหรับวางบนขอบบนของหน้า PDF */
+  async function pageLabelImage(text, fontData) {
+    const fam = 'SltsPdfLabel';
+    try {
+      if (fontData && /^data:/.test(fontData) && ![...document.fonts].some((f) => f.family === fam)) {
+        const ff = new FontFace(fam, `url(${fontData})`); await ff.load(); document.fonts.add(ff);
+      }
+    } catch (_) { /* ใช้ฟอนต์ระบบ */ }
+    const c = document.createElement('canvas'); c.width = 360; c.height = 60;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = '#000'; g.font = `bold 44px ${fam}, 'Sarabun', sans-serif`; g.textAlign = 'right'; g.textBaseline = 'middle';
+    g.fillText(text, c.width - 4, 32);
+    return c.toDataURL('image/png');
+  }
+  async function htmlToPdfBlob(html, opt) {
+    opt = opt || {};
     if (!(window.jspdf && window.jspdf.jsPDF)) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    const fontUrl = (html.match(/url\('([^']*THSarabun\.ttf)'\)/) || [])[1];
     html = await inlineFonts(html);
+    const fontData = fontUrl ? await _fontDataCache[fontUrl] : null;
     const land = /size:A4 landscape/.test(html);
     const mStr = ((html.match(/@page\{size:A4 \w+;margin:([^}]+)\}/) || [])[1] || '14mm').trim();
     let m = mStr.split(/\s+/).map((x) => parseFloat(x) || 0);
@@ -180,8 +197,35 @@
         if (i) pdf.addPage('a4', land ? 'l' : 'p');
         pdf.addImage(c.toDataURL('image/jpeg', 0.93), 'JPEG', ml, mt, cw, (b - a) / PX);
       });
+      if (opt.pageNumbers) {
+        for (let i = 0; i < breaks.length; i++) {
+          pdf.setPage(i + 1);
+          const im = await pageLabelImage(`หน้าที่  ${i + 1}${breaks.length > 1 ? ' / ' + breaks.length : ''}`, fontData);
+          pdf.addImage(im, 'PNG', pw - mr - 36, Math.max(1, mt - 7.5), 36, 6);
+        }
+      }
       return pdf.output('blob');
     } finally { ifr.remove(); }
+  }
+
+  /** พิมพ์ไฟล์ PDF ที่สร้างแล้ว (สั่งพิมพ์ตัวไฟล์ PDF จริง) — ถ้าอุปกรณ์สั่งพิมพ์ไม่ได้ เปิดไฟล์ในแท็บใหม่/ดาวน์โหลดแทน */
+  function printPdfBlob(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const ifr = document.createElement('iframe');
+    ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0';
+    ifr.src = url;
+    let printed = false;
+    ifr.onload = () => {
+      setTimeout(() => {
+        try { ifr.contentWindow.focus(); ifr.contentWindow.print(); printed = true; } catch (e) {
+          const w = window.open(url, '_blank');
+          if (!w) downloadBlob(blob, fileName);
+        }
+      }, 300);
+    };
+    document.body.appendChild(ifr);
+    setTimeout(() => { if (!printed) { try { ifr.contentWindow.print(); printed = true; } catch (_) {} } }, 4000);
+    setTimeout(() => { ifr.remove(); URL.revokeObjectURL(url); }, 120000);
   }
 
   /** แสดงไฟล์ PDF ที่สร้างแล้วในระบบ (PDF.js) + ปุ่มดาวน์โหลด */
@@ -191,6 +235,7 @@
     wrap.innerHTML = `<div class="sr-dialog" role="dialog" style="max-width:1100px;width:100%">
       <div class="sr-dialog-head"><i class="fa-solid fa-file-pdf"></i><h2>${esc(fileName)}</h2>
         <button class="sr-btn sm" data-pdf-dl style="margin-left:auto;background:#fff"><i class="fa-solid fa-download"></i> ดาวน์โหลด PDF</button>
+        <button class="sr-btn sm" data-pdf-print style="background:#fff;margin-left:6px"><i class="fa-solid fa-print"></i> พิมพ์</button>
         <button class="x" data-close title="ปิด">&times;</button></div>
       <div class="sr-dialog-body" style="background:#525659;padding:16px;display:flex;flex-direction:column;align-items:center;gap:14px" data-pages>
         <div style="color:#fff">กำลังแสดงผล…</div></div></div>`;
@@ -199,6 +244,7 @@
     wrap.addEventListener('click', (e) => {
       if (e.target === wrap || e.target.closest('[data-close]')) close();
       if (e.target.closest('[data-pdf-dl]')) downloadBlob(blob, fileName);
+      if (e.target.closest('[data-pdf-print]')) printPdfBlob(blob, fileName);
     });
     const box = wrap.querySelector('[data-pages]');
     try {
@@ -223,10 +269,10 @@
   }
 
   /** เอกสาร HTML → ไฟล์ PDF จริง แล้วแสดงผลในระบบ */
-  async function openPdf(html, fileName) {
+  async function openPdf(html, fileName, opt) {
     busy('กำลังสร้างไฟล์ PDF...');
     try {
-      const blob = await htmlToPdfBlob(html);
+      const blob = await htmlToPdfBlob(html, opt);
       done();
       await showPdf(blob, String(fileName || 'เอกสาร').replace(/[\\/:*?"<>|]+/g, '-') + '.pdf');
     } catch (e) { done(); fail(e); }
@@ -1967,12 +2013,13 @@
       <td class="num">${m.item_count}</td><td class="num">${L.money2(m.total_amount)}</td><td>${esc(m.reporter_name)}</td>
       <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm" data-mword="${m.id}" title="บันทึกข้อความ Word"><i class="fa-solid fa-file-word"></i> Word</button>
         <button class="sr-btn sm" data-mpdf="${m.id}" title="บันทึกข้อความ PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        ${m.report_type === 'paid' ? `<button class="sr-btn sm" data-axlsx="${m.id}" title="แบบ 25. บัญชีขอเบิกจ่ายเงิน (Excel)"><i class="fa-solid fa-file-excel"></i> บัญชีเบิก</button><button class="sr-btn sm" data-apdf="${m.id}" title="แบบ 25. บัญชีขอเบิกจ่ายเงิน (PDF)"><i class="fa-solid fa-file-pdf"></i> บัญชีเบิก PDF</button>` : ''}
         ${m.report_type === 'free' ? `<button class="sr-btn sm" data-rxlsx="${m.id}" title="ใบสำคัญรับเงิน Excel"><i class="fa-solid fa-file-excel"></i> ใบสำคัญ</button><button class="sr-btn sm" data-rpdf="${m.id}" title="ใบสำคัญรับเงิน PDF"><i class="fa-solid fa-file-pdf"></i> ใบสำคัญ PDF</button>` : ''}</td>
       <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm" data-medit="${m.id}"><i class="fa-solid fa-pen"></i></button><button class="sr-btn sm danger" data-mdel="${m.id}"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')
       || '<tr><td colspan="8"><div class="sr-empty">ยังไม่มีรายงาน — สร้างรายงานหมายฟรี/หมายเงินจากปุ่มด้านบน</div></td></tr>';
     tb.onclick = async (e) => {
       const b = e.target.closest('button'); if (!b) return;
-      const id = Number(b.dataset.mword || b.dataset.mpdf || b.dataset.rxlsx || b.dataset.rpdf || b.dataset.medit || b.dataset.mdel);
+      const id = Number(b.dataset.mword || b.dataset.mpdf || b.dataset.rxlsx || b.dataset.rpdf || b.dataset.axlsx || b.dataset.apdf || b.dataset.medit || b.dataset.mdel);
       try {
         if (b.dataset.mdel) {
           const ok = await Swal.fire({ icon: 'warning', title: 'ลบรายงานนี้?', showCancelButton: true, confirmButtonText: 'ลบ', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#b91c1c' });
@@ -1986,6 +2033,8 @@
           downloadBlob(await DOCX.fillReportDocx(tpl, E.memoVars(memo), []), `บันทึกข้อความ-${memo.report_type === 'paid' ? 'หมายมีเงิน' : 'หมายฟรี'}-${(memo.round_label || id).toString().replace(/[\\/:*?"<>|]/g, '-')}.docx`);
         } else if (b.dataset.mpdf) await openPdf(E.memoPrintHtml(memo, baseUrl()), `บันทึกข้อความ-${memo.report_type === 'paid' ? 'หมายมีเงิน' : 'หมายฟรี'}-${memo.round_label || id}`);
         else if (b.dataset.rxlsx) { const { wb } = E.receiptWorkbook(memo, items); downloadBlob(await wb.toBlob(), `ใบสำคัญรับเงินฟรี-${(memo.round_label || id).toString().replace(/[\\/:*?"<>|]/g, '-')}.xlsx`); }
+        else if (b.dataset.axlsx) await accExpense(memo, 'xlsx');
+        else if (b.dataset.apdf) await accExpense(memo, 'pdf');
         else if (b.dataset.rpdf) await openPdf(E.receiptPrintHtml(memo, items, baseUrl()), `ใบสำคัญรับเงิน-หมายฟรี-${memo.round_label || id}`);
       } catch (er) { fail(er); }
     };
@@ -2038,6 +2087,50 @@
     const map = p && p.lat && p.lng ? ` <a href="https://www.google.com/maps?q=${encodeURIComponent(p.lat + ',' + p.lng)}" target="_blank" rel="noopener" title="เปิดตำแหน่งที่ถ่ายภาพใน Google Maps"><i class="fa-solid fa-map-location-dot"></i></a>` : '';
     return `<div><i class="fa-solid fa-house" style="color:#64748b"></i> ${esc(issuedAddr(it))}</div>`
       + (p ? `<div class="sr-muted" style="margin-top:2px"><i class="fa-solid fa-camera"></i> ${p.noPhoto ? esc(p.reason) : esc(p.loc || '-')}${map}</div>` : '');
+  }
+
+  /** หมายเงินในช่วงวันที่ (วันที่ส่งหมายตามรายงาน → วันที่ลงข้อมูล → ช่วงจ่ายหมาย) ของผู้ใช้ */
+  function paidItemsFor(from, to) {
+    const me = myUser();
+    const dOf = (it) => (it.report && it.report.serve_date) || it.entry_date || it.period_end || '';
+    return R.issued.filter((it) => it.money_type === 'paid' && (!me || !it.owner || it.owner === me || isAdmin()))
+      .filter((it) => { const d = dOf(it); return (!from || d >= from) && (!to || d <= to); })
+      .sort((a, b) => String(a.entry_date || a.period_start || '').localeCompare(String(b.entry_date || b.period_start || '')) || (a.seq || 0) - (b.seq || 0));
+  }
+  /** ใบเสร็จแบบบัญชีเบิก: "97335/110(900)" — e-Filing ตัด D/ค/เลข 0 นำหน้า → "2570/544(850)" */
+  function accReceipt(it) {
+    const rep = it.report || {};
+    const amt = Number(rep.amount || it.price) || 0;
+    const amtTxt = amt ? `(${Number.isInteger(amt) ? amt : amt.toFixed(2)})` : '';
+    let book = rep.rcpt_book; let no = rep.rcpt_no;
+    if (!book && !no) { const p = L.parseReceiptRef(it.receipt_ref || rep.receipt_ref || ''); if (p) { book = p.book; no = p.no; } }
+    const dg = (v) => L.toArabicDigits(String(v || '')).replace(/\D+/g, '');
+    if (book || no) return `${dg(book).replace(/^0+(?=\d)/, '')}/${dg(no) ? String(parseInt(dg(no), 10)) : ''}${amtTxt}`;
+    const raw = String(it.receipt_ref || '').trim();
+    return raw ? (/\(/.test(raw) ? raw : raw + amtTxt) : '';
+  }
+  function accRowsOf(list) {
+    const staff = staffList();
+    const nameOf = (u) => { const x = staff.find((s0) => s0.username === u); return x ? x.name : ''; };
+    return list.map((it) => {
+      const rep = it.report || {};
+      const rc = accReceipt(it);
+      return {
+        entry_date: it.entry_date || rep.issue_date || it.period_start || '', t_no: it.kind === 'T' ? it.t_no : '', black_no: it.black_no || '', red_no: it.red_no || '',
+        summon_type: it.summon_type || '', recipient: it.recipient || '', subdistrict: it.subdistrict || '', district: it.district || '',
+        price: Number(rep.amount || it.price) || 0, server: rep.server_name || nameOf(it.owner) || '', rcpt_out: rc, rcpt_in: rc,
+      };
+    });
+  }
+  /** แบบ 25. บัญชีขอเบิกจ่ายเงิน (หมายเงิน) ของรายงานรอบ */
+  async function accExpense(memo, kind) {
+    const list = paidItemsFor(memo.period_start, memo.period_end);
+    if (!list.length) return Swal.fire({ icon: 'info', title: 'ไม่พบหมายเงินในช่วงวันที่ของรายงานนี้', text: `${L.thaiDateText(memo.period_start) || '-'} ถึง ${L.thaiDateText(memo.period_end) || '-'}` });
+    const rows = accRowsOf(list);
+    const meta = { court: 'ศาลจังหวัดอุดรธานี', period_start: memo.period_start, period_end: memo.period_end };
+    const name = `บัญชีขอเบิกจ่ายเงิน-หมายเงิน-${String(memo.round_label || memo.id).replace(/[\\/:*?"<>|]/g, '-')}`;
+    if (kind === 'xlsx') { const { wb } = E.accExpenseWorkbook(meta, rows); downloadBlob(await wb.toBlob(), name + '.xlsx'); return; }
+    await openPdf(E.accExpensePrintHtml(meta, rows, baseUrl()), name, { pageNumbers: true });
   }
 
   /** ฟอร์มรายงานรอบ (บันทึกข้อความ) */
@@ -2112,8 +2205,7 @@
       if (e.target.closest('#mf_pull_free')) { pullFree(true); return; }
       if (e.target.closest('#mf_pull_paid')) {
         const from = g('period_start').value; const to = g('period_end').value;
-        const list = R.issued.filter((it) => it.money_type === 'paid' && (!R.f.batch || true))
-          .filter((it) => { const d = (it.report && it.report.serve_date) || it.period_end || ''; return (!from || d >= from) && (!to || d <= to); });
+        const list = paidItemsFor(from, to);
         g('item_count').value = list.length; g('total_amount').value = list.reduce((a, it) => a + (Number((it.report && it.report.amount) || it.price) || 0), 0);
         g('paid_info').textContent = `พบหมายเงิน ${list.length} รายการ`;
         return;
@@ -2565,5 +2657,5 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
   // ให้ทดสอบ/เรียกจากที่อื่นได้
-  window.SltsReportUI = { open: () => window.switchTab('report'), openSub: (sub) => { R.sub = sub; window.switchTab('report'); }, openFlow: () => { R.sub = 'flow'; window.switchTab('report'); }, openData: () => { if (R.sub === 'flow') R.sub = 'issued'; window.switchTab('report'); }, FL, openReportForm, refreshUploadsCard, openPdf, htmlToPdfBlob, R };
+  window.SltsReportUI = { open: () => window.switchTab('report'), openSub: (sub) => { R.sub = sub; window.switchTab('report'); }, openFlow: () => { R.sub = 'flow'; window.switchTab('report'); }, openData: () => { if (R.sub === 'flow') R.sub = 'issued'; window.switchTab('report'); }, FL, openReportForm, refreshUploadsCard, openPdf, htmlToPdfBlob, accRowsOf, R };
 })();

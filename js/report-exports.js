@@ -241,7 +241,70 @@ th{background:#f4f6fa;font-weight:700}.nob td{border:none}
     return printHtml('บันทึกข้อความ', body, { base, margin: '15mm 20mm 12mm 30mm' });
   }
 
-  const api = { receiptWorkbook, ratesWorkbook, issuedWorkbook, memoVars, receiptPrintHtml, ratesPrintHtml, memoPrintHtml, printHtml };
+  // -------------------------------------------------------------
+  // แบบ 25. บัญชีขอเบิกจ่ายเงิน (หมายเงิน) — ตามรูปแบบ litigant_rpt_accexpense ของระบบงานศาล
+  // rows: [{ entry_date, black_no, t_no, red_no, summon_type, recipient, subdistrict, district, price, server, rcpt_out, rcpt_in }]
+  // -------------------------------------------------------------
+  /** วันที่แบบ "17-พ.ย. -69" */
+  function accDate(v) {
+    const iso = L.toIso(v); if (!iso) return '';
+    const [y, m, d] = iso.split('-').map(Number);
+    return `${d}-${['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][m]} -${String(y + 543).slice(-2)}`;
+  }
+  const accBlack = (r) => (r.t_no ? `${r.t_no}\n${r.black_no || ''}` : (r.black_no || '')).trim();
+  function accTitle(meta) {
+    const a = L.thaiDateText(meta.period_start); const b = L.thaiDateText(meta.period_end);
+    return a || b ? `ตั้งแต่วันที่ ${a || '-'} ถึงวันที่ ${b || '-'}` : '';
+  }
+  function accExpenseWorkbook(meta, rows) {
+    const wb = X.workbook();
+    const ws = wb.sheet('บัญชีขอเบิกจ่ายเงิน', { landscape: true, widths: [4.5, 10.5, 13.5, 12, 18, 22, 11, 12, 9.5, 17, 14, 14] });
+    const W = [4.5, 10.5, 13.5, 12, 18, 22, 11, 12, 9.5, 17, 14, 14];
+    const t = { size: 16, bold: true, align: 'center' };
+    ws.cell('A1', meta.court || 'ศาลจังหวัดอุดรธานี', t).merge('A1:L1');
+    ws.cell('A2', accTitle(meta), t).merge('A2:L2');
+    ws.height(1, 24).height(2, 24).height(3, 8);
+    const hd = { size: 14, bold: true, align: 'center', border: true, wrap: true };
+    ['ที่', 'วันที่ลงข้อมูล', 'เลขดำที่', 'เลขแดงที่', 'หมายอะไร', 'ส่งหมายให้ใคร', 'ตำบล', 'อำเภอ', 'ราคาหมาย', 'ผู้ส่งหมาย', 'ใบเสร็จ จ่ายออก', 'ใบเสร็จ รับมา']
+      .forEach((h, i) => ws.at(4, i, h, hd));
+    ws.height(4, 36);
+    const c = (al, fmt) => ({ size: 14, border: true, wrap: true, align: al, valign: 'top', fmt });
+    let row = 5; let sum = 0;
+    (rows || []).forEach((r, i) => {
+      const price = Number(r.price) || 0; sum += price;
+      const vals = [[i + 1, 'center'], [accDate(r.entry_date), 'center'], [accBlack(r), 'center'], [r.red_no || '', 'center'], [r.summon_type || '', 'left'],
+        [r.recipient || '', 'left'], [L.cleanSubdistrict(r.subdistrict || ''), 'center'], [L.cleanDistrict(r.district || ''), 'center'], [price, 'right', '#,##0.00'],
+        [r.server || '', 'left'], [r.rcpt_out || '', 'center'], [r.rcpt_in || r.rcpt_out || '', 'center']];
+      vals.forEach(([v, al, fmt], k) => ws.at(row, k, v, c(al, fmt)));
+      // ความสูงแถวตามจำนวนบรรทัดที่ต้องตัดคำ (ภาษาไทย ~1.25 ตัวอักษร/หน่วยความกว้าง)
+      const lines = Math.max(1, ...vals.map(([v], k) => String(v == null ? '' : v).split('\n')
+        .reduce((a, part) => a + Math.max(1, Math.ceil(part.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, '').length / (W[k] * 1.2))), 0)));
+      ws.height(row, Math.max(24, lines * 19 + 4));
+      row++;
+    });
+    const tb = { size: 15, bold: true, align: 'center' };
+    ws.cell(`D${row}`, `รวมทั้งสิ้น  =  ${(rows || []).length}  หมาย`, tb).merge(`D${row}:F${row}`);
+    ws.cell(`H${row}`, `รวม  ${L.money2(sum)}  บาท`, tb).merge(`H${row}:J${row}`);
+    ws.height(row, 26);
+    return { wb, sum };
+  }
+  function accExpensePrintHtml(meta, rows, base) {
+    let sum = 0;
+    const body = (rows || []).map((r, i) => {
+      const price = Number(r.price) || 0; sum += price;
+      return `<tr><td class="c">${i + 1}</td><td class="c">${esc(accDate(r.entry_date))}</td><td class="c">${esc(accBlack(r)).replace(/\n/g, '<br>')}</td><td class="c">${esc(r.red_no || '')}</td>
+<td>${esc(r.summon_type || '')}</td><td>${esc(r.recipient || '')}</td><td class="c">${esc(L.cleanSubdistrict(r.subdistrict || ''))}</td><td class="c">${esc(L.cleanDistrict(r.district || ''))}</td>
+<td class="r">${L.money2(price)}</td><td>${esc(r.server || '')}</td><td class="c">${esc(r.rcpt_out || '')}</td><td class="c">${esc(r.rcpt_in || r.rcpt_out || '')}</td></tr>`;
+    }).join('');
+    const html = `<h2 class="c">${esc(meta.court || 'ศาลจังหวัดอุดรธานี')}</h2><h2 class="c" style="margin-bottom:6px">${esc(accTitle(meta))}</h2>
+<table class="small acc"><thead><tr><th style="width:4%">ที่</th><th style="width:8%">วันที่ลงข้อมูล</th><th style="width:11%">เลขดำที่</th><th style="width:9%">เลขแดงที่</th><th style="width:11%">หมายอะไร</th><th style="width:15%">ส่งหมายให้ใคร</th><th style="width:8%">ตำบล</th><th style="width:8%">อำเภอ</th><th style="width:7%">ราคาหมาย</th><th style="width:11%">ผู้ส่งหมาย</th><th style="width:9%">ใบเสร็จ จ่ายออก</th><th style="width:9%">ใบเสร็จ รับมา</th></tr></thead>
+<tbody>${body || '<tr><td colspan="12" class="c">ไม่มีรายการ</td></tr>'}</tbody></table>
+<table class="nob" style="margin-top:10px"><tr><td class="c b" style="width:50%">รวมทั้งสิ้น&nbsp; = &nbsp;${(rows || []).length}&nbsp; หมาย</td><td class="c b">รวม&nbsp; ${L.money2(sum)}&nbsp; บาท</td></tr></table>
+<style>.acc td{vertical-align:top}</style>`;
+    return printHtml('บัญชีขอเบิกจ่ายเงิน', html, { landscape: true, base, margin: '10mm' });
+  }
+
+  const api = { accExpenseWorkbook, accExpensePrintHtml, accDate, receiptWorkbook, ratesWorkbook, issuedWorkbook, memoVars, receiptPrintHtml, ratesPrintHtml, memoPrintHtml, printHtml };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.SltsReportExports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
