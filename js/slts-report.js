@@ -574,7 +574,10 @@
     const rep = it.report || {};
     const insp = defaultSigner('inspector'); const payer = defaultSigner('payer');
     const photos = photosForIssued(it);
-    const firstTime = photos[0] && photos[0].time ? new Date(photos[0].time) : null;
+    // วันที่ส่งหมาย = วันที่ของภาพส่งหมายที่เลือก (วันเวลาบนภาพ/ข้อมูลภาพ) → ภาพล่าสุดของหมายนี้
+    const selId = opt && opt.photoIds && opt.photoIds[0];
+    const selPhoto = (selId && (photos.find((p) => p.id === selId) || sheetRows().map(photoFromRow).find((x) => x && x.id === selId))) || photos[0];
+    const firstTime = selPhoto && selPhoto.time ? new Date(selPhoto.time) : null;
     const code = L.resultCodeOf(it.result_text) || (/ประกาศ/.test(it.summon_type) ? '003' : '001');
     const fr = freeRateFor(it);
     const prof = profile();
@@ -773,6 +776,26 @@
     const g = (k) => wrap.querySelector('#rf_' + k);
 
     let touchedRc = false;
+    // วันที่ส่งหมาย: ตามภาพที่ติ๊กเลือก / ไฟล์ภาพที่แนบเพิ่ม (จนกว่าจะแก้เอง)
+    let touchedServe = Boolean(it.report && it.report.serve_date);
+    const sd = g('serve_date');
+    if (sd) sd.addEventListener('input', () => { touchedServe = true; });
+    const setServe = (d, why) => {
+      if (!sd || touchedServe || !d || isNaN(d)) return;
+      sd.value = L.toIso(d);
+      sd.title = why || '';
+      sd.style.background = '#ecfeff'; setTimeout(() => { sd.style.background = ''; }, 1500);
+    };
+    wrap.addEventListener('change', async (e) => {
+      const el = e.target;
+      if (el.matches && el.matches('input[data-photo]') && el.checked) {
+        const p = sheetRows().map(photoFromRow).find((x) => x && x.id === el.dataset.photo);
+        if (p && p.time) setServe(new Date(p.time), 'จากภาพส่งหมายที่เลือก');
+      }
+      if (el.matches && el.matches('input[data-extra]') && el.files && el.files[0] && window.SLTS && SLTS.geo && SLTS.geo.readPhotoDate) {
+        try { const r = await SLTS.geo.readPhotoDate(el.files[0]); if (r && r.source !== 'file') setServe(r.date, 'จากวันที่ในภาพที่แนบ'); } catch (_) {}
+      }
+    });
     const refresh = () => {
       const code = g('result_code').value; const notice = L.isNoticeResult(code);
       wrap.querySelector('#rf_tpl').textContent = 'แบบ: ' + L.TEMPLATE_LABELS[L.templateFor(it.kind, code)];
@@ -1806,6 +1829,39 @@
     };
   }
 
+  const roleOf = (rec) => ((String(rec || '').match(/(จำเลย|โจทก์|ผู้ร้องสอด|ผู้ร้อง|ผู้คัดค้าน|ผู้เสียหาย|ผู้ประกัน|นายประกัน|บุคคลภายนอก)(ร่วม)?(ที่\s*\d+)?/) || [''])[0] || 'ผู้รับ').replace(/ที่\s+(\d)/, 'ที่ $1');
+  /** แถวใบสำคัญรับเงินหมายฟรีจากหมายในบัญชีจ่ายหมาย (กรอกข้อมูลให้ครบ) */
+  function freeMemoItemOf(it) {
+    const rep = it.report || {};
+    const ph = photosForIssued(it);
+    const photoDate = ph[0] && ph[0].time ? L.toIso(new Date(ph[0].time)) : '';
+    const plan = claimPlan(claimScope(it)).get(it.id) || {};
+    const ch = claimChoice(it);
+    return {
+      issued_id: it.id, case_prefix: 'คดีดำ', case_no: it.kind === 'T' ? it.t_no : it.black_no,
+      issue_date: rep.issue_date || it.entry_date || it.period_start || '', serve_date: rep.serve_date || photoDate || '',
+      summon_type: it.summon_type || '', recipient: it.recipient || '', recipient_role: roleOf(it.recipient),
+      house_no: it.house_no || '', moo: it.moo || '', subdistrict: it.subdistrict || '', district: it.district || '', province: 'จ.อุดรธานี',
+      base_rate: freeRateFor(it) || Number(rep.claim_amount) || 0,
+      claim_mode: ch.mode || 'full', claim_eff: plan.eff || ch.mode || 'full',
+      reported: Boolean(it.report && it.report_status && it.report_status !== 'none'),
+    };
+  }
+  /** หมายฟรีที่เลือก "เบิก" (เต็ม/ครึ่ง) ในช่วงวันที่ — ช่วงจ่ายหมายทับซ้อน หรือวันที่ส่งอยู่ในช่วง */
+  function claimableFree(from, to) {
+    const me = myUser();
+    return R.issued.filter((it) => it.money_type !== 'paid' && (!me || !it.owner || it.owner === me || isAdmin()))
+      .filter((it) => { const m = claimChoice(it).mode; if (m !== 'full' && m !== 'half') return false; const p = claimPlan(claimScope(it)).get(it.id); return !(p && (p.blockedBy || p.eff === 'none')); })
+      .filter((it) => {
+        if (!from && !to) return true;
+        const ps = it.period_start || it.period_end || ''; const pe = it.period_end || it.period_start || '';
+        const overlap = ps && pe && (!to || ps <= to) && (!from || pe >= from);
+        const sd = (it.report && it.report.serve_date) || '';
+        return overlap || (sd && (!from || sd >= from) && (!to || sd <= to));
+      })
+      .sort((a, b) => (a.period_start || '').localeCompare(b.period_start || '') || (a.seq || 0) - (b.seq || 0));
+  }
+
   /** ฟอร์มรายงานรอบ (บันทึกข้อความ) */
   function openMemoForm(type, existing) {
     const m = (existing && existing.memo) || {};
@@ -1836,7 +1892,7 @@
           <div class="sr-field"><label>หมายเหตุ</label><input class="sr-input" id="mf_note" value="${esc(val('note', ''))}"></div>
         </div></div>
         ${type === 'free' ? `<div class="sr-section"><h4>รายการส่งหมาย (ใบสำคัญรับเงินหมายฟรี)</h4>
-          <div class="sr-toolbar"><button class="sr-btn primary" type="button" id="mf_pull_free"><i class="fa-solid fa-download"></i> ดึงหมายฟรีที่รายงาน "เบิก" แล้ว (ในช่วงวันที่)</button>
+          <div class="sr-toolbar"><button class="sr-btn primary" type="button" id="mf_pull_free"><i class="fa-solid fa-rotate"></i> ดึงหมายฟรีที่เลือก "เบิก" (ในช่วงวันที่)</button>
             <button class="sr-btn" type="button" id="mf_add_row"><i class="fa-solid fa-plus"></i> เพิ่มแถว</button><span class="grow"></span><span class="sr-muted" id="mf_total"></span></div>
           <div class="sr-note" style="margin-top:8px">กติกา (ตาม summon-report): บ้านเลขที่ หมู่ ตำบล อำเภอ เดียวกัน = เบิกได้หมายเดียว (แถวสีแดง ห้ามบันทึก) · หมู่เดียวกันแต่คนละบ้าน = เบิก 50%</div>
           <div class="sr-scroll" style="margin-top:8px;max-height:360px"><table class="sr-table" id="mf_items"></table></div></div>` : ''}
@@ -1852,9 +1908,11 @@
       const t = g('items'); if (!t) return;
       const ev = L.evaluateFreeSummonItems(items);
       items = ev.items; dup = ev.duplicate_indices;
-      t.innerHTML = `<thead><tr><th>#</th>${ITEM_COLS.map((c) => `<th>${c[1]}</th>`).join('')}<th class="num">ราคาเบิก</th><th></th></tr></thead><tbody>${items.map((it, i) => `<tr style="${ev.items[i].calc_rule === 'duplicate' ? 'background:#fef2f2' : ev.items[i].calc_rule === 'half' ? 'background:#fffbeb' : ''}">
-        <td>${i + 1}</td>${ITEM_COLS.map((c) => `<td><input class="sr-input" style="width:${c[2]}px" data-i="${i}" data-k="${c[0]}" type="${c[3] || 'text'}" value="${esc(it[c[0]] == null ? '' : it[c[0]])}"></td>`).join('')}
+      const missing = (x) => ['case_no', 'serve_date', 'summon_type', 'house_no', 'subdistrict', 'district'].filter((k) => !String(x[k] == null ? '' : x[k]).trim()).length + (Number(x.base_rate) > 0 ? 0 : 1);
+      t.innerHTML = `<thead><tr><th>#</th>${ITEM_COLS.map((c) => `<th>${c[1]}</th>`).join('')}<th class="num">ราคาเบิก</th><th class="ctr">แก้ไข</th><th></th></tr></thead><tbody>${items.map((it, i) => `<tr style="${ev.items[i].calc_rule === 'duplicate' ? 'background:#fef2f2' : ev.items[i].calc_rule === 'half' ? 'background:#fffbeb' : ''}">
+        <td>${i + 1}${missing(it) ? ' <span class="sr-chip warn" title="ข้อมูลยังไม่ครบ">!</span>' : ''}</td>${ITEM_COLS.map((c) => `<td><input class="sr-input" style="width:${c[2]}px" data-i="${i}" data-k="${c[0]}" type="${c[3] || 'text'}" value="${esc(it[c[0]] == null ? '' : it[c[0]])}"></td>`).join('')}
         <td class="num">${L.money2(it.claim_rate)}${it.calc_rule === 'half' ? '<div class="sr-muted">50%</div>' : it.calc_rule === 'duplicate' ? '<div class="sr-chip red">ซ้ำ</div>' : ''}</td>
+        <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm" data-iedit="${i}" type="button" title="แก้ไขรายการนี้"><i class="fa-solid fa-pen"></i></button>${it.issued_id ? `<button class="sr-btn sm" data-irep="${it.issued_id}" type="button" title="เปิดแบบรายงานหมายของรายการนี้"><i class="fa-solid fa-file-pen"></i></button>` : ''}</td>
         <td><button class="sr-btn sm danger" data-del="${i}" type="button"><i class="fa-solid fa-xmark"></i></button></td></tr>`).join('')}</tbody>`;
       g('total').textContent = `${items.length} รายการ · รวมเบิก ${L.money2(ev.total_amount)} บาท (${L.bahtText(ev.total_amount)})`;
     }
@@ -1869,21 +1927,11 @@
       if (e.target.closest('[data-close]')) return close();
       const del = e.target.closest('[data-del]'); if (del) { items.splice(Number(del.dataset.del), 1); return renderItems(); }
       if (e.target.closest('#mf_add_row')) { items.push({ case_prefix: 'คดีดำ', province: 'จ.อุดรธานี', base_rate: 0 }); return renderItems(); }
-      if (e.target.closest('#mf_pull_free')) {
-        const from = g('period_start').value; const to = g('period_end').value;
-        const list = R.issued.filter((it) => it.money_type === 'free' && it.report && it.report_status !== 'none' && (claimChoice(it).mode || 'none') !== 'none')
-          .filter((it) => { const sd = it.report.serve_date || ''; return (!from || sd >= from) && (!to || sd <= to); });
-        const have = new Set(items.map((x) => x.issued_id).filter(Boolean));
-        list.filter((it) => !have.has(it.id)).forEach((it) => items.push({
-          issued_id: it.id, case_prefix: 'คดีดำ', case_no: it.kind === 'T' ? it.t_no : it.black_no, issue_date: it.report.issue_date || '', serve_date: it.report.serve_date || '',
-          summon_type: it.summon_type, recipient_role: (String(it.recipient).match(/(จำเลย|โจทก์|ผู้ร้อง|ผู้คัดค้าน|ผู้เสียหาย|ผู้ประกัน|นายประกัน)[^\s]*/) || [''])[0] || 'ผู้รับ',
-          house_no: it.house_no, moo: it.moo, subdistrict: it.subdistrict, district: it.district, province: 'จ.อุดรธานี', base_rate: freeRateFor(it) || Number(it.report.claim_amount) || 0,
-          claim_mode: claimChoice(it).mode, claim_eff: (claimPlan(claimScope(it)).get(it.id) || {}).eff,
-        }));
-        renderItems();
-        toast(list.length ? 'success' : 'info', list.length ? `ดึงมา ${list.length} รายการ` : 'ไม่พบหมายฟรีที่รายงาน "เบิก" ในช่วงวันที่นี้');
-        return;
-      }
+      const rep = e.target.closest('[data-irep]');
+      if (rep) { openReportForm(Number(rep.dataset.irep)); return; }
+      const ied = e.target.closest('[data-iedit]');
+      if (ied) { if (await editMemoItem(Number(ied.dataset.iedit))) renderItems(); return; }
+      if (e.target.closest('#mf_pull_free')) { pullFree(true); return; }
       if (e.target.closest('#mf_pull_paid')) {
         const from = g('period_start').value; const to = g('period_end').value;
         const list = R.issued.filter((it) => it.money_type === 'paid' && (!R.f.batch || true))
@@ -1912,6 +1960,53 @@
         }
       }
     });
+    /** ดึงหมายฟรีที่เลือกเบิกในช่วงวันที่ (เพิ่มเฉพาะที่ยังไม่มีในตาราง) */
+    function pullFree(notify) {
+      const list = claimableFree(g('period_start').value, g('period_end').value);
+      const have = new Set(items.map((x) => x.issued_id).filter(Boolean));
+      const add = list.filter((it) => !have.has(it.id));
+      add.forEach((it) => items.push(freeMemoItemOf(it)));
+      renderItems();
+      if (notify) toast(add.length ? 'success' : 'info', add.length ? `เพิ่ม ${add.length} รายการ` : (list.length ? 'มีครบทุกรายการแล้ว' : 'ไม่พบหมายฟรีที่เลือก "เบิก" ในช่วงวันที่นี้'));
+      return add.length;
+    }
+    /** แก้ไขรายการในใบสำคัญ (ข้อมูลครบทุกช่อง + การเบิก) */
+    async function editMemoItem(i) {
+      const x = items[i]; if (!x) return false;
+      const src = x.issued_id ? R.issued.find((y) => y.id === x.issued_id) : null;
+      const F = [['case_no', 'หมายเลขคดี'], ['issue_date', 'วันที่จ่ายหมาย', 'date'], ['serve_date', 'วันที่ส่งหมาย', 'date'], ['summon_type', 'หมายอะไร'], ['recipient', 'ชื่อผู้รับ'], ['recipient_role', 'ส่งให้ใคร (ฐานะ)'],
+        ['house_no', 'บ้านเลขที่'], ['moo', 'หมู่ที่'], ['subdistrict', 'ตำบล'], ['district', 'อำเภอ'], ['base_rate', 'ราคาหมาย (บาท)', 'number']];
+      const mode = x.claim_mode || 'full';
+      const out = await Swal.fire({
+        title: `แก้ไขรายการที่ ${i + 1}`, width: 760, showCancelButton: true, confirmButtonText: 'บันทึก', cancelButtonText: 'ยกเลิก',
+        html: `<div class="sr-grid sr-g2" style="text-align:left">${F.map(([k, l, t]) => `<div class="sr-field"><label>${l}</label><input class="sr-input" id="mi_${k}" type="${t || 'text'}" value="${esc(x[k] == null ? '' : x[k])}"></div>`).join('')}
+          <div class="sr-field sr-span2"><label>การเบิก</label><div class="sr-radio">${[['full', 'เบิกเต็ม'], ['half', 'เบิกครึ่ง'], ['none', 'ไม่เบิก (เอาออกจากใบสำคัญ)']].map(([v, l]) => `<label><input type="radio" name="mi_claim" value="${v}" ${mode === v ? 'checked' : ''}> ${l}</label>`).join('')}</div></div>
+          ${src ? '<div class="sr-muted sr-span2">การเบิกจะปรับที่หน้ารายงานหมายด้วย (ตามกฎบ้าน/หมู่บ้านเดียวกัน)</div>' : ''}</div>`,
+        preConfirm: () => {
+          const v = Object.fromEntries(F.map(([k, , t]) => { const el = document.getElementById('mi_' + k); return [k, t === 'number' ? Number(el.value) || 0 : el.value.trim()]; }));
+          v.claim_mode = (document.querySelector('input[name="mi_claim"]:checked') || {}).value || 'full';
+          return v;
+        },
+      });
+      if (!out.isConfirmed) return false;
+      const v = out.value;
+      if (Number(v.base_rate) !== Number(x.base_rate)) x.base_rate_manual = true;
+      Object.assign(x, v);
+      if (src && v.claim_mode !== (claimChoice(src).mode || 'full')) {
+        try { await setFreeClaim(src, v.claim_mode); } catch (er) { fail(er); }
+      }
+      if (v.claim_mode === 'none') { items.splice(i, 1); }
+      // ปรับผลการเบิก (เต็ม/ครึ่ง) ของทุกแถวตามกฎล่าสุด
+      items.forEach((y) => { const s0 = y.issued_id && R.issued.find((z) => z.id === y.issued_id); if (s0) { const p = claimPlan(claimScope(s0)).get(s0.id) || {}; y.claim_mode = claimChoice(s0).mode || y.claim_mode; y.claim_eff = p.eff || y.claim_eff; } });
+      return true;
+    }
+    ['period_start', 'period_end'].forEach((k) => { const el = g(k); if (el) el.addEventListener('change', () => { if (type === 'free') pullFree(false); }); });
+    // สร้างใบสำคัญหมายฟรีใหม่ → แสดงรายการหมายฟรีที่เลือก "เบิก" ให้ทันที
+    if (type === 'free' && !m.id && !items.length) {
+      const n = pullFree(false);
+      const info = g('total');
+      if (info && n) info.insertAdjacentHTML('beforebegin', `<span class="sr-chip ok" style="margin-right:8px">ดึงหมายฟรีที่เลือกเบิกมาให้ ${n} รายการ</span>`);
+    }
     renderItems();
   }
 

@@ -1062,7 +1062,58 @@
     return t === subKey(zone.subdistrict);
   }
 
+  // ------------------------------------------------------------------
+  // วัน-เวลาจากข้อความบนภาพถ่าย (ลายน้ำกล้อง GPS / ลายน้ำ SLTS ที่อ่านด้วย OCR)
+  // ------------------------------------------------------------------
+  const EN_MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+  const TH_MON_RE = [['ม.ค', 1], ['ก.พ', 2], ['มี.ค', 3], ['เม.ย', 4], ['พ.ค', 5], ['มิ.ย', 6], ['ก.ค', 7], ['ส.ค', 8], ['ก.ย', 9], ['ต.ค', 10], ['พ.ย', 11], ['ธ.ค', 12]];
+  /**
+   * คืน Date หรือ null — รองรับ 25/11/2025 10:30, 2025-11-25 10:30:05, 2025:11:25, 25 Nov 2025, Nov 25, 2025 10:30 AM,
+   * 25 พ.ย. 2568 / 25 พฤศจิกายน 2568 (ปี พ.ศ. แปลงเป็น ค.ศ.) · ตรวจว่าไม่อยู่ในอนาคตและไม่เก่าเกิน maxAgeDays
+   */
+  function parsePhotoDateText(text, opts) {
+    opts = opts || {};
+    const now = opts.now ? new Date(opts.now) : new Date();
+    const maxAge = opts.maxAgeDays || 400;
+    let t = toArabicDigits(thNorm(String(text || ''))).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
+    if (!t.trim()) return null;
+    const yr = (y) => { y = Number(y); if (y < 100) y += 2000; if (y > 2400) y -= 543; return y; };
+    const timeAfter = (idx) => {
+      const m = t.slice(idx, idx + 24).match(/^[\s,T|-]*(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?\s*(AM|PM|น\.?)?/i);
+      if (!m) return [12, 0, 0];
+      let h = Number(m[1]); const ap = (m[4] || '').toUpperCase();
+      if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+      return [h, Number(m[2]), Number(m[3] || 0)];
+    };
+    const cands = [];
+    const push = (y, mo, d, idxEnd) => {
+      y = yr(y); mo = Number(mo); d = Number(d);
+      if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && y >= 2000 && y <= 2100)) return;
+      const [h, mi, se] = timeAfter(idxEnd);
+      const dt = new Date(y, mo - 1, d, h, mi, se);
+      if (dt.getMonth() !== mo - 1) return;
+      cands.push(dt);
+    };
+    let m;
+    const reYmd = /(\d{4})[\/\-.:](\d{1,2})[\/\-.:](\d{1,2})/g;
+    while ((m = reYmd.exec(t))) push(m[1], m[2], m[3], m.index + m[0].length);
+    const reDmy = /(?<![\d.])(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4}|\d{2})(?![\d])/g;
+    while ((m = reDmy.exec(t))) push(m[3], m[2], m[1], m.index + m[0].length);
+    const reDMonY = /(\d{1,2})\s*[-\s]?\s*([A-Za-z]{3,9})\.?,?\s*[-\s]?\s*(\d{4})/g;
+    while ((m = reDMonY.exec(t))) { const mo = EN_MONTHS[m[2].toLowerCase().slice(0, 4)] || EN_MONTHS[m[2].toLowerCase().slice(0, 3)]; if (mo) push(m[3], mo, m[1], m.index + m[0].length); }
+    const reMonDY = /([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})/g;
+    while ((m = reMonDY.exec(t))) { const mo = EN_MONTHS[m[1].toLowerCase().slice(0, 4)] || EN_MONTHS[m[1].toLowerCase().slice(0, 3)]; if (mo) push(m[3], mo, m[2], m.index + m[0].length); }
+    const thFull = THAI_MONTHS.slice(1).map((n, i) => [n, i + 1]);
+    for (const [name, mo] of [...thFull, ...TH_MON_RE]) {
+      const re = new RegExp('(\\d{1,2})\\s*' + name.replace(/\./g, '\\.?') + '\\.?\\s*(\\d{4}|\\d{2})', 'g');
+      while ((m = re.exec(t))) push(m[2], mo, m[1], m.index + m[0].length);
+    }
+    const ok = cands.filter((d) => d.getTime() <= now.getTime() + 864e5 && d.getTime() >= now.getTime() - maxAge * 864e5);
+    return ok.length ? ok[0] : null;
+  }
+
   const api = {
+    parsePhotoDateText,
     thNorm, THAI_MONTHS, THAI_MONTHS_SHORT, RESULT_CODES, FILE_TYPES, POSTING_CHOICES, SEND_METHODS, UDON_POSTCODES, TEMPLATE_LABELS,
     toThaiDigits, toArabicDigits, ymd, toIso, todayIso, parseThaiTextDate, thaiDateLong, thaiDateParts, thaiDateText, thaiDateShort,
     bahtText, money2, moneyShort, parseMoney, resultText, resultCodeOf, isNoticeResult, cleanDistrict, cleanSubdistrict,

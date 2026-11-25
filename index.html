@@ -630,6 +630,13 @@
                     <input type="file" id="desktopImageFileInput" accept="image/*" class="block w-full text-xs text-gray-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border border-gray-300 rounded-xl p-1 bg-white">
                   </div>
 
+                  <!-- วันที่-เวลาส่งหมาย (อ่านจากภาพ: EXIF / ตัวอักษรวันที่บนภาพ) -->
+                  <div id="desktopServeDateRow" class="hidden bg-sky-50 border border-sky-200 rounded-xl p-2.5 text-xs">
+                    <label for="desktopServeDateTime" class="block font-bold text-sky-900 mb-1"><i class="fa-solid fa-calendar-day text-sky-600 mr-1"></i> วันที่-เวลาส่งหมาย <span id="desktopServeDateSrc" class="font-normal text-sky-700"></span></label>
+                    <input type="datetime-local" id="desktopServeDateTime" class="w-full border border-sky-200 rounded-lg px-2 py-1.5 bg-white text-sm font-mono">
+                    <p class="text-[11px] text-sky-700 mt-1">ใช้เป็นวันเวลาบนลายน้ำ ในตารางประวัติ และวันที่ส่งหมายในแบบรายงานหมาย — แก้ไขได้</p>
+                  </div>
+
                   <!-- Dynamic Notice: GPS Extraction Status (Desktop only) -->
                   <div id="desktopGpsScanningNotice" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-xs text-blue-700 flex items-center gap-2">
                     <i class="fa-solid fa-circle-notch fa-spin text-blue-600"></i>

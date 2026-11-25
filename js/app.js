@@ -10588,6 +10588,8 @@ window.showMobileUploadPhotoModal = function(existingDataUrl = null) {
           return;
         }
 
+        window._mobileManualPhotoDate = null;
+        if (window.SLTS && SLTS.geo && SLTS.geo.readExifDate) SLTS.geo.readExifDate(file).then((d) => { window._mobileManualPhotoDate = d; }).catch(() => {});
         const reader = new FileReader();
         reader.onload = async (ev) => {
           selectedDataUrl = ev.target.result;
@@ -10776,7 +10778,7 @@ window.submitMobileManualUploadForm = async function() {
       lat: formatFullCoordinateString(coordsLat, 6),
       lng: formatFullCoordinateString(coordsLng, 6),
       heading: currentHeading,
-      dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+      dateTime: WatermarkEngine.formatThaiDateTime(window._mobileManualPhotoDate || new Date()), // วันที่ถ่ายภาพ (EXIF) = วันที่ส่งหมาย
       uploader: state.currentUser?.username || '',
       uploadedBy: state.currentUser?.username || '',
       user_id: state.currentUser?.username || '',
@@ -13709,6 +13711,9 @@ function initDesktopUploadEvents() {
           elements.desktopImageSizeBadge.textContent = `${file.name} (${sizeKb} KB → บีบอัดก่อนส่ง < 500 KB)`;
         }
 
+        // วันที่ส่งหมายจากภาพ (EXIF → วันที่บนภาพ) — ทำงานคู่ขนานกับการอ่านพิกัด
+        if (!sltsMobileLogic()) fillDesktopServeDateFromPhoto(file, state.selectedDesktopImageDataUrl);
+
         // ตรวจสอบและดึงพิกัด GPS จากภาพถ่ายอัตโนมัติ (เฉพาะ Desktop > 768px)
         if (!sltsMobileLogic()) {
           const gpsResult = await extractGpsFromImage(file, state.selectedDesktopImageDataUrl, true);
@@ -13790,6 +13795,8 @@ function initDesktopUploadEvents() {
   }
   const chkNoPhoto = document.getElementById('chkDesktopNoPhoto');
   if (chkNoPhoto) chkNoPhoto.addEventListener('change', syncDesktopNoPhotoUi);
+  const serveInp = document.getElementById('desktopServeDateTime');
+  if (serveInp) serveInp.addEventListener('input', () => { serveInp.dataset.touched = '1'; const src = document.getElementById('desktopServeDateSrc'); if (src) src.textContent = '(แก้ไขเอง)'; });
 }
 
 function updateDesktopWatermarkBadge(hasWatermark) {
@@ -13820,6 +13827,44 @@ window.viewDesktopFullPreview = function() {
 };
 
 window.isDesktopUploadInProgress = false;
+
+/** Date → ค่าสำหรับ <input type="datetime-local"> */
+function toLocalDateTimeInput(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+/** อ่านวันที่ส่งหมายจากภาพที่เลือกในหน้าบันทึกส่งหมาย (PC) แล้วกรอกให้ */
+async function fillDesktopServeDateFromPhoto(file, dataUrl) {
+  const row = document.getElementById('desktopServeDateRow');
+  const inp = document.getElementById('desktopServeDateTime');
+  const src = document.getElementById('desktopServeDateSrc');
+  if (!row || !inp) return;
+  row.classList.remove('hidden');
+  inp.dataset.touched = '';
+  inp.value = toLocalDateTimeInput(new Date());
+  if (src) src.textContent = '(กำลังอ่านวันที่จากภาพ…)';
+  const token = (state._serveDateToken = (state._serveDateToken || 0) + 1);
+  let r = null;
+  try { r = (window.SLTS && SLTS.geo && SLTS.geo.readPhotoDate) ? await SLTS.geo.readPhotoDate(file, dataUrl) : null; } catch (_) {}
+  if (token !== state._serveDateToken || inp.dataset.touched) return;
+  if (r && r.date) {
+    inp.value = toLocalDateTimeInput(r.date);
+    if (src) src.textContent = r.source === 'exif' ? '(จากข้อมูลภาพถ่าย)' : r.source === 'ocr' ? '(อ่านจากวันที่บนภาพ — โปรดตรวจสอบ)' : '(จากวันที่ของไฟล์ — โปรดตรวจสอบ)';
+  } else if (src) {
+    src.textContent = '(ไม่พบวันที่ในภาพ — ใช้เวลาปัจจุบัน แก้ไขได้)';
+  }
+}
+/** วันเวลาส่งหมายที่ใช้บันทึก (ภาพ/ที่แก้ไข) หรือเวลาปัจจุบัน */
+function desktopServeDateValue() {
+  const inp = document.getElementById('desktopServeDateTime');
+  const row = document.getElementById('desktopServeDateRow');
+  if (inp && row && !row.classList.contains('hidden') && inp.value) {
+    const d = new Date(inp.value);
+    if (!isNaN(d) && d.getTime() <= Date.now() + 864e5) return d;
+  }
+  return new Date();
+}
+window.fillDesktopServeDateFromPhoto = fillDesktopServeDateFromPhoto;
 
 /** สลับหน้าฟอร์มเมื่อเลือก "ไม่มีภาพถ่าย (ผู้รับเซ็นรับหมายเอง)" */
 function syncDesktopNoPhotoUi() {
@@ -14004,7 +14049,7 @@ async function handleDesktopUpload() {
       lat: state.lat,
       lng: state.lng,
       heading: heading,
-      dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+      dateTime: WatermarkEngine.formatThaiDateTime(desktopServeDateValue()),
       uploader: state.currentUser?.username || '',
       uploadedBy: state.currentUser?.username || '',
       user_id: state.currentUser?.username || '',
@@ -14231,6 +14276,7 @@ async function handleDesktopUpload() {
 }
 
 function resetDesktopForm(keepValues = true) {
+  { const row = document.getElementById('desktopServeDateRow'); if (row) row.classList.add('hidden'); const inp = document.getElementById('desktopServeDateTime'); if (inp) { inp.value = ''; inp.dataset.touched = ''; } }
   state.selectedDesktopImageDataUrl = null;
   if (elements.desktopImageFileInput) elements.desktopImageFileInput.value = '';
   if (elements.desktopImagePreviewContainer) elements.desktopImagePreviewContainer.classList.add('hidden');
