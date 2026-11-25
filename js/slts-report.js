@@ -682,6 +682,10 @@
       <div class="sr-dialog-head"><i class="fa-solid fa-file-pen"></i><h2>บันทึกผลการส่งหมาย : ${esc(isT ? it.t_no : it.black_no)} — ${esc(it.recipient)}</h2>
         <span class="sr-chip" style="background:#fff" id="rf_tpl"></span><button class="x" data-close title="ปิด">&times;</button></div>
       <div class="sr-dialog-body">
+        <div class="sr-section" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:10px 14px">
+          <div style="font-size:15px"><b><i class="fa-solid fa-location-dot" style="color:#e11d48"></i> ที่ตั้งส่งหมาย:</b> ${esc(issuedAddr(it))}${it.recipient ? ` <span class="sr-muted">· ${esc(it.recipient)}</span>` : ''}</div>
+          ${photos.length ? `<div class="sr-muted" style="margin-top:4px"><i class="fa-solid fa-camera"></i> ที่ตั้งจากภาพส่งหมาย: ${photos.slice(0, 3).map((p) => `${p.noPhoto ? esc(p.reason) : esc(p.loc || '-')}${p.lat && p.lng ? ` <a href="https://www.google.com/maps?q=${encodeURIComponent(p.lat + ',' + p.lng)}" target="_blank" rel="noopener">แผนที่</a>` : ''} <span style="opacity:.7">(${esc(p.at)})</span>`).join(' · ')}</div>` : '<div class="sr-muted" style="margin-top:4px">ยังไม่มีภาพส่งหมายของหมายนี้</div>'}
+        </div>
         <div class="sr-section"><h4>บันทึกผลการส่งหมาย</h4>
           <div class="sr-grid sr-g4">
             ${inp('issue_date', 'วันที่จ่ายหมาย', { type: 'date', req: true })}
@@ -1289,7 +1293,8 @@
     const repRows = D.issued.map((it) => {
       const ph = D.photoMap.get(it.id) || [];
       const st = it.report_status === 'printed' ? '<span class="sr-chip ok">พิมพ์แล้ว</span>' : it.report_status === 'saved' ? '<span class="sr-chip ok">บันทึกแล้ว</span>' : '<span class="sr-chip">ยังไม่รายงาน</span>';
-      return `<tr><td>${esc(it.seq || '')}</td><td><b>${esc(it.kind === 'T' ? it.t_no : it.black_no)}</b>${it.kind === 'T' ? '<div class="sr-muted">หมาย ต.</div>' : ''}</td><td>${esc(it.summon_type)}</td><td>${esc(it.recipient)}<div class="sr-muted">ต.${esc(it.subdistrict)} อ.${esc(it.district)}</div></td>
+      return `<tr><td>${esc(it.seq || '')}</td><td><b>${esc(it.kind === 'T' ? it.t_no : it.black_no)}</b>${it.kind === 'T' ? '<div class="sr-muted">หมาย ต.</div>' : ''}</td><td>${esc(it.summon_type)}</td><td>${esc(it.recipient)}</td>
+        <td style="min-width:220px;max-width:340px">${locCell(it, ph)}</td>
         <td>${claimCell(it)}</td>
         <td>${ph.length ? `<img class="sr-thumb" src="${esc(ph[0].thumb)}" data-view="${esc(ph[0].id)}" referrerpolicy="no-referrer" loading="lazy" alt="">${ph.length > 1 ? ` <span class="sr-muted">+${ph.length - 1}</span>` : ''}` : '<span class="sr-muted">ไม่มีภาพ</span>'}</td>
         <td>${st}</td>
@@ -1301,7 +1306,7 @@
       ${s4state === 'lock' ? '<div class="sr-muted">นำเข้าบัญชีจ่ายหมายที่มีหมายของโซนนี้ก่อน</div>' : `<div class="sr-toolbar"><div class="sr-progress"><div style="width:${pct}%"></div></div><span><b>${D.reported.length}</b> / ${D.issued.length} รายการรายงานแล้ว</span><span class="sr-muted">· เบิกหมายฟรี <b>${claimN}</b> หมาย รวม <b>${L.money2(claimTotal)}</b> บาท</span><span class="grow"></span>
           <button class="sr-btn" data-fl="wordall" ${D.reported.length ? '' : 'disabled'}><i class="fa-solid fa-file-zipper"></i> ดาวน์โหลด Word ที่รายงานแล้ว (.zip)</button>
           <button class="sr-btn" data-fl="memo"><i class="fa-solid fa-file-invoice"></i> ทำบันทึกข้อความขออนุมัติเบิก</button></div>
-        <div class="sr-scroll" style="margin-top:10px;max-height:560px"><table class="sr-table"><thead><tr><th>ที่</th><th>เลขคดี</th><th>หมาย</th><th>ผู้รับหมาย</th><th style="min-width:150px">ประเภท / การเบิก</th><th>ภาพ</th><th>สถานะ</th><th class="ctr">จัดการ</th></tr></thead><tbody>${repRows}</tbody></table></div>`}
+        <div class="sr-scroll" style="margin-top:10px;max-height:560px"><table class="sr-table"><thead><tr><th>ที่</th><th>เลขคดี</th><th>หมาย</th><th>ผู้รับหมาย</th><th>ที่ตั้ง (บัญชี / <i class="fa-solid fa-camera"></i> ภาพ)</th><th style="min-width:150px">ประเภท / การเบิก</th><th>ภาพ</th><th>สถานะ</th><th class="ctr">จัดการ</th></tr></thead><tbody>${repRows}</tbody></table></div>`}
     </div>`;
 
     body.innerHTML = `<div class="sr-stepper">${stepper}</div>${s1}${s2}${s3}${s4}
@@ -1860,6 +1865,22 @@
         return overlap || (sd && (!from || sd >= from) && (!to || sd <= to));
       })
       .sort((a, b) => (a.period_start || '').localeCompare(b.period_start || '') || (a.seq || 0) - (b.seq || 0));
+  }
+
+  /** ที่อยู่ส่งหมายเต็มตามบัญชีจ่ายหมาย */
+  function issuedAddr(it) {
+    const raw = String(it.address_raw || '').replace(/\s*(ซ\.|ถ\.)\s*-(?=\s|$)/g, '').replace(/\s+/g, ' ').trim();
+    const parts = [raw || [it.house_no, it.moo ? 'ม.' + it.moo : '', it.soi && it.soi !== '-' ? 'ซ.' + it.soi : '', it.road && it.road !== '-' ? 'ถ.' + it.road : ''].filter(Boolean).join(' ')];
+    if (it.subdistrict && !raw.includes('ต.' + it.subdistrict) && !raw.includes('ตำบล' + it.subdistrict)) parts.push('ต.' + it.subdistrict);
+    if (it.district && !raw.includes('อ.' + it.district) && !raw.includes('อำเภอ' + it.district)) parts.push('อ.' + it.district);
+    return parts.filter(Boolean).join(' ');
+  }
+  /** ช่องที่ตั้ง: ตามบัญชี + ตามภาพส่งหมาย (ปุ่มเปิดแผนที่) */
+  function locCell(it, ph) {
+    const p = (ph || [])[0];
+    const map = p && p.lat && p.lng ? ` <a href="https://www.google.com/maps?q=${encodeURIComponent(p.lat + ',' + p.lng)}" target="_blank" rel="noopener" title="เปิดตำแหน่งที่ถ่ายภาพใน Google Maps"><i class="fa-solid fa-map-location-dot"></i></a>` : '';
+    return `<div><i class="fa-solid fa-house" style="color:#64748b"></i> ${esc(issuedAddr(it))}</div>`
+      + (p ? `<div class="sr-muted" style="margin-top:2px"><i class="fa-solid fa-camera"></i> ${p.noPhoto ? esc(p.reason) : esc(p.loc || '-')}${map}</div>` : '');
   }
 
   /** ฟอร์มรายงานรอบ (บันทึกข้อความ) */
