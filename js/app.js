@@ -16170,13 +16170,9 @@ async function optimizeRouteSequenceRealRoad(options = {}) {
         if (ordered.length === stopsWithCoords.length) {
           // เก็บข้อมูล Polyline ถนนจริง และระยะทางรวม เพื่อให้แผนที่แสดงผลได้ทันที
           if (trip) {
-            if (trip.geometry && trip.geometry.coordinates) {
-              state.routeRoadPolylineCoords = trip.geometry.coordinates.map(pt => [pt[1], pt[0]]);
-              state.mapRoutePolylineCoords = state.routeRoadPolylineCoords;
-              try {
-                localStorage.setItem('slts_shared_route_polyline', JSON.stringify(state.routeRoadPolylineCoords));
-              } catch (e) {}
-            }
+            // ใช้ OSRM เฉพาะจัดลำดับจุด — เส้นทางที่แสดงคำนวณใหม่บนถนนสายหลัก (ไม่เก็บเส้นที่ลัดซอย)
+            state.routeRoadPolylineCoords = [];
+            state.mapRoutePolylineCoords = null;
             if (trip.distance) {
               state.calculatedRoadDistanceKm = trip.distance / 1000;
             }
@@ -21585,43 +21581,112 @@ let routeFetchSeq = 0;
  */
 async function fetchRealRoadRoute(coords) {
   if (!coords || coords.length < 2) return null;
+  // 1) ถนนสัญจรหลัก (Valhalla): เกาะหมุดเข้าถนนสายหลัก ไม่ใช้ซอย ทางในหมู่บ้าน ทางบริการ ทางเกวียน
+  try {
+    const main = await fetchMainRoadRoute(coords);
+    if (main) return main;
+  } catch (e) { console.warn('[route] main-road routing failed', e); }
+  // 2) สำรอง: OSRM (ถนนจริงทุกประเภท)
+  return fetchOsrmRoadRoute(coords);
+}
+
+// ------------------------------------------------------------------
+// เส้นทางถนนสัญจรหลัก (Valhalla — valhalla1.openstreetmap.de, จำกัด 10 จุด/คำขอ, ~1 คำขอ/วินาที)
+// ------------------------------------------------------------------
+const MAIN_ROAD_MIN_CLASS = 'unclassified'; // ถนนเชื่อมหมู่บ้านขึ้นไป (ไม่รวม residential/service/track)
+const _mainRoadCache = new Map();
+let _valhallaLastCall = 0;
+
+function decodePolyline6(str) {
+  const out = []; let idx = 0, lat = 0, lng = 0;
+  while (idx < str.length) {
+    let b, shift = 0, res = 0;
+    do { b = str.charCodeAt(idx++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (res & 1) ? ~(res >> 1) : (res >> 1);
+    shift = 0; res = 0;
+    do { b = str.charCodeAt(idx++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (res & 1) ? ~(res >> 1) : (res >> 1);
+    out.push([lat / 1e6, lng / 1e6]);
+  }
+  return out;
+}
+
+async function valhallaRouteChunk(pts, minClass) {
+  const wait = 1100 - (Date.now() - _valhallaLastCall);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  _valhallaLastCall = Date.now();
+  const body = {
+    locations: pts.map(c => {
+      const loc = { lat: Number(c[0]), lon: Number(c[1]), type: 'break', radius: 0 };
+      if (minClass) loc.search_filter = { min_road_class: minClass, exclude_ramp: false };
+      return loc;
+    }),
+    costing: 'auto',
+    costing_options: { auto: { use_living_streets: 0, use_tracks: 0, service_penalty: 600, service_factor: 8, use_highways: 1, use_ferry: 0, exclude_unpaved: false } },
+    directions_type: 'none',
+    units: 'kilometers'
+  };
+  const res = await fetch('https://valhalla1.openstreetmap.de/route?json=' + encodeURIComponent(JSON.stringify(body)), { signal: AbortSignal.timeout(12000) });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || !json.trip) {
+    const err = new Error((json && json.error) || ('Valhalla HTTP ' + res.status));
+    err.code = json && json.error_code;
+    throw err;
+  }
+  const latLngs = [];
+  (json.trip.legs || []).forEach(leg => {
+    const seg = decodePolyline6(leg.shape || '');
+    if (latLngs.length && seg.length) seg.shift();
+    latLngs.push(...seg);
+  });
+  return { latLngs, distanceKm: Number(json.trip.summary?.length || 0), durationMin: Number(json.trip.summary?.time || 0) / 60 };
+}
+
+async function fetchMainRoadRoute(coords) {
+  const pts = coords.filter(c => c && isFinite(c[0]) && isFinite(c[1]) && Number(c[0]) !== 0);
+  if (pts.length < 2) return null;
+  const key = pts.map(c => Number(c[0]).toFixed(5) + ',' + Number(c[1]).toFixed(5)).join(';');
+  if (_mainRoadCache.has(key)) return _mainRoadCache.get(key);
+  const all = []; let km = 0, min = 0;
+  for (let i = 0; i < pts.length - 1; i += 9) {
+    const chunk = pts.slice(i, i + 10);
+    if (chunk.length < 2) break;
+    let part = null;
+    // ถ้าหมุดอยู่ไกลจากถนนสายหลักจนหาไม่พบ ค่อยผ่อนเป็นถนนในชุมชน (ยังไม่ใช้ทางบริการ/ทางเกวียน)
+    for (const cls of [MAIN_ROAD_MIN_CLASS, 'residential']) {
+      try { part = await valhallaRouteChunk(chunk, cls); break; }
+      catch (e) { if (e.code !== 171 && e.code !== 442 && e.code !== 443) throw e; }
+    }
+    if (!part || !part.latLngs.length) return null;
+    if (all.length) part.latLngs.shift();
+    all.push(...part.latLngs);
+    km += part.distanceKm; min += part.durationMin;
+  }
+  const result = { latLngs: all, distanceKm: km, durationMin: min, source: 'main-road' };
+  if (_mainRoadCache.size > 50) _mainRoadCache.clear();
+  _mainRoadCache.set(key, result);
+  return result;
+}
+window.fetchMainRoadRoute = fetchMainRoadRoute;
+
+async function fetchOsrmRoadRoute(coords) {
+  if (!coords || coords.length < 2) return null;
 
   // แปลงพิกัดเป็น lng,lat ตามข้อกำหนดของ OSRM
   const coordQuery = coords.map(c => `${c[1]},${c[0]}`).join(';');
   const osrmUrl1 = `https://router.project-osrm.org/route/v1/driving/${coordQuery}?overview=full&geometries=geojson&steps=false&continue_straight=true`;
   const osrmUrl2 = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coordQuery}?overview=full&geometries=geojson&steps=false&continue_straight=true`;
 
-  try {
-    let res = await fetch(osrmUrl1, { signal: AbortSignal.timeout(6000) });
-    if (!res.ok) throw new Error('OSRM mirror 1 error');
-    let data = await res.json();
-    if (data.code === 'Ok' && data.routes && data.routes[0]) {
-      const route = data.routes[0];
-      const roadLatLngs = route.geometry.coordinates.map(pt => [pt[1], pt[0]]);
-      return {
-        latLngs: roadLatLngs,
-        distanceKm: route.distance / 1000,
-        durationMin: route.duration / 60
-      };
-    }
-  } catch (err1) {
+  for (const u of [osrmUrl1, osrmUrl2]) {
     try {
-      let res2 = await fetch(osrmUrl2, { signal: AbortSignal.timeout(6000) });
-      if (res2.ok) {
-        let data2 = await res2.json();
-        if (data2.code === 'Ok' && data2.routes && data2.routes[0]) {
-          const route = data2.routes[0];
-          const roadLatLngs = route.geometry.coordinates.map(pt => [pt[1], pt[0]]);
-          return {
-            latLngs: roadLatLngs,
-            distanceKm: route.distance / 1000,
-            durationMin: route.duration / 60
-          };
-        }
+      const res = await fetch(u, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.code === 'Ok' && data.routes && data.routes[0]) {
+        const route = data.routes[0];
+        return { latLngs: route.geometry.coordinates.map(pt => [pt[1], pt[0]]), distanceKm: route.distance / 1000, durationMin: route.duration / 60, source: 'osrm' };
       }
-    } catch (err2) {
-      console.warn('OSRM routing failed:', err2);
-    }
+    } catch (e) { console.warn('OSRM routing failed:', e.message); }
   }
   return null;
 }
@@ -21841,14 +21906,13 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
   if (polylineCoords.length > 1 && state.showRouteLayer) {
     const currentSeq = ++routeFetchSeq;
 
-    // สร้างเส้นพื้นฐานไว้ก่อนระหว่างรอ API โครงข่ายถนนจริง
-    state.mapRoutePolyline = L.polyline(polylineCoords, {
-      color: '#2563eb',
-      weight: 4,
-      opacity: 0.6,
-      lineJoin: 'round',
-      lineCap: 'round'
-    }).addTo(state.interactiveLeafletMap);
+    // ไม่ลากเส้นตรงระหว่างหมุด (ไม่ใช่เส้นทางจริง) — รอเส้นทางถนนสัญจรหลักจากระบบนำทาง
+    state.mapRoutePolyline = null;
+    state.mapRoutePolylineCoords = null;
+    setTimeout(() => {
+      const el = document.getElementById('mapTotalDistanceText');
+      if (el && currentSeq === routeFetchSeq) el.textContent = 'กำลังคำนวณเส้นทางถนนหลัก…';
+    }, 0);
 
     // ดึงเส้นทางโครงข่ายถนนสัญจรหลักจริง (OSRM Driving Engine)
     fetchRealRoadRoute(polylineCoords).then(roadResult => {
@@ -21868,13 +21932,17 @@ function recalculateRouteFromStops(isResetToOptimal = false) {
           lineCap: 'round'
         }).addTo(state.interactiveLeafletMap);
 
+        state.routeRoadPolylineCoords = roadResult.latLngs;
         // อัปเดตระยะทางรวมบนถนนจริง
         if (roadResult.distanceKm > 0) {
           const totalDistEl = document.getElementById('mapTotalDistanceText');
           if (totalDistEl) {
-            totalDistEl.textContent = `${roadResult.distanceKm.toFixed(1)} กม. (ถนนจริง)`;
+            totalDistEl.textContent = `${roadResult.distanceKm.toFixed(1)} กม. (${roadResult.source === 'main-road' ? 'ถนนสายหลัก' : 'ถนนจริง'})`;
           }
         }
+      } else {
+        const totalDistEl = document.getElementById('mapTotalDistanceText');
+        if (totalDistEl) totalDistEl.textContent = 'ดึงเส้นทางถนนไม่สำเร็จ (แสดงเฉพาะหมุด)';
       }
     }).catch(e => console.warn('Real road route render error:', e));
   }
@@ -26618,12 +26686,7 @@ window.initMobileModalMapInstance = function() {
     const bounds = L.latLngBounds(state.routeRoadPolylineCoords);
     window.mobileModalMap.fitBounds(bounds, { padding: [25, 25] });
   } else if (waypoints.length > 1) {
-    window.mobileModalPolyline = L.polyline(waypoints, {
-      color: '#2563eb',
-      weight: 3,
-      opacity: 0.5,
-      dashArray: '4, 4'
-    }).addTo(window.mobileModalMap);
+    window.mobileModalPolyline = null; // ไม่ลากเส้นตรงระหว่างหมุด รอเส้นทางถนนสายหลัก
 
     window.mobileModalMap.fitBounds(L.latLngBounds(waypoints), { padding: [25, 25] });
 
