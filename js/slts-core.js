@@ -52,6 +52,21 @@
     if (isNeonPhoto(id)) return SLTS.apiBase() + '/api/photo?f=' + encodeURIComponent(id) + (/^db-\d+-[A-Za-z0-9]{16}$/.test(id) ? '&v=2' : '');
     return `https://lh3.googleusercontent.com/d/${id}=w${size || 1600}`;
   };
+  /**
+   * ลิงก์ภาพที่บันทึกไว้ในแถวข้อมูล อาจชี้ไปที่โดเมนของ deployment อื่น (ซึ่งต่อฐานข้อมูลคนละชุด → ภาพคนละคดี)
+   * ภาพ Neon จึงสร้างลิงก์ใหม่จาก fileId กับเซิร์ฟเวอร์ที่ใช้งานอยู่เสมอ
+   */
+  window.sltsFixPhotoUrl = function (url, fileId, size) {
+    const fid = String(fileId || '').trim();
+    if (isNeonPhoto(fid)) return window.sltsImgUrl(fid, size);
+    const m = String(url || '').match(/\/api\/photo\?(?:[^#]*&)?f=([^&#]+)/);
+    if (m) {
+      let id = m[1];
+      try { id = decodeURIComponent(id); } catch (_) {}
+      if (isNeonPhoto(id)) return window.sltsImgUrl(id, size);
+    }
+    return url || '';
+  };
   window.sltsThumbUrl = function (fileId, size) {
     const id = String(fileId || '').trim();
     if (!id) return '';

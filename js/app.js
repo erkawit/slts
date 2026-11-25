@@ -6340,7 +6340,23 @@ window.dtSearchAllProvinces = function(term) {
   try { if ($.fn.DataTable.isDataTable('#summonsDataTable')) $('#summonsDataTable').DataTable().search('').draw(); } catch (_) {}
 };
 
+/** ลิงก์ภาพในแถวข้อมูล → สร้างจาก Drive File ID กับเซิร์ฟเวอร์ปัจจุบัน (ลิงก์ที่บันทึกไว้อาจชี้โดเมนอื่น) */
+function sltsNormalizeRowPhotoLinks(rows) {
+  if (!Array.isArray(rows) || typeof window.sltsFixPhotoUrl !== 'function') return;
+  rows.forEach(r => {
+    if (!r) return;
+    const cur = r['ลิงก์รูปภาพใน Google Drive'] || r['ลิงก์รูปภาพ'] || '';
+    const fixed = window.sltsFixPhotoUrl(cur, r['Drive File ID']);
+    if (fixed && fixed !== cur) {
+      r['ลิงก์รูปภาพใน Google Drive'] = fixed;
+      if (r['ลิงก์รูปภาพ'] !== undefined) r['ลิงก์รูปภาพ'] = fixed;
+    }
+  });
+}
+window.sltsNormalizeRowPhotoLinks = sltsNormalizeRowPhotoLinks;
+
 function renderDataTable(rows, filterCriteria = null) {
+  sltsNormalizeRowPhotoLinks(rows);
   state.allSheetRows = rows;
   const isAdmin = state.currentUser && state.currentUser.role === 'admin';
   const isDesktop = !sltsMobileLogic();
@@ -7849,7 +7865,7 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
     try {
       const cachedStr = localStorage.getItem('slts_cached_sheet_data');
       if (cachedStr) {
-        state.allSheetRows = JSON.parse(cachedStr);
+        state.allSheetRows = JSON.parse(cachedStr); sltsNormalizeRowPhotoLinks(state.allSheetRows);
       }
     } catch (e) {}
   }
@@ -8148,7 +8164,7 @@ window.openMobileCaseSearchModal = async function(initialQuery = '', forceLock =
           });
 
           if (freshRows && freshRows.length > 0) {
-            state.allSheetRows = freshRows;
+            state.allSheetRows = freshRows; sltsNormalizeRowPhotoLinks(state.allSheetRows);
             // บันทึกลงหน่วยความจำเครื่องไว้ให้ใช้งานในโหมดออฟไลน์ได้
             try {
               localStorage.setItem('slts_cached_sheet_data', JSON.stringify(freshRows));
@@ -8365,6 +8381,7 @@ window.copyCoordinates = function(lat, lng) {
  * แสดงภาพถ่ายเต็มด้วย SweetAlert พร้อมปุ่มดาวน์โหลด และคลิกดูเต็มหน้าจอได้ (สเกลไม่เกิน 80vh)
  */
 window.viewPhotoModal = function(imgUrl, caseNumber, locationFull, timestamp, lat, lng) {
+  if (typeof window.sltsFixPhotoUrl === 'function') imgUrl = window.sltsFixPhotoUrl(imgUrl);
   let directImgUrl = imgUrl;
   const match = (imgUrl || '').match(/id=([a-zA-Z0-9_-]+)/) || (imgUrl || '').match(/\/d\/([a-zA-Z0-9_-]+)/);
   if (match && match[1]) {
@@ -10100,7 +10117,7 @@ window.showMobileHistorySearchModal = async function() {
     const cachedStr = localStorage.getItem(CACHE_KEY_SHEET_DATA);
     if (cachedStr) {
       try {
-        state.allSheetRows = JSON.parse(cachedStr);
+        state.allSheetRows = JSON.parse(cachedStr); sltsNormalizeRowPhotoLinks(state.allSheetRows);
       } catch (e) {}
     }
   }
