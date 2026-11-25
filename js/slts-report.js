@@ -81,11 +81,38 @@
 
   // ------------------------------------------------------------------
   // สร้างไฟล์ PDF จริงจากหน้าเอกสาร (ไม่ใช้หน้าต่างพิมพ์ของเบราว์เซอร์) แล้วแสดงผลในระบบ
-  // html2canvas (ภาษาไทยถูกต้องตามฟอนต์ TH Sarabun) → jsPDF ขนาด A4 ตามที่หน้าเอกสารกำหนด
+  // เรนเดอร์ด้วยเบราว์เซอร์ (SVG foreignObject + ฟอนต์ TH Sarabun ฝังในเอกสาร) → jsPDF ขนาด A4 ตามที่หน้าเอกสารกำหนด
   // ------------------------------------------------------------------
+  const _fontDataCache = {};
+  /** ฝังฟอนต์ (TH Sarabun) เป็น data URL — ภาพ SVG ไม่โหลดไฟล์ภายนอก */
+  async function inlineFonts(html) {
+    const urls = [...new Set([...html.matchAll(/url\('([^']+\.ttf)'\)/g)].map((m) => m[1]))];
+    for (const u of urls) {
+      if (!_fontDataCache[u]) {
+        _fontDataCache[u] = fetch(u).then((r) => { if (!r.ok) throw new Error('font ' + r.status); return r.blob(); })
+          .then((b) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }))
+          .catch(() => u);
+      }
+      html = html.split(u).join(await _fontDataCache[u]);
+    }
+    return html;
+  }
+  /** เรนเดอร์ body ของเอกสารเป็น canvas ด้วยเครื่องมือแสดงผลของเบราว์เซอร์เอง (SVG foreignObject) — ตัวอักษรไทย/เส้นตารางตรงตำแหน่ง */
+  async function renderBodyCanvas(doc, w, H, scale) {
+    const styles = [...doc.querySelectorAll('style')].map((st) => `<style xmlns="http://www.w3.org/1999/xhtml">${st.textContent}</style>`).join('');
+    const xml = new XMLSerializer().serializeToString(doc.body);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;background:#fff">${styles}${xml}</div></foreignObject></svg>`;
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('render svg')); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+    await new Promise((r) => setTimeout(r, 200));
+    const c = document.createElement('canvas'); c.width = Math.round(w * scale); c.height = Math.round(H * scale);
+    const g = c.getContext('2d'); g.scale(scale, scale); g.fillStyle = '#fff'; g.fillRect(0, 0, w, H); g.drawImage(img, 0, 0);
+    c.getContext('2d').getImageData(0, 0, 1, 1); // ตรวจว่า canvas ใช้งานได้ (ไม่ถูก taint)
+    return c;
+  }
   async function htmlToPdfBlob(html) {
-    if (!window.html2canvas) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
     if (!(window.jspdf && window.jspdf.jsPDF)) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    html = await inlineFonts(html);
     const land = /size:A4 landscape/.test(html);
     const mStr = ((html.match(/@page\{size:A4 \w+;margin:([^}]+)\}/) || [])[1] || '14mm').trim();
     let m = mStr.split(/\s+/).map((x) => parseFloat(x) || 0);
@@ -126,7 +153,13 @@
         breaks.push([start, end]); start = end;
       }
       const scale = 2;
-      const canvas = await window.html2canvas(body, { scale, width: wpx, height: H, windowWidth: wpx, windowHeight: H, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      let canvas;
+      try { canvas = await renderBodyCanvas(doc, wpx, H, scale); }
+      catch (er) { // สำรอง: html2canvas
+        console.warn('[pdf] svg render failed, fallback html2canvas', er);
+        if (!window.html2canvas) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+        canvas = await window.html2canvas(body, { scale, width: wpx, height: H, windowWidth: wpx, windowHeight: H, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      }
       const pdf = new window.jspdf.jsPDF({ orientation: land ? 'l' : 'p', unit: 'mm', format: 'a4', compress: true });
       breaks.forEach(([a, b], i) => {
         const sh = Math.max(1, Math.round((b - a) * scale));
