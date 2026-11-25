@@ -77,12 +77,116 @@
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
     setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 2000);
   }
-  function openPrint(html) {
-    const w = window.open('', '_blank');
-    if (!w) { fail(new Error('เบราว์เซอร์บล็อกหน้าต่างใหม่ กรุณาอนุญาตป๊อปอัปสำหรับเว็บไซต์นี้')); return; }
-    w.document.open(); w.document.write(html); w.document.close();
-  }
   const baseUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '');
+
+  // ------------------------------------------------------------------
+  // สร้างไฟล์ PDF จริงจากหน้าเอกสาร (ไม่ใช้หน้าต่างพิมพ์ของเบราว์เซอร์) แล้วแสดงผลในระบบ
+  // html2canvas (ภาษาไทยถูกต้องตามฟอนต์ TH Sarabun) → jsPDF ขนาด A4 ตามที่หน้าเอกสารกำหนด
+  // ------------------------------------------------------------------
+  async function htmlToPdfBlob(html) {
+    if (!window.html2canvas) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+    if (!(window.jspdf && window.jspdf.jsPDF)) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    const land = /size:A4 landscape/.test(html);
+    const mStr = ((html.match(/@page\{size:A4 \w+;margin:([^}]+)\}/) || [])[1] || '14mm').trim();
+    let m = mStr.split(/\s+/).map((x) => parseFloat(x) || 0);
+    m = m.length === 1 ? [m[0], m[0], m[0], m[0]] : m.length === 2 ? [m[0], m[1], m[0], m[1]] : m.length === 3 ? [m[0], m[1], m[2], m[1]] : m;
+    const [mt, mr, mb, ml] = m;
+    const pw = land ? 297 : 210; const ph = land ? 210 : 297;
+    const cw = pw - ml - mr; const ch = ph - mt - mb;
+    const PX = 96 / 25.4; const wpx = Math.round(cw * PX); const hpx = Math.floor(ch * PX);
+    const ifr = document.createElement('iframe');
+    ifr.setAttribute('aria-hidden', 'true');
+    ifr.style.cssText = `position:fixed;left:-20000px;top:0;width:${wpx}px;height:${hpx}px;border:0;visibility:hidden;`;
+    document.body.appendChild(ifr);
+    try {
+      const clean = html.replace(/<div class="toolbar">[\s\S]*?<\/div>/, '').replace(/<script>[\s\S]*?<\/script>/g, '')
+        .replace('</head>', `<style>html,body{margin:0!important;padding:0!important;width:${wpx}px;background:#fff}</style></head>`);
+      const doc = ifr.contentDocument;
+      await new Promise((res) => { ifr.onload = res; doc.open(); doc.write(clean); doc.close(); setTimeout(res, 1500); });
+      try { await doc.fonts.ready; } catch (_) {}
+      await new Promise((r) => setTimeout(r, 250));
+      const body = doc.body;
+      const H = Math.ceil(body.scrollHeight);
+      // จุดตัดหน้าที่ปลอดภัย (ไม่ตัดกลางบรรทัด/แถวตาราง) + ขึ้นหน้าใหม่ที่กำหนดไว้
+      const cands = new Set([H]); const forced = [];
+      doc.querySelectorAll('tr, p, h1, h2, h3, table, section, li, br, div').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0) cands.add(Math.round(r.bottom));
+        const st = el.getAttribute('style') || '';
+        if (/page-break-before:\s*always/.test(st) && r.top > 1) forced.push(Math.round(r.top));
+      });
+      const sorted = [...cands].sort((a, b) => a - b);
+      const breaks = []; let start = 0;
+      while (start < H - 2) {
+        const f = forced.find((y) => y > start + 2 && y <= start + hpx);
+        let end;
+        if (f) end = f;
+        else if (start + hpx >= H) end = H;
+        else { const ok = sorted.filter((y) => y > start + hpx * 0.4 && y <= start + hpx); end = ok.length ? ok[ok.length - 1] : start + hpx; }
+        breaks.push([start, end]); start = end;
+      }
+      const scale = 2;
+      const canvas = await window.html2canvas(body, { scale, width: wpx, height: H, windowWidth: wpx, windowHeight: H, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      const pdf = new window.jspdf.jsPDF({ orientation: land ? 'l' : 'p', unit: 'mm', format: 'a4', compress: true });
+      breaks.forEach(([a, b], i) => {
+        const sh = Math.max(1, Math.round((b - a) * scale));
+        const c = document.createElement('canvas'); c.width = canvas.width; c.height = sh;
+        const cx = c.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, sh);
+        cx.drawImage(canvas, 0, Math.round(a * scale), canvas.width, sh, 0, 0, canvas.width, sh);
+        if (i) pdf.addPage('a4', land ? 'l' : 'p');
+        pdf.addImage(c.toDataURL('image/jpeg', 0.93), 'JPEG', ml, mt, cw, (b - a) / PX);
+      });
+      return pdf.output('blob');
+    } finally { ifr.remove(); }
+  }
+
+  /** แสดงไฟล์ PDF ที่สร้างแล้วในระบบ (PDF.js) + ปุ่มดาวน์โหลด */
+  async function showPdf(blob, fileName) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sr-modal sr-wrap';
+    wrap.innerHTML = `<div class="sr-dialog" role="dialog" style="max-width:1100px;width:100%">
+      <div class="sr-dialog-head"><i class="fa-solid fa-file-pdf"></i><h2>${esc(fileName)}</h2>
+        <button class="sr-btn sm" data-pdf-dl style="margin-left:auto;background:#fff"><i class="fa-solid fa-download"></i> ดาวน์โหลด PDF</button>
+        <button class="x" data-close title="ปิด">&times;</button></div>
+      <div class="sr-dialog-body" style="background:#525659;padding:16px;display:flex;flex-direction:column;align-items:center;gap:14px" data-pages>
+        <div style="color:#fff">กำลังแสดงผล…</div></div></div>`;
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => {
+      if (e.target === wrap || e.target.closest('[data-close]')) close();
+      if (e.target.closest('[data-pdf-dl]')) downloadBlob(blob, fileName);
+    });
+    const box = wrap.querySelector('[data-pages]');
+    try {
+      if (!window.pdfjsLib) throw new Error('ไม่พบไลบรารี PDF.js');
+      const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+      box.innerHTML = '';
+      const maxW = Math.min(1040, box.clientWidth - 32 || 1040);
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const v1 = page.getViewport({ scale: 1 });
+        const cssScale = maxW / v1.width; const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const vp = page.getViewport({ scale: cssScale * dpr });
+        const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+        c.style.cssText = `width:${Math.round(v1.width * cssScale)}px;max-width:100%;height:auto;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.35)`;
+        box.appendChild(c);
+        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      }
+      const n = document.createElement('div'); n.style.cssText = 'color:#e5e7eb;font-size:13px'; n.textContent = `${pdf.numPages} หน้า`; box.appendChild(n);
+    } catch (e) {
+      box.innerHTML = `<div style="color:#fff">แสดงตัวอย่างไม่ได้ (${esc(e.message || e)}) — กด "ดาวน์โหลด PDF" เพื่อเปิดไฟล์</div>`;
+    }
+  }
+
+  /** เอกสาร HTML → ไฟล์ PDF จริง แล้วแสดงผลในระบบ */
+  async function openPdf(html, fileName) {
+    busy('กำลังสร้างไฟล์ PDF...');
+    try {
+      const blob = await htmlToPdfBlob(html);
+      done();
+      await showPdf(blob, String(fileName || 'เอกสาร').replace(/[\\/:*?"<>|]+/g, '-') + '.pdf');
+    } catch (e) { done(); fail(e); }
+  }
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -1819,7 +1923,7 @@
       <td class="num">${m.item_count}</td><td class="num">${L.money2(m.total_amount)}</td><td>${esc(m.reporter_name)}</td>
       <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm" data-mword="${m.id}" title="บันทึกข้อความ Word"><i class="fa-solid fa-file-word"></i> Word</button>
         <button class="sr-btn sm" data-mpdf="${m.id}" title="บันทึกข้อความ PDF"><i class="fa-solid fa-file-pdf"></i> PDF</button>
-        ${m.report_type === 'free' ? `<button class="sr-btn sm" data-rxlsx="${m.id}" title="ใบสำคัญรับเงิน Excel"><i class="fa-solid fa-file-excel"></i> ใบสำคัญ</button><button class="sr-btn sm" data-rpdf="${m.id}" title="ใบสำคัญรับเงิน PDF"><i class="fa-solid fa-print"></i></button>` : ''}</td>
+        ${m.report_type === 'free' ? `<button class="sr-btn sm" data-rxlsx="${m.id}" title="ใบสำคัญรับเงิน Excel"><i class="fa-solid fa-file-excel"></i> ใบสำคัญ</button><button class="sr-btn sm" data-rpdf="${m.id}" title="ใบสำคัญรับเงิน PDF"><i class="fa-solid fa-file-pdf"></i> ใบสำคัญ PDF</button>` : ''}</td>
       <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm" data-medit="${m.id}"><i class="fa-solid fa-pen"></i></button><button class="sr-btn sm danger" data-mdel="${m.id}"><i class="fa-solid fa-trash"></i></button></td></tr>`).join('')
       || '<tr><td colspan="8"><div class="sr-empty">ยังไม่มีรายงาน — สร้างรายงานหมายฟรี/หมายเงินจากปุ่มด้านบน</div></td></tr>';
     tb.onclick = async (e) => {
@@ -1836,9 +1940,9 @@
         if (b.dataset.mword) {
           const tpl = await template(memo.report_type === 'paid' ? 'memo_paid' : 'memo_free');
           downloadBlob(await DOCX.fillReportDocx(tpl, E.memoVars(memo), []), `บันทึกข้อความ-${memo.report_type === 'paid' ? 'หมายมีเงิน' : 'หมายฟรี'}-${(memo.round_label || id).toString().replace(/[\\/:*?"<>|]/g, '-')}.docx`);
-        } else if (b.dataset.mpdf) openPrint(E.memoPrintHtml(memo, baseUrl()));
+        } else if (b.dataset.mpdf) await openPdf(E.memoPrintHtml(memo, baseUrl()), `บันทึกข้อความ-${memo.report_type === 'paid' ? 'หมายมีเงิน' : 'หมายฟรี'}-${memo.round_label || id}`);
         else if (b.dataset.rxlsx) { const { wb } = E.receiptWorkbook(memo, items); downloadBlob(await wb.toBlob(), `ใบสำคัญรับเงินฟรี-${(memo.round_label || id).toString().replace(/[\\/:*?"<>|]/g, '-')}.xlsx`); }
-        else if (b.dataset.rpdf) openPrint(E.receiptPrintHtml(memo, items, baseUrl()));
+        else if (b.dataset.rpdf) await openPdf(E.receiptPrintHtml(memo, items, baseUrl()), `ใบสำคัญรับเงิน-หมายฟรี-${memo.round_label || id}`);
       } catch (er) { fail(er); }
     };
   }
@@ -2068,7 +2172,7 @@
     body.querySelectorAll('input[name="sr_rt"]').forEach((r) => { r.onchange = () => { R.rateType = r.value; renderRates(body); }; });
     $('#srRateQ').oninput = (e) => { R.rateQ = e.target.value; fill(); };
     $('#srRateXlsx').onclick = async () => downloadBlob(await E.ratesWorkbook(R.boot.rates, settings(), 'all').toBlob(), 'อัตราค่านำหมาย_ศาลจังหวัดอุดรธานี.xlsx');
-    $('#srRatePdf').onclick = () => openPrint(E.ratesPrintHtml(R.boot.rates, settings(), R.rateType, baseUrl()));
+    $('#srRatePdf').onclick = () => openPdf(E.ratesPrintHtml(R.boot.rates, settings(), R.rateType, baseUrl()), 'อัตราค่านำหมาย');
     if (!admin) return;
     const reload = async () => { await ensureBoot(true); renderRates(body); };
     const editRate = async (r) => {
@@ -2417,5 +2521,5 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
   // ให้ทดสอบ/เรียกจากที่อื่นได้
-  window.SltsReportUI = { open: () => window.switchTab('report'), openSub: (sub) => { R.sub = sub; window.switchTab('report'); }, openFlow: () => { R.sub = 'flow'; window.switchTab('report'); }, openData: () => { if (R.sub === 'flow') R.sub = 'issued'; window.switchTab('report'); }, FL, openReportForm, refreshUploadsCard, R };
+  window.SltsReportUI = { open: () => window.switchTab('report'), openSub: (sub) => { R.sub = sub; window.switchTab('report'); }, openFlow: () => { R.sub = 'flow'; window.switchTab('report'); }, openData: () => { if (R.sub === 'flow') R.sub = 'issued'; window.switchTab('report'); }, FL, openReportForm, refreshUploadsCard, openPdf, htmlToPdfBlob, R };
 })();
