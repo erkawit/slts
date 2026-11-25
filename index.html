@@ -102,6 +102,7 @@
   <link rel="stylesheet" href="css/simple-view.css?v=__APP_VERSION__">
   <!-- ธีมทางการ (โหมด PC) + โมดูลรายงานผลหมาย -->
   <link rel="stylesheet" href="css/official.css?v=__APP_VERSION__">
+  <link rel="stylesheet" href="css/app-v27.css?v=__APP_VERSION__">
 </head>
 <body class="bg-gray-50/90 text-gray-800 antialiased min-h-screen flex flex-col justify-between" onclick="handleGlobalClick(event)">
 
@@ -269,6 +270,10 @@
                 <button type="button" onclick="openChangePasswordModal()" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
                   <i class="fa-solid fa-key text-amber-600 w-4 text-center"></i>
                   <span>เปลี่ยนรหัสผ่าน</span>
+                </button>
+                <button type="button" onclick="SLTSUI.linkGoogleAccount()" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
+                  <i class="fa-brands fa-google text-rose-500 w-4 text-center"></i>
+                  <span>บัญชี Google (เข้าสู่ระบบด้วย Google)</span>
                 </button>
                 <button type="button" onclick="SLTSUI.openQuickMenu()" class="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition">
                   <i class="fa-solid fa-qrcode text-indigo-600 w-4 text-center"></i>
@@ -1176,7 +1181,12 @@
 
   <!-- Modal: ล็อกอินเข้าสู่ระบบ (Login Modal) -->
   <div id="loginModal" class="fixed inset-0 bg-black/70 z-[60] hidden items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in relative">
+    <div class="slts-login-brand" aria-hidden="true">
+      <img src="img/logo.png" alt="" class="slts-login-brand-logo">
+      <div class="slts-login-brand-title">ระบบจัดเก็บข้อมูลพิกัดส่งหมาย</div>
+      <div class="slts-login-brand-sub">Summons Location Tracking System · ศาลจังหวัดอุดรธานี</div>
+    </div>
+    <div class="slts-login-card bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl animate-fade-in relative">
       
       <button type="button" onclick="closeLoginModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-1">
         <i class="fa-solid fa-xmark text-lg"></i>
@@ -1204,6 +1214,18 @@
           เข้าสู่ระบบ
         </button>
       </form>
+
+      <!-- เข้าสู่ระบบด้วยบัญชี Google (แสดงเมื่อเซิร์ฟเวอร์ตั้งค่า GOOGLE_CLIENT_ID) -->
+      <div id="googleLoginWrap" class="hidden mt-4">
+        <div class="flex items-center gap-2 text-[11px] text-gray-400 mb-3"><span class="flex-1 h-px bg-gray-200"></span>หรือ<span class="flex-1 h-px bg-gray-200"></span></div>
+        <button type="button" id="btnGoogleLogin" class="w-full bg-white hover:bg-gray-50 border border-gray-300 text-gray-800 font-bold py-2.5 px-4 rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-sm">
+          <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+          เข้าสู่ระบบด้วย Google
+        </button>
+        <div id="googleLoginWebBtn" class="hidden flex justify-center"></div>
+      </div>
+      <p id="loginServerHint" class="hidden mt-3 text-[11px] leading-relaxed text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-2.5"></p>
+      <p id="loginVersionLine" class="mt-4 text-center text-[10px] text-gray-400"></p>
     </div>
   </div>
 
@@ -1366,6 +1388,11 @@
           <canvas id="liveCompassCanvas" width="84" height="84" class="drop-shadow-lg"></canvas>
         </div>
 
+        <!-- มุมขวาบน: ปุ่มดึงพิกัดใหม่ (ย้ายจากแถบล่าง) -->
+        <button id="btnCameraGpsMini" type="button" class="camera-mini-btn gyro-rotate absolute top-3 right-3 sm:top-4 sm:right-4 pointer-events-auto z-30" title="ดึงพิกัดใหม่ (Refresh GPS)" aria-label="ดึงพิกัดใหม่" onclick="handleCameraRefreshGps(event)">
+          <i class="fa-solid fa-location-crosshairs text-sm"></i>
+        </button>
+
         <!-- มุมซ้ายล่าง: แผนที่สด Live Map (ตามข้อ 4) -->
         <div id="liveMapWrapper" class="absolute bottom-3 left-3 sm:bottom-4 sm:left-4 gyro-rotate">
           <canvas id="liveMapCanvas" width="100" height="75" class="rounded-lg border-2 border-white/80 shadow-2xl"></canvas>
@@ -1386,8 +1413,9 @@
 
     <!-- Bottom Controls / Right Controls in Landscape -->
     <div id="cameraControlsContainer" class="p-4 sm:p-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent flex items-center justify-around z-10">
-      <button id="btnFlipCamera" type="button" class="camera-circle-btn gyro-rotate" title="สลับกล้องหน้า/หลัง">
-        <i class="fa-solid fa-camera-rotate text-xl"></i>
+      <!-- ซ้ายล่าง: ภาพถ่ายล่าสุด (แตะเพื่อเปิดในคลังภาพของโทรศัพท์) -->
+      <button id="btnLastPhoto" type="button" class="camera-last-photo gyro-rotate" title="ภาพถ่ายล่าสุด — แตะเพื่อเปิดคลังภาพ" aria-label="ภาพถ่ายล่าสุด" onclick="openLastCapturedPhoto(event)">
+        <i class="fa-regular fa-images text-xl"></i>
       </button>
 
       <!-- ปุ่มชัตเตอร์ถ่ายภาพขนาดใหญ่วงกลมเด่นชัด สัมผัสง่ายด้วยนิ้วมือ -->
@@ -1397,9 +1425,9 @@
         </div>
       </button>
 
-      <!-- ปุ่มดึงพิกัดใหม่ที่มุมขวาล่าง -->
-      <button id="btnFlipOrientationQuick" type="button" class="camera-circle-btn gyro-rotate" title="ดึงพิกัดใหม่ (Refresh GPS)" onclick="handleCameraRefreshGps(event)">
-        <i class="fa-solid fa-arrows-rotate text-xl"></i>
+      <!-- ขวาล่าง: สลับกล้องหน้า/หลัง -->
+      <button id="btnFlipCamera" type="button" class="camera-circle-btn gyro-rotate" title="สลับกล้องหน้า/หลัง">
+        <i class="fa-solid fa-camera-rotate text-xl"></i>
       </button>
     </div>
   </div>

@@ -1,0 +1,36 @@
+/* SLTS v2.7 — หน้าเข้าสู่ระบบเต็มจอ, โหมดประหยัดทรัพยากร, ปุ่มหน้ากล้อง
+ * (แยกไฟล์จาก style.css เพราะท้าย style.css มีบล็อก @media (min-width: 769px) ที่ปิดไม่ครบ) */
+
+/* ============================================================
+ * หน้าเข้าสู่ระบบเต็มหน้าจอ (แอปมือถือ / หน้าจอเล็ก)
+ * ============================================================ */
+.slts-login-brand { display: none; }
+#loginModal.slts-login-full {
+  background: radial-gradient(120% 80% at 50% 0%, #2563eb 0%, #1e3a8a 55%, #0b1a3d 100%) !important;
+  flex-direction: column; justify-content: center; gap: 18px; z-index: 9990;
+  padding: calc(env(safe-area-inset-top, 0px) + 20px) 18px calc(env(safe-area-inset-bottom, 0px) + 20px);
+  overflow-y: auto;
+}
+#loginModal.slts-login-full .slts-login-brand { display: flex; flex-direction: column; align-items: center; text-align: center; color: #fff; }
+#loginModal.slts-login-full .slts-login-brand-logo { width: 84px; height: 84px; object-fit: contain; filter: drop-shadow(0 6px 14px rgba(0,0,0,.35)); margin-bottom: 10px; }
+#loginModal.slts-login-full .slts-login-brand-title { font-size: 19px; font-weight: 800; letter-spacing: .2px; }
+#loginModal.slts-login-full .slts-login-brand-sub { font-size: 11.5px; opacity: .8; margin-top: 2px; }
+#loginModal.slts-login-full .slts-login-card { max-width: 400px; border-radius: 22px; box-shadow: 0 24px 60px rgba(0,0,0,.4); }
+#loginModal.slts-login-full .slts-login-card > .text-center > div:first-child { display: none; } /* โลโก้ซ้ำในการ์ด */
+#loginModal.slts-login-full button[onclick="closeLoginModal()"] { display: none !important; }
+#loginModal.slts-login-full input { font-size: 16px; padding-top: .8rem; padding-bottom: .8rem; } /* ไม่ซูมเมื่อแตะช่องกรอก */
+@media (max-height: 560px) { #loginModal.slts-login-full .slts-login-brand-logo { width: 56px; height: 56px; } }
+
+/* โหมดประหยัดทรัพยากร (มือถือสเปกต่ำ) — ลดเอฟเฟกต์ที่กิน GPU
+ * ไม่แตะ animation/transition ทั่วไป เพราะหน้าต่าง SweetAlert รอ animationend เพื่อปิดตัวเอง */
+html.slts-lite *, html.slts-lite *::before, html.slts-lite *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+html.slts-lite .animate-ping, html.slts-lite .animate-pulse, html.slts-lite .animate-bounce { animation: none !important; }
+html.slts-lite .shadow-2xl, html.slts-lite .shadow-xl { box-shadow: 0 2px 6px rgba(0,0,0,.18) !important; }
+
+/* ปุ่มภาพถ่ายล่าสุด (มุมซ้ายล่างหน้ากล้อง) */
+.camera-last-photo { width: 52px; height: 52px; border-radius: 14px; overflow: hidden; border: 2px solid rgba(255,255,255,.85);
+  background: rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; color: #fff; padding: 0; position: relative; }
+.camera-last-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.camera-last-photo:active { transform: scale(.94); }
+.camera-mini-btn { width: 36px; height: 36px; border-radius: 12px; background: rgba(17,24,39,.72); border: 1px solid rgba(255,255,255,.35);
+  color: #fff; display: flex; align-items: center; justify-content: center; }

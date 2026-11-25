@@ -40,6 +40,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- บันทึกภาพลงคลังภาพ: Android 9 ลงไปเท่านั้น (Android 10+ ไม่ต้องใช้สิทธิ์) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <!-- คุณสมบัติฮาร์ดแวร์ที่แอปต้องการ -->
     <uses-feature android:name="android.hardware.camera" android:required="true" />

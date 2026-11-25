@@ -2926,12 +2926,17 @@ function userNameFieldsHtml(prefix, v) {
         <datalist id="${prefix}PositionList"><option value="เจ้าพนักงานศาลยุติธรรมปฏิบัติงาน"><option value="เจ้าพนักงานศาลยุติธรรมชำนาญงาน"><option value="เจ้าพนักงานศาลยุติธรรมอาวุโส"><option value="เจ้าหน้าที่ศาลยุติธรรมปฏิบัติงาน"><option value="เจ้าหน้าที่ศาลยุติธรรมชำนาญงาน"><option value="นิติกร"></datalist>
         <p class="text-[10px] text-gray-400 mt-1">ชื่อ-นามสกุลและตำแหน่งใช้เป็นผู้ส่งหมาย/ผู้รายงานในแบบรายงานผลหมาย และใช้จับคู่ชื่อผู้ส่งในตารางโซนจ่ายหมาย</p>
       </div>
+      <div class="sm:col-span-12">
+        <label class="block text-xs font-semibold text-gray-700 mb-1"><i class="fa-brands fa-google text-rose-500 mr-1"></i>อีเมล Google (เข้าสู่ระบบด้วย Google)</label>
+        <input type="email" id="${prefix}GoogleEmail" value="${e(v.googleEmail)}" class="${cls}" placeholder="เช่น somchai@gmail.com (เว้นว่างได้)" autocomplete="off">
+      </div>
     </div>`;
 }
 function readUserNameFields(prefix) {
   const g = (k) => (document.getElementById(prefix + k)?.value || '').trim().replace(/\s+/g, ' ');
   const title = g('Title'); const firstName = g('FirstName'); const lastName = g('LastName'); const position = g('Position');
-  return { title, firstName, lastName, position, fullName: firstName ? `${title}${firstName} ${lastName}`.trim() : '' };
+  const googleEmail = g('GoogleEmail').toLowerCase();
+  return { title, firstName, lastName, position, googleEmail, fullName: firstName ? `${title}${firstName} ${lastName}`.trim() : '' };
 }
 
 window.openAddUserModal = function(initialData = {}) {
@@ -3382,7 +3387,7 @@ window.handleModalCreateUser = function(e) {
     'ประเภทศาล': courtCategory,
     'ศาลที่สังกัด': assignedCourt,
     'จังหวัดที่ส่งหมาย': assignedProvince,
-    title: nf.title, firstName: nf.firstName, lastName: nf.lastName, position: nf.position,
+    title: nf.title, firstName: nf.firstName, lastName: nf.lastName, position: nf.position, googleEmail: nf.googleEmail,
     name: fullName || (role === 'admin' ? `Admin (${username})` : (role === 'local_advisor' ? `Local Advisor (${username})` : `เจ้าหน้าที่ (${username})`)),
     createdAt: dateNow
   };
@@ -3740,7 +3745,7 @@ window.editUserModal = function(username) {
         return false;
       }
       const name = document.getElementById('swalEditName').value.trim() || nf.fullName;
-      const nameFields = { title: nf.title, firstName: nf.firstName, lastName: nf.lastName, position: nf.position };
+      const nameFields = { title: nf.title, firstName: nf.firstName, lastName: nf.lastName, position: nf.position, googleEmail: nf.googleEmail };
 
       if (isLocalAdvisor) {
         return {
@@ -3772,6 +3777,7 @@ window.editUserModal = function(username) {
     if (res.isConfirmed && res.value) {
       user.name = res.value.name;
       user.title = res.value.title; user.firstName = res.value.firstName; user.lastName = res.value.lastName; user.position = res.value.position;
+      user.googleEmail = res.value.googleEmail || '';
       user.fullName = res.value.firstName ? `${res.value.title}${res.value.firstName} ${res.value.lastName}`.trim() : user.name;
       if (!isPrimary && !isLocalAdvisor) user.role = res.value.role;
       if (!isLocalAdvisor) {
@@ -11213,8 +11219,11 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
               <i class="fa-solid fa-arrow-left mr-1"></i> ย้อนกลับไปหน้าเลือกแนบรูป
             </button>
           ` : `
-            <button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { state.tempModalValues = v; Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
+            ${state.noPhotoMode ? '' : `<button type="button" class="slts-confirm-btn" onclick="(async () => { const v = validateAndExtractModalForm(); if (v) { state.tempModalValues = v; Swal.close(); applyModalFormValues(v); await openCameraModal(); } })()">
               <i class="fa-solid fa-camera mr-1.5"></i> ยืนยันข้อมูลและเปิดกล้องถ่ายภาพ
+            </button>`}
+            <button type="button" class="${state.noPhotoMode ? 'slts-confirm-btn' : 'slts-cancel-btn'}" style="${state.noPhotoMode ? 'background:#7c3aed' : 'color:#6d28d9;border-color:#c4b5fd'}" onclick="(() => { const v = validateAndExtractModalForm(); if (v) { state.tempModalValues = v; state.noPhotoMode = false; Swal.close(); applyModalFormValues(v); setTimeout(() => submitMobileNoPhoto(v), 250); } })()">
+              <i class="fa-solid fa-signature mr-1.5"></i> ${state.noPhotoMode ? 'บันทึกรายการส่งหมาย (ไม่มีภาพถ่าย)' : 'ไม่มีภาพถ่าย — ผู้รับเซ็นรับหมายเอง'}
             </button>
             ${isEditing ? '<button type="button" class="slts-cancel-btn" onclick="Swal.close()"><i class="fa-solid fa-xmark mr-1"></i> กลับไปยังกล้อง</button>' : ''}
           `}
@@ -11275,6 +11284,7 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
       }
     },
     didClose: () => {
+      state.noPhotoMode = false;
       // ── Cleanup viewport listeners เมื่อปิด modal ──
       const vv = window.visualViewport;
       const popup = document.querySelector('.swal2-popup');
@@ -11292,6 +11302,91 @@ window.showMobileSummonsFormModal = function(isEditing = false, allowLandscape =
       }, 60);
     }
   });
+};
+
+// ---------------------------------------------------------------------------
+// v2.7: บันทึกหมายที่ไม่มีภาพถ่าย (ผู้รับเซ็นรับหมายเอง / มารับที่ศาล) จากมือถือ
+//       ออฟไลน์ได้ — เก็บไว้ในเครื่องแล้วส่งอัตโนมัติเมื่อมีอินเทอร์เน็ต
+// ---------------------------------------------------------------------------
+const NOPHOTO_QUEUE_KEY = 'slts_nophoto_queue';
+function getNoPhotoQueue() { try { return JSON.parse(localStorage.getItem(NOPHOTO_QUEUE_KEY) || '[]'); } catch (_) { return []; } }
+function setNoPhotoQueue(q) { try { localStorage.setItem(NOPHOTO_QUEUE_KEY, JSON.stringify(q)); } catch (_) {} }
+let _noPhotoFlushing = false;
+async function flushNoPhotoQueue() {
+  if (_noPhotoFlushing || !navigator.onLine) return 0;
+  const q = getNoPhotoQueue(); if (!q.length) return 0;
+  _noPhotoFlushing = true; let sent = 0;
+  try {
+    for (const item of q.slice()) {
+      try {
+        const res = await SLTS.api('upload_image', item, { timeoutMs: 25000 });
+        if (res && res.status === 'success') {
+          sent++; setNoPhotoQueue(getNoPhotoQueue().filter((x) => x.clientUploadId !== item.clientUploadId));
+        } else if (res && res._http && res._http < 500 && res._http !== 401) {
+          // ข้อมูลผิด (ไม่ใช่ปัญหาเครือข่าย) → แจ้งและเอาออกจากคิว
+          setNoPhotoQueue(getNoPhotoQueue().filter((x) => x.clientUploadId !== item.clientUploadId));
+          if (window.SLTSUI) SLTSUI.toast(`บันทึก ${item.caseNumber} ไม่สำเร็จ: ${res.message || ''}`, 'error', 4000);
+        } else break;
+      } catch (_) { break; }
+    }
+  } finally { _noPhotoFlushing = false; }
+  if (sent) {
+    if (window.SLTSUI) SLTSUI.toast(`ส่งรายการไม่มีภาพถ่ายเข้าระบบแล้ว ${sent} รายการ`, 'success', 2500);
+    try { localStorage.removeItem(CACHE_KEY_SHEET_DATA); localStorage.removeItem(CACHE_KEY_SHEET_TIME); } catch (_) {}
+    if (typeof loadGoogleSheetData === 'function') loadGoogleSheetData(true, true);
+  }
+  return sent;
+}
+window.flushNoPhotoQueue = flushNoPhotoQueue;
+window.addEventListener('online', () => setTimeout(flushNoPhotoQueue, 1500));
+document.addEventListener('DOMContentLoaded', () => setTimeout(flushNoPhotoQueue, 6000));
+
+/** เปิดฟอร์มกรอกข้อมูลหมายในโหมด "ไม่มีภาพถ่าย" (จากเมนู) */
+window.showMobileNoPhotoForm = function () {
+  state.noPhotoMode = true;
+  showMobileSummonsFormModal(true);
+};
+
+/** ยืนยันเหตุผลและบันทึกรายการไม่มีภาพถ่าย (ค่าฟอร์มถูกนำไปใส่ฟอร์มหลักแล้ว) */
+window.submitMobileNoPhoto = async function (v) {
+  const esc = (t) => String(t || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const caseNumber = getFormattedCaseNumber();
+  const locationText = getFullLocationText();
+  const r = await Swal.fire({
+    title: 'บันทึกโดยไม่มีภาพถ่าย',
+    html: `<div style="text-align:left;font-size:14px;line-height:1.6">
+        <div><b>${esc(caseNumber)}</b></div><div style="color:#6b7280;font-size:12px">${esc(locationText)}</div>
+        <label style="display:block;margin-top:10px;font-weight:700;font-size:13px">เหตุที่ไม่มีภาพ</label>
+        <select id="npMReason" class="swal2-select" style="width:100%;margin:4px 0;display:block;font-size:15px">
+          <option>ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)</option>
+          <option>มารับหมายที่ศาล (ไม่มีภาพถ่าย)</option>
+          <option value="__other">อื่น ๆ (ระบุ)</option>
+        </select>
+        <input id="npMOther" class="swal2-input" placeholder="ระบุเหตุผล" style="display:none;width:100%;margin:4px 0;font-size:15px">
+        ${navigator.onLine ? '' : '<div style="margin-top:8px;padding:8px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:12px">ออฟไลน์อยู่ — จะเก็บไว้ในเครื่องและส่งอัตโนมัติเมื่อมีอินเทอร์เน็ต</div>'}
+      </div>`,
+    showCancelButton: true, confirmButtonText: 'บันทึก', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#7c3aed', reverseButtons: true,
+    didOpen: () => { const sel = document.getElementById('npMReason'); const o = document.getElementById('npMOther'); sel.onchange = () => { o.style.display = sel.value === '__other' ? 'block' : 'none'; }; },
+    preConfirm: () => {
+      const sel = document.getElementById('npMReason').value; const o = document.getElementById('npMOther').value.trim();
+      if (sel === '__other' && !o) { Swal.showValidationMessage('กรุณาระบุเหตุผล'); return false; }
+      return sel === '__other' ? o : sel;
+    },
+  });
+  if (!r.isConfirmed) { if (typeof window.resumeCameraStream === 'function') setTimeout(() => window.resumeCameraStream(), 200); return; }
+  const item = {
+    caseNumber, courtType: (v && v.courtType) || (elements.courtTypeSelect ? elements.courtTypeSelect.value : ''),
+    province: state.selectedProvince || 'อุดรธานี', district: state.selectedDistrict || (v && v.district) || '', subdistrict: state.selectedSubdistrict || (v && v.subdistrict) || '',
+    locationType: (v && v.locType) || 'หมายบ้าน', locationText, lat: null, lng: null,
+    dateTime: WatermarkEngine.formatThaiDateTime(new Date()),
+    noPhoto: true, noPhotoReason: r.value,
+    clientUploadId: 'nophoto-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+  };
+  setNoPhotoQueue(getNoPhotoQueue().concat([item]));
+  const sent = navigator.onLine ? await flushNoPhotoQueue() : 0;
+  if (typeof resetFormForNextCase === 'function') { try { resetFormForNextCase(); } catch (_) {} }
+  await Swal.fire({ icon: 'success', title: sent ? 'บันทึกเข้าระบบแล้ว' : 'เก็บไว้ในเครื่องแล้ว', text: sent ? `${caseNumber} — ${r.value}` : `${caseNumber} จะถูกส่งอัตโนมัติเมื่อมีอินเทอร์เน็ต`, timer: 1800, showConfirmButton: false });
+  if (typeof window.resumeCameraStream === 'function') window.resumeCameraStream();
 };
 
 // ยกเลิกการแนบภาพถ่ายส่งหมาย และกลับสู่แบบฟอร์มบันทึกการส่งหมายปกติ (ตามข้อกำหนด 2)
@@ -13237,7 +13332,7 @@ window.handleCameraRefreshGps = function(e) {
     } catch (err) {}
   }
 
-  const icon = document.querySelector('#btnFlipOrientationQuick i');
+  const icon = document.querySelector('#btnCameraGpsMini i') || document.querySelector('#btnFlipOrientationQuick i');
   if (icon) icon.classList.add('fa-spin');
 
   fetchCurrentLocation(true, false, (success, errOrPos) => {
@@ -14941,6 +15036,9 @@ async function openCameraModal() {
     elements.cameraModal.classList.remove('hidden');
     elements.cameraModal.classList.add('flex');
   }
+  state.isCameraStreamPaused = false;
+  if (elements.videoPreview) elements.videoPreview.style.display = '';
+  startCameraWatchdog();
   applySafariMobileCameraSafeAreas();
   updateCaptureButtonState();
   if (typeof repositionLandscapeHUD === 'function') {
@@ -14973,6 +15071,8 @@ async function openCameraModal() {
 
 function closeCameraModal() {
   stopLiveCameraHUD();
+  stopCameraWatchdog();
+  _camGen++; // ทิ้งคำขอเปิดกล้องที่ค้างอยู่
   if (state.cameraStream) {
     state.cameraStream.getTracks().forEach(track => track.stop());
     state.cameraStream = null;
@@ -14992,6 +15092,7 @@ function closeCameraModal() {
  */
 window.pauseCameraStream = function() {
   stopLiveCameraHUD();
+  _camGen++; // ทิ้งคำขอเปิดกล้องที่ค้างอยู่ (กันกล้องเปิดขึ้นมาหลังผู้ใช้ไปหน้าอื่นแล้ว)
   // หยุดการทำงานของฮาร์ดแวร์กล้อง Native Camera ทันที (ชัตเตอร์ฮาร์ดแวร์ปิด ไม่สะสมความร้อน ไม่กินแบต)
   if (state.cameraStream) {
     state.cameraStream.getTracks().forEach(track => {
@@ -15112,7 +15213,7 @@ function startLiveCameraHUD() {
   };
 
   updateHUD();
-  state.hudIntervalId = setInterval(updateHUD, 250);
+  state.hudIntervalId = setInterval(updateHUD, window.SLTS_LITE ? 500 : 250); // โหมดประหยัด: วาด HUD ครึ่งหนึ่ง
 }
 
 let lastMapSnapshotLat = null;
@@ -15333,56 +15434,217 @@ window.handleCameraAccessError = function(err) {
   });
 };
 
-async function startCameraStream() {
+// ---------------------------------------------------------------------------
+// v2.7: กล้องเสถียรขึ้น — เปิดกล้องทีละคำขอ (ไม่แย่งฮาร์ดแวร์กัน), ลองใหม่เมื่อกล้องยังไม่ว่าง,
+//       ทิ้งสตรีมที่ได้มาช้าหลังผู้ใช้ไปหน้าอื่นแล้ว และมีตัวเฝ้าระวังฟื้นภาพเมื่อจอมืดค้าง
+// ---------------------------------------------------------------------------
+let _camGen = 0;          // เลขรุ่นคำขอเปิดกล้อง (คำขอเก่าที่ถูกแทนที่จะถูกทิ้ง)
+let _camStartChain = Promise.resolve();
+function cameraViewVisible() {
+  return Boolean(elements.cameraModal && !elements.cameraModal.classList.contains('hidden'));
+}
+/** มีหน้าต่างอื่นบังหน้ากล้องอยู่หรือไม่ (ไม่นับ toast) */
+function cameraBlockedByOverlay() {
+  if (typeof Swal !== 'undefined' && Swal.isVisible()) {
+    const pop = Swal.getPopup();
+    if (pop && !pop.classList.contains('swal2-toast')) return true;
+  }
+  if (elements.loginModal && !elements.loginModal.classList.contains('hidden')) return true;
+  if (elements.previewModal && !elements.previewModal.classList.contains('hidden')) return true;
+  return false;
+}
+function stopStreamTracks(stream) {
+  try { stream && stream.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} }); } catch (_) {}
+}
+
+function startCameraStream() {
+  const gen = ++_camGen;
+  // ต่อคิว: รอคำขอก่อนหน้าปล่อยกล้องให้เสร็จก่อน (Android เปิดกล้องซ้อนกันไม่ได้ → จอมืด)
+  _camStartChain = _camStartChain.catch(() => {}).then(() => _startCameraStreamNow(gen));
+  return _camStartChain;
+}
+
+async function _startCameraStreamNow(gen) {
+  if (gen !== _camGen) return; // มีคำขอใหม่กว่าแล้ว
   if (state.cameraStream) {
-    state.cameraStream.getTracks().forEach(track => track.stop());
+    stopStreamTracks(state.cameraStream);
     state.cameraStream = null;
   }
+  if (elements.cameraStatus) elements.cameraStatus.textContent = 'กำลังเปิดกล้อง...';
 
-  if (elements.cameraStatus) {
-    elements.cameraStatus.textContent = 'กำลังเปิดกล้อง...';
+  const isMobile = sltsMobileLogic();
+  const lite = Boolean(window.SLTS_LITE);
+  const make = (relaxed) => ({
+    video: relaxed ? { facingMode: { ideal: state.facingMode || 'environment' } } : {
+      facingMode: { ideal: state.facingMode || 'environment' },
+      // มือถือ: พรีวิว 1280x720 (โหมดประหยัด 960x540) — ภาพนิ่งยังถ่ายความละเอียดเต็มจากเซนเซอร์
+      width: { ideal: isMobile ? (lite ? 960 : 1280) : 1920, max: 1920 },
+      height: { ideal: isMobile ? (lite ? 540 : 720) : 1080, max: 1080 },
+      frameRate: { ideal: lite ? 24 : 30, max: 30 },
+    },
+    audio: false,
+  });
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    handleCameraAccessError(new Error('navigator.mediaDevices.getUserMedia is not supported'));
+    return;
   }
 
-  try {
-    const isMobile = sltsMobileLogic();
-    const constraints = {
-      video: {
-        facingMode: { ideal: state.facingMode || 'environment' },
-        // บนมือถือ (< 768px) ปรับขนาดพรีวิว 1280x720 เพื่อลดการกินทรัพยากรเครื่องและความร้อนลงอย่างมาก
-        width: { ideal: isMobile ? 1280 : 1920, max: 1920 },
-        height: { ideal: isMobile ? 720 : 1080, max: 1080 }
-      },
-      audio: false
-    };
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('navigator.mediaDevices.getUserMedia is not supported');
+  let stream = null; let lastErr = null;
+  for (let attempt = 0; attempt < 4 && !stream; attempt++) {
+    if (gen !== _camGen) return;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(make(attempt >= 2));
+    } catch (err) {
+      lastErr = err;
+      const name = (err && err.name) || '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') break; // ไม่ได้รับสิทธิ์ — ลองซ้ำไม่ช่วย
+      // กล้องยังถูกปล่อยไม่ทัน (NotReadableError/AbortError/TrackStartError) หรือขนาดภาพไม่รองรับ → รอแล้วลองใหม่
+      await new Promise((r) => setTimeout(r, 350 + attempt * 450));
     }
-
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    state.cameraStream = stream;
-    if (elements.videoPreview) {
-      elements.videoPreview.style.display = '';
-      elements.videoPreview.srcObject = stream;
-      try {
-        await elements.videoPreview.play();
-      } catch (pErr) {
-        console.warn('Video preview play error:', pErr);
-        // v2.3.5: บางเครื่อง/WebView บล็อกการเล่นอัตโนมัติ → เริ่มภาพกล้องเมื่อแตะหน้าจอครั้งแรก
-        const resume = () => { try { elements.videoPreview.play(); } catch (_) {} };
-        document.addEventListener('touchstart', resume, { once: true, passive: true });
-        document.addEventListener('click', resume, { once: true });
-        if (elements.cameraStatus) elements.cameraStatus.textContent = 'แตะหน้าจอเพื่อเปิดภาพกล้อง';
-      }
-    }
-    if (elements.cameraStatus) {
-      elements.cameraStatus.textContent = 'พร้อมถ่ายภาพ';
-    }
-  } catch (err) {
-    console.error('Camera access error:', err);
-    handleCameraAccessError(err);
   }
+  if (!stream) {
+    console.error('Camera access error:', lastErr);
+    if (gen === _camGen) handleCameraAccessError(lastErr || new Error('camera'));
+    return;
+  }
+  // ผู้ใช้ออกจากหน้ากล้อง/เปิดหน้าต่างอื่นระหว่างรอ → ปล่อยกล้องทันที (ไม่ค้างกล้องไว้เบื้องหลัง)
+  if (gen !== _camGen || state.isCameraStreamPaused || !cameraViewVisible()) {
+    stopStreamTracks(stream);
+    return;
+  }
+
+  state.cameraStream = stream;
+  const v = elements.videoPreview;
+  if (v) {
+    v.style.display = '';
+    v.srcObject = stream;
+    try {
+      await v.play();
+    } catch (pErr) {
+      console.warn('Video preview play error:', pErr);
+      // v2.3.5: บางเครื่อง/WebView บล็อกการเล่นอัตโนมัติ → เริ่มภาพกล้องเมื่อแตะหน้าจอครั้งแรก
+      const resume = () => { try { v.play(); } catch (_) {} };
+      document.addEventListener('touchstart', resume, { once: true, passive: true });
+      document.addEventListener('click', resume, { once: true });
+      if (elements.cameraStatus) elements.cameraStatus.textContent = 'แตะหน้าจอเพื่อเปิดภาพกล้อง';
+      return;
+    }
+  }
+  if (elements.cameraStatus) elements.cameraStatus.textContent = 'พร้อมถ่ายภาพ';
 }
+
+/**
+ * ตัวเฝ้าระวังกล้อง: ทำงานเฉพาะตอนหน้ากล้องเปิดอยู่ (ทุก 1.5 วินาที งานเบามาก)
+ * ฟื้นกล้องเองเมื่อ: ถูกพักค้างหลังปิดหน้าต่างอื่น, สตรีมหลุด, วิดีโอหยุด, หรือภาพไม่ขยับ (จอมืดค้าง)
+ */
+let _camWatchTimer = null;
+let _camWatchState = { lastTime: -1, stuck: 0, healing: false };
+function startCameraWatchdog() {
+  if (_camWatchTimer) return;
+  _camWatchState = { lastTime: -1, stuck: 0, healing: false };
+  _camWatchTimer = setInterval(cameraWatchTick, 1500);
+}
+function stopCameraWatchdog() {
+  if (_camWatchTimer) clearInterval(_camWatchTimer);
+  _camWatchTimer = null;
+}
+async function cameraWatchTick() {
+  if (!cameraViewVisible()) return stopCameraWatchdog();
+  if (document.hidden || cameraBlockedByOverlay() || _camWatchState.healing || isCaptureInProgress) { _camWatchState.stuck = 0; return; }
+  const v = elements.videoPreview;
+  const tracks = state.cameraStream ? state.cameraStream.getVideoTracks() : [];
+  const dead = !tracks.length || tracks.some((t) => t.readyState === 'ended');
+  let need = '';
+  if (state.isCameraStreamPaused) need = 'paused';
+  else if (dead) need = 'dead';
+  else if (v && v.paused) { try { await v.play(); } catch (_) { need = 'play'; } }
+  else if (v) {
+    const t = v.currentTime;
+    if (v.readyState < 2 || t === _camWatchState.lastTime) _camWatchState.stuck++; else _camWatchState.stuck = 0;
+    _camWatchState.lastTime = t;
+    if (_camWatchState.stuck >= 3) need = 'frozen';
+  }
+  if (!need) return;
+  _camWatchState.healing = true; _camWatchState.stuck = 0;
+  try {
+    console.warn('[Camera] auto-heal:', need);
+    state.isCameraStreamPaused = false;
+    if (v) v.style.display = '';
+    await startCameraStream();
+    startLiveCameraHUD();
+  } catch (e) { console.warn('[Camera] heal failed', e); }
+  finally { _camWatchState.healing = false; }
+}
+// ปิดหน้าต่าง SweetAlert แล้ว → ฟื้นกล้องทันที (ไม่ต้องรอตัวเฝ้าระวัง)
+(function watchSwalCloseForCamera() {
+  try {
+    let wasShown = false;
+    new MutationObserver(() => {
+      const shown = document.body.classList.contains('swal2-shown');
+      if (wasShown && !shown) setTimeout(() => { if (cameraViewVisible() && !cameraBlockedByOverlay()) cameraWatchTick(); }, 180);
+      wasShown = shown;
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  } catch (_) { /* ไม่มี MutationObserver */ }
+})();
+
+// ---------------------------------------------------------------------------
+// ภาพถ่ายล่าสุด (มุมซ้ายล่างหน้ากล้อง) + บันทึกลงคลังภาพของโทรศัพท์ (แอป Android)
+// ---------------------------------------------------------------------------
+function sltsNativePlugin() {
+  return (window.SLTS && SLTS.isNative && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SltsNative) || null;
+}
+function setLastPhotoThumb(dataUrl, info) {
+  try {
+    state.lastCapturedPhoto = Object.assign({ dataUrl, at: Date.now() }, info || {});
+    const btn = document.getElementById('btnLastPhoto');
+    if (!btn) return;
+    // ย่อภาพเล็ก ๆ ไว้แสดง (ไม่เก็บภาพเต็มใน DOM)
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas'); const S = 120;
+      const r = Math.max(S / img.width, S / img.height);
+      c.width = S; c.height = S;
+      c.getContext('2d').drawImage(img, (S - img.width * r) / 2, (S - img.height * r) / 2, img.width * r, img.height * r);
+      const thumb = c.toDataURL('image/jpeg', 0.7);
+      btn.innerHTML = `<img src="${thumb}" alt="ภาพถ่ายล่าสุด">`;
+      try { localStorage.setItem('slts_last_photo_thumb', thumb); localStorage.setItem('slts_last_photo_uri', (info && info.uri) || ''); } catch (_) {}
+    };
+    img.src = dataUrl;
+  } catch (_) {}
+}
+window.setLastPhotoThumb = setLastPhotoThumb;
+function restoreLastPhotoThumb() {
+  try {
+    const thumb = localStorage.getItem('slts_last_photo_thumb');
+    const btn = document.getElementById('btnLastPhoto');
+    if (thumb && btn) btn.innerHTML = `<img src="${thumb}" alt="ภาพถ่ายล่าสุด">`;
+  } catch (_) {}
+}
+/** บันทึกภาพลงคลังภาพของโทรศัพท์ (Pictures/SLTS) — คืน uri ของไฟล์ในคลังภาพ */
+async function saveCapturedPhotoToGallery(dataUrl, fileName) {
+  const plug = sltsNativePlugin();
+  if (!plug || !dataUrl) return '';
+  try {
+    const r = await plug.saveImage({ base64: String(dataUrl).split(',')[1] || '', fileName: String(fileName || 'SLTS.jpg') });
+    return (r && r.uri) || '';
+  } catch (e) { console.warn('[Gallery] save failed', e); return ''; }
+}
+window.saveCapturedPhotoToGallery = saveCapturedPhotoToGallery;
+/** แตะภาพถ่ายล่าสุด → เปิดภาพในคลังภาพของโทรศัพท์ (แอป) / คลังภาพในเครื่องของระบบ (เว็บ) */
+window.openLastCapturedPhoto = async function (e) {
+  try { e && e.preventDefault(); e && e.stopPropagation(); } catch (_) {}
+  const plug = sltsNativePlugin();
+  const uri = (state.lastCapturedPhoto && state.lastCapturedPhoto.uri) || localStorage.getItem('slts_last_photo_uri') || '';
+  if (plug) {
+    try { await plug.openGallery({ uri }); return; } catch (err) { console.warn('[Gallery] open failed', err); }
+  }
+  if (window.SLTSUI && typeof SLTSUI.openVault === 'function') return SLTSUI.openVault();
+  if (state.lastCapturedPhoto && state.lastCapturedPhoto.dataUrl) {
+    Swal.fire({ imageUrl: state.lastCapturedPhoto.dataUrl, imageAlt: 'ภาพถ่ายล่าสุด', showConfirmButton: false, showCloseButton: true });
+  }
+};
+document.addEventListener('DOMContentLoaded', restoreLastPhotoThumb);
 
 /**
  * v2.3.5: ถ่ายภาพนิ่งความละเอียดเต็มจากเซนเซอร์กล้องโดยตรง (ImageCapture.takePhoto) แบบแอปกล้องทั่วไป
@@ -15570,12 +15832,20 @@ async function captureAndProcessPhoto() {
           payload: { ...uploadPayload, imageBase64: undefined },
           meta: { originalCaseNumber: origCaseNumber, routeStopIndex: targetStopIndex, stopId: activeTarget?.id, locationText: locationText, courtType: payloadData.courtType }
         });
-        SLTS.vault.exportToDevice(captureId).catch(() => {});
+        SLTS.vault.exportToDevice(captureId).then((uri) => {
+          if (typeof uri === 'string' && uri && uri !== 'saved') {
+            if (state.lastCapturedPhoto) state.lastCapturedPhoto.uri = uri;
+            try { localStorage.setItem('slts_last_photo_uri', uri); } catch (_) {}
+          }
+        }).catch(() => {});
       } catch (vaultErr) {
         console.warn('[Vault] save failed (continuing with queue only):', vaultErr);
         if (SLTS.reportError) SLTS.reportError(vaultErr, { where: 'vault.save' });
       }
     }
+
+    // ภาพถ่ายล่าสุดที่มุมซ้ายล่างหน้ากล้อง
+    setLastPhotoThumb(compressedImageBase64, { caseNumber, id: captureId });
 
     // จัดการคิวผ่านระบบ Unified Multi-Tier Queue (ทำงานเบื้องหลัง 100%)
     const enqueued = enqueueBackgroundUpload({

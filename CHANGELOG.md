@@ -2,6 +2,23 @@
 
 สร้างอัตโนมัติจาก `version.json` ด้วย `npm run version:bump`
 
+## [2.7.0] - 2026-11-25
+### เพิ่ม
+- **เข้าสู่ระบบด้วย Google**: `public_config`, `google_login`, `link_google` (ตรวจ ID token กับ Google tokeninfo, aud = `GOOGLE_CLIENT_ID`)
+  · คอลัมน์ `app_users.google_email` (unique) · ช่อง "อีเมล Google" ในเพิ่ม/แก้ไขผู้ใช้ · เมนู "บัญชี Google"
+  · แอป Android: ปลั๊กอินเนทีฟ `SltsNative.googleSignIn` (Credential Manager) · เว็บ: Google Identity Services
+- ปลั๊กอินเนทีฟ `SltsNative.saveImage` / `openGallery`: บันทึกภาพลงคลังภาพ (Pictures/SLTS) + เปิดภาพในแอปคลังภาพ
+- หน้ากล้อง: ปุ่มภาพถ่ายล่าสุด (ซ้ายล่าง) · สลับกล้อง (ขวาล่าง) · ดึงพิกัดใหม่ (มุมขวาบนของภาพ)
+- บันทึกหมายไม่มีภาพถ่ายจากมือถือ (ฟอร์ม/เมนู) + คิวออฟไลน์ `slts_nophoto_queue`
+- โหมดประหยัดทรัพยากร (`html.slts-lite`, อัตโนมัติเมื่อ deviceMemory ≤ 3 หรือ CPU ≤ 4) — พรีวิวกล้อง 960x540@24fps, HUD 2 ครั้ง/วินาที
+- Workflow: ตัวเลือก `build_aab` สร้างไฟล์ AAB สำหรับ Google Play
+### แก้ไข
+- หน้าเข้าสู่ระบบเต็มหน้าจอบนแอป/มือถือ (ไม่มีปุ่มปิด) · แสดงเวอร์ชัน
+- เข้าสู่ระบบไม่สำเร็จ: วินิจฉัยด้วย CapacitorHttp — Vercel Deployment Protection / ฐานข้อมูลล่ม / ติดต่อไม่ได้
+- กล้องมืดค้างหลังสลับฟอร์ม → กล้อง: คิวเปิดกล้องทีละคำขอ (`_camGen`), ลองใหม่เมื่อ NotReadable/Abort, ทิ้งสตรีมที่มาช้า, watchdog 1.5 วินาที
+- OCR worker ปิดเองเมื่อไม่ใช้ 90 วินาที
+- CSS ใหม่แยกไฟล์ `css/app-v27.css` (ท้าย `style.css` มี `@media (min-width:769px)` ที่ปิดไม่ครบ — กฎหลังบรรทัด 1619 มีผลเฉพาะจอ ≥ 769px)
+
 ## [2.6.17] - 2026-11-25
 ### เพิ่ม
 - **แบบ 25. บัญชีขอเบิกจ่ายเงิน (หมายเงิน)** ตามรูปแบบ `litigant_rpt_accexpense` — ที่ / วันที่ลงข้อมูล / เลขดำที่ (หมาย ต. + เลขดำ) / เลขแดงที่ /

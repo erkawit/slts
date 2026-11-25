@@ -248,7 +248,8 @@ body.gyro-landscape-90 #cameraTopBar #btnTabletSwitchToPc {
 /* ปุ่มควบคุมชัตเตอร์ด้านขวา หมุนไอคอน 90 องศา */
 body.gyro-landscape-90 #btnFlipCamera,
 body.gyro-landscape-90 #btnCapture,
-body.gyro-landscape-90 #btnFlipOrientationQuick {
+body.gyro-landscape-90 #btnFlipOrientationQuick,
+body.gyro-landscape-90 #btnLastPhoto {
   transform: rotate(90deg) !important;
   transform-origin: center center !important;
 }
@@ -336,7 +337,8 @@ body.gyro-landscape-270 #cameraTopBar #btnTabletSwitchToPc {
 /* ปุ่มควบคุมชัตเตอร์ หมุนไอคอน 90 องศา */
 body.gyro-landscape-270 #btnFlipCamera,
 body.gyro-landscape-270 #btnCapture,
-body.gyro-landscape-270 #btnFlipOrientationQuick {
+body.gyro-landscape-270 #btnFlipOrientationQuick,
+body.gyro-landscape-270 #btnLastPhoto {
   transform: rotate(90deg) !important;
   transform-origin: center center !important;
 }
@@ -2108,7 +2110,8 @@ body.hardware-landscape #cameraTopBar #btnTabletSwitchToPc {
 
 body.hardware-landscape #btnFlipCamera,
 body.hardware-landscape #btnCapture,
-body.hardware-landscape #btnFlipOrientationQuick {
+body.hardware-landscape #btnFlipOrientationQuick,
+body.hardware-landscape #btnLastPhoto {
   transform: none !important;
 }
 
@@ -2216,7 +2219,8 @@ body.hardware-landscape #btnFlipOrientationQuick {
 
   #btnFlipCamera,
   #btnCapture,
-  #btnFlipOrientationQuick {
+  #btnFlipOrientationQuick,
+  #btnLastPhoto {
     transform: none !important;
   }
 }
@@ -2389,6 +2393,7 @@ body.hardware-landscape #btnFlipOrientationQuick {
   transition: none !important;
   -webkit-transition: none !important;
 }
+
 
 
 

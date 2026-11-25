@@ -30,6 +30,8 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // v2.7: ปลั๊กอินเนทีฟของแอป (คลังภาพ / เข้าสู่ระบบด้วย Google) — ต้องลงทะเบียนก่อน super.onCreate
+        registerPlugin(SltsNativePlugin.class);
         super.onCreate(savedInstanceState);
 
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
@@ -68,11 +70,18 @@ public class MainActivity extends BridgeActivity {
 
     /** ขอสิทธิ์กล้องและตำแหน่งตั้งแต่เปิดแอป (ระบบจะถามครั้งแรกครั้งเดียว) */
     private void requestCoreRuntimePermissions() {
-        String[] perms = new String[] {
-            Manifest.permission.CAMERA,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        };
+        String[] perms = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+            ? new String[] {
+                Manifest.permission.CAMERA,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE // Android 9 ลงไป: บันทึกภาพลงคลังภาพ
+            }
+            : new String[] {
+                Manifest.permission.CAMERA,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            };
         boolean need = false;
         for (String p : perms) {
             if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) { need = true; break; }

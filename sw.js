@@ -21,6 +21,7 @@ const STATIC_ASSETS = [
   'css/style.css',
   'css/simple-view.css',
   'css/official.css',
+  'css/app-v27.css',
   'js/config.js',
   'js/slts-core.js',
   'js/slts-geo.js',

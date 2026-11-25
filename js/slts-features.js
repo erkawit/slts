@@ -91,42 +91,59 @@
       username: u.username, name: u.name || u.username, role: u.role,
       assignedProvince: u.assignedProvince || 'อุดรธานี', courtCategory: u.courtCategory || 'ศาลจังหวัด',
       assignedCourt: u.assignedCourt || '',
+      title: u.title || '', firstName: u.firstName || '', lastName: u.lastName || '', position: u.position || '', fullName: u.fullName || '',
+      googleEmail: u.googleEmail || '',
     };
     localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
   }
 
-  window.handleLogin = async function (e) {
-    if (e) e.preventDefault();
-    const uEl = document.getElementById('loginUsername');
-    const pEl = document.getElementById('loginPassword');
-    const u = (uEl && uEl.value || '').trim();
-    const p = (pEl && pEl.value || '');
-    if (!u || !p) return Swal.fire({ icon: 'warning', title: 'กรอกข้อมูลไม่ครบ', text: 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน', confirmButtonColor: '#2563eb' });
-
-    const form = document.getElementById('loginForm');
-    const btn = form && form.querySelector('button[type="submit"]');
-    const oldHtml = btn ? btn.innerHTML : '';
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังตรวจสอบ...'; }
-
-    const deviceMode = window.innerWidth < 768 ? 'mobile' : 'desktop';
-    let res;
+  // -------------------------------------------------------------------
+  // วินิจฉัยเมื่อติดต่อเซิร์ฟเวอร์ไม่ได้ (แอป APK ใช้ HTTP แบบเนทีฟอ่านคำตอบจริงได้แม้ไม่มี CORS)
+  // -------------------------------------------------------------------
+  async function diagnoseServer() {
+    const base = (SLTS.apiBase && SLTS.apiBase()) || location.origin;
+    const url = base.replace(/\/+$/, '') + '/api/health';
+    const H = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+    let status = 0; let body = '';
     try {
-      res = await SLTS.api('login', { username: u, password: p, deviceMode }, { timeoutMs: 20000 });
-    } catch (err) {
-      res = { status: 'error', message: navigator.onLine ? 'ติดต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่อีกครั้ง' : 'ไม่มีอินเทอร์เน็ต — การเข้าสู่ระบบครั้งแรกต้องเชื่อมต่ออินเทอร์เน็ต' };
-    } finally {
-      if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
+      if (SLTS.isNative && H) {
+        const r = await H.get({ url, connectTimeout: 9000, readTimeout: 9000 });
+        status = r.status; body = typeof r.data === 'string' ? r.data : JSON.stringify(r.data || {});
+      } else {
+        const r = await fetch(url, { cache: 'no-store' });
+        status = r.status; body = await r.text();
+      }
+    } catch (_) { return { kind: 'unreachable', url: base }; }
+    if (status === 401 || status === 403) return { kind: /vercel|sso|authentication/i.test(body) ? 'vercel-protected' : 'forbidden', url: base };
+    if (status >= 200 && status < 300) {
+      let j = null; try { j = JSON.parse(body); } catch (_) {}
+      if (j && j.db === false) return { kind: 'db-down', url: base, detail: j.dbError || '' };
+      return { kind: 'ok', url: base };
     }
-    if (!res || res.status !== 'success') {
-      return Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text: (res && res.message) || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', confirmButtonColor: '#2563eb' });
+    return { kind: 'http-' + status, url: base };
+  }
+  function diagnoseText(d) {
+    const host = String(d.url || '').replace(/^https?:\/\//, '');
+    switch (d.kind) {
+      case 'vercel-protected': return `เซิร์ฟเวอร์ ${host} ถูกล็อกด้วย Vercel Deployment Protection — แอปจึงเข้าไม่ได้ ผู้ดูแลระบบต้องปิด "Vercel Authentication" (Vercel → Settings → Deployment Protection)`;
+      case 'db-down': return `เซิร์ฟเวอร์ ${host} เชื่อมต่อฐานข้อมูลไม่ได้ — แจ้งผู้ดูแลระบบตรวจ DATABASE_URL${d.detail ? ' (' + d.detail + ')' : ''}`;
+      case 'unreachable': return `ติดต่อเซิร์ฟเวอร์ ${host} ไม่ได้ — ตรวจสัญญาณอินเทอร์เน็ต แล้วลองใหม่`;
+      case 'ok': return 'เซิร์ฟเวอร์ทำงานปกติ กรุณาลองใหม่อีกครั้ง';
+      default: return `เซิร์ฟเวอร์ ${host} ตอบกลับผิดปกติ (${d.kind})`;
     }
+  }
+  UI.diagnoseServer = diagnoseServer;
 
+  /** หลังยืนยันตัวตนสำเร็จ (รหัสผ่าน หรือ Google) */
+  function finishLogin(res, deviceMode) {
     SLTS.auth.setToken(res.token);
     applyLoggedInUser(res.user);
     localStorage.setItem('slts_last_auth_action', 'login');
     localStorage.setItem('slts_last_auth_device_mode', deviceMode);
     localStorage.removeItem('slts_v2_relogin_notice');
+    const pEl = document.getElementById('loginPassword');
     if (pEl) pEl.value = '';
+    const hint = document.getElementById('loginServerHint'); if (hint) hint.classList.add('hidden');
 
     closeLoginModal();
     updateAuthUI();
@@ -147,7 +164,172 @@
     } else {
       UI.consumePendingShareCode();
     }
+  }
+
+  async function loginFailed(res, networkError) {
+    let text = (res && res.message) || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
+    if (networkError && navigator.onLine) {
+      const d = await diagnoseServer();
+      text = diagnoseText(d);
+      const hint = document.getElementById('loginServerHint');
+      if (hint && d.kind !== 'ok') { hint.textContent = text; hint.classList.remove('hidden'); }
+    }
+    return Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบไม่สำเร็จ', text, confirmButtonColor: '#2563eb' });
+  }
+
+  window.handleLogin = async function (e) {
+    if (e) e.preventDefault();
+    const uEl = document.getElementById('loginUsername');
+    const pEl = document.getElementById('loginPassword');
+    const u = (uEl && uEl.value || '').trim();
+    const p = (pEl && pEl.value || '');
+    if (!u || !p) return Swal.fire({ icon: 'warning', title: 'กรอกข้อมูลไม่ครบ', text: 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน', confirmButtonColor: '#2563eb' });
+
+    const form = document.getElementById('loginForm');
+    const btn = form && form.querySelector('button[type="submit"]');
+    const oldHtml = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังตรวจสอบ...'; }
+
+    const deviceMode = window.innerWidth < 768 ? 'mobile' : 'desktop';
+    let res; let netErr = false;
+    try {
+      res = await SLTS.api('login', { username: u, password: p, deviceMode }, { timeoutMs: 20000 });
+    } catch (err) {
+      netErr = true;
+      res = { status: 'error', message: navigator.onLine ? 'ติดต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่อีกครั้ง' : 'ไม่มีอินเทอร์เน็ต — การเข้าสู่ระบบครั้งแรกต้องเชื่อมต่ออินเทอร์เน็ต' };
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
+    }
+    if (!res || res.status !== 'success') {
+      if (!netErr && res && res._http >= 500 && /DATABASE|database|password authentication/i.test(res.message || '')) netErr = true;
+      return loginFailed(res, netErr);
+    }
+    finishLogin(res, deviceMode);
   };
+
+  // -------------------------------------------------------------------
+  // เข้าสู่ระบบด้วยบัญชี Google
+  //   - แอป Android: Credential Manager ผ่านปลั๊กอินเนทีฟ SltsNative.googleSignIn
+  //   - เว็บ: Google Identity Services (ปุ่มของ Google)
+  //   ต้องตั้ง GOOGLE_CLIENT_ID (Web client ID) ที่เซิร์ฟเวอร์ — ถ้ายังไม่ตั้ง ปุ่มจะไม่แสดง
+  // -------------------------------------------------------------------
+  const G = { cfg: null, gsiLoaded: null, webCb: null };
+  G.config = async function () {
+    if (G.cfg) return G.cfg;
+    try {
+      const r = await SLTS.api('public_config', {}, { method: 'GET', timeoutMs: 8000 });
+      if (r && r.status === 'success') G.cfg = r;
+    } catch (_) { /* ออฟไลน์/เซิร์ฟเวอร์ปิด */ }
+    return G.cfg || {};
+  };
+  G.nativePlugin = () => (SLTS.isNative && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SltsNative) || null;
+  G.loadGsi = function () {
+    if (window.google && window.google.accounts && window.google.accounts.id) return Promise.resolve();
+    if (!G.gsiLoaded) {
+      G.gsiLoaded = new Promise((res, rej) => {
+        const sc = document.createElement('script'); sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true;
+        sc.onload = () => res(); sc.onerror = () => { G.gsiLoaded = null; rej(new Error('โหลด Google Sign-In ไม่สำเร็จ')); };
+        document.head.appendChild(sc);
+      });
+    }
+    return G.gsiLoaded;
+  };
+  /** แสดงปุ่ม Google ใน container (เว็บ) → cb(idToken) */
+  G.renderWebButton = async function (container, cb) {
+    const cfg = await G.config();
+    if (!cfg.googleClientId || !container) return false;
+    await G.loadGsi();
+    G.webCb = cb;
+    window.google.accounts.id.initialize({
+      client_id: cfg.googleClientId,
+      callback: (resp) => { if (resp && resp.credential && typeof G.webCb === 'function') G.webCb(resp.credential); },
+      ux_mode: 'popup', auto_select: false, cancel_on_tap_outside: true,
+    });
+    container.innerHTML = '';
+    window.google.accounts.id.renderButton(container, { type: 'standard', theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill', locale: 'th', width: Math.min(320, container.clientWidth || 300) });
+    return true;
+  };
+  /** ขอ ID token แบบเนทีฟ (แอป) */
+  G.nativeIdToken = async function () {
+    const cfg = await G.config();
+    if (!cfg.googleClientId) throw new Error('เซิร์ฟเวอร์ยังไม่ได้ตั้งค่าการเข้าสู่ระบบด้วย Google');
+    const plug = G.nativePlugin();
+    if (!plug) throw new Error('แอปเวอร์ชันนี้ยังไม่รองรับการเข้าสู่ระบบด้วย Google');
+    const r = await plug.googleSignIn({ serverClientId: cfg.googleClientId });
+    if (!r || !r.idToken) throw new Error('ไม่ได้รับข้อมูลยืนยันตัวตนจาก Google');
+    return r.idToken;
+  };
+  async function loginWithGoogleToken(idToken) {
+    const deviceMode = window.innerWidth < 768 ? 'mobile' : 'desktop';
+    UI.toast('กำลังเข้าสู่ระบบด้วย Google...', 'info', 1500);
+    let res; let netErr = false;
+    try { res = await SLTS.api('google_login', { idToken, deviceMode }, { timeoutMs: 20000 }); }
+    catch (_) { netErr = true; res = { status: 'error', message: 'ติดต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่อีกครั้ง' }; }
+    if (!res || res.status !== 'success') return loginFailed(res, netErr);
+    finishLogin(res, deviceMode);
+  }
+  G.prepareLoginUi = async function () {
+    const wrap = document.getElementById('googleLoginWrap');
+    if (!wrap) return;
+    const cfg = await G.config();
+    if (!cfg.googleClientId) { wrap.classList.add('hidden'); return; }
+    const nativeBtn = document.getElementById('btnGoogleLogin');
+    const webBox = document.getElementById('googleLoginWebBtn');
+    if (G.nativePlugin()) {
+      wrap.classList.remove('hidden'); webBox.classList.add('hidden'); nativeBtn.classList.remove('hidden');
+      nativeBtn.onclick = async () => {
+        try { await loginWithGoogleToken(await G.nativeIdToken()); }
+        catch (e) { if (!/cancel/i.test(String(e && (e.code || e.message)))) Swal.fire({ icon: 'error', title: 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ', text: e.message || String(e), confirmButtonColor: '#2563eb' }); }
+      };
+    } else if (!SLTS.isNative) {
+      nativeBtn.classList.add('hidden'); webBox.classList.remove('hidden'); wrap.classList.remove('hidden');
+      try { await G.renderWebButton(webBox, (tok) => loginWithGoogleToken(tok)); } catch (_) { wrap.classList.add('hidden'); }
+    } else {
+      wrap.classList.add('hidden'); // แอปเวอร์ชันเก่าไม่มีปลั๊กอิน
+    }
+  };
+  /** เชื่อม/ยกเลิกเชื่อมบัญชี Google ของผู้ใช้ที่ล็อกอินอยู่ */
+  UI.linkGoogleAccount = async function () {
+    if (!me()) return;
+    const cfg = await G.config();
+    if (!cfg.googleClientId) return Swal.fire({ icon: 'info', title: 'ยังไม่เปิดใช้การเข้าสู่ระบบด้วย Google', text: 'ผู้ดูแลระบบต้องตั้งค่า GOOGLE_CLIENT_ID ที่เซิร์ฟเวอร์ก่อน', confirmButtonColor: '#2563eb' });
+    const cur = (me() && me().googleEmail) || '';
+    const doLink = async (idToken) => {
+      const r = await SLTS.api('link_google', { idToken });
+      if (r.status !== 'success') return Swal.fire({ icon: 'error', title: 'เชื่อมบัญชีไม่สำเร็จ', text: r.message || '', confirmButtonColor: '#2563eb' });
+      state.currentUser.googleEmail = r.googleEmail; localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+      Swal.fire({ icon: 'success', title: 'เชื่อมบัญชี Google แล้ว', text: `ครั้งต่อไปกด "เข้าสู่ระบบด้วย Google" ด้วย ${r.googleEmail} ได้เลย`, confirmButtonColor: '#2563eb' });
+    };
+    const ask = await Swal.fire({
+      title: 'บัญชี Google', icon: 'info',
+      html: cur ? `เชื่อมอยู่กับ <b>${esc(cur)}</b>` : 'ยังไม่ได้เชื่อมบัญชี Google<div id="sltsGoogleLinkBtn" class="flex justify-center mt-3"></div>',
+      showCancelButton: true, cancelButtonText: 'ปิด',
+      showConfirmButton: Boolean(cur) || Boolean(G.nativePlugin()), confirmButtonText: cur ? 'ยกเลิกการเชื่อม' : 'เลือกบัญชี Google', confirmButtonColor: cur ? '#dc2626' : '#2563eb',
+      didOpen: () => { if (!cur && !G.nativePlugin()) G.renderWebButton(document.getElementById('sltsGoogleLinkBtn'), (tok) => { Swal.close(); doLink(tok); }).catch(() => {}); },
+    });
+    if (!ask.isConfirmed) return;
+    if (cur) {
+      const r = await SLTS.api('link_google', { unlink: true });
+      if (r.status === 'success') { state.currentUser.googleEmail = ''; localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser)); UI.toast('ยกเลิกการเชื่อมบัญชี Google แล้ว'); }
+      return;
+    }
+    try { await doLink(await G.nativeIdToken()); } catch (e) { if (!/cancel/i.test(String(e && (e.code || e.message)))) Swal.fire({ icon: 'error', title: 'เชื่อมบัญชีไม่สำเร็จ', text: e.message || String(e) }); }
+  };
+  SLTS.google = G;
+
+  // หน้าเข้าสู่ระบบ: เต็มหน้าจอบนแอป/มือถือ + ปุ่ม Google + เวอร์ชัน
+  (function enhanceLoginModal() {
+    const orig = window.openLoginModal;
+    window.openLoginModal = function (isForced = false) {
+      if (typeof orig === 'function') orig(isForced);
+      const m = document.getElementById('loginModal');
+      const full = SLTS.isNative || window.innerWidth < 768;
+      if (m) m.classList.toggle('slts-login-full', full);
+      const v = document.getElementById('loginVersionLine');
+      if (v) v.textContent = `SLTS v${SLTS.version || ''}${SLTS.isNative ? ' · แอป Android' : ''}`;
+      G.prepareLoginUi().catch(() => {});
+    };
+  })();
 
   UI.forcePasswordChange = async function () {
     const r = await Swal.fire({
@@ -635,6 +817,19 @@
   };
   UI.applySimpleView(UI.isSimple());
 
+  // โหมดประหยัดทรัพยากร: เปิดเองอัตโนมัติเมื่อเครื่องแรม ≤ 3 GB หรือ CPU ≤ 4 คอร์ (ผู้ใช้สลับเองได้ในเมนู)
+  UI.autoLite = function () {
+    const mem = Number(navigator.deviceMemory || 0); const cores = Number(navigator.hardwareConcurrency || 0);
+    return (mem && mem <= 3) || (cores && cores <= 4);
+  };
+  UI.isLite = () => { const v = localStorage.getItem('slts_lite_mode'); return v === null ? Boolean(UI.autoLite()) : v === '1'; };
+  UI.setLite = function (on, remember) {
+    document.documentElement.classList.toggle('slts-lite', Boolean(on));
+    if (remember) localStorage.setItem('slts_lite_mode', on ? '1' : '0');
+    window.SLTS_LITE = Boolean(on);
+  };
+  UI.setLite(UI.isLite(), false);
+
   UI.openQuickMenu = async function () {
     await refreshPendingIndicators();
     const st = UI._vaultStats || {};
@@ -645,6 +840,9 @@
       ...(mobileLogic() && stops ? [{ id: 'clearroute', icon: 'fa-trash-can', color: '#e11d48', title: 'ล้างเส้นทางที่ได้รับ', sub: `${stops} จุด (ไม่กระทบภาพที่ถ่ายแล้ว)` }] : []),
       { id: 'vault', icon: 'fa-images', color: '#059669', title: 'คลังภาพในเครื่อง', sub: st.pending ? `${st.pending} ภาพรอส่ง` : 'ภาพทั้งหมดส่งแล้ว', badge: st.pending || 0 },
       { id: 'simple', icon: 'fa-eye', color: '#0ea5e9', title: UI.isSimple() ? 'ปิดมุมมองแบบง่าย' : 'เปิดมุมมองแบบง่าย', sub: 'ปุ่มใหญ่ ตัวอักษรอ่านง่าย' },
+      ...(mobileLogic() ? [{ id: 'nophoto', icon: 'fa-signature', color: '#7c3aed', title: 'บันทึกหมายที่ไม่มีภาพถ่าย', sub: 'ผู้รับเซ็นรับหมายเอง / มารับที่ศาล' }] : []),
+      { id: 'google', icon: 'fa-user-shield', color: '#dc2626', title: 'บัญชี Google', sub: (me() && me().googleEmail) ? me().googleEmail : 'เชื่อมเพื่อเข้าสู่ระบบด้วย Google' },
+      { id: 'lite', icon: 'fa-gauge-simple', color: '#0d9488', title: UI.isLite() ? 'ปิดโหมดประหยัดทรัพยากร' : 'เปิดโหมดประหยัดทรัพยากร', sub: UI.isLite() ? 'กำลังใช้: ลดเอฟเฟกต์/ความละเอียดพรีวิวกล้อง' : 'สำหรับมือถือสเปกต่ำ (เปิดอัตโนมัติเมื่อเครื่องแรมน้อย)' },
       { id: 'about', icon: 'fa-circle-info', color: '#64748b', title: `เวอร์ชัน ${SLTS.version}`, sub: 'ประวัติการอัปเดตระบบ' },
     ];
     if (isAdmin()) items.push({ id: 'admin', icon: 'fa-shield-halved', color: '#7c3aed', title: 'ศูนย์ผู้ดูแลระบบ', sub: 'บันทึกจุดบกพร่อง • ประวัติใช้งาน • สถานะระบบ' });
@@ -665,6 +863,9 @@
       case 'vault': return UI.openVault();
       case 'clearroute': return UI.confirmClearMobileRoute();
       case 'simple': UI.applySimpleView(!UI.isSimple()); return UI.toast(UI.isSimple() ? 'เปิดมุมมองแบบง่ายแล้ว' : 'ปิดมุมมองแบบง่ายแล้ว');
+      case 'nophoto': return typeof window.showMobileNoPhotoForm === 'function' ? window.showMobileNoPhotoForm() : null;
+      case 'google': return UI.linkGoogleAccount();
+      case 'lite': UI.setLite(!UI.isLite(), true); return UI.toast(UI.isLite() ? 'เปิดโหมดประหยัดทรัพยากรแล้ว' : 'ปิดโหมดประหยัดทรัพยากรแล้ว');
       case 'about': return UI.openAbout();
       case 'admin': return UI.openAdminCenter();
       default:

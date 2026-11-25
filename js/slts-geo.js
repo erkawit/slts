@@ -115,8 +115,18 @@
   }
 
   let workerPromise = null;
+  let workerIdle = null;
+  // ปิดตัวอ่านข้อความ (OCR) เมื่อไม่ได้ใช้ 90 วินาที เพื่อคืนหน่วยความจำ (สร้างใหม่ได้ทุกเมื่อที่ต้องใช้)
+  function scheduleWorkerIdle() {
+    clearTimeout(workerIdle);
+    workerIdle = setTimeout(async () => {
+      const p = workerPromise; workerPromise = null;
+      try { const w = p && await p; if (w) await w.terminate(); } catch (_) {}
+    }, 90000);
+  }
   async function getWorker() {
     if (typeof window.Tesseract === 'undefined') throw new Error('OCR ไม่พร้อม');
+    scheduleWorkerIdle();
     if (!workerPromise) {
       workerPromise = window.Tesseract.createWorker('eng', 1, { logger: () => {} })
         .then(async (w) => {

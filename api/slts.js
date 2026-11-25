@@ -92,6 +92,7 @@ function publicUser(u) {
     role: u.role,
     name: u.name || u.username,
     title: u.title || '', firstName: u.first_name || '', lastName: u.last_name || '', position: u.position || '',
+    googleEmail: u.google_email || '',
     fullName: fullNameOf(u),
     createdAt: u.created_at_text || '',
     courtCategory: cat,
@@ -320,7 +321,7 @@ actions.health = async () => {
   return {
     status: 'success', ok: true, db: dbOk, dbError, dbTarget,
     deployment: { env: process.env.VERCEL_ENV || '', branch: process.env.VERCEL_GIT_COMMIT_REF || '', commit: String(process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) },
-    version: getVersionInfo().version,
+    version: getVersionInfo().version, googleLogin: googleClientIds().length > 0,
     photoStorage: drive.storageMode(), driveBridge: drive.storageMode() === 'neon' || drive.bridgeConfigured(), aiGateway: ai.aiConfigured(), time: new Date().toISOString(),
   };
 };
@@ -362,6 +363,61 @@ actions.login = async (data) => {
   return { status: 'success', token: auth.signToken(u), user: publicUser(u), expiresInSec: auth.TOKEN_TTL_SEC };
 };
 
+// ---------- เข้าสู่ระบบด้วยบัญชี Google ----------
+// ตั้งค่า env GOOGLE_CLIENT_ID = Web client ID (OAuth) จาก Google Cloud (ใส่หลายค่าคั่นด้วย , ได้ — ค่าแรกใช้กับปุ่มบนเว็บ/แอป)
+const googleClientIds = () => String(process.env.GOOGLE_CLIENT_ID || '').split(',').map((x) => x.trim()).filter(Boolean);
+
+/** ตรวจ ID token ของ Google กับเซิร์ฟเวอร์ Google → { email, name, sub } */
+async function verifyGoogleIdToken(idToken) {
+  const ids = googleClientIds();
+  if (!ids.length) throw new HttpError(503, 'ระบบยังไม่ได้ตั้งค่าการเข้าสู่ระบบด้วย Google (GOOGLE_CLIENT_ID)', 'NO_GOOGLE_CLIENT');
+  const tok = str(idToken).trim();
+  if (!tok || tok.length > 4096) throw new HttpError(400, 'ไม่พบข้อมูลยืนยันตัวตนจาก Google');
+  let info;
+  try {
+    const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(tok), { signal: AbortSignal.timeout(8000) });
+    info = await r.json();
+    if (!r.ok) throw new Error(info && (info.error_description || info.error) || ('HTTP ' + r.status));
+  } catch (e) {
+    throw new HttpError(401, 'ยืนยันตัวตนกับ Google ไม่สำเร็จ: ' + (e.message || e), 'GOOGLE_TOKEN_INVALID');
+  }
+  if (!ids.includes(info.aud)) throw new HttpError(401, 'ข้อมูลยืนยันตัวตนไม่ได้ออกให้แอปนี้', 'GOOGLE_BAD_AUDIENCE');
+  if (!['accounts.google.com', 'https://accounts.google.com'].includes(info.iss)) throw new HttpError(401, 'ผู้ออกข้อมูลยืนยันตัวตนไม่ถูกต้อง', 'GOOGLE_BAD_ISSUER');
+  if (Number(info.exp || 0) * 1000 < Date.now()) throw new HttpError(401, 'ข้อมูลยืนยันตัวตนหมดอายุ กรุณาลองใหม่', 'GOOGLE_EXPIRED');
+  if (String(info.email_verified) !== 'true') throw new HttpError(401, 'อีเมล Google นี้ยังไม่ได้ยืนยัน', 'GOOGLE_EMAIL_UNVERIFIED');
+  return { email: lower(info.email), name: str(info.name), sub: str(info.sub) };
+}
+
+actions.public_config = async () => ({ status: 'success', googleClientId: googleClientIds()[0] || '' });
+
+actions.google_login = async (data) => {
+  const g = await verifyGoogleIdToken(data.idToken || data.credential);
+  const { rows } = await db.query('SELECT * FROM app_users WHERE lower(google_email) = $1', [g.email]);
+  const u = rows[0];
+  if (!u) {
+    await logActivity(g.email, '', 'LOGIN_FAILED', 'บัญชี Google ยังไม่ได้ผูกกับผู้ใช้');
+    throw new HttpError(401, `บัญชี Google ${g.email} ยังไม่ได้ผูกกับผู้ใช้ในระบบ — เข้าสู่ระบบด้วยชื่อผู้ใช้/รหัสผ่านแล้วกด "เชื่อมบัญชี Google" หรือให้ผู้ดูแลระบบใส่อีเมลนี้ในข้อมูลผู้ใช้`, 'GOOGLE_NOT_LINKED');
+  }
+  if (u.disabled) throw new HttpError(403, 'บัญชีผู้ใช้นี้ถูกระงับ', 'DISABLED');
+  await logActivity(u.username, u.role, 'LOGIN', `เข้าสู่ระบบด้วย Google ${g.email} (${str(data.deviceMode) || '-'})`);
+  return { status: 'success', token: auth.signToken(u), user: publicUser(u), expiresInSec: auth.TOKEN_TTL_SEC };
+};
+
+actions.link_google = async (data, ctx) => {
+  const me = requireUser(ctx);
+  if (data.unlink) {
+    await db.query("UPDATE app_users SET google_email = '', updated_at = NOW() WHERE username = $1", [me.username]);
+    await logActivity(me.username, me.role, 'GOOGLE_UNLINKED', 'ยกเลิกเชื่อมบัญชี Google');
+    return { status: 'success', googleEmail: '' };
+  }
+  const g = await verifyGoogleIdToken(data.idToken || data.credential);
+  const { rows: dup } = await db.query('SELECT username FROM app_users WHERE lower(google_email) = $1 AND username <> $2', [g.email, me.username]);
+  if (dup[0]) throw new HttpError(409, `บัญชี Google ${g.email} ผูกกับผู้ใช้ @${dup[0].username} อยู่แล้ว`);
+  await db.query('UPDATE app_users SET google_email = $1, updated_at = NOW() WHERE username = $2', [g.email, me.username]);
+  await logActivity(me.username, me.role, 'GOOGLE_LINKED', `เชื่อมบัญชี Google ${g.email}`);
+  return { status: 'success', googleEmail: g.email };
+};
+
 actions.me = async (data, ctx) => ({ status: 'success', user: publicUser(requireUser(ctx)) });
 
 actions.logout = async (data, ctx) => {
@@ -401,6 +457,12 @@ async function saveUser(data, ctx) {
   const firstName = data.firstName !== undefined ? str(data.firstName).trim().slice(0, 80) : undefined;
   const lastName = data.lastName !== undefined ? str(data.lastName).trim().slice(0, 80) : undefined;
   const position = data.position !== undefined ? str(data.position).trim().slice(0, 160) : undefined;
+  let googleEmail = data.googleEmail !== undefined ? lower(data.googleEmail).slice(0, 200) : undefined;
+  if (googleEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(googleEmail)) throw new HttpError(400, 'รูปแบบอีเมล Google ไม่ถูกต้อง');
+  if (googleEmail) {
+    const { rows: dup } = await db.query('SELECT username FROM app_users WHERE lower(google_email) = $1 AND username <> $2', [googleEmail, target]);
+    if (dup[0]) throw new HttpError(409, `อีเมล ${googleEmail} ผูกกับผู้ใช้ @${dup[0].username} อยู่แล้ว`);
+  }
   // ชื่อแสดง: ถ้าไม่ระบุแต่มีชื่อ-นามสกุล → ประกอบให้
   const composed = firstName ? `${title || ''}${firstName} ${lastName || ''}`.trim() : '';
   const name = str(data.name).trim() || composed || null;
@@ -417,9 +479,9 @@ async function saveUser(data, ctx) {
     const p = isAdmin ? (prov || 'อุดรธานี') : (me.assigned_province || 'อุดรธานี');
     const c = isAdmin ? (cat || 'ศาลจังหวัด') : (me.court_category || 'ศาลจังหวัด');
     const ct = isAdmin ? courtNameFor(c, p, court) : myCourt;
-    await db.query(`INSERT INTO app_users (username, password_hash, role, name, court_category, assigned_court, assigned_province, must_change_password, created_at_text, title, first_name, last_name, position)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,$8,$9,$10,$11,$12)`,
-      [target, auth.hashPassword(newPassword), role, name || target, c, ct, p, str(data.createdAt) || thaiDateTimeNow().slice(0, 10), title || '', firstName || '', lastName || '', position || '']);
+    await db.query(`INSERT INTO app_users (username, password_hash, role, name, court_category, assigned_court, assigned_province, must_change_password, created_at_text, title, first_name, last_name, position, google_email)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,$8,$9,$10,$11,$12,$13)`,
+      [target, auth.hashPassword(newPassword), role, name || target, c, ct, p, str(data.createdAt) || thaiDateTimeNow().slice(0, 10), title || '', firstName || '', lastName || '', position || '', googleEmail || '']);
     await logActivity(me.username, me.role, 'USER_CREATED', `เพิ่มผู้ใช้ @${target} (${role}, ${ct})`);
     return { status: 'success', message: `เพิ่มผู้ใช้ @${target} สำเร็จ`, created: true };
   }
@@ -432,6 +494,7 @@ async function saveUser(data, ctx) {
   if (firstName !== undefined) add('first_name', firstName);
   if (lastName !== undefined) add('last_name', lastName);
   if (position !== undefined) add('position', position);
+  if (googleEmail !== undefined && (isAdmin || isSelf || advisorCanManage(existing))) add('google_email', googleEmail);
   if (isAdmin || isSelf) {
     if (cat) add('court_category', cat);
     if (court) add('assigned_court', court);
@@ -1046,7 +1109,7 @@ actions.ai_extract_dispatch = async (data, ctx) => {
 // ------------------------------------------------------------------
 // handler
 // ------------------------------------------------------------------
-const PUBLIC_ACTIONS = new Set(['health', 'get_version', 'login', 'log_error', 'logout']);
+const PUBLIC_ACTIONS = new Set(['health', 'get_version', 'login', 'log_error', 'logout', 'public_config', 'google_login']);
 
 module.exports = async function handler(req, res) {
   setCors(req, res);
@@ -1069,7 +1132,7 @@ module.exports = async function handler(req, res) {
     ctx.action = action;
     const fn = Object.prototype.hasOwnProperty.call(actions, action) ? actions[action] : null;
     if (!fn) throw new HttpError(400, `ไม่รู้จักคำสั่ง (action): ${action || '-'}`, 'UNKNOWN_ACTION');
-    if (req.method === 'GET' && !['health', 'get_version', 'get_data', 'get_summons', 'get_users', 'get_user_route', 'get_pending_handoff',
+    if (req.method === 'GET' && !['health', 'get_version', 'public_config', 'get_data', 'get_summons', 'get_users', 'get_user_route', 'get_pending_handoff',
       'get_latest_handoff', 'data_version', 'ip_locate', 'search_place', 'geocode', 'get_share_code', 'list_share_codes', 'list_errors', 'get_activity_logs', 'me', 'sync_all_users', 'sync_users_structure'].includes(action)) {
       throw new HttpError(405, 'คำสั่งนี้ต้องใช้ POST');
     }

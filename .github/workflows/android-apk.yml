@@ -12,6 +12,10 @@ on:
         description: 'ส่งไฟล์ APK ขึ้น branch apk-builds ด้วย (สำหรับดึงไปลงนามนอก CI)'
         type: boolean
         default: false
+      build_aab:
+        description: 'สร้างไฟล์ AAB สำหรับอัปโหลดขึ้น Google Play ด้วย'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -67,7 +71,11 @@ jobs:
           SLTS_KEY_PASSWORD: ${{ secrets.SLTS_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleRelease
+          if [ "${{ inputs.build_aab }}" = "true" ]; then
+            ./gradlew --no-daemon assembleRelease bundleRelease
+          else
+            ./gradlew --no-daemon assembleRelease
+          fi
 
       - name: Collect APK
         run: |
@@ -82,6 +90,8 @@ jobs:
             BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
             mkdir -p out/tools && cp "$BT/lib/apksigner.jar" "$BT/zipalign" out/tools/ && cp -r "$BT/lib64" out/tools/ 2>/dev/null || true
           fi
+          AAB=$(ls android/app/build/outputs/bundle/release/*.aab 2>/dev/null | head -1 || true)
+          if [ -n "$AAB" ]; then cp "$AAB" "out/SLTS-v${VER}.aab"; fi
           ls -laR out
 
       - uses: actions/upload-artifact@v4

@@ -405,7 +405,13 @@
       const devName = String(rec.fileName || 'photo.jpg').replace(/\.jpg$/i, '') +
         `_${stamp.getFullYear()}${p(stamp.getMonth() + 1)}${p(stamp.getDate())}-${p(stamp.getHours())}${p(stamp.getMinutes())}${p(stamp.getSeconds())}.jpg`;
       const plugins = (window.Capacitor && window.Capacitor.Plugins) || {};
-      if (SLTS.isNative && plugins.Filesystem) {
+      let savedUri = '';
+      if (SLTS.isNative && plugins.SltsNative) {
+        // แอป Android: บันทึกลงคลังภาพของโทรศัพท์ (Pictures/SLTS) — เปิดดูได้จากแอปแกลเลอรี
+        const b64 = (await blobToDataUrl(rec.blob)).split(',')[1];
+        const r = await plugins.SltsNative.saveImage({ base64: b64, fileName: devName });
+        savedUri = (r && r.uri) || 'saved';
+      } else if (SLTS.isNative && plugins.Filesystem) {
         const b64 = (await blobToDataUrl(rec.blob)).split(',')[1];
         await plugins.Filesystem.writeFile({ path: 'SLTS/' + devName, data: b64, directory: 'DOCUMENTS', recursive: true });
       } else if (force && navigator.canShare && SLTS.platform === 'ios-web') {
@@ -418,8 +424,8 @@
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 10000);
       }
-      await SLTS.vault.setStatus(id, rec.status, { savedToDevice: true });
-      return true;
+      await SLTS.vault.setStatus(id, rec.status, { savedToDevice: true, galleryUri: savedUri || undefined });
+      return savedUri || true;
     },
     /**
      * กู้คืนงานที่ภาพยังอยู่ในคลังแต่หายจากคิว (เช่น ปิดแอปตอนกำลังบันทึกคิว)
