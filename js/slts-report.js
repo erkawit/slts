@@ -1005,7 +1005,8 @@
     for (const pid of r.photo_ids || []) { const im = await photoBytes(pid); if (im) imgs.push(im); }
     for (const f of extraFiles || []) imgs.push(await normalizeImage(f));
     const data = L.buildDocData(Object.assign({}, it, r, { kind: it.kind }), { arabic: arabicDocs() });
-    return { blob: await DOCX.fillReportDocx(tpl, data, imgs), fileName: L.docFileName(Object.assign({}, it, r)) };
+    const selPh = (r.photo_ids || []).map((pid) => sheetRows().map(photoFromRow).find((x) => x && x.id === pid)).find(Boolean) || photosForIssued(it)[0];
+    return { blob: await DOCX.fillReportDocx(tpl, data, imgs), fileName: L.docFileName(Object.assign({}, it, r), selPh && selPh.caseNo) };
   }
   async function generateWord(it, r, extraFiles) {
     busy('กำลังสร้างไฟล์ Word...');
@@ -1033,7 +1034,7 @@
       for (let i = 0; i < list.length; i++) {
         Swal.update({ title: `กำลังสร้างไฟล์ Word (${i + 1}/${list.length})...` }); Swal.showLoading();
         const { blob, fileName } = await buildWord(list[i], defaultsFor(list[i]));
-        let n = `${String(list[i].seq || i + 1).padStart(2, '0')}_${fileName}`; while (names.has(n)) n = n.replace('.docx', '_1.docx'); names.add(n);
+        let n = fileName; let k = 2; while (names.has(n)) n = fileName.replace(/\.docx$/, `(${k++}).docx`); names.add(n);
         zip.file(n, blob);
       }
       const out = await zip.generateAsync({ type: 'blob' });

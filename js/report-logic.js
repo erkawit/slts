@@ -750,10 +750,26 @@
   }
 
   /** ชื่อไฟล์ Word ที่ดาวน์โหลด */
-  function docFileName(r) {
-    const no = (r.kind === 'T' ? r.t_no : r.black_no) || 'หมาย';
-    const who = String(r.recipient || '').replace(/\s+/g, ' ').split(' ').slice(0, 2).join('_');
-    return `รายงานผลหมาย_${no}_${who}`.replace(/[\\/:*?"<>|]+/g, '-') + '.docx';
+  /**
+   * ชื่อไฟล์ Word = เลขคดีเท่านั้น เช่น ผบE2749/2568 → ผบE2749-2568.docx
+   * ข้อมูลต่อท้ายเลขคดี (ล.1, โจทก์, ผู้เสียหาย, จำเลยที่ 1 ...) ต่อด้วยขีดล่าง → ผบE2749-2568_ล.1.docx
+   * @param r  รายงาน/หมาย (black_no, t_no, kind)
+   * @param alt  เลขคดีจากรายการส่งหมาย (ภาพ) ใช้หาข้อมูลต่อท้ายเมื่อเลขคดีในบัญชีไม่มี
+   */
+  function docFileName(r, alt) {
+    const raw = String(((r.kind === 'T' ? r.t_no : r.black_no) || r.black_no || '')).replace(/\s+/g, ' ').trim();
+    const split = (v) => {
+      const m = String(v || '').replace(/\s+/g, ' ').trim().match(/^(.*?\d+\s*\/\s*\d{2,4})\s*(.*)$/);
+      return m ? { main: m[1].replace(/\s+/g, ''), rest: m[2].trim() } : { main: String(v || '').replace(/\s+/g, ''), rest: '' };
+    };
+    const a = split(raw);
+    let rest = a.rest;
+    if (!rest && alt) { const b = split(alt); if (b.main && b.main.replace(/\D+/g, '') === a.main.replace(/\D+/g, '')) rest = b.rest; }
+    const main = (a.main || 'หมาย').replace(/\//g, '-');
+    const tail = rest
+      ? rest.replace(/[()\[\],]+/g, ' ').trim().split(/\s+/).reduce((acc, t) => { if (acc.length && /^\d+(?:-\d+)?$/.test(t)) acc[acc.length - 1] += t; else acc.push(t); return acc; }, []).join('_')
+      : '';
+    return (main + (tail ? '_' + tail : '')).replace(/[\\/:*?"<>|]+/g, '-') + '.docx';
   }
 
   // ------------------------------------------------------------------
