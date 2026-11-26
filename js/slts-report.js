@@ -679,7 +679,8 @@
   function viewPhoto(id) {
     const p = sheetRows().map(photoFromRow).find((x) => x && x.id === id);
     if (p && p.noPhoto) return Swal.fire({ icon: 'info', title: 'ไม่มีภาพถ่าย', html: `<b>${esc(p.caseNo)}</b><br>${esc(p.reason)}<br><span class="sr-muted">${esc(p.loc)} · ${esc(p.at)}</span>` });
-    if (p && typeof window.viewPhotoModal === 'function') window.viewPhotoModal(p.url, p.caseNo, p.loc, p.at, p.lat, p.lng);
+    const m = p && R.issued && R.issued.length ? issuedForPhoto(p) : [];
+    if (p && typeof window.viewPhotoModal === 'function') window.viewPhotoModal(p.url, p.caseNo, m.length === 1 ? photoPlaceText(p, m[0]) : p.loc, p.at, p.lat, p.lng);
     else window.open(window.sltsImgUrl(id, 1600), '_blank');
   }
 
@@ -865,9 +866,10 @@
     const fileOpts = L.FILE_TYPES.map(([k, t]) => `<option value="${k}" ${v.file_type === k ? 'selected' : ''}>${esc(t)}</option>`).join('');
     const sendOpts = L.SEND_METHODS.map((t) => `<option ${v.send_method === t ? 'selected' : ''}>${esc(t)}</option>`).join('');
     const postOpts = L.POSTING_CHOICES.map(([k, t]) => `<label style="display:flex;gap:6px;align-items:flex-start;margin:3px 0"><input type="radio" name="rf_posting" value="${k}" ${String(v.posting_choice) === k ? 'checked' : ''}> <span>${esc(t)}</span></label>`).join('');
-    const photoHtml = photos.length ? photos.map((p) => `<label class="sr-photo"><input type="checkbox" data-photo="${esc(p.id)}" ${(v.photo_ids || []).includes(p.id) ? 'checked' : ''}>
-        <img src="${esc(p.thumb)}" referrerpolicy="no-referrer" alt="" data-zoom="${esc(p.id)}"><div class="cap">${esc(p.caseNo)}<br>${esc(p.at)}<br>${esc(p.loc).slice(0, 60)}</div></label>`).join('')
-      : '<div class="sr-muted">ไม่พบภาพที่อัปโหลดจากมือถือสำหรับหมายนี้ (เลือกไฟล์ภาพเพิ่มได้ด้านล่าง หรือรายงานโดยไม่มีภาพ)</div>';
+    const photosHtml = (list, sel) => (list.length ? list.map((p) => `<label class="sr-photo"><input type="checkbox" data-photo="${esc(p.id)}" ${(sel || []).includes(p.id) ? 'checked' : ''}>
+        <img src="${esc(p.thumb)}" referrerpolicy="no-referrer" alt="" data-zoom="${esc(p.id)}"><div class="cap">${esc(p.caseNo)}<br>${esc(p.at)}<br>${esc(photoPlaceText(p, it)).slice(0, 70)}</div></label>`).join('')
+      : '<div class="sr-muted">ไม่พบภาพส่งหมายของหมายนี้ — กด <b>แนบภาพส่งหมาย</b> เพื่ออัปโหลดเข้าระบบ หรือเลือกไฟล์ภาพเพิ่มเติมด้านล่าง</div>');
+    const photoHtml = photosHtml(photos, v.photo_ids);
     const courts = LS.get('sr_origin_courts', []);
 
     const wrap = document.createElement('div');
@@ -878,7 +880,7 @@
       <div class="sr-dialog-body">
         <div class="sr-section" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:10px 14px">
           <div style="font-size:15px"><b><i class="fa-solid fa-location-dot" style="color:#e11d48"></i> ที่ตั้งส่งหมาย:</b> ${esc(issuedAddr(it))}${it.recipient ? ` <span class="sr-muted">· ${esc(it.recipient)}</span>` : ''}</div>
-          ${photos.length ? `<div class="sr-muted" style="margin-top:4px"><i class="fa-solid fa-camera"></i> ที่ตั้งจากภาพส่งหมาย: ${photos.slice(0, 3).map((p) => `${p.noPhoto ? esc(p.reason) : esc(p.loc || '-')}${p.lat && p.lng ? ` <a href="https://www.google.com/maps?q=${encodeURIComponent(p.lat + ',' + p.lng)}" target="_blank" rel="noopener">แผนที่</a>` : ''} <span style="opacity:.7">(${esc(p.at)})</span>`).join(' · ')}</div>` : '<div class="sr-muted" style="margin-top:4px">ยังไม่มีภาพส่งหมายของหมายนี้</div>'}
+          ${photos.length ? `<div class="sr-muted" style="margin-top:4px">ที่ตั้งจากภาพส่งหมาย <span style="font-size:12px">(ตำบล/อำเภอตามบัญชีจ่ายหมาย)</span>: ${photos.slice(0, 3).map((p) => `<div>${photoPlaceHtml(p, it)} <span style="opacity:.7">(${esc(p.at)})</span></div>`).join('')}</div>` : '<div class="sr-muted" style="margin-top:4px">ยังไม่มีภาพส่งหมายของหมายนี้</div>'}
         </div>
         <div class="sr-section"><h4>บันทึกผลการส่งหมาย</h4>
           <div class="sr-grid sr-g4">
@@ -954,7 +956,7 @@
             ${inp('letter_date', 'ลงวันที่', { type: 'date' })}
             ${inp('ref_no', 'อ้างถึง (เลขที่หนังสือของศาลต้นทาง)', { cls: 'sr-span2' })}
           </div></div>` : ''}
-        <div class="sr-section"><h4>เอกสาร / ภาพการส่งหมาย (แนบท้ายไฟล์ Word)</h4>
+        <div class="sr-section"><h4 style="display:flex;align-items:center;gap:8px">เอกสาร / ภาพการส่งหมาย (แนบท้ายไฟล์ Word)<span class="grow" style="flex:1"></span><button class="sr-btn sm primary" type="button" data-act="attach" title="อัปโหลดภาพส่งหมายเข้าระบบ (ตรวจลายน้ำ/พิกัดให้)"><i class="fa-solid fa-camera"></i> แนบภาพส่งหมาย</button></h4>
           <div class="sr-photos" id="rf_photos">${photoHtml}</div>
           <div class="sr-grid sr-g3" style="margin-top:10px">
             ${[1, 2, 3].map((n) => `<div class="sr-field"><label>ชื่อเอกสาร / ภาพเพิ่มเติม ${n}</label><input class="sr-input" type="file" accept="image/jpeg,image/png,image/webp" data-extra="${n}"></div>`).join('')}
@@ -1134,6 +1136,17 @@
         return;
       }
       const act = e.target.closest('[data-act]'); if (!act) return;
+      if (act.dataset.act === 'attach') {
+        const got = await attachPhoto(it); if (!got) return;
+        const sel = $$('input[data-photo]:checked', wrap).map((x) => x.dataset.photo);
+        if (got.photoId) sel.unshift(got.photoId);
+        const list = photosForIssued(it);
+        sel.forEach((pid) => { if (!list.some((p) => p.id === pid)) { const p = sheetRows().map(photoFromRow).find((x) => x && x.id === pid); if (p) list.push(p); } });
+        wrap.querySelector('#rf_photos').innerHTML = photosHtml(list, sel);
+        const np = got.photoId && list.find((p) => p.id === got.photoId);
+        if (np && np.time) setServe(new Date(np.time), 'จากภาพส่งหมายที่แนบ');
+        return;
+      }
       const r = collect();
       if (act.dataset.act === 'clear') {
         const ok = await Swal.fire({ icon: 'question', title: 'ล้างข้อมูลที่กรอก?', text: 'กลับไปใช้ค่าเริ่มต้นจากบัญชีจ่ายหมาย', showCancelButton: true, confirmButtonText: 'ล้าง', cancelButtonText: 'ยกเลิก' });
@@ -1433,7 +1446,7 @@
     const upRows = D.uploads.map((p, i) => {
       const m = D.issued.filter((it) => (D.photoMap.get(it.id) || []).some((x) => x.id === p.id));
       return `<tr><td>${i + 1}</td><td><img class="sr-thumb" src="${esc(p.thumb)}" data-view="${esc(p.id)}" referrerpolicy="no-referrer" loading="lazy" alt=""></td>
-        <td><b>${esc(p.caseNo || '-')}</b></td><td>${esc(p.loc)}</td><td style="white-space:nowrap">${esc(p.at)}</td>
+        <td><b>${esc(p.caseNo || '-')}</b></td><td>${m.length === 1 ? photoPlaceHtml(p, m[0], { sync: true }) : esc(p.loc)}</td><td style="white-space:nowrap">${esc(p.at)}</td>
         <td>${!D.issued.length ? '<span class="sr-muted">รอตรวจกับบัญชี</span>' : m.length ? m.map((it) => `<span class="sr-chip ok">${esc(it.kind === 'T' ? it.t_no : it.black_no)}</span>`).join(' ') : '<span class="sr-chip warn">ไม่พบในบัญชีจ่ายหมาย</span>'}</td>
         <td class="ctr"><button class="sr-btn sm" data-fl-dl="${esc(p.id)}" title="ดาวน์โหลดภาพ"><i class="fa-solid fa-download"></i></button></td></tr>`;
     }).join('');
@@ -1454,7 +1467,7 @@
     const chk = (label, n, cls, key) => `<div class="sr-flow-stat ${cls}" ${key ? `data-fl-show="${key}"` : ''}><b>${n}</b><span>${label}</span></div>`;
     const gapRows = (list, kind) => list.map((x) => kind === 'nophoto'
       ? `<tr><td><b>${esc(x.kind === 'T' ? x.t_no : x.black_no)}</b>${x.kind === 'T' ? ' <span class="sr-chip">หมาย ต.</span>' : ''}</td><td>${esc(x.summon_type)}</td><td>${esc(x.recipient)}</td><td>${esc(x.address_raw)} ต.${esc(x.subdistrict)} อ.${esc(x.district)}</td>
-        <td class="ctr"><button class="sr-btn sm" data-fl-nophoto="${x.id}" title="บันทึกรายการส่งหมายโดยไม่มีภาพถ่าย เพื่อให้รายงานหมายได้"><i class="fa-solid fa-signature"></i> บันทึกโดยไม่มีภาพ</button></td></tr>`
+        <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm" data-fl-attach="${x.id}" title="แนบภาพส่งหมาย"><i class="fa-solid fa-camera"></i> แนบรูป</button> <button class="sr-btn sm" data-fl-nophoto="${x.id}" title="บันทึกรายการส่งหมายโดยไม่มีภาพถ่าย เพื่อให้รายงานหมายได้"><i class="fa-solid fa-signature"></i> บันทึกโดยไม่มีภาพ</button></td></tr>`
       : `<tr><td><b>${esc(x.caseNo || '-')}</b></td><td colspan="2">${esc(x.loc)}</td><td>${esc(x.at)}</td></tr>`).join('');
     const s3 = `<div class="sr-card sr-step ${s3state === 'lock' ? 'locked' : ''}">${stepHead(3, 'นำเข้าบัญชีจ่ายหมาย (Excel) เพื่อตรวจความถูกต้องครบถ้วน', s3state, 'ไฟล์ "บัญชีจ่ายหมาย พนักงานศาลนี้ส่ง" จากระบบงานศาล (เลือกบัญชีใบเสร็จมาพร้อมกันได้) — นำเข้าทุกครั้งก่อนรายงาน')}
       ${s3state === 'lock' ? '<div class="sr-muted">ต้องมีภาพส่งหมายในโซนนี้ก่อน</div>' : `<div class="sr-toolbar">
@@ -1499,9 +1512,10 @@
       return `<tr><td>${esc(it.seq || '')}</td><td><b>${esc(it.kind === 'T' ? it.t_no : it.black_no)}</b>${it.kind === 'T' ? '<div class="sr-muted">หมาย ต.</div>' : ''}</td><td>${esc(it.summon_type)}</td><td>${esc(it.recipient)}</td>
         <td style="min-width:220px;max-width:340px">${locCell(it, ph)}</td>
         <td>${claimCell(it)}</td>
-        <td>${ph.length ? `<img class="sr-thumb" src="${esc(ph[0].thumb)}" data-view="${esc(ph[0].id)}" referrerpolicy="no-referrer" loading="lazy" alt="">${ph.length > 1 ? ` <span class="sr-muted">+${ph.length - 1}</span>` : ''}` : '<span class="sr-muted">ไม่มีภาพ</span>'}</td>
+        <td>${ph.length ? `<img class="sr-thumb" src="${esc(ph[0].thumb)}" data-view="${esc(ph[0].id)}" referrerpolicy="no-referrer" loading="lazy" alt="">${ph.length > 1 ? ` <span class="sr-muted">+${ph.length - 1}</span>` : ''}` : `<button class="sr-btn sm" data-fl-attach="${it.id}" title="แนบภาพส่งหมาย / บันทึกหมายเซ็นรับ"><i class="fa-solid fa-camera"></i> แนบรูป</button>`}</td>
         <td>${st}</td>
-        <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm primary" data-fl-rep="${it.id}"><i class="fa-solid fa-file-pen"></i> รายงานหมาย</button>
+        <td class="ctr" style="white-space:nowrap"><button class="sr-btn sm" data-fl-attach="${it.id}" title="แนบภาพส่งหมาย (ตรวจลายน้ำ/พิกัดให้) หรือบันทึกหมายที่ผู้รับเซ็นรับเอง"><i class="fa-solid fa-camera"></i> แนบรูป</button>
+          <button class="sr-btn sm primary" data-fl-rep="${it.id}"><i class="fa-solid fa-file-pen"></i> รายงานหมาย</button>
           ${it.report ? `<button class="sr-btn sm" data-fl-word="${it.id}" title="ดาวน์โหลด Word"><i class="fa-solid fa-file-word"></i></button>` : ''}</td></tr>`;
     }).join('');
     const pct = D.issued.length ? Math.round((D.reported.length / D.issued.length) * 100) : 0;
@@ -1528,9 +1542,8 @@
    */
   async function recordNoPhoto(it) {
     if (!it) return false;
-    const caseNo = it.kind === 'T' && it.t_no ? it.t_no : it.black_no;
-    const prov = String(it.province || defaultProvince()).replace(/^จ(\.|ังหวัด)\s*/, '');
-    const loc = [it.address_raw, it.subdistrict && !String(it.address_raw || '').includes('ต.' + it.subdistrict) ? 'ต.' + it.subdistrict : '', it.district && !String(it.address_raw || '').includes('อ.' + it.district) ? 'อ.' + it.district : '', 'จ.' + prov].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    const caseNo = caseNoOf(it);
+    const loc = issuedLocText(it);
     const today = L.dIso(new Date());
     const res = await Swal.fire({
       title: 'บันทึกส่งหมายโดยไม่มีภาพถ่าย',
@@ -1556,21 +1569,177 @@
       },
     });
     if (!res.isConfirmed) return false;
-    const d = L.parseIso(res.value.date); const now = new Date();
-    if (res.value.date !== today) d.setHours(12, 0, 0, 0); else d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), 0);
-    const dateTime = (window.WatermarkEngine && window.WatermarkEngine.formatThaiDateTime) ? window.WatermarkEngine.formatThaiDateTime(d) : d.toLocaleString('th-TH');
+    return saveNoPhoto(it, res.value.reason, res.value.date);
+  }
+  /** วันที่ (yyyy-mm-dd) → ข้อความวันเวลาแบบไทยของระบบ (วันนี้ = เวลาปัจจุบัน, วันอื่น = 12:00) */
+  function thaiStamp(d) {
+    return (window.WatermarkEngine && window.WatermarkEngine.formatThaiDateTime) ? window.WatermarkEngine.formatThaiDateTime(d) : d.toLocaleString('th-TH');
+  }
+  /** ข้อมูลที่ตั้งสำหรับบันทึกเข้าระบบ — ตำบล/อำเภอ/จังหวัด ตามบัญชีจ่ายหมายเสมอ */
+  function issuedPlace(it) {
     const u = currentUser() || {};
+    return {
+      caseNumber: caseNoOf(it), courtType: u.assignedCourt || u['ศาลที่สังกัด'] || '', province: issuedProvince(it),
+      district: it.district || '', subdistrict: it.subdistrict || '', locationType: 'หมายบ้าน', locationText: issuedLocText(it),
+    };
+  }
+  async function saveNoPhoto(it, reason, dateIso) {
+    const today = L.dIso(new Date());
+    const d = L.parseIso(dateIso || today); const now = new Date();
+    if ((dateIso || today) !== today) d.setHours(12, 0, 0, 0); else d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), 0);
     busy('กำลังบันทึกรายการ...');
     try {
-      await SLTS.api('upload_image', {
-        caseNumber: caseNo, courtType: u.assignedCourt || u['ศาลที่สังกัด'] || '', province: prov, district: it.district || '', subdistrict: it.subdistrict || '',
-        locationType: 'หมายบ้าน', locationText: loc, dateTime, noPhoto: true, noPhotoReason: res.value.reason,
-        clientUploadId: 'nophoto-' + it.id + '-' + Date.now(),
-      });
+      await SLTS.api('upload_image', Object.assign(issuedPlace(it), {
+        dateTime: thaiStamp(d), noPhoto: true, noPhotoReason: reason, clientUploadId: 'nophoto-' + it.id + '-' + Date.now(),
+      }));
       try { if (typeof window.loadGoogleSheetData === 'function') await window.loadGoogleSheetData(true, true); } catch (_) {}
-      done(); toast('success', `บันทึก ${caseNo} (ไม่มีภาพถ่าย) แล้ว`);
+      done(); toast('success', `บันทึก ${caseNoOf(it)} (ไม่มีภาพถ่าย) แล้ว`);
       return true;
     } catch (e) { done(); fail(e); return false; }
+  }
+
+  /**
+   * แนบภาพส่งหมายจากหน้ารายงานหมาย (ไม่ต้องกรอกข้อมูล — ใช้ข้อมูลจากบัญชีจ่ายหมาย)
+   * - ตรวจลายน้ำพิกัดบนภาพ (OCR) → มีแล้วไม่ประทับซ้ำ / ไม่มีจะประทับลายน้ำให้ (ถ้ามีพิกัด)
+   * - พิกัดจากลายน้ำ → EXIF GPS → พิมพ์เอง ; วันที่ส่งหมายจากภาพ
+   * - หรือเลือก "ไม่มีภาพถ่าย — ผู้รับเซ็นรับหมายเอง"
+   * คืน { photoId } เมื่อบันทึกสำเร็จ, null เมื่อยกเลิก
+   */
+  async function attachPhoto(it) {
+    if (!it) return null;
+    const caseNo = caseNoOf(it);
+    const existingNo = photosForIssued(it).find((p) => p.noPhoto && p.rowId);
+    const nowLocal = toLocalInput(new Date());
+    const st = { file: null, dataUrl: '', wm: null, token: 0 };
+    const res = await Swal.fire({
+      title: '<i class="fa-solid fa-camera"></i> แนบภาพส่งหมาย',
+      width: 640,
+      html: `<div style="text-align:left;font-size:14px;line-height:1.6">
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:8px 12px">
+          <div><b>${esc(caseNo)}</b>${it.kind === 'T' ? ' <span class="sr-chip">หมาย ต.</span>' : ''} · ${esc(it.summon_type || '')} · ${esc(it.recipient || '')}</div>
+          <div><i class="fa-solid fa-location-dot" style="color:#e11d48"></i> ${esc(issuedLocText(it))}</div>
+          <div class="sr-muted" style="font-size:12px">ข้อมูลคดีและที่ตั้งใช้ตามบัญชีจ่ายหมาย — ไม่ต้องกรอก</div>
+        </div>
+        <div class="sr-radio" style="margin:10px 0 6px;display:flex;gap:14px;flex-wrap:wrap">
+          <label><input type="radio" name="apMode" value="photo" checked> <b>แนบภาพถ่ายส่งหมาย</b></label>
+          <label><input type="radio" name="apMode" value="nophoto"> <b>ไม่มีภาพถ่าย — ผู้รับเซ็นรับหมายเอง</b></label>
+        </div>
+        <div id="apPhoto">
+          <input id="apFile" type="file" accept="image/jpeg,image/png,image/webp,image/heic" class="sr-input" style="width:100%">
+          <div id="apPrevWrap" style="display:none;margin-top:8px;background:#0f172a;border-radius:10px;text-align:center"><img id="apPrev" style="display:block;margin:0 auto;max-height:220px;max-width:100%;border-radius:8px" alt=""></div>
+          <div id="apStatus" class="sr-muted" style="margin-top:6px;font-size:13px">เลือกไฟล์ภาพ ระบบจะตรวจลายน้ำพิกัดและวันที่บนภาพให้</div>
+          <label style="display:flex;gap:6px;align-items:flex-start;margin-top:6px"><input type="checkbox" id="apWm" style="margin-top:4px">
+            <span><b>ภาพมีลายน้ำ/พิกัดบนภาพแล้ว</b> <span class="sr-muted">(ไม่ประทับลายน้ำซ้ำ — ถ้าไม่ติ๊ก ระบบจะประทับลายน้ำพิกัดให้)</span></span></label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+            <div><label style="font-weight:700;font-size:13px">พิกัดจุดส่งหมาย (lat, lng)</label>
+              <input id="apCoord" class="sr-input" style="width:100%" placeholder="เช่น 17.4144, 102.7881">
+              <div id="apMap" style="font-size:12px;margin-top:2px"></div></div>
+            <div><label style="font-weight:700;font-size:13px">วันเวลาส่งหมาย</label>
+              <input id="apDate" type="datetime-local" class="sr-input" style="width:100%" value="${nowLocal}" max="${nowLocal}">
+              <div id="apDateSrc" class="sr-muted" style="font-size:12px;margin-top:2px"></div></div>
+          </div>
+          ${existingNo ? `<div class="sr-note warn" style="margin-top:8px;font-size:12px"><i class="fa-solid fa-circle-info"></i> หมายนี้เคยบันทึกแบบไม่มีภาพถ่าย (${esc(existingNo.reason)}) — ภาพที่แนบจะแทนที่รายการนั้น</div>` : ''}
+        </div>
+        <div id="apNo" style="display:none">
+          <label style="display:block;font-weight:700">เหตุที่ไม่มีภาพ</label>
+          <select id="apReason" class="sr-select" style="width:100%;margin:4px 0">
+            <option>ผู้รับเซ็นรับหมายเอง (ไม่มีภาพถ่าย)</option><option>มารับหมายที่ศาล (ไม่มีภาพถ่าย)</option><option value="__other">อื่น ๆ (ระบุ)</option></select>
+          <input id="apOther" class="sr-input" placeholder="ระบุเหตุผล" style="display:none;width:100%;margin:4px 0">
+          <label style="display:block;margin-top:6px;font-weight:700">วันที่ส่งหมาย</label>
+          <input id="apNoDate" type="date" class="sr-input" value="${L.dIso(new Date())}" max="${L.dIso(new Date())}" style="width:100%">
+        </div></div>`,
+      showCancelButton: true, confirmButtonText: '<i class="fa-solid fa-cloud-arrow-up"></i> บันทึกเข้าระบบ', cancelButtonText: 'ยกเลิก', confirmButtonColor: '#1d4ed8',
+      didOpen: (pop) => {
+        const q = (id) => pop.querySelector('#' + id);
+        const mode = () => (pop.querySelector('input[name=apMode]:checked') || {}).value;
+        const syncMode = () => { const no = mode() === 'nophoto'; q('apPhoto').style.display = no ? 'none' : ''; q('apNo').style.display = no ? '' : 'none'; Swal.getConfirmButton().style.background = no ? '#7c3aed' : '#1d4ed8'; };
+        pop.querySelectorAll('input[name=apMode]').forEach((r) => { r.onchange = syncMode; });
+        q('apReason').onchange = () => { q('apOther').style.display = q('apReason').value === '__other' ? 'block' : 'none'; };
+        const showMap = () => { const c = parseCoord(q('apCoord').value); q('apMap').innerHTML = c ? `<a href="${mapsLink(c.lat, c.lng)}" target="_blank" rel="noopener"><i class="fa-solid fa-map-location-dot"></i> ดูตำแหน่งบนแผนที่</a>` : (q('apCoord').value.trim() ? '<span style="color:#b91c1c">รูปแบบพิกัดไม่ถูกต้อง</span>' : '<span class="sr-muted">ไม่มีพิกัด</span>'); };
+        q('apCoord').oninput = () => { q('apCoord').dataset.touched = '1'; showMap(); };
+        q('apDate').oninput = () => { q('apDate').dataset.touched = '1'; q('apDateSrc').textContent = '(แก้ไขเอง)'; };
+        showMap();
+        q('apFile').onchange = async () => {
+          const f = q('apFile').files && q('apFile').files[0]; if (!f) return;
+          const tk = ++st.token; st.file = f; st.wm = null;
+          try { st.dataUrl = await fileToDataUrl(f); } catch (_) { st.dataUrl = ''; }
+          if (tk !== st.token) return;
+          q('apPrev').src = st.dataUrl; q('apPrevWrap').style.display = st.dataUrl ? '' : 'none';
+          const geo = window.SLTS && SLTS.geo;
+          const setCoord = (c) => { if (c && !q('apCoord').dataset.touched) { q('apCoord').value = `${Number(c.lat).toFixed(6)}, ${Number(c.lng).toFixed(6)}`; showMap(); } };
+          q('apStatus').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังตรวจลายน้ำและวันที่บนภาพ…';
+          const exif = geo && geo.readExif ? await geo.readExif(f).catch(() => null) : null;
+          if (tk !== st.token) return;
+          setCoord(exif);
+          // วันที่ส่งหมาย (EXIF → ตัวอักษรบนภาพ → วันที่ไฟล์)
+          (geo && geo.readPhotoDate ? geo.readPhotoDate(f, st.dataUrl).catch(() => null) : Promise.resolve(null)).then((r) => {
+            if (tk !== st.token || q('apDate').dataset.touched) return;
+            if (r && r.date) { q('apDate').value = toLocalInput(r.date); q('apDateSrc').textContent = r.source === 'exif' ? '(จากข้อมูลภาพถ่าย)' : r.source === 'ocr' ? '(อ่านจากวันที่บนภาพ — โปรดตรวจสอบ)' : '(จากวันที่ของไฟล์ — โปรดตรวจสอบ)'; }
+            else q('apDateSrc').textContent = '(ไม่พบวันที่ในภาพ — แก้ไขได้)';
+          });
+          let wm = null;
+          try { wm = geo && geo.readWatermark ? await geo.readWatermark(st.dataUrl) : null; } catch (_) { wm = null; }
+          if (tk !== st.token) return;
+          st.wm = wm;
+          q('apWm').checked = Boolean(wm);
+          if (wm) { setCoord(wm); q('apStatus').innerHTML = `<span style="color:#166534;font-weight:700"><i class="fa-solid fa-circle-check"></i> ตรวจพบลายน้ำพิกัดบนภาพ</span> (${Number(wm.lat).toFixed(4)}, ${Number(wm.lng).toFixed(4)}) — จะใช้ภาพตามเดิม ไม่ประทับซ้ำ`; }
+          else if (exif) q('apStatus').innerHTML = '<span style="color:#1d4ed8;font-weight:700"><i class="fa-solid fa-location-crosshairs"></i> ไม่พบลายน้ำบนภาพ</span> — ใช้พิกัด GPS ในไฟล์ภาพ และระบบจะประทับลายน้ำให้';
+          else q('apStatus').innerHTML = '<span style="color:#b45309;font-weight:700"><i class="fa-solid fa-triangle-exclamation"></i> ไม่พบลายน้ำและพิกัดในภาพ</span> — ใส่พิกัดเองได้ (ถ้าไม่ใส่ ระบบจะบันทึกภาพตามเดิมโดยไม่มีพิกัด)';
+        };
+      },
+      preConfirm: () => {
+        const pop = Swal.getPopup(); const q = (id) => pop.querySelector('#' + id);
+        const mode = (pop.querySelector('input[name=apMode]:checked') || {}).value;
+        if (mode === 'nophoto') {
+          const r = q('apReason').value; const o = q('apOther').value.trim();
+          if (r === '__other' && !o) { Swal.showValidationMessage('กรุณาระบุเหตุผล'); return false; }
+          return { mode, reason: r === '__other' ? o : r, date: q('apNoDate').value };
+        }
+        if (!st.file || !st.dataUrl) { Swal.showValidationMessage('กรุณาเลือกไฟล์ภาพส่งหมาย'); return false; }
+        const raw = q('apCoord').value.trim(); const c = raw ? parseCoord(raw) : null;
+        if (raw && !c) { Swal.showValidationMessage('พิกัดไม่ถูกต้อง (ตัวอย่าง 17.4144, 102.7881)'); return false; }
+        const d = q('apDate').value ? new Date(q('apDate').value) : new Date();
+        if (isNaN(d) || d.getTime() > Date.now() + 864e5) { Swal.showValidationMessage('วันเวลาส่งหมายไม่ถูกต้อง'); return false; }
+        return { mode, coord: c, date: d, hasWm: q('apWm').checked };
+      },
+    });
+    if (!res.isConfirmed) return null;
+    const v = res.value;
+    if (v.mode === 'nophoto') return (await saveNoPhoto(it, v.reason, v.date)) ? { photoId: '' } : null;
+
+    busy(v.hasWm || !v.coord ? 'กำลังเตรียมภาพ...' : 'กำลังประทับลายน้ำและเตรียมภาพ...');
+    try {
+      const place = issuedPlace(it);
+      const dateTime = thaiStamp(v.date);
+      let dataUrl = st.dataUrl;
+      if (!v.hasWm && v.coord && window.WatermarkEngine) {
+        const img = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = st.dataUrl; });
+        const r = await window.WatermarkEngine.renderWatermark(img, { caseNumber: place.caseNumber, locationText: place.locationText, lat: v.coord.lat, lng: v.coord.lng, heading: 0, dateTime });
+        dataUrl = r.dataUrl;
+      }
+      const small = typeof window.compressImageToMax1MB === 'function' ? await window.compressImageToMax1MB(dataUrl, 500 * 1024) : dataUrl;
+      const payload = Object.assign(place, {
+        lat: v.coord ? v.coord.lat : null, lng: v.coord ? v.coord.lng : null, heading: 0, dateTime,
+        fileName: place.caseNumber.replace(/\//g, '-') + '.jpg', imageBase64: small,
+      });
+      let out;
+      if (existingNo) out = await SLTS.api('edit_record', Object.assign(payload, { recordId: existingNo.rowId }));
+      else out = await SLTS.api('upload_image', Object.assign(payload, { clientUploadId: 'rpt-' + it.id + '-' + Date.now() }));
+      try { if (typeof window.loadGoogleSheetData === 'function') await window.loadGoogleSheetData(true, true); } catch (_) {}
+      done(); toast('success', `แนบภาพ ${place.caseNumber} แล้ว`);
+      return { photoId: (out && out.fileId) || '' };
+    } catch (e) { done(); fail(e); return null; }
+  }
+  function toLocalInput(d) {
+    const p2 = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
+  }
+  function fileToDataUrl(f) { return new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); }); }
+  function parseCoord(t) {
+    const m = String(t || '').match(/(-?\d{1,3}(?:\.\d+)?)\s*[,\s]\s*(-?\d{1,3}(?:\.\d+)?)/);
+    if (!m) return null;
+    const lat = Number(m[1]); const lng = Number(m[2]);
+    return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat || lng) ? { lat, lng } : null;
   }
 
   function bindFlow(body, D) {
@@ -1586,7 +1755,7 @@
       };
     });
     body.onclick = async (e) => {
-      const a = e.target.closest('[data-fl],[data-fl-dl],[data-fl-rep],[data-fl-word],[data-view],[data-fl-show],[data-fl-nophoto]');
+      const a = e.target.closest('[data-fl],[data-fl-dl],[data-fl-rep],[data-fl-word],[data-view],[data-fl-show],[data-fl-nophoto],[data-fl-attach],[data-fl-sync]');
       if (!a) return;
       if (a.tagName === 'A') e.preventDefault();
       try {
@@ -1595,6 +1764,13 @@
         if (a.dataset.flDl) { const p = D.uploads.find((x) => x.id === a.dataset.flDl); if (p) downloadPhoto(p); return; }
         if (a.dataset.flRep) { const id = Number(a.dataset.flRep); const ph = D.photoMap.get(id) || []; return openReportForm(id, { photoIds: ph.map((p) => p.id) }); }
         if (a.dataset.flWord) return quickWord(Number(a.dataset.flWord));
+        if (a.dataset.flAttach) { if (await attachPhoto(R.issued.find((x) => x.id === Number(a.dataset.flAttach)))) { await loadIssued().catch(() => {}); renderFlow(body); } return; }
+        if (a.dataset.flSync) {
+          const [pid, iid] = a.dataset.flSync.split('|');
+          const p = sheetRows().map(photoFromRow).find((x) => x && x.id === pid);
+          if (await syncPhotoPlace(p, R.issued.find((x) => x.id === Number(iid)))) renderFlow(body);
+          return;
+        }
         if (a.dataset.flNophoto) { if (await recordNoPhoto(R.issued.find((x) => x.id === Number(a.dataset.flNophoto)))) renderFlow(body); return; }
         const act = a.dataset.fl;
         if (act === 'wkprev') { FL.weekOffset -= 1; FL.periodKey = FL.periodKey || ''; return renderFlow(body); }
@@ -2081,12 +2257,68 @@
     if (it.district && !raw.includes('อ.' + it.district) && !raw.includes('อำเภอ' + it.district)) parts.push('อ.' + it.district);
     return parts.filter(Boolean).join(' ');
   }
-  /** ช่องที่ตั้ง: ตามบัญชี + ตามภาพส่งหมาย (ปุ่มเปิดแผนที่) */
+  const caseNoOf = (it) => (it.kind === 'T' && it.t_no ? it.t_no : it.black_no);
+  const issuedProvince = (it) => String(it.province || defaultProvince()).replace(/^จ(\.|ังหวัด)\s*/, '');
+  /** ที่อยู่เต็มตามบัญชีจ่ายหมาย (ใช้บันทึกเข้าระบบ) */
+  function issuedLocText(it) {
+    const raw = String(it.address_raw || '').replace(/\s*(ซ\.|ถ\.)\s*-(?=\s|$)/g, '').replace(/\s+/g, ' ').trim();
+    return [raw, it.subdistrict && !raw.includes('ต.' + it.subdistrict) ? 'ต.' + it.subdistrict : '', it.district && !raw.includes('อ.' + it.district) ? 'อ.' + it.district : '', 'จ.' + issuedProvince(it)]
+      .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  }
+  const mapsLink = (lat, lng) => `https://www.google.com/maps?q=${encodeURIComponent(Number(lat).toFixed(6) + ',' + Number(lng).toFixed(6))}`;
+  const ADMIN_RE = /(?:^|\s)(?:ต\.|ตำบล|แขวง|อ\.|อำเภอ|เขต|จ\.|จังหวัด)\s*[^\s,]+/g;
+  /** ตำบล/อำเภอที่ภาพบันทึกไว้ (จากพิกัด GPS) */
+  function photoAdmin(p) {
+    const loc = String(p.loc || '');
+    const pick = (re) => { const m = loc.match(re); return m ? m[1] : ''; };
+    const sub = String(p.subdistrict || '').trim() || pick(/(?:ต\.|ตำบล|แขวง)\s*([^\s,]+)/);
+    const dist = String(p.district || '').trim() || pick(/(?:อ\.|อำเภอ|เขต)\s*([^\s,]+)/);
+    return { sub: L.cleanSubdistrict(sub), dist: L.cleanDistrict(dist) };
+  }
+  /** ตำบล/อำเภอในภาพไม่ตรงบัญชีจ่ายหมาย → คืนข้อความที่อ่านจาก GPS, ตรงกัน → '' */
+  function placeMismatch(p, it) {
+    if (!p || p.noPhoto) return '';
+    const a = photoAdmin(p);
+    const subBad = a.sub && it.subdistrict && L.subKey(a.sub) !== L.subKey(it.subdistrict);
+    const distBad = a.dist && it.district && L.districtKey(a.dist) !== L.districtKey(it.district);
+    return subBad || distBad ? [a.sub ? 'ต.' + a.sub : '', a.dist ? 'อ.' + a.dist : ''].filter(Boolean).join(' ') : '';
+  }
+  /** ที่ตั้งของภาพ: บ้านเลขที่/หมู่ตามภาพ + ตำบล/อำเภอ/จังหวัดตามบัญชีจ่ายหมายเสมอ */
+  function photoPlaceText(p, it) {
+    if (!it) return String(p.loc || '');
+    const base = String(p.loc || '').replace(ADMIN_RE, ' ').replace(/\s*(ซ\.|ถ\.)\s*-(?=\s|$)/g, '').replace(/\s+/g, ' ').trim();
+    const tail = ['ต.' + (it.subdistrict || ''), 'อ.' + (it.district || ''), 'จ.' + issuedProvince(it)].filter((x) => x.length > 2).join(' ');
+    return [base, tail].filter(Boolean).join(' ');
+  }
+  /** บรรทัดที่ตั้งจากภาพ: ข้อความ (ตามบัญชี) + พิกัดกดดูแผนที่ + เตือนเมื่อ GPS อ่านตำบล/อำเภอต่างจากบัญชี */
+  function photoPlaceHtml(p, it, opt) {
+    if (p.noPhoto) return `<i class="fa-solid fa-signature" style="color:#7c3aed"></i> ${esc(p.reason)}`;
+    const hasXY = p.lat && p.lng && Number(p.lat) && Number(p.lng);
+    const mm = placeMismatch(p, it);
+    return `<i class="fa-solid fa-camera"></i> ${esc(photoPlaceText(p, it) || '-')}`
+      + (hasXY ? ` <a href="${mapsLink(p.lat, p.lng)}" target="_blank" rel="noopener" title="เปิดตำแหน่งที่ถ่ายภาพใน Google Maps" style="white-space:nowrap"><i class="fa-solid fa-map-location-dot"></i> ${Number(p.lat).toFixed(4)}, ${Number(p.lng).toFixed(4)}</a>` : ' <span class="sr-chip">ไม่มีพิกัด</span>')
+      + (mm ? ` <span class="sr-chip warn" title="ตำบล/อำเภอที่อ่านจาก GPS ของภาพไม่ตรงกับบัญชีจ่ายหมาย — ระบบยึดตามบัญชีจ่ายหมาย">GPS อ่านเป็น ${esc(mm)}</span>${opt && opt.sync && p.rowId ? ` <a href="#" data-fl-sync="${esc(p.id)}|${it.id}" title="แก้ตำบล/อำเภอของรายการภาพนี้ในระบบให้ตรงกับบัญชีจ่ายหมาย">ปรับตามบัญชี</a>` : ''}` : '');
+  }
+  /** แก้ข้อมูลตำบล/อำเภอ/ที่อยู่ของรายการภาพในระบบให้ตรงบัญชีจ่ายหมาย (พิกัดคงเดิม) */
+  async function syncPhotoPlace(p, it) {
+    if (!p || !p.rowId || !it) return false;
+    const pl = issuedPlace(it);
+    const ok = await Swal.fire({ icon: 'question', title: 'ปรับที่ตั้งของภาพตามบัญชีจ่ายหมาย?',
+      html: `<div style="text-align:left;font-size:14px"><div><b>${esc(p.caseNo)}</b> · ${esc(p.at)}</div><div class="sr-muted">เดิม: ${esc(p.loc)}</div><div style="margin-top:4px">ใหม่: <b>${esc(photoPlaceText(p, it))}</b></div><div class="sr-muted" style="font-size:12px;margin-top:4px">พิกัดและภาพคงเดิม</div></div>`,
+      showCancelButton: true, confirmButtonText: 'ปรับข้อมูล', cancelButtonText: 'ยกเลิก' });
+    if (!ok.isConfirmed) return false;
+    busy('กำลังปรับข้อมูล...');
+    try {
+      await SLTS.api('edit_record', { recordId: p.rowId, province: pl.province, district: pl.district, subdistrict: pl.subdistrict, locationText: photoPlaceText(p, it) });
+      try { if (typeof window.loadGoogleSheetData === 'function') await window.loadGoogleSheetData(true, true); } catch (_) {}
+      done(); toast('success', 'ปรับที่ตั้งตามบัญชีจ่ายหมายแล้ว'); return true;
+    } catch (e) { done(); fail(e); return false; }
+  }
+  /** ช่องที่ตั้ง: ตามบัญชี + ตามภาพส่งหมาย (ตำบล/อำเภอยึดบัญชี, กดพิกัดเปิดแผนที่) */
   function locCell(it, ph) {
     const p = (ph || [])[0];
-    const map = p && p.lat && p.lng ? ` <a href="https://www.google.com/maps?q=${encodeURIComponent(p.lat + ',' + p.lng)}" target="_blank" rel="noopener" title="เปิดตำแหน่งที่ถ่ายภาพใน Google Maps"><i class="fa-solid fa-map-location-dot"></i></a>` : '';
     return `<div><i class="fa-solid fa-house" style="color:#64748b"></i> ${esc(issuedAddr(it))}</div>`
-      + (p ? `<div class="sr-muted" style="margin-top:2px"><i class="fa-solid fa-camera"></i> ${p.noPhoto ? esc(p.reason) : esc(p.loc || '-')}${map}</div>` : '');
+      + (p ? `<div class="sr-muted" style="margin-top:2px">${photoPlaceHtml(p, it, { sync: true })}</div>` : '');
   }
 
   /** หมายเงินในช่วงวันที่ (วันที่ส่งหมายตามรายงาน → วันที่ลงข้อมูล → ช่วงจ่ายหมาย) ของผู้ใช้ */
