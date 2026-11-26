@@ -2,6 +2,10 @@
 
 สร้างอัตโนมัติจาก `version.json` ด้วย `npm run version:bump`
 
+## [2.7.3] - 2026-11-26
+### แก้ไข
+- `diagnoseServer`: Vercel ตอบ 429/3xx ให้แอปที่ติด Deployment Protection → แจ้ง "vercel-protected"; `x-vercel-mitigated: challenge` → แจ้งให้ปิด Firewall challenge
+
 ## [2.7.2] - 2026-11-26
 ### เพิ่ม
 - รายงานหมาย ขั้นที่ 4 / ฟอร์มบันทึกผล / รายการที่ยังไม่มีภาพ: ปุ่ม **แนบรูป** (`attachPhoto`) — ใช้ข้อมูลบัญชีจ่ายหมาย ไม่ต้องกรอก

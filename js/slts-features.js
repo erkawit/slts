@@ -104,17 +104,27 @@
     const base = (SLTS.apiBase && SLTS.apiBase()) || location.origin;
     const url = base.replace(/\/+$/, '') + '/api/health';
     const H = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
-    let status = 0; let body = '';
+    let status = 0; let body = ''; let hdr = {};
     try {
       if (SLTS.isNative && H) {
         const r = await H.get({ url, connectTimeout: 9000, readTimeout: 9000 });
         status = r.status; body = typeof r.data === 'string' ? r.data : JSON.stringify(r.data || {});
+        Object.keys(r.headers || {}).forEach((k) => { hdr[k.toLowerCase()] = String(r.headers[k]); });
       } else {
         const r = await fetch(url, { cache: 'no-store' });
         status = r.status; body = await r.text();
+        r.headers.forEach((v, k) => { hdr[k.toLowerCase()] = v; });
       }
     } catch (_) { return { kind: 'unreachable', url: base }; }
-    if (status === 401 || status === 403) return { kind: /vercel|sso|authentication/i.test(body) ? 'vercel-protected' : 'forbidden', url: base };
+    const hv = JSON.stringify(hdr);
+    // v2.7.3: Vercel ตอบ 429 ให้โปรแกรม (ไม่ใช่เบราว์เซอร์) ที่ติด Deployment Protection / Firewall challenge
+    if (/challenge/i.test(hdr['x-vercel-mitigated'] || '')) return { kind: 'vercel-challenge', url: base };
+    if ([401, 403, 429].includes(status) || (status >= 300 && status < 400)) {
+      if (/vercel|sso|authentication/i.test(body) || /_vercel_sso|vercel\.com\/(sso|login)/i.test(hv)) return { kind: 'vercel-protected', url: base };
+      if (status === 429) return { kind: 'vercel-protected', url: base, maybe: true };
+      if (status !== 429 && status < 400) return { kind: 'http-' + status, url: base };
+      return { kind: 'forbidden', url: base };
+    }
     if (status >= 200 && status < 300) {
       let j = null; try { j = JSON.parse(body); } catch (_) {}
       if (j && j.db === false) return { kind: 'db-down', url: base, detail: j.dbError || '' };
@@ -125,7 +135,8 @@
   function diagnoseText(d) {
     const host = String(d.url || '').replace(/^https?:\/\//, '');
     switch (d.kind) {
-      case 'vercel-protected': return `เซิร์ฟเวอร์ ${host} ถูกล็อกด้วย Vercel Deployment Protection — แอปจึงเข้าไม่ได้ ผู้ดูแลระบบต้องปิด "Vercel Authentication" (Vercel → Settings → Deployment Protection)`;
+      case 'vercel-protected': return `เซิร์ฟเวอร์ ${host} ถูกล็อกด้วย Vercel Deployment Protection${d.maybe ? ' (HTTP 429)' : ''} — แอปจึงเข้าไม่ได้ ผู้ดูแลระบบต้องปิด "Vercel Authentication" ให้เป็น Disabled (Vercel → Settings → Deployment Protection) — แบบ Standard Protection ยังล็อก URL ของ Preview/branch อยู่`;
+      case 'vercel-challenge': return `เซิร์ฟเวอร์ ${host} เปิดการตรวจบอทของ Vercel (Firewall: Attack Challenge Mode / Bot Protection) — แอปผ่านการตรวจไม่ได้ ผู้ดูแลระบบต้องปิดใน Vercel → Firewall`;
       case 'db-down': return `เซิร์ฟเวอร์ ${host} เชื่อมต่อฐานข้อมูลไม่ได้ — แจ้งผู้ดูแลระบบตรวจ DATABASE_URL${d.detail ? ' (' + d.detail + ')' : ''}`;
       case 'unreachable': return `ติดต่อเซิร์ฟเวอร์ ${host} ไม่ได้ — ตรวจสัญญาณอินเทอร์เน็ต แล้วลองใหม่`;
       case 'ok': return 'เซิร์ฟเวอร์ทำงานปกติ กรุณาลองใหม่อีกครั้ง';
