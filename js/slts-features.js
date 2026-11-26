@@ -95,6 +95,11 @@
       googleEmail: u.googleEmail || '',
     };
     localStorage.setItem('slts_current_user', JSON.stringify(state.currentUser));
+    // v2.7.5: ยังไม่เคยเลือกจังหวัดเอง → ใช้จังหวัดที่รับผิดชอบ (ค้นหาข้อมูลหมายจะได้เห็นข้อมูลของจังหวัดตัวเอง)
+    try {
+      const prov = state.currentUser.assignedProvince;
+      if (prov && localStorage.getItem('slts_province_chosen') !== '1' && state.selectedProvince !== prov && typeof window.setProvince === 'function') window.setProvince(prov);
+    } catch (_) {}
   }
 
   // -------------------------------------------------------------------

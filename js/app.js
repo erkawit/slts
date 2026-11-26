@@ -8765,7 +8765,11 @@ function saveLocalAdminName(name) {
 
 function initProvinceSystem() {
   const savedProv = localStorage.getItem('slts_selected_province');
-  state.selectedProvince = savedProv || (typeof THAILAND_PROVINCES !== 'undefined' && THAILAND_PROVINCES.length > 0 ? THAILAND_PROVINCES[0].name : 'กรุงเทพมหานคร');
+  // v2.7.5: ติดตั้งใหม่/ยังไม่เคยเลือกจังหวัดเอง → ใช้จังหวัดที่รับผิดชอบของผู้ใช้ (ไม่ใช่จังหวัดแรกในรายการ = กรุงเทพฯ)
+  let assignedProv = '';
+  try { const cu = JSON.parse(localStorage.getItem('slts_current_user') || 'null'); assignedProv = (cu && cu.assignedProvince ? String(cu.assignedProvince) : '').trim(); } catch (_) {}
+  const userChose = localStorage.getItem('slts_province_chosen') === '1';
+  state.selectedProvince = (userChose && savedProv) || assignedProv || savedProv || 'อุดรธานี';
 
   if (elements.provinceSelect) {
     elements.provinceSelect.innerHTML = '';
@@ -8782,6 +8786,7 @@ function initProvinceSystem() {
     }
 
     elements.provinceSelect.addEventListener('change', (e) => {
+      try { localStorage.setItem('slts_province_chosen', '1'); } catch (_) {}
       setProvince(e.target.value);
     });
   }
@@ -11633,7 +11638,7 @@ function applyModalFormValues(val) {
 
   if (val.province) {
     state.selectedProvince = val.province;
-    try { localStorage.setItem('slts_selected_province', val.province); } catch(e){}
+    try { localStorage.setItem('slts_selected_province', val.province); localStorage.setItem('slts_province_chosen', '1'); } catch(e){}
     if (elements.provinceSelect && elements.provinceSelect.value !== val.province) {
       elements.provinceSelect.value = val.province;
     }

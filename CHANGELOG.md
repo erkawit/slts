@@ -2,6 +2,11 @@
 
 สร้างอัตโนมัติจาก `version.json` ด้วย `npm run version:bump`
 
+## [2.7.5] - 2026-11-26
+### แก้ไข
+- `initProvinceSystem`: ไม่มีจังหวัดที่ผู้ใช้เลือกเอง (`slts_province_chosen`) → ใช้ `assignedProvince` ของผู้ใช้ → อุดรธานี (เดิม THAILAND_PROVINCES[0] = กรุงเทพมหานคร ทำให้ค้นหาข้อมูลหมายบนแอปที่ติดตั้งใหม่ได้ 0 คดี)
+- `applyLoggedInUser`: ตั้งจังหวัดเป็นจังหวัดที่รับผิดชอบหลังเข้าสู่ระบบ (ถ้าผู้ใช้ไม่ได้เลือกเอง)
+
 ## [2.7.4] - 2026-11-26
 ### แก้ไข
 - `lib/db.js` `resolveDatabaseUrl()`: SLTS_DATABASE_ENV → DATABASE_URL → <PREFIX>_DATABASE_URL → <PREFIX>_URL (มี _URL_UNPOOLED) → POSTGRES_URL → <PREFIX>_POSTGRES_URL
