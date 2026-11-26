@@ -1,7 +1,16 @@
 {
-  "version": "2.7.3",
+  "version": "2.7.4",
   "build": "2026-11-26",
   "releases": [
+    {
+      "version": "2.7.4",
+      "date": "2026-11-26",
+      "title": "รองรับฐานข้อมูลที่เชื่อมผ่าน Vercel Storage (Neon) แบบมี prefix",
+      "notes": [
+        "เซิร์ฟเวอร์หา connection string ได้เองแม้ชื่อตัวแปรไม่ใช่ DATABASE_URL (เช่น SLTS_DATABASE_URL, STORAGE_URL) หรือระบุชื่อเองด้วย SLTS_DATABASE_ENV",
+        "/api/health แสดงชื่อตัวแปรที่ใช้และรายชื่อตัวแปรฐานข้อมูลทั้งหมด (ไม่แสดงค่า)"
+      ]
+    },
     {
       "version": "2.7.3",
       "date": "2026-11-26",

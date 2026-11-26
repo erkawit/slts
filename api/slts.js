@@ -315,9 +315,10 @@ actions.health = async () => {
   // ข้อมูลวินิจฉัย (ไม่มีรหัสผ่าน): ปลายทางฐานข้อมูลที่ deployment นี้ใช้ — ไว้ตรวจว่าตั้ง DATABASE_URL ถูก branch/environment
   let dbTarget = null;
   try {
-    const u = new URL(process.env.DATABASE_URL || '');
-    dbTarget = { user: decodeURIComponent(u.username), endpoint: u.hostname.split('.')[0], pooled: /-pooler/.test(u.hostname), database: u.pathname.replace(/^\//, ''), passwordLength: decodeURIComponent(u.password || '').length };
-  } catch (_) { dbTarget = process.env.DATABASE_URL ? 'invalid-url' : 'not-set'; }
+    const found = db.resolveDatabaseUrl();
+    const u = new URL((found && found.url) || '');
+    dbTarget = { env: found.name, user: decodeURIComponent(u.username), endpoint: u.hostname.split('.')[0], pooled: /-pooler/.test(u.hostname), database: u.pathname.replace(/^\//, ''), passwordLength: decodeURIComponent(u.password || '').length, available: db.databaseEnvNames() };
+  } catch (_) { dbTarget = { error: db.resolveDatabaseUrl() ? 'invalid-url' : 'not-set', available: db.databaseEnvNames() }; }
   return {
     status: 'success', ok: true, db: dbOk, dbError, dbTarget,
     deployment: { env: process.env.VERCEL_ENV || '', branch: process.env.VERCEL_GIT_COMMIT_REF || '', commit: String(process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) },

@@ -2,6 +2,11 @@
 
 สร้างอัตโนมัติจาก `version.json` ด้วย `npm run version:bump`
 
+## [2.7.4] - 2026-11-26
+### แก้ไข
+- `lib/db.js` `resolveDatabaseUrl()`: SLTS_DATABASE_ENV → DATABASE_URL → <PREFIX>_DATABASE_URL → <PREFIX>_URL (มี _URL_UNPOOLED) → POSTGRES_URL → <PREFIX>_POSTGRES_URL
+- `/api/health` → `dbTarget.env`, `dbTarget.available`
+
 ## [2.7.3] - 2026-11-26
 ### แก้ไข
 - `diagnoseServer`: Vercel ตอบ 429/3xx ให้แอปที่ติด Deployment Protection → แจ้ง "vercel-protected"; `x-vercel-mitigated: challenge` → แจ้งให้ปิด Firewall challenge
